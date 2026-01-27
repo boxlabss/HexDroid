@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HexDroidIRC" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#121212</item>
+        <item name="android:navigationBarColor">#121212</item>
+        <item name="colorPrimary">#1087CC</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#0D6AA3</item>
+        <item name="colorSecondary">#1087CC</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSurface">#121212</item>
+        <item name="colorOnSurface">#E1E1E1</item>
+        <item name="android:colorBackground">#121212</item>
+        <item name="colorOnBackground">#E1E1E1</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+</resources>
