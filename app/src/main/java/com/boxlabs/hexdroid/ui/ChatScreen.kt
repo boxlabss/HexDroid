@@ -827,7 +827,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         }
                     }
 
-                    // Nicklist button with gradient styling (matches color picker button)
+                    // Nicklist button
                     run {
                         val nicklistInteraction = remember { MutableInteractionSource() }
                         val nicklistPressed by nicklistInteraction.collectIsPressedAsState()
@@ -853,7 +853,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                                             interactionSource = nicklistInteraction,
                                             indication = ripple(bounded = false),
                                             onClick = {
-                                                if (isWide) {
+                                                if (isWide || state.settings.portraitNicklistOverlay) {
                                                     onToggleNickList()
                                                 } else {
                                                     val next = !showNickSheet
@@ -1177,7 +1177,62 @@ modifier = Modifier
 
     val scaffoldContent: @Composable (PaddingValues) -> Unit = { padding ->
         if (!isWide) {
-            MessagesPane(Modifier.fillMaxSize().padding(padding))
+            // Portrait: either full-width messages, or split messages + nicklist pane
+            // When overlay mode is on, use the persisted showNickList (same as landscape)
+            if (state.settings.portraitNicklistOverlay && state.showNickList && isChannel) {
+                val density = LocalDensity.current
+                val portraitScreenW = cfg.screenWidthDp.dp
+                val portraitScreenWpx = with(density) { portraitScreenW.toPx().coerceAtLeast(1f) }
+
+                val minPortraitNickFrac = 0.20f
+                val maxPortraitNickFrac = 0.55f
+                var portraitNickFrac by remember(state.settings.portraitNickPaneFrac) {
+                    mutableStateOf(state.settings.portraitNickPaneFrac.coerceIn(minPortraitNickFrac, maxPortraitNickFrac))
+                }
+                val nickPaneW = (portraitScreenW * portraitNickFrac).coerceIn(70.dp, portraitScreenW * maxPortraitNickFrac)
+
+                var portraitDragging by remember { mutableStateOf(false) }
+                val portraitDragSt = rememberDraggableState { dxPx ->
+                    val dxFrac = dxPx / portraitScreenWpx
+                    portraitNickFrac = (portraitNickFrac - dxFrac).coerceIn(minPortraitNickFrac, maxPortraitNickFrac)
+                }
+
+                Row(Modifier.fillMaxSize().padding(padding)) {
+                    MessagesPane(Modifier.weight(1f).fillMaxHeight())
+
+                    // Thin drag handle
+                    Box(
+                        modifier = Modifier
+                            .width(10.dp)
+                            .fillMaxHeight()
+                            .draggable(
+                                orientation = Orientation.Horizontal,
+                                state = portraitDragSt,
+                                startDragImmediately = true,
+                                onDragStarted = { portraitDragging = true },
+                                onDragStopped = {
+                                    portraitDragging = false
+                                    val clamped = portraitNickFrac.coerceIn(minPortraitNickFrac, maxPortraitNickFrac)
+                                    portraitNickFrac = clamped
+                                    onUpdateSettings { copy(portraitNickPaneFrac = clamped) }
+                                },
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        VerticalDivider(
+                            modifier = Modifier.fillMaxHeight(),
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(
+                                alpha = if (portraitDragging) 0.8f else 0.3f
+                            )
+                        )
+                    }
+
+                    NicklistContent(Modifier.width(nickPaneW).fillMaxHeight())
+                }
+            } else {
+                MessagesPane(Modifier.fillMaxSize().padding(padding))
+            }
         } else {
 
             val density = LocalDensity.current
@@ -1325,7 +1380,8 @@ fun SplitHandle(
             scaffold()
         }
 
-        if (showNickSheet && isChannel) {
+        // Bottom sheet mode (original behaviour) – only when overlay is disabled
+        if (!state.settings.portraitNicklistOverlay && showNickSheet && isChannel) {
             ModalBottomSheet(
                 onDismissRequest = {
                     showNickSheet = false

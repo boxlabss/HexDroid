@@ -68,9 +68,19 @@ fun AppRoot(
 	var tourReturnScreen by rememberSaveable { mutableStateOf<AppScreen?>(null) }
 	var tourSuppressedThisSession by rememberSaveable { mutableStateOf(false) }
 
+	// Track whether the welcome screen was shown and completed this session.
+	var welcomeCompletedThisSession by rememberSaveable { mutableStateOf(false) }
+
+	// Show the welcome screen on first launch (before the tour).
+	// It's gated on settingsLoaded so we don't flash it before prefs are read.
+	val showWelcome = state.settingsLoaded &&
+		!state.settings.welcomeCompleted &&
+		!welcomeCompletedThisSession
+
 	// Keep the step list stable while the tour is running.
 	// (Dynamic insertion/removal can cause the tour to "jump" screens unexpectedly.)
-	val tourSteps = remember { buildIntroTour() }
+	val tourContext = LocalContext.current
+	val tourSteps = remember { buildIntroTour(tourContext) }
 	val currentTourStep = tourSteps.getOrNull(tourStepIndex).takeIf { tourActive }
 
 	val startTour: (auto: Boolean) -> Unit = { auto ->
@@ -155,6 +165,17 @@ fun AppRoot(
             customFontPath = state.settings.customFontPath
         ) {
         Surface(modifier = Modifier.fillMaxSize()) {
+
+        // Welcome screen gate: shown before everything else on first launch.
+        if (showWelcome) {
+            WelcomeScreen(
+                onContinue = { langCode, nick ->
+                    vm.completeWelcome(langCode, nick)
+                    welcomeCompletedThisSession = true
+                }
+            )
+        } else {
+
         CompositionLocalProvider(LocalDensity provides scaledDensity, LocalTourRegistry provides tourRegistry) {
 
 	            // Tour back handling: step back, or exit the tour on the first step.
@@ -305,6 +326,7 @@ fun AppRoot(
     }
 }
 
+        } // end else (welcome completed)
         }
         }
     }

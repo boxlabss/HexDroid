@@ -1,0 +1,152 @@
+<resources>
+    <string name="welcome_title">Bienvenido a HexDroid IRC</string>
+    <string name="welcome_subtitle">Vamos a configurarte antes de empezar.</string>
+    <string name="welcome_language_label">Idioma</string>
+    <string name="welcome_nick_label">Apodo</string>
+    <string name="welcome_nick_hint">Elige tu apodo de IRC</string>
+    <string name="welcome_nick_helper">Se usará en todos los perfiles de servidor predeterminados.</string>
+    <string name="welcome_continue">Continuar</string>
+    <string name="welcome_nick_error_empty">El apodo no puede estar vacío</string>
+    <string name="welcome_nick_error_invalid">El apodo contiene caracteres no válidos</string>
+    <string name="welcome_nick_error_long">El apodo debe tener 16 caracteres o menos</string>
+
+    <string name="back">Atrás</string>
+    <string name="cancel">Cancelar</string>
+    <string name="save">Guardar</string>
+    <string name="delete">Eliminar</string>
+    <string name="close">Cerrar</string>
+    <string name="done">Listo</string>
+    <string name="next">Siguiente</string>
+    <string name="skip">Saltar</string>
+    <string name="run">Iniciar</string>
+    <string name="set">Aplicar</string>
+    <string name="reset">Restablecer</string>
+    <string name="manage">Gestionar</string>
+    <string name="not_now">Ahora no</string>
+    <string name="copy_text">Copiar</string>
+
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_intro_tour">Tour introductorio</string>
+    <string name="settings_intro_tour_desc">Un recorrido rápido por las pantallas principales y los atajos.</string>
+    <string name="section_appearance">Apariencia</string>
+    <string name="section_ui">Interfaz</string>
+    <string name="section_landscape">Barras laterales (Horizontal)</string>
+    <string name="section_portrait">Lista de nicks (Vertical)</string>
+    <string name="section_highlights">Resaltados</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">Notificaciones</string>
+    <string name="section_logging">Registro</string>
+    <string name="section_ircv3_history">Historial IRCv3</string>
+    <string name="section_file_transfers">Transferencias de archivos</string>
+
+    <string name="setting_font_size">Tamaño de fuente</string>
+    <string name="setting_colorise_nicks">Colorear nicks</string>
+    <string name="setting_mirc_colours">Habilitar colores mIRC</string>
+    <string name="setting_show_topic_bar">Mostrar barra de tema</string>
+    <string name="setting_show_timestamps">Mostrar marcas de tiempo</string>
+    <string name="setting_timestamp_format">Formato de hora (Java)</string>
+    <string name="setting_hide_motd">Ocultar MOTD al conectar</string>
+    <string name="setting_hide_joinpartquit">Ocultar mensajes de entrada/salida</string>
+    <string name="setting_show_buffers_default">Mostrar redes/canales por defecto</string>
+    <string name="setting_show_nicklist_default">Mostrar lista de nicks por defecto</string>
+    <string name="setting_highlight_on_nick">Resaltar en nick</string>
+    <string name="setting_extra_highlights">Palabras adicionales (una por línea)</string>
+    <string name="setting_compact_mode">Modo compacto</string>
+
+    <string name="setting_portrait_nicklist_overlay">Panel lateral de nicks</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Mostrar la lista de nicks como un panel lateral redimensionable (como en horizontal) en lugar de una hoja inferior emergente. Cuando está activado, el botón de la lista actúa como mostrar/ocultar persistente.</string>
+
+    <string name="setting_ignore_list">Lista de ignorados</string>
+    <string name="setting_ignore_list_desc">Ocultar mensajes y ofertas DCC de nicks específicos (por red).</string>
+    <string name="setting_quit_message">Mensaje de salida</string>
+    <string name="setting_part_message">Mensaje de salida de canal</string>
+
+    <string name="setting_auto_reconnect">Reconexión automática</string>
+    <string name="setting_reconnect_interval">Intervalo de reconexión (segundos)</string>
+    <string name="setting_reconnect_interval_desc">Con qué frecuencia reintentar cuando se pierde la conexión.</string>
+    <string name="setting_seconds">Segundos</string>
+    <string name="setting_auto_connect_startup">Conectar automáticamente al iniciar</string>
+
+    <string name="setting_enable_notifications">Habilitar notificaciones</string>
+    <string name="setting_notify_highlights">Notificaciones de resaltado</string>
+    <string name="setting_notify_pm">Notificaciones de mensajes privados</string>
+    <string name="setting_connection_status">Mostrar notificación de estado de conexión</string>
+    <string name="setting_sound_highlight">Sonido al resaltar</string>
+    <string name="setting_vibrate_highlight">Vibrar al resaltar</string>
+
+    <string name="setting_enable_logging">Habilitar registro</string>
+    <string name="setting_log_server">Registrar búfer del servidor</string>
+    <string name="setting_log_folder">Carpeta de registros</string>
+    <string name="setting_choose_folder">Elegir carpeta</string>
+    <string name="setting_retention_days">Días de retención</string>
+    <string name="setting_max_scrollback">Líneas máximas de historial</string>
+
+    <string name="setting_history_limit">Límite de historial</string>
+    <string name="setting_history_limit_desc">Mensajes a solicitar por canal al unirse (CHATHISTORY). 0 para desactivar.</string>
+    <string name="setting_messages">Mensajes</string>
+    <string name="setting_count_unread">Contar historial como no leído</string>
+    <string name="setting_trigger_notif">Notificar historial obtenido</string>
+
+    <string name="setting_download_folder">Carpeta de descargas</string>
+    <string name="setting_incoming_port_min">Puerto mínimo de entrada</string>
+    <string name="setting_incoming_port_max">Puerto máximo de entrada</string>
+
+    <string name="setting_keep_alive">Mantener la conexión activa</string>
+    <string name="setting_open_app_settings">Abrir ajustes de la app</string>
+    <string name="setting_battery_optimization">Lista de optimización de batería</string>
+
+    <string name="theme_label">Tema</string>
+    <string name="theme_dark">Oscuro</string>
+    <string name="theme_light">Claro</string>
+    <string name="theme_system">Sistema</string>
+
+    <string name="chat_nicklist">Lista de nicks</string>
+    <string name="chat_users_format">%1$s • %2$d usuarios</string>
+    <string name="chat_no_channel">No estás en un canal</string>
+    <string name="chat_disconnected">Desconectado</string>
+    <string name="chat_type_message">Escribe un mensaje…</string>
+    <string name="chat_channel_tools">Herramientas de canal</string>
+    <string name="chat_topic">Tema</string>
+    <string name="chat_new_topic">Nuevo tema</string>
+    <string name="chat_kick_ban">Expulsar / Banear</string>
+    <string name="chat_nick">Nick</string>
+    <string name="chat_reason">Razón</string>
+    <string name="chat_kick">Expulsar</string>
+    <string name="chat_ban">Banear</string>
+    <string name="chat_kick_ban_btn">Expulsar+Banear</string>
+
+    <string name="networks_title">Redes</string>
+    <string name="networks_connect">Conectar</string>
+    <string name="networks_disconnect">Desconectar</string>
+    <string name="networks_edit">Editar</string>
+    <string name="networks_add">Agregar red</string>
+    <string name="networks_auto_connect">Auto-conectar</string>
+
+    <string name="tour_add_network_title">Agregar una red</string>
+    <string name="tour_add_network_body">Toca + para agregar una nueva red, o edita una existente. HexDroid incluye algunas predeterminadas para empezar rápido.</string>
+    <string name="tour_connect_title">Conectar</string>
+    <string name="tour_connect_body">Conéctate a la red seleccionada. Una vez conectado, abre el chat para unirte a canales y hablar.</string>
+    <string name="tour_settings_title">Ajustes</string>
+    <string name="tour_settings_body">Ajusta la apariencia, fuentes y otras preferencias aquí.</string>
+    <string name="tour_switcher_title">Selector</string>
+    <string name="tour_switcher_body">Esta barra lateral muestra tu servidor, canales y mensajes privados. Toca cualquier elemento para cambiar.</string>
+    <string name="tour_more_title">Más acciones</string>
+    <string name="tour_more_body">Este menú contiene lista de canales, transferencias, ajustes, redes y más.</string>
+    <string name="tour_send_title">Enviar mensajes</string>
+    <string name="tour_send_body">Escribe aquí para chatear. También puedes usar comandos como /join #canal, /msg nick hola, /whois nick, etc.</string>
+    <string name="tour_dcc_title">Habilitar DCC</string>
+    <string name="tour_dcc_body">Activa DCC para enviar/recibir archivos. Si estás detrás de NAT, el modo Pasivo puede ayudar.</string>
+    <string name="tour_send_file_title">Enviar un archivo</string>
+    <string name="tour_send_file_body">Introduce un nick destino y selecciona un archivo. (Requiere DCC habilitado.) Las ofertas entrantes también aparecen aquí.</string>
+    <string name="tour_support_title">¿Necesitas ayuda?</string>
+    <string name="tour_support_body">Puedes conectarte aquí si necesitas soporte en #HexDroid.</string>
+    <string name="tour_support_fallback">Si no ves AfterNET en tu lista, toca Agregar AfterNET (o +) para añadirlo. Puedes conectarte allí para soporte en #HexDroid.</string>
+    <string name="tour_support_action">Agregar AfterNET</string>
+    <string name="tour_replay_title">Repetir este tour</string>
+    <string name="tour_replay_body">Puedes repetir el recorrido en cualquier momento desde Ajustes.</string>
+
+    <string name="about_title">Acerca de</string>
+    <string name="transfers_title">Transferencias</string>
+    <string name="ignore_title">Lista de ignorados</string>
+    <string name="list_title">Lista de canales</string>
+</resources>

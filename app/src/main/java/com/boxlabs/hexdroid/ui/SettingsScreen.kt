@@ -18,9 +18,6 @@
 
 package com.boxlabs.hexdroid.ui
 
-import com.boxlabs.hexdroid.ui.tour.TourTarget
-import com.boxlabs.hexdroid.ui.tour.tourTarget
-
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -28,21 +25,54 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.boxlabs.hexdroid.FontChoice
 import com.boxlabs.hexdroid.ChatFontStyle
-import com.boxlabs.hexdroid.VibrateIntensity
+import com.boxlabs.hexdroid.FontChoice
+import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
+import com.boxlabs.hexdroid.VibrateIntensity
 import com.boxlabs.hexdroid.data.ThemeMode
+import com.boxlabs.hexdroid.ui.tour.TourTarget
+import com.boxlabs.hexdroid.ui.tour.tourTarget
 import java.io.File
 
 // Copy a font file from a content URI to internal storage
@@ -190,7 +220,17 @@ fun SettingsScreen(
         }
     }
 
-    item { SectionTitle("Appearance", modifier = Modifier.tourTarget(TourTarget.SETTINGS_APPEARANCE_SECTION)) }
+    item { SectionTitle(stringResource(R.string.section_appearance), modifier = Modifier.tourTarget(TourTarget.SETTINGS_APPEARANCE_SECTION)) }
+
+            item {
+                LanguagePicker(
+                    currentCode = s.appLanguage,
+                    onPick = { code ->
+                        onUpdate { copy(appLanguage = code) }
+                        com.boxlabs.hexdroid.ui.applyLocale(ctx, code)
+                    }
+                )
+            }
 
             item {
                 ThemePicker(s.themeMode) { mode -> onUpdate { copy(themeMode = mode) } }
@@ -231,7 +271,7 @@ fun SettingsScreen(
             }
 
             item {
-                SettingToggle("Compact mode", s.compactMode) { onUpdate { copy(compactMode = !compactMode) } }
+                SettingToggle(stringResource(R.string.setting_compact_mode), s.compactMode) { onUpdate { copy(compactMode = !compactMode) } }
             }
 
             item {
@@ -246,17 +286,17 @@ fun SettingsScreen(
 
             item { Divider() }
 
-            item { SectionTitle("UI") }
+            item { SectionTitle(stringResource(R.string.section_ui)) }
             item {
-                SettingToggle("Colourise nicks", s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
+                SettingToggle(stringResource(R.string.setting_colorise_nicks), s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
             }
 
             item {
-                SettingToggle("Enable mIRC colours", s.mircColorsEnabled) { onUpdate { copy(mircColorsEnabled = !mircColorsEnabled) } }
+                SettingToggle(stringResource(R.string.setting_mirc_colours), s.mircColorsEnabled) { onUpdate { copy(mircColorsEnabled = !mircColorsEnabled) } }
             }
 
-            item { SettingToggle("Show topic bar", s.showTopicBar) { onUpdate { copy(showTopicBar = !showTopicBar) } } }
-            item { SettingToggle("Show timestamps", s.showTimestamps) { onUpdate { copy(showTimestamps = !showTimestamps) } } }
+            item { SettingToggle(stringResource(R.string.setting_show_topic_bar), s.showTopicBar) { onUpdate { copy(showTopicBar = !showTopicBar) } } }
+            item { SettingToggle(stringResource(R.string.setting_show_timestamps), s.showTimestamps) { onUpdate { copy(showTimestamps = !showTimestamps) } } }
             item {
                 OutlinedTextField(
                     value = s.timestampFormat,
@@ -266,17 +306,31 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            item { SettingToggle("Hide MOTD on connect", s.hideMotdOnConnect) { onUpdate { copy(hideMotdOnConnect = !hideMotdOnConnect) } } }
-            item { SettingToggle("Hide join/part/quit messages", s.hideJoinPartQuit) { onUpdate { copy(hideJoinPartQuit = !hideJoinPartQuit) } } }
-            item { SectionTitle("Landscape Sidebar Settings") }
-            item { SettingToggle("Show network/chans by default", s.defaultShowBufferList) { onUpdate { copy(defaultShowBufferList = !defaultShowBufferList) } } }
-            item { SettingToggle("Show nicklist by default", s.defaultShowNickList) { onUpdate { copy(defaultShowNickList = !defaultShowNickList) } } }
+            item { SettingToggle(stringResource(R.string.setting_hide_motd), s.hideMotdOnConnect) { onUpdate { copy(hideMotdOnConnect = !hideMotdOnConnect) } } }
+            item { SettingToggle(stringResource(R.string.setting_hide_joinpartquit), s.hideJoinPartQuit) { onUpdate { copy(hideJoinPartQuit = !hideJoinPartQuit) } } }
+            item { SectionTitle(stringResource(R.string.section_landscape)) }
+            item { SettingToggle(stringResource(R.string.setting_show_buffers_default), s.defaultShowBufferList) { onUpdate { copy(defaultShowBufferList = !defaultShowBufferList) } } }
+            item { SettingToggle(stringResource(R.string.setting_show_nicklist_default), s.defaultShowNickList) { onUpdate { copy(defaultShowNickList = !defaultShowNickList) } } }
+
+            item { SectionTitle(stringResource(R.string.section_portrait)) }
+            item {
+                Column {
+                    SettingToggle(stringResource(R.string.setting_portrait_nicklist_overlay), s.portraitNicklistOverlay) {
+                        onUpdate { copy(portraitNicklistOverlay = !portraitNicklistOverlay) }
+                    }
+                    Text(
+                        stringResource(R.string.setting_portrait_nicklist_overlay_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
+                    )
+                }
+            }
 			
             item { Divider() }
 
-            item { SectionTitle("Highlights") }
+            item { SectionTitle(stringResource(R.string.section_highlights)) }
 
-            item { SettingToggle("Highlight on nick", s.highlightOnNick) { onUpdate { copy(highlightOnNick = !highlightOnNick) } } }
+            item { SettingToggle(stringResource(R.string.setting_highlight_on_nick), s.highlightOnNick) { onUpdate { copy(highlightOnNick = !highlightOnNick) } } }
 
             item {
                 var wordsText by remember(s.extraHighlightWords) { mutableStateOf(s.extraHighlightWords.joinToString("\n")) }
@@ -295,7 +349,7 @@ fun SettingsScreen(
 
             item { Divider() }
 
-            item { SectionTitle("IRC") }
+            item { SectionTitle(stringResource(R.string.section_irc)) }
 			
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -331,7 +385,7 @@ fun SettingsScreen(
                     singleLine = true
                 )
             }
-            item { SettingToggle("Show connection notification while connected", s.showConnectionStatusNotification) { onUpdate { copy(showConnectionStatusNotification = !showConnectionStatusNotification) } } }
+            item { SettingToggle(stringResource(R.string.setting_connection_status), s.showConnectionStatusNotification) { onUpdate { copy(showConnectionStatusNotification = !showConnectionStatusNotification) } } }
             item {
                 SettingToggle(
                     "Keep connection alive",
@@ -350,7 +404,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SettingToggle("Auto-reconnect on disconnect", s.autoReconnectEnabled) { onUpdate { copy(autoReconnectEnabled = !autoReconnectEnabled) } } }
+            item { SettingToggle(stringResource(R.string.setting_auto_reconnect), s.autoReconnectEnabled) { onUpdate { copy(autoReconnectEnabled = !autoReconnectEnabled) } } }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -372,13 +426,13 @@ fun SettingsScreen(
             }
             item { Divider() }
 
-            item { SectionTitle("Notifications") }
+            item { SectionTitle(stringResource(R.string.section_notifications)) }
 
-            item { SettingToggle("Enable notifications", s.notificationsEnabled) { onUpdate { copy(notificationsEnabled = !notificationsEnabled) } } }
-            item { SettingToggle("Notify on highlight", s.notifyOnHighlights) { onUpdate { copy(notifyOnHighlights = !notifyOnHighlights) } } }
-            item { SettingToggle("Notify on PM", s.notifyOnPrivateMessages) { onUpdate { copy(notifyOnPrivateMessages = !notifyOnPrivateMessages) } } }
-            item { SettingToggle("Play sound on highlight", s.playSoundOnHighlight) { onUpdate { copy(playSoundOnHighlight = !playSoundOnHighlight) } } }
-            item { SettingToggle("Vibrate on highlight", s.vibrateOnHighlight) { onUpdate { copy(vibrateOnHighlight = !vibrateOnHighlight) } } }
+            item { SettingToggle(stringResource(R.string.setting_enable_notifications), s.notificationsEnabled) { onUpdate { copy(notificationsEnabled = !notificationsEnabled) } } }
+            item { SettingToggle(stringResource(R.string.setting_notify_highlights), s.notifyOnHighlights) { onUpdate { copy(notifyOnHighlights = !notifyOnHighlights) } } }
+            item { SettingToggle(stringResource(R.string.setting_notify_pm), s.notifyOnPrivateMessages) { onUpdate { copy(notifyOnPrivateMessages = !notifyOnPrivateMessages) } } }
+            item { SettingToggle(stringResource(R.string.setting_sound_highlight), s.playSoundOnHighlight) { onUpdate { copy(playSoundOnHighlight = !playSoundOnHighlight) } } }
+            item { SettingToggle(stringResource(R.string.setting_vibrate_highlight), s.vibrateOnHighlight) { onUpdate { copy(vibrateOnHighlight = !vibrateOnHighlight) } } }
             if (s.vibrateOnHighlight) {
                 item {
                     VibrateIntensityPicker(current = s.vibrateIntensity) { picked ->
@@ -389,10 +443,10 @@ fun SettingsScreen(
 
             item { Divider() }
 
-            item { SectionTitle("Logging") }
+            item { SectionTitle(stringResource(R.string.section_logging)) }
 
-            item { SettingToggle("Enable logging", s.loggingEnabled) { onUpdate { copy(loggingEnabled = !loggingEnabled) } } }
-            item { SettingToggle("Log server windows", s.logServerBuffer) { onUpdate { copy(logServerBuffer = !logServerBuffer) } } }
+            item { SettingToggle(stringResource(R.string.setting_enable_logging), s.loggingEnabled) { onUpdate { copy(loggingEnabled = !loggingEnabled) } } }
+            item { SettingToggle(stringResource(R.string.setting_log_server), s.logServerBuffer) { onUpdate { copy(logServerBuffer = !logServerBuffer) } } }
 
             item {
                 val label = if (s.logFolderUri.isNullOrBlank()) "Internal storage" else "Custom folder selected"
@@ -448,7 +502,7 @@ fun SettingsScreen(
 
             item { Divider() }
 
-            item { SectionTitle("IRCv3 History") }
+            item { SectionTitle(stringResource(R.string.section_ircv3_history)) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -467,14 +521,14 @@ fun SettingsScreen(
                 }
             }
 
-            item { SettingToggle("Count IRCv3 history as unread", s.ircHistoryCountsAsUnread) { onUpdate { copy(ircHistoryCountsAsUnread = !ircHistoryCountsAsUnread) } } }
-            item { SettingToggle("Allow notifications from IRCv3 history", s.ircHistoryTriggersNotifications) { onUpdate { copy(ircHistoryTriggersNotifications = !ircHistoryTriggersNotifications) } } }
+            item { SettingToggle(stringResource(R.string.setting_count_unread), s.ircHistoryCountsAsUnread) { onUpdate { copy(ircHistoryCountsAsUnread = !ircHistoryCountsAsUnread) } } }
+            item { SettingToggle(stringResource(R.string.setting_trigger_notif), s.ircHistoryTriggersNotifications) { onUpdate { copy(ircHistoryTriggersNotifications = !ircHistoryTriggersNotifications) } } }
 
             item { Divider() }
 
-            item { SectionTitle("File transfers") }
+            item { SectionTitle(stringResource(R.string.section_file_transfers)) }
 
-            item { SettingToggle("Enable DCC", s.dccEnabled) { onUpdate { copy(dccEnabled = !dccEnabled) } } }
+            item { SettingToggle(stringResource(R.string.setting_enable_dcc), s.dccEnabled) { onUpdate { copy(dccEnabled = !dccEnabled) } } }
 
             item {
                 val dccFolderLabel = if (s.dccDownloadFolderUri.isNullOrBlank()) "Downloads (default)" else "Custom folder"
@@ -588,6 +642,34 @@ fun SettingsScreen(
 @Composable
 private fun SectionTitle(t: String, modifier: Modifier = Modifier) {
     Text(t, style = MaterialTheme.typography.titleMedium, modifier = modifier)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val languages = com.boxlabs.hexdroid.ui.SUPPORTED_LANGUAGES
+    val currentLabel = languages.firstOrNull { it.code == currentCode }?.nativeName ?: "System"
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+        OutlinedTextField(
+            value = currentLabel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Language") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for (lang in languages) {
+                DropdownMenuItem(
+                    text = { Text(lang.nativeName) },
+                    onClick = { onPick(lang.code); expanded = false }
+                )
+            }
+        }
+    }
 }
 
 @Composable

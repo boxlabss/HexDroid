@@ -23,28 +23,55 @@ import kotlin.math.abs
 
 /**
  * nick colour mapping
- * Uses golden-angle hue scrambling for perceptual spread
- * Better hash mixing for short/low-entropy nicks
- * Large palette (128) to reduce collisions
- * Adjustable lightness/saturation based on background
- * Linear probing with a larger coprime step to spread assignments
+ *
+ * Generates a large palette where every entry has a visually distinct
+ * hue *and* lightness, so even nicks that hash to nearby hues end up
+ * with clearly different shades.
+ *
+ * Approach:
+ * 1. Use golden-angle hue stepping (≈137.5°) for maximal hue spread.
+ * 2. Alternate lightness across 3 bands so consecutive palette entries
+ *    differ in both hue AND lightness.
+ * 3. Vary saturation slightly per band for extra differentiation.
+ * 4. Linear probing with a coprime step avoids clustering when the
+ *    channel has many users.
  */
 object NickColors {
-    private const val PALETTE_SIZE = 128          // Larger palette = fewer collisions
+    private const val PALETTE_SIZE = 192
     private const val GOLDEN_ANGLE_DEG = 137.50776f
-    private const val PROBE_STEP = 37             // Larger coprime step spreads better
+    private const val PROBE_STEP = 37
 
     /**
-     * Build a palette suitable for the current background luminance.
-     * Dark BG - brighter/saturated colours
-     * Light BG  - darker/muted colours
+     * Lightness/saturation bands.  Each band produces a different "shade"
+     * feel — bright & vivid, medium & rich, light & soft — so even if
+     * two nicks get the same hue region they look clearly different.
      */
+    private data class Band(val lightness: Float, val saturation: Float)
+
+    private val darkBgBands = listOf(
+        Band(0.72f, 0.90f),   // vivid
+        Band(0.58f, 0.78f),   // deeper / richer
+        Band(0.82f, 0.65f),   // pastel / light
+    )
+    private val lightBgBands = listOf(
+        Band(0.38f, 0.75f),   // dark & saturated
+        Band(0.28f, 0.60f),   // very dark
+        Band(0.48f, 0.55f),   // medium, muted
+    )
+
     fun buildPalette(bgLum: Float): List<Color> {
-        val lightness = if (bgLum < 0.5f) 0.75f else 0.40f   // Slightly brighter on dark, darker on light
-        val saturation = if (bgLum < 0.5f) 0.85f else 0.65f   // Punchier on dark backgrounds
+        val bands = if (bgLum < 0.5f) darkBgBands else lightBgBands
+
         return List(PALETTE_SIZE) { i ->
             val hue = (i * GOLDEN_ANGLE_DEG) % 360f
-            Color.hsl(hue, saturation, lightness)
+            val band = bands[i % bands.size]
+            // Small per-index saturation jitter to break up any residual patterns
+            val satJitter = ((i * 7) % 5 - 2) * 0.02f
+            Color.hsl(
+                hue,
+                (band.saturation + satJitter).coerceIn(0.35f, 0.95f),
+                band.lightness
+            )
         }
     }
 
@@ -59,13 +86,12 @@ object NickColors {
         val used = BooleanArray(n)
         val out = LinkedHashMap<String, Color>(baseNicks.size)
 
-        // Sort for stable order across recompositions
         val sorted = baseNicks.distinct().sortedBy { it.lowercase() }
 
         for (nick in sorted) {
             val idx = pickIndex(nick, used, n)
             used[idx] = true
-            out[nick.lowercase()] = palette[idx]  // Key by lowercase for case-insensitive lookup
+            out[nick.lowercase()] = palette[idx]
         }
         return out
     }
@@ -93,7 +119,7 @@ object NickColors {
     }
 
     /**
-     * Better mixing for short strings (simple Murmur-like hash mixer)
+     * Better mixing for short strings (Murmur-like finaliser)
      */
     private fun mixHash(h: Int): Int {
         var hash = h

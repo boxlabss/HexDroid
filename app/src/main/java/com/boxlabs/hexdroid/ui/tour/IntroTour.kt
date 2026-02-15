@@ -18,7 +18,9 @@
 
 package com.boxlabs.hexdroid.ui.tour
 
+import android.content.Context
 import com.boxlabs.hexdroid.AppScreen
+import com.boxlabs.hexdroid.R
 
 
 enum class IntroTourActionId { ADD_AFTERNET }
@@ -40,71 +42,77 @@ data class IntroTourStep(
     val action: IntroTourAction? = null,
 )
 
+/**
+ * Build the intro tour with localised strings.
+ * Falls back to English defaults when called without a context.
+ */
+fun buildIntroTour(context: Context? = null): List<IntroTourStep> {
+    // Helper that resolves a string resource, or returns the English fallback.
+    fun s(resId: Int, fallback: String): String = context?.getString(resId) ?: fallback
 
-fun buildIntroTour(): List<IntroTourStep> {
     return listOf(
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_ADD_FAB,
-            title = "Add a network",
-            body = "Tap + to add a new network, or edit an existing one. HexDroid ships with a few defaults so you can get going quickly."
+            title = s(R.string.tour_add_network_title, "Add a network"),
+            body = s(R.string.tour_add_network_body, "Tap + to add a new network, or edit an existing one. HexDroid ships with a few defaults so you can get going quickly.")
         ),
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_CONNECT_BUTTON,
-            title = "Connect",
-            body = "Connect to the selected network. Once connected, open chat to join channels and talk."
+            title = s(R.string.tour_connect_title, "Connect"),
+            body = s(R.string.tour_connect_body, "Connect to the selected network. Once connected, open chat to join channels and talk.")
         ),
         IntroTourStep(
             screen = AppScreen.SETTINGS,
             target = TourTarget.SETTINGS_APPEARANCE_SECTION,
-            title = "Settings",
-            body = "Tweak settings such as appearance, fonts and other preferences here."
+            title = s(R.string.tour_settings_title, "Settings"),
+            body = s(R.string.tour_settings_body, "Tweak settings such as appearance, fonts and other preferences here.")
         ),
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_BUFFER_DRAWER,
-            title = "Switcher",
-            body = "This sidebar shows your server, channels, and private messages. Tap any item to switch between them."
+            title = s(R.string.tour_switcher_title, "Switcher"),
+            body = s(R.string.tour_switcher_body, "This sidebar shows your server, channels, and private messages. Tap any item to switch between them.")
         ),
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_OVERFLOW_BUTTON,
-            title = "More actions",
-            body = "This menu contains channel list, file transfers, settings, networks, and more."
+            title = s(R.string.tour_more_title, "More actions"),
+            body = s(R.string.tour_more_body, "This menu contains channel list, file transfers, settings, networks, and more.")
         ),
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_INPUT,
-            title = "Send messages",
-            body = "Type here to chat. You can also use slash commands like /join #channel, /msg nick hi, /whois nick, etc."
+            title = s(R.string.tour_send_title, "Send messages"),
+            body = s(R.string.tour_send_body, "Type here to chat. You can also use slash commands like /join #channel, /msg nick hi, /whois nick, etc.")
         ),
         IntroTourStep(
             screen = AppScreen.TRANSFERS,
             target = TourTarget.TRANSFERS_ENABLE_DCC,
-            title = "Enable DCC",
-            body = "Turn on DCC to send/receive files. If you're behind NAT, Passive mode can help."
+            title = s(R.string.tour_dcc_title, "Enable DCC"),
+            body = s(R.string.tour_dcc_body, "Turn on DCC to send/receive files. If you're behind NAT, Passive mode can help.")
         ),
         IntroTourStep(
             screen = AppScreen.TRANSFERS,
             target = TourTarget.TRANSFERS_PICK_FILE,
-            title = "Send a file",
-            body = "Enter a target nick, then pick a file to send. (Requires DCC to be enabled.) Incoming offers appear on this screen too."
+            title = s(R.string.tour_send_file_title, "Send a file"),
+            body = s(R.string.tour_send_file_body, "Enter a target nick, then pick a file to send. (Requires DCC to be enabled.) Incoming offers appear on this screen too.")
         ),
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_AFTERNET_ITEM,
             fallbackTarget = TourTarget.NETWORKS_ADD_FAB,
-            title = "Need support?",
-            body = "You can connect here if you need support in #HexDroid.",
-            fallbackBody = "If you don't see AfterNET in your list, tap Add AfterNET (or +) to add it again. You can connect there for support in #HexDroid.",
-            action = IntroTourAction(IntroTourActionId.ADD_AFTERNET, "Add AfterNET", fallbackOnly = true),
+            title = s(R.string.tour_support_title, "Need support?"),
+            body = s(R.string.tour_support_body, "You can connect here if you need support in #HexDroid."),
+            fallbackBody = s(R.string.tour_support_fallback, "If you don't see AfterNET in your list, tap Add AfterNET (or +) to add it again. You can connect there for support in #HexDroid."),
+            action = IntroTourAction(IntroTourActionId.ADD_AFTERNET, s(R.string.tour_support_action, "Add AfterNET"), fallbackOnly = true),
         ),
         IntroTourStep(
             screen = AppScreen.SETTINGS,
             target = TourTarget.SETTINGS_RUN_TOUR,
-            title = "Run this tour again",
-            body = "You can replay the walkthrough any time from Settings."
+            title = s(R.string.tour_replay_title, "Run this tour again"),
+            body = s(R.string.tour_replay_body, "You can replay the walkthrough any time from Settings.")
         )
     )
 }

@@ -186,14 +186,14 @@ class SettingsRepository(private val ctx: Context) {
             val o = JSONObject(json)
             UiSettings(
                 themeMode = runCatching {
-                    ThemeMode.valueOf(o.optString("themeMode", ThemeMode.SYSTEM.name))
+                    ThemeMode.valueOf(o.optString("themeMode", ThemeMode.DARK.name))
                 }.getOrDefault(ThemeMode.SYSTEM),
                 compactMode = o.optBoolean("compactMode", false),
 
                 showTimestamps = o.optBoolean("showTimestamps", true),
                 timestampFormat = o.optString("timestampFormat", "HH:mm:ss"),
                 fontScale = o.optDouble("fontScale", 1.0).toFloat(),
-                fontChoice = parseFontChoice(o.optString("fontChoice", com.boxlabs.hexdroid.FontChoice.MONOSPACE.name), com.boxlabs.hexdroid.FontChoice.MONOSPACE),
+                fontChoice = parseFontChoice(o.optString("fontChoice", com.boxlabs.hexdroid.FontChoice.OPEN_SANS.name), com.boxlabs.hexdroid.FontChoice.OPEN_SANS),
 
                 chatFontChoice = parseFontChoice(o.optString("chatFontChoice", com.boxlabs.hexdroid.FontChoice.MONOSPACE.name), com.boxlabs.hexdroid.FontChoice.MONOSPACE),
 
@@ -256,6 +256,10 @@ class SettingsRepository(private val ctx: Context) {
                 colorizeNicks = o.optBoolean("colorizeNicks", true),
                 mircColorsEnabled = o.optBoolean("mircColorsEnabled", true),
                 introTourSeenVersion = o.optInt("introTourSeenVersion", 0),
+                welcomeCompleted = o.optBoolean("welcomeCompleted", false),
+                appLanguage = o.optString("appLanguage", "").takeIf { it.isNotBlank() },
+                portraitNicklistOverlay = o.optBoolean("portraitNicklistOverlay", true),
+                portraitNickPaneFrac = o.optDouble("portraitNickPaneFrac", 0.35).toFloat(),
             )
         } catch (_: Throwable) {
             UiSettings()
@@ -321,6 +325,10 @@ class SettingsRepository(private val ctx: Context) {
         o.put("colorizeNicks", s.colorizeNicks)
         o.put("mircColorsEnabled", s.mircColorsEnabled)
         o.put("introTourSeenVersion", s.introTourSeenVersion)
+        o.put("welcomeCompleted", s.welcomeCompleted)
+        o.put("appLanguage", s.appLanguage ?: "")
+        o.put("portraitNicklistOverlay", s.portraitNicklistOverlay)
+        o.put("portraitNickPaneFrac", s.portraitNickPaneFrac.toDouble())
 
         return o
     }
@@ -471,7 +479,7 @@ class SettingsRepository(private val ctx: Context) {
             host = "irc.afternet.org",
             port = 6697,
             useTls = true,
-            allowInvalidCerts = true,
+            allowInvalidCerts = false,
             serverPassword = null,
             nick = "HexDroidUser",
             altNick = "HexDroidUser",

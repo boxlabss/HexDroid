@@ -1,0 +1,125 @@
+<resources>
+    <string name="welcome_title">HexDroid IRC\'ye Hoş Geldiniz</string>
+    <string name="welcome_subtitle">Başlamadan önce sizi ayarlayalım.</string>
+    <string name="welcome_language_label">Dil</string>
+    <string name="welcome_nick_label">Takma ad</string>
+    <string name="welcome_nick_hint">IRC takma adınızı seçin</string>
+    <string name="welcome_nick_helper">Bu, tüm varsayılan sunucu profillerinde kullanılacaktır.</string>
+    <string name="welcome_continue">Devam</string>
+    <string name="welcome_nick_error_empty">Takma ad boş olamaz</string>
+    <string name="welcome_nick_error_invalid">Takma ad geçersiz karakterler içeriyor</string>
+    <string name="welcome_nick_error_long">Takma ad 16 karakter veya daha kısa olmalıdır</string>
+
+    <string name="back">Geri</string>
+    <string name="cancel">İptal</string>
+    <string name="save">Kaydet</string>
+    <string name="delete">Sil</string>
+    <string name="close">Kapat</string>
+    <string name="done">Tamam</string>
+    <string name="next">İleri</string>
+    <string name="skip">Atla</string>
+    <string name="run">Başlat</string>
+    <string name="set">Uygula</string>
+    <string name="reset">Sıfırla</string>
+    <string name="manage">Yönet</string>
+    <string name="not_now">Şimdi değil</string>
+    <string name="copy_text">Kopyala</string>
+
+    <string name="settings_title">Ayarlar</string>
+    <string name="settings_intro_tour">Tanıtım turu</string>
+    <string name="settings_intro_tour_desc">Ana ekranlar ve kısayolların hızlı bir turu.</string>
+    <string name="section_appearance">Görünüm</string>
+    <string name="section_ui">Arayüz</string>
+    <string name="section_landscape">Yatay Kenar Çubukları</string>
+    <string name="section_portrait">Dikey Kullanıcı Listesi</string>
+    <string name="section_highlights">Vurgulamalar</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">Bildirimler</string>
+    <string name="section_logging">Günlük</string>
+    <string name="section_ircv3_history">IRCv3 Geçmişi</string>
+    <string name="section_file_transfers">Dosya aktarımları</string>
+
+    <string name="setting_font_size">Yazı tipi boyutu</string>
+    <string name="setting_colorise_nicks">Takma adları renklendir</string>
+    <string name="setting_mirc_colours">mIRC renklerini etkinleştir</string>
+    <string name="setting_show_topic_bar">Konu çubuğunu göster</string>
+    <string name="setting_show_timestamps">Zaman damgalarını göster</string>
+    <string name="setting_timestamp_format">Zaman biçimi (Java)</string>
+    <string name="setting_hide_motd">Bağlantıda MOTD\'yi gizle</string>
+    <string name="setting_hide_joinpartquit">Giriş/çıkış mesajlarını gizle</string>
+    <string name="setting_show_buffers_default">Ağları/kanalları varsayılan olarak göster</string>
+    <string name="setting_show_nicklist_default">Kullanıcı listesini varsayılan olarak göster</string>
+    <string name="setting_highlight_on_nick">Takma adda vurgula</string>
+    <string name="setting_extra_highlights">Ek kelimeler (satır başına bir)</string>
+    <string name="setting_compact_mode">Kompakt mod</string>
+
+    <string name="setting_portrait_nicklist_overlay">Yan panel kullanıcı listesi</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Kullanıcı listesini alt sayfa yerine yeniden boyutlandırılabilir yan panel olarak göster (yatay mod gibi). Etkinleştirildiğinde, düğme kalıcı göster/gizle olarak çalışır.</string>
+
+    <string name="setting_ignore_list">Yoksayma listesi</string>
+    <string name="setting_ignore_list_desc">Belirli takma adlardan gelen mesajları ve DCC tekliflerini gizle (ağ başına).</string>
+    <string name="setting_quit_message">Çıkış mesajı</string>
+    <string name="setting_part_message">Ayrılma mesajı</string>
+
+    <string name="setting_auto_reconnect">Otomatik yeniden bağlan</string>
+    <string name="setting_reconnect_interval">Yeniden bağlanma aralığı (saniye)</string>
+    <string name="setting_reconnect_interval_desc">Bağlantı kesildiğinde ne sıklıkla tekrar denenecek.</string>
+    <string name="setting_seconds">Saniye</string>
+    <string name="setting_auto_connect_startup">Başlangıçta otomatik bağlan</string>
+
+    <string name="setting_enable_notifications">Bildirimleri etkinleştir</string>
+    <string name="setting_notify_highlights">Vurgulama bildirimleri</string>
+    <string name="setting_notify_pm">Özel mesaj bildirimleri</string>
+    <string name="setting_connection_status">Bağlantı durumu bildirimini göster</string>
+
+    <string name="setting_enable_logging">Günlüğü etkinleştir</string>
+    <string name="setting_log_folder">Günlük klasörü</string>
+    <string name="setting_choose_folder">Klasör seç</string>
+    <string name="setting_retention_days">Saklama günleri</string>
+    <string name="setting_max_scrollback">Maksimum geçmiş satırları</string>
+
+    <string name="theme_label">Tema</string>
+    <string name="theme_dark">Koyu</string>
+    <string name="theme_light">Açık</string>
+    <string name="theme_system">Sistem</string>
+
+    <string name="chat_nicklist">Kullanıcı listesi</string>
+    <string name="chat_users_format">%1$s • %2$d kullanıcı</string>
+    <string name="chat_disconnected">Bağlantı kesildi</string>
+    <string name="chat_type_message">Bir mesaj yazın…</string>
+    <string name="chat_channel_tools">Kanal araçları</string>
+    <string name="chat_topic">Konu</string>
+    <string name="chat_new_topic">Yeni konu</string>
+
+    <string name="networks_title">Ağlar</string>
+    <string name="networks_connect">Bağlan</string>
+    <string name="networks_disconnect">Bağlantıyı kes</string>
+    <string name="networks_edit">Düzenle</string>
+    <string name="networks_add">Ağ ekle</string>
+
+    <string name="tour_add_network_title">Bir ağ ekle</string>
+    <string name="tour_add_network_body">Yeni bir ağ eklemek veya mevcut birini düzenlemek için + simgesine dokunun. HexDroid hızlı başlangıç için birkaç varsayılan ağ içerir.</string>
+    <string name="tour_connect_title">Bağlan</string>
+    <string name="tour_connect_body">Seçilen ağa bağlanın. Bağlandıktan sonra kanallara katılmak için sohbeti açın.</string>
+    <string name="tour_settings_title">Ayarlar</string>
+    <string name="tour_settings_body">Görünüm, yazı tipleri ve diğer tercihleri buradan ayarlayın.</string>
+    <string name="tour_switcher_title">Değiştirici</string>
+    <string name="tour_switcher_body">Bu kenar çubuğu sunucunuzu, kanallarınızı ve özel mesajlarınızı gösterir. Geçiş yapmak için dokunun.</string>
+    <string name="tour_more_title">Daha fazla eylem</string>
+    <string name="tour_more_body">Bu menü kanal listesi, dosya aktarımları, ayarlar, ağlar ve daha fazlasını içerir.</string>
+    <string name="tour_send_title">Mesaj gönder</string>
+    <string name="tour_send_body">Sohbet etmek için buraya yazın. /join #kanal, /msg takmaad merhaba, /whois takmaad gibi komutlar da kullanabilirsiniz.</string>
+    <string name="tour_dcc_title">DCC\'yi etkinleştir</string>
+    <string name="tour_dcc_body">Dosya göndermek/almak için DCC\'yi açın. NAT arkasındaysanız Pasif modu yardımcı olabilir.</string>
+    <string name="tour_support_title">Desteğe mi ihtiyacınız var?</string>
+    <string name="tour_support_body">#HexDroid\'de destek almak için buraya bağlanabilirsiniz.</string>
+    <string name="tour_support_fallback">Listenizde AfterNET görmüyorsanız, tekrar eklemek için AfterNET Ekle (veya +) düğmesine dokunun.</string>
+    <string name="tour_support_action">AfterNET Ekle</string>
+    <string name="tour_replay_title">Bu turu tekrarla</string>
+    <string name="tour_replay_body">Turu istediğiniz zaman Ayarlar\'dan tekrarlayabilirsiniz.</string>
+
+    <string name="about_title">Hakkında</string>
+    <string name="transfers_title">Aktarımlar</string>
+    <string name="ignore_title">Yoksayma listesi</string>
+    <string name="list_title">Kanal listesi</string>
+</resources>

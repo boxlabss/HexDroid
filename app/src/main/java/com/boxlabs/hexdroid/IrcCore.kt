@@ -52,6 +52,8 @@ import java.util.Locale
 import javax.net.ssl.KeyManager
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -826,7 +828,7 @@ class IrcClient(val config: IrcConfig) {
         val s = try {
             withContext(Dispatchers.IO) { openSocket() }
         } catch (t: Throwable) {
-            val msg = t.message ?: t::class.java.simpleName
+            val msg = friendlyErrorMessage(t)
             send(IrcEvent.Error("Connect failed: $msg"))
             send(IrcEvent.Disconnected(msg))
             return@channelFlow
@@ -864,12 +866,13 @@ class IrcClient(val config: IrcConfig) {
             try {
                 for (line in outbound) writeLine(line)
             } catch (t: Throwable) {
-                // If writes start failing (common during network handovers),
+                // If writes start failing (common during network handovers or SSL close),
                 // force-close the socket so the read loop can notice and emit Disconnected.
                 if (!userClosing) {
-                    lastQuitReason = t.message ?: t::class.java.simpleName
+                    lastQuitReason = friendlyErrorMessage(t)
                     runCatching { s.close() }
                 }
+                // If userClosing, this is expected (socket was closed while a write was pending)
             }
         }
 
@@ -1762,7 +1765,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// If the user requested a disconnect, don't surface "EOF" as an error.
 			send(IrcEvent.Disconnected(if (userClosing) (lastQuitReason ?: "Disconnected") else "EOF"))
 		} catch (t: Throwable) {
-			val msg = t.message ?: t::class.java.simpleName
+			val msg = friendlyErrorMessage(t)
 			if (userClosing) {
 				send(IrcEvent.Disconnected(lastQuitReason ?: "Disconnected"))
 			} else {
@@ -1773,6 +1776,13 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			joinedChannelCases.clear()
 			runCatching { writerJob.cancel() }
 			runCatching { pingJob.cancel() }
+			// Attempt graceful SSL shutdown before hard-closing
+			runCatching {
+				(s as? SSLSocket)?.let { ssl ->
+					// close the output side to send SSL close_notify
+					runCatching { ssl.shutdownOutput() }
+				}
+			}
 			runCatching { s.close() }
 		}
 	}
@@ -1917,6 +1927,78 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			ss.soTimeout = config.readTimeoutMs
 
 			ss
+		}
+	}
+
+	/**
+	 * Translate raw exception messages — especially opaque OpenSSL/BoringSSL strings —
+	 * into something a user can understand and act on.
+	 */
+	private fun friendlyErrorMessage(t: Throwable): String {
+		val raw = t.message ?: t::class.java.simpleName
+
+		// SSL handshake failures (certificate problems, protocol mismatch)
+		if (t is SSLHandshakeException) {
+			return when {
+				raw.contains("CERTIFICATE_VERIFY_FAILED", ignoreCase = true) ||
+				raw.contains("CertPathValidatorException", ignoreCase = true) ->
+					"TLS certificate verification failed — the server's certificate may be expired, self-signed, or untrusted"
+				raw.contains("PROTOCOL_VERSION", ignoreCase = true) ||
+				raw.contains("NO_PROTOCOLS_AVAILABLE", ignoreCase = true) ->
+					"TLS handshake failed — the server may not support TLS 1.2/1.3"
+				raw.contains("HANDSHAKE_FAILURE", ignoreCase = true) ->
+					"TLS handshake rejected by server — check port and TLS settings"
+				else ->
+					"TLS handshake failed: ${raw.take(120)}"
+			}
+		}
+
+		// General SSL exceptions (mid-session errors)
+		if (t is SSLException) {
+			return when {
+				raw.contains("Internal error in SSL library", ignoreCase = true) ||
+				raw.contains("SSL_ERROR_INTERNAL", ignoreCase = true) ||
+				raw.contains("Internal OpenSSL error", ignoreCase = true) ->
+					"TLS session interrupted — connection will retry"
+				raw.contains("Connection reset", ignoreCase = true) ||
+				raw.contains("ECONNRESET", ignoreCase = true) ->
+					"Connection reset by server"
+				raw.contains("PROTOCOL_ERROR", ignoreCase = true) ||
+				raw.contains("protocol_error", ignoreCase = true) ->
+					"TLS protocol error — connection will retry"
+				raw.contains("Read error", ignoreCase = true) ||
+				raw.contains("SSL_ERROR_SYSCALL", ignoreCase = true) ->
+					"TLS read error — network may have changed"
+				raw.contains("write", ignoreCase = true) ->
+					"TLS write error — network may have changed"
+				raw.contains("closed", ignoreCase = true) ||
+				raw.contains("shutdown", ignoreCase = true) ->
+					"TLS session closed"
+				else ->
+					"TLS error: ${raw.take(120)}"
+			}
+		}
+
+		// Non-SSL socket/IO errors
+		return when {
+			raw.contains("Connection refused", ignoreCase = true) ->
+				"Connection refused — check hostname and port"
+			raw.contains("Network is unreachable", ignoreCase = true) ->
+				"Network unreachable — check your internet connection"
+			raw.contains("Connection timed out", ignoreCase = true) ||
+			raw.contains("connect timed out", ignoreCase = true) ->
+				"Connection timed out"
+			raw.contains("UnknownHost", ignoreCase = true) ||
+			raw.contains("No address associated", ignoreCase = true) ->
+				"Could not resolve hostname"
+			raw.contains("Broken pipe", ignoreCase = true) ->
+				"Connection lost (broken pipe)"
+			raw.contains("Connection reset", ignoreCase = true) ->
+				"Connection reset by server"
+			raw.contains("Socket closed", ignoreCase = true) ->
+				"Connection closed"
+			else ->
+				raw.take(160)
 		}
 	}
 

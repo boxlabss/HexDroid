@@ -181,7 +181,16 @@ data class UiSettings(
     // IRC formatting
     /** When enabled, render mIRC colour/style control codes in chat (otherwise strip them). */
     val introTourSeenVersion: Int = 0,
-    val mircColorsEnabled: Boolean = true
+    val mircColorsEnabled: Boolean = true,
+
+    /** Whether the first-launch welcome screen has been completed (language + nick chosen). */
+    val welcomeCompleted: Boolean = false,
+    /** Saved language selection from the welcome screen (BCP-47 tag, e.g. "en", "es"). */
+    val appLanguage: String? = null,
+    /** In portrait mode, show nicklist as a side pane instead of a bottom sheet. */
+    val portraitNicklistOverlay: Boolean = true,
+    /** Portrait overlay nicklist width as fraction of screen width. */
+    val portraitNickPaneFrac: Float = 0.35f,
 )
 
 data class NetConnState(
@@ -1046,6 +1055,42 @@ if (_state.value.activeNetworkId != netId) setActiveNetwork(netId)
             )
 
             repo.upsertNetwork(n)
+        }
+    }
+
+    /**
+     * Update the nick (and altNick) on all default server profiles that still have
+     * the factory-default "HexDroidUser" / "HexDroid" nick. Called from the welcome screen
+     * so the user's chosen nickname is applied everywhere before they even connect.
+     */
+    fun updateAllDefaultNetworkNicks(nick: String) {
+        viewModelScope.launch {
+            val st = _state.value
+            val defaultNicks = setOf("HexDroidUser", "HexDroid", "HexDroidUser_")
+            for (net in st.networks) {
+                if (net.nick in defaultNicks) {
+                    val updated = net.copy(
+                        nick = nick,
+                        altNick = "${nick}_",
+                        username = nick.lowercase()
+                    )
+                    repo.upsertNetwork(updated)
+                }
+            }
+        }
+    }
+
+    /**
+     * Called from the WelcomeScreen to persist the chosen language and nick, mark welcome as done,
+     * and apply the nick to all default network profiles.
+     */
+    fun completeWelcome(languageCode: String, nick: String) {
+        updateAllDefaultNetworkNicks(nick)
+        updateSettings {
+            copy(
+                welcomeCompleted = true,
+                appLanguage = languageCode
+            )
         }
     }
 
@@ -2371,14 +2416,53 @@ if (code == "442") {
                 runtimes[netId]?.myNick = ev.nick
                 setNetConn(netId) { it.copy(myNick = ev.nick) }
                 append(bufKey(netId, "*server*"), from = null, text = "*** Registered as ${ev.nick}", doNotify = false)
-                // Autojoin
-                val aj = runtimes[netId]?.client?.config?.autoJoin.orEmpty()
-                val rt = runtimes[netId]
-                if (aj.isNotEmpty() && rt != null) {
-                    viewModelScope.launch {
-                        for (c in aj) {
-                            val join = if (c.key.isNullOrBlank()) "JOIN ${c.channel}" else "JOIN ${c.channel} ${c.key}"
-                            rt.client.sendRaw(join)
+
+                val rt = runtimes[netId] ?: return
+                val profile = _state.value.networks.firstOrNull { it.id == netId }
+
+                viewModelScope.launch {
+                    // 1. Service auth command (e.g. /msg NickServ IDENTIFY password)
+                    //    Runs first, before autojoin, so channels with +r can be joined.
+                    profile?.serviceAuthCommand?.takeIf { it.isNotBlank() }?.let { cmd ->
+                        val trimmed = cmd.trim()
+                        if (trimmed.startsWith("/")) {
+                            // Client command — expand aliases like /msg → PRIVMSG
+                            rt.client.handleSlashCommand(trimmed.drop(1), "*server*")
+                        } else {
+                            // Raw IRC line
+                            rt.client.sendRaw(trimmed)
+                        }
+                    }
+
+                    // 2. Optional delay before autojoin & commands
+                    //    Gives services time to identify/cloak before joining channels.
+                    val delaySec = profile?.autoCommandDelaySeconds ?: 0
+                    if (delaySec > 0) {
+                        append(bufKey(netId, "*server*"), from = null,
+                            text = "*** Waiting ${delaySec}s before auto-join & commands…", doNotify = false)
+                        delay(delaySec * 1000L)
+                    }
+
+                    // 3. Autojoin channels
+                    val aj = rt.client.config.autoJoin
+                    for (c in aj) {
+                        val join = if (c.key.isNullOrBlank()) "JOIN ${c.channel}" else "JOIN ${c.channel} ${c.key}"
+                        rt.client.sendRaw(join)
+                    }
+
+                    // 4. Post-connect commands (one per line, like mIRC's Perform)
+                    //    Supports both /slash commands and raw IRC lines.
+                    profile?.autoCommandsText?.takeIf { it.isNotBlank() }?.let { text ->
+                        for (line in text.lines()) {
+                            val trimmed = line.trim()
+                            if (trimmed.isEmpty()) continue
+                            if (trimmed.startsWith("/")) {
+                                // Client command — expand aliases
+                                rt.client.handleSlashCommand(trimmed.drop(1), "*server*")
+                            } else {
+                                // Raw IRC line (e.g. "MODE #chan +o nick")
+                                rt.client.sendRaw(trimmed)
+                            }
                         }
                     }
                 }

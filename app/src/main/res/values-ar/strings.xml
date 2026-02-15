@@ -1,0 +1,122 @@
+<resources>
+    <string name="welcome_title">مرحبًا في HexDroid IRC</string>
+    <string name="welcome_subtitle">دعنا نعدّك قبل البدء.</string>
+    <string name="welcome_language_label">اللغة</string>
+    <string name="welcome_nick_label">الاسم المستعار</string>
+    <string name="welcome_nick_hint">اختر اسمك المستعار في IRC</string>
+    <string name="welcome_nick_helper">سيتم استخدامه في جميع ملفات تعريف الخوادم الافتراضية.</string>
+    <string name="welcome_continue">متابعة</string>
+    <string name="welcome_nick_error_empty">لا يمكن أن يكون الاسم المستعار فارغًا</string>
+    <string name="welcome_nick_error_invalid">يحتوي الاسم المستعار على أحرف غير صالحة</string>
+    <string name="welcome_nick_error_long">يجب ألا يزيد الاسم المستعار عن 16 حرفًا</string>
+
+    <string name="back">رجوع</string>
+    <string name="cancel">إلغاء</string>
+    <string name="save">حفظ</string>
+    <string name="delete">حذف</string>
+    <string name="close">إغلاق</string>
+    <string name="done">تم</string>
+    <string name="next">التالي</string>
+    <string name="skip">تخطي</string>
+    <string name="run">تشغيل</string>
+    <string name="set">تطبيق</string>
+    <string name="reset">إعادة تعيين</string>
+    <string name="manage">إدارة</string>
+    <string name="not_now">ليس الآن</string>
+    <string name="copy_text">نسخ</string>
+
+    <string name="settings_title">الإعدادات</string>
+    <string name="settings_intro_tour">جولة تعريفية</string>
+    <string name="settings_intro_tour_desc">جولة سريعة في الشاشات الرئيسية والاختصارات.</string>
+    <string name="section_appearance">المظهر</string>
+    <string name="section_ui">الواجهة</string>
+    <string name="section_landscape">الأشرطة الجانبية (أفقي)</string>
+    <string name="section_portrait">قائمة المستخدمين (عمودي)</string>
+    <string name="section_highlights">التمييز</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">الإشعارات</string>
+    <string name="section_logging">السجلات</string>
+    <string name="section_ircv3_history">سجل IRCv3</string>
+    <string name="section_file_transfers">نقل الملفات</string>
+
+    <string name="setting_font_size">حجم الخط</string>
+    <string name="setting_colorise_nicks">تلوين الأسماء المستعارة</string>
+    <string name="setting_mirc_colours">تفعيل ألوان mIRC</string>
+    <string name="setting_show_topic_bar">إظهار شريط الموضوع</string>
+    <string name="setting_show_timestamps">إظهار الطوابع الزمنية</string>
+    <string name="setting_timestamp_format">تنسيق الوقت (Java)</string>
+    <string name="setting_hide_motd">إخفاء MOTD عند الاتصال</string>
+    <string name="setting_hide_joinpartquit">إخفاء رسائل الدخول/الخروج</string>
+    <string name="setting_show_buffers_default">إظهار الشبكات/القنوات افتراضيًا</string>
+    <string name="setting_show_nicklist_default">إظهار قائمة المستخدمين افتراضيًا</string>
+    <string name="setting_highlight_on_nick">تمييز عند ذكر الاسم</string>
+    <string name="setting_extra_highlights">كلمات إضافية (واحدة لكل سطر)</string>
+    <string name="setting_compact_mode">الوضع المضغوط</string>
+
+    <string name="setting_portrait_nicklist_overlay">لوحة جانبية للمستخدمين</string>
+    <string name="setting_portrait_nicklist_overlay_desc">عرض قائمة المستخدمين كلوحة جانبية قابلة لتغيير الحجم (كما في الوضع الأفقي) بدلاً من ورقة سفلية منبثقة. عند التفعيل، يعمل الزر كإظهار/إخفاء دائم.</string>
+
+    <string name="setting_ignore_list">قائمة التجاهل</string>
+    <string name="setting_ignore_list_desc">إخفاء الرسائل وعروض DCC من أسماء مستعارة محددة (لكل شبكة).</string>
+    <string name="setting_quit_message">رسالة الخروج</string>
+    <string name="setting_part_message">رسالة المغادرة</string>
+
+    <string name="setting_auto_reconnect">إعادة الاتصال تلقائيًا</string>
+    <string name="setting_reconnect_interval">فترة إعادة الاتصال (ثوانٍ)</string>
+    <string name="setting_reconnect_interval_desc">عدد مرات المحاولة عند انقطاع الاتصال.</string>
+    <string name="setting_seconds">ثوانٍ</string>
+    <string name="setting_auto_connect_startup">اتصال تلقائي عند البدء</string>
+
+    <string name="setting_enable_notifications">تفعيل الإشعارات</string>
+    <string name="setting_notify_highlights">إشعارات التمييز</string>
+    <string name="setting_notify_pm">إشعارات الرسائل الخاصة</string>
+
+    <string name="setting_enable_logging">تفعيل التسجيل</string>
+    <string name="setting_log_folder">مجلد السجلات</string>
+    <string name="setting_choose_folder">اختيار مجلد</string>
+
+    <string name="theme_label">السمة</string>
+    <string name="theme_dark">داكن</string>
+    <string name="theme_light">فاتح</string>
+    <string name="theme_system">النظام</string>
+
+    <string name="chat_nicklist">قائمة المستخدمين</string>
+    <string name="chat_users_format">%1$s • %2$d مستخدم</string>
+    <string name="chat_disconnected">غير متصل</string>
+    <string name="chat_type_message">اكتب رسالة…</string>
+    <string name="chat_channel_tools">أدوات القناة</string>
+    <string name="chat_topic">الموضوع</string>
+    <string name="chat_new_topic">موضوع جديد</string>
+
+    <string name="networks_title">الشبكات</string>
+    <string name="networks_connect">اتصال</string>
+    <string name="networks_disconnect">قطع الاتصال</string>
+    <string name="networks_edit">تعديل</string>
+    <string name="networks_add">إضافة شبكة</string>
+
+    <string name="tour_add_network_title">إضافة شبكة</string>
+    <string name="tour_add_network_body">اضغط على + لإضافة شبكة جديدة أو تعديل شبكة موجودة. يتضمن HexDroid بعض الشبكات الافتراضية للبدء بسرعة.</string>
+    <string name="tour_connect_title">اتصال</string>
+    <string name="tour_connect_body">اتصل بالشبكة المحددة. بعد الاتصال، افتح المحادثة للانضمام إلى القنوات.</string>
+    <string name="tour_settings_title">الإعدادات</string>
+    <string name="tour_settings_body">اضبط المظهر والخطوط والتفضيلات الأخرى هنا.</string>
+    <string name="tour_switcher_title">المبدّل</string>
+    <string name="tour_switcher_body">يعرض هذا الشريط الجانبي الخادم والقنوات والرسائل الخاصة. اضغط للتبديل.</string>
+    <string name="tour_more_title">إجراءات أخرى</string>
+    <string name="tour_more_body">تحتوي هذه القائمة على قائمة القنوات ونقل الملفات والإعدادات والشبكات والمزيد.</string>
+    <string name="tour_send_title">إرسال رسائل</string>
+    <string name="tour_send_body">اكتب هنا للمحادثة. يمكنك أيضًا استخدام أوامر مثل /join #قناة و /msg اسم مرحبا وغيرها.</string>
+    <string name="tour_dcc_title">تفعيل DCC</string>
+    <string name="tour_dcc_body">فعّل DCC لإرسال/استقبال الملفات. إذا كنت خلف NAT فالوضع السلبي قد يساعد.</string>
+    <string name="tour_support_title">تحتاج مساعدة؟</string>
+    <string name="tour_support_body">يمكنك الاتصال هنا للحصول على الدعم في #HexDroid.</string>
+    <string name="tour_support_fallback">إذا لم تجد AfterNET في قائمتك، اضغط على إضافة AfterNET (أو +) لإضافتها مجددًا.</string>
+    <string name="tour_support_action">إضافة AfterNET</string>
+    <string name="tour_replay_title">إعادة هذه الجولة</string>
+    <string name="tour_replay_body">يمكنك إعادة الجولة في أي وقت من الإعدادات.</string>
+
+    <string name="about_title">حول</string>
+    <string name="transfers_title">عمليات النقل</string>
+    <string name="ignore_title">قائمة التجاهل</string>
+    <string name="list_title">قائمة القنوات</string>
+</resources>

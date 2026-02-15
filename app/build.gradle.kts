@@ -5,6 +5,11 @@ plugins {
 }
 
 android {
+	dependenciesInfo {
+		includeInApk = false
+		includeInBundle = false
+	}
+	
     namespace = "com.boxlabs.hexdroid"
     compileSdk = 36
 
@@ -12,8 +17,8 @@ android {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.5.2"
+        versionCode = 9
+        versionName = "1.5.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

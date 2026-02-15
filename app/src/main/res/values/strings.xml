@@ -1,1 +1,216 @@
-<resources></resources>
+<resources>
+    <string name="app_name">HexDroid IRC</string>
+
+    <!-- Welcome / Setup Screen -->
+    <string name="welcome_title">Welcome to HexDroid</string>
+    <string name="welcome_subtitle">Let\'s get you set up before we start.</string>
+    <string name="welcome_language_label">Language</string>
+    <string name="welcome_nick_label">Nickname</string>
+    <string name="welcome_nick_hint">Choose your IRC nickname</string>
+    <string name="welcome_nick_helper">This will be used across all default server profiles.</string>
+    <string name="welcome_continue">Continue</string>
+    <string name="welcome_nick_error_empty">Nickname can\'t be empty</string>
+    <string name="welcome_nick_error_invalid">Nickname contains invalid characters</string>
+    <string name="welcome_nick_error_long">Nickname must be 16 characters or fewer</string>
+
+    <!-- Common / Navigation -->
+    <string name="back">Back</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="close">Close</string>
+    <string name="done">Done</string>
+    <string name="next">Next</string>
+    <string name="skip">Skip</string>
+    <string name="run">Run</string>
+    <string name="set">Set</string>
+    <string name="reset">Reset</string>
+    <string name="manage">Manage</string>
+    <string name="not_now">Not now</string>
+    <string name="copy_text">Copy</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_intro_tour">Intro tour</string>
+    <string name="settings_intro_tour_desc">A quick walkthrough of the main screens and shortcuts.</string>
+    <string name="section_appearance">Appearance</string>
+    <string name="section_ui">UI</string>
+    <string name="section_landscape">Landscape Sidebar Settings</string>
+    <string name="section_portrait">Portrait Nicklist</string>
+    <string name="section_highlights">Highlights</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">Notifications</string>
+    <string name="section_logging">Logging</string>
+    <string name="section_ircv3_history">IRCv3 History</string>
+    <string name="section_file_transfers">File transfers</string>
+
+    <string name="setting_font_size">Font size</string>
+    <string name="setting_colorise_nicks">Colourise nicks</string>
+    <string name="setting_mirc_colours">Enable mIRC colours</string>
+    <string name="setting_show_topic_bar">Show topic bar</string>
+    <string name="setting_show_timestamps">Show timestamps</string>
+    <string name="setting_timestamp_format">Timestamp format (Java)</string>
+    <string name="setting_hide_motd">Hide MOTD on connect</string>
+    <string name="setting_hide_joinpartquit">Hide join/part/quit messages</string>
+    <string name="setting_show_buffers_default">Show network/chans by default</string>
+    <string name="setting_show_nicklist_default">Show nicklist by default</string>
+    <string name="setting_highlight_on_nick">Highlight on nick</string>
+    <string name="setting_extra_highlights">Extra highlight words (one per line)</string>
+    <string name="setting_compact_mode">Compact mode</string>
+
+    <string name="setting_portrait_nicklist_overlay">Side pane nicklist</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Show the nicklist as a resizable side pane instead of a popup. When enabled, the nicklist toggle acts as a persistent show/hide.</string>
+
+    <string name="setting_ignore_list">Ignore list</string>
+    <string name="setting_ignore_list_desc">Hide messages and DCC offers from specific nicks (per network).</string>
+    <string name="setting_quit_message">Quit message</string>
+    <string name="setting_part_message">Part message</string>
+
+    <string name="setting_auto_reconnect">Auto-reconnect</string>
+    <string name="setting_reconnect_interval">Reconnect interval (seconds)</string>
+    <string name="setting_reconnect_interval_desc">How often to retry when the connection drops.</string>
+    <string name="setting_seconds">Seconds</string>
+    <string name="setting_auto_connect_startup">Auto-connect on startup</string>
+
+    <string name="setting_enable_notifications">Enable notifications</string>
+    <string name="setting_notify_highlights">Highlight notifications</string>
+    <string name="setting_notify_pm">Private message notifications</string>
+    <string name="setting_connection_status">Show connection status notification</string>
+    <string name="setting_sound_highlight">Sound on highlight</string>
+    <string name="setting_vibrate_highlight">Vibrate on highlight</string>
+
+    <string name="setting_enable_logging">Enable logging</string>
+    <string name="setting_log_server">Log server buffer</string>
+    <string name="setting_log_folder">Log folder</string>
+    <string name="setting_choose_folder">Choose folder</string>
+    <string name="setting_retention_days">Retention days</string>
+    <string name="setting_max_scrollback">Max scrollback lines</string>
+
+    <string name="setting_history_limit">History fetch limit</string>
+    <string name="setting_history_limit_desc">Number of messages to request per channel on join (CHATHISTORY LATEST). Set to 0 to disable.</string>
+    <string name="setting_messages">Messages</string>
+    <string name="setting_count_unread">Count fetched history as unread</string>
+    <string name="setting_trigger_notif">Trigger notifications for fetched history</string>
+
+    <string name="setting_download_folder">Download folder</string>
+    <string name="setting_incoming_port_min">Incoming port min</string>
+    <string name="setting_incoming_port_max">Incoming port max</string>
+
+    <string name="setting_keep_alive">Keep the connection alive</string>
+    <string name="setting_enable_dcc">Enable DCC</string>
+    <string name="setting_open_app_settings">Open app settings</string>
+    <string name="setting_battery_optimization">Battery optimization list</string>
+
+    <!-- Theme picker -->
+    <string name="theme_label">Theme</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_system">System</string>
+
+    <!-- Font picker -->
+    <string name="font_open_sans">Open Sans</string>
+    <string name="font_inter">Inter</string>
+    <string name="font_monospace">Monospace</string>
+    <string name="font_custom">Custom font file…</string>
+
+    <!-- Chat font style -->
+    <string name="chat_font_style">Chat font style</string>
+    <string name="style_regular">Regular</string>
+    <string name="style_bold">Bold</string>
+    <string name="style_italic">Italic</string>
+    <string name="style_bold_italic">Bold + Italic</string>
+
+    <!-- Vibration -->
+    <string name="vibration_intensity">Vibration intensity</string>
+    <string name="vibration_low">Low</string>
+    <string name="vibration_medium">Medium</string>
+    <string name="vibration_high">High</string>
+
+    <!-- Chat Screen -->
+    <string name="chat_nicklist">Nicklist</string>
+    <string name="chat_users_format">%1$s • %2$d users</string>
+    <string name="chat_no_channel">Not in a channel</string>
+    <string name="chat_disconnected">Disconnected</string>
+    <string name="chat_type_message">Type a message…</string>
+    <string name="chat_channel_tools">Channel tools</string>
+    <string name="chat_topic">Topic</string>
+    <string name="chat_new_topic">New topic</string>
+    <string name="chat_kick_ban">Kick / Ban</string>
+    <string name="chat_nick">Nick</string>
+    <string name="chat_reason">Reason</string>
+    <string name="chat_kick">Kick</string>
+    <string name="chat_ban">Ban</string>
+    <string name="chat_kick_ban_btn">Kick+Ban</string>
+
+    <!-- Network screens -->
+    <string name="networks_title">Networks</string>
+    <string name="networks_connect">Connect</string>
+    <string name="networks_disconnect">Disconnect</string>
+    <string name="networks_edit">Edit</string>
+    <string name="networks_add">Add network</string>
+    <string name="networks_auto_connect">Auto-connect</string>
+
+    <string name="network_edit_title">Edit network</string>
+    <string name="network_add_title">Add network</string>
+    <string name="network_name">Name</string>
+    <string name="network_host">Host</string>
+    <string name="network_port">Port</string>
+    <string name="network_use_tls">Use TLS (SSL)</string>
+    <string name="network_allow_invalid_certs">Allow invalid certificates</string>
+    <string name="network_nick">Nickname</string>
+    <string name="network_alt_nick">Alt nickname</string>
+    <string name="network_username">Username</string>
+    <string name="network_realname">Real name</string>
+
+    <!-- Tour steps -->
+    <string name="tour_add_network_title">Add a network</string>
+    <string name="tour_add_network_body">Tap + to add a new network, or edit an existing one. HexDroid ships with a few defaults so you can get going quickly.</string>
+    <string name="tour_connect_title">Connect</string>
+    <string name="tour_connect_body">Connect to the selected network. Once connected, open chat to join channels and talk.</string>
+    <string name="tour_settings_title">Settings</string>
+    <string name="tour_settings_body">Tweak settings such as appearance, fonts and other preferences here.</string>
+    <string name="tour_switcher_title">Switcher</string>
+    <string name="tour_switcher_body">This sidebar shows your server, channels, and private messages. Tap any item to switch between them.</string>
+    <string name="tour_more_title">More actions</string>
+    <string name="tour_more_body">This menu contains channel list, file transfers, settings, networks, and more.</string>
+    <string name="tour_send_title">Send messages</string>
+    <string name="tour_send_body">Type here to chat. You can also use slash commands like /join #channel, /msg nick hi, /whois nick, etc.</string>
+    <string name="tour_dcc_title">Enable DCC</string>
+    <string name="tour_dcc_body">Turn on DCC to send/receive files. If you\'re behind NAT, Passive mode can help.</string>
+    <string name="tour_send_file_title">Send a file</string>
+    <string name="tour_send_file_body">Enter a target nick, then pick a file to send. (Requires DCC to be enabled.) Incoming offers appear on this screen too.</string>
+    <string name="tour_support_title">Need support?</string>
+    <string name="tour_support_body">You can connect here if you need support in #HexDroid.</string>
+    <string name="tour_support_fallback">If you don\'t see AfterNET in your list, tap Add AfterNET (or +) to add it again. You can connect there for support in #HexDroid.</string>
+    <string name="tour_support_action">Add AfterNET</string>
+    <string name="tour_replay_title">Run this tour again</string>
+    <string name="tour_replay_body">You can replay the walkthrough any time from Settings.</string>
+
+    <!-- About -->
+    <string name="about_title">About</string>
+
+    <!-- Transfers -->
+    <string name="transfers_title">File transfers</string>
+
+    <!-- Ignore -->
+    <string name="ignore_title">Ignore list</string>
+
+    <!-- List -->
+    <string name="list_title">Channel list</string>
+
+    <!-- Language names (native) – not translated -->
+    <string name="lang_en" translatable="false">English</string>
+    <string name="lang_de" translatable="false">Deutsch</string>
+    <string name="lang_es" translatable="false">Español</string>
+    <string name="lang_fr" translatable="false">Français</string>
+    <string name="lang_it" translatable="false">Italiano</string>
+    <string name="lang_nl" translatable="false">Nederlands</string>
+    <string name="lang_pl" translatable="false">Polski</string>
+    <string name="lang_pt" translatable="false">Português</string>
+    <string name="lang_ru" translatable="false">Русский</string>
+    <string name="lang_tr" translatable="false">Türkçe</string>
+    <string name="lang_ar" translatable="false">العربية</string>
+    <string name="lang_ja" translatable="false">日本語</string>
+    <string name="lang_ko" translatable="false">한국어</string>
+    <string name="lang_zh" translatable="false">中文</string>
+</resources>
