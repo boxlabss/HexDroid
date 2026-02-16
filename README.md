@@ -2,7 +2,7 @@
 
 A fast, modern IRC client for Android.
 
-[Google Play](https://play.google.com/store/apps/details?id=com.boxlabs.hexdroid) | [Direct Download](https://hexdroid.boxlabs.uk/releases/hexdroid-1.5.3.apk) | [Documentation](https://hexdroid.boxlabs.uk/)
+[Google Play](https://play.google.com/store/apps/details?id=com.boxlabs.hexdroid) | [Direct Download](https://hexdroid.boxlabs.uk/releases/hexdroid-latest.apk) | [Documentation](https://hexdroid.boxlabs.uk/)
 
 ---
 
@@ -109,7 +109,7 @@ The recommended installation method:
 
 Download the latest APK directly:
 
-[Download HexDroid 1.5.3](https://hexdroid.boxlabs.uk/releases/hexdroid-1.5.3.apk)
+[Download HexDroid Latest](https://hexdroid.boxlabs.uk/releases/hexdroid-latest.apk)
 
 ### Build from Source
 
