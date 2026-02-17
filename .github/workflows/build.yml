@@ -30,6 +30,7 @@ jobs:
         env:
           KEYSTORE_FILE: ${{ format('{0}/release.keystore', github.workspace) }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: ./gradlew :app:assembleRelease --no-daemon --no-build-cache
 

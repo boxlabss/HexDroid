@@ -29,7 +29,7 @@ android {
                 storeFile = file(ksFile)
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEYSTORE_PASSWORD")
+                keyPassword = System.getenv("KEY_PASSWORD")
             }
         }
     }
