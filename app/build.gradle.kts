@@ -22,6 +22,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val ksFile = System.getenv("KEYSTORE_FILE")
+            if (ksFile != null && file(ksFile).exists()) {
+                storeFile = file(ksFile)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
 	buildTypes {
 		getByName("release") {
 			isMinifyEnabled = true
@@ -30,10 +42,12 @@ android {
 				getDefaultProguardFile("proguard-android-optimize.txt"),
 				"proguard-rules.pro"
 			)
-            signingConfig = signingConfigs.getByName("debug")
-            // For local/testing builds only: pass -PdebugReleaseSigning=true to sign release with the debug keystore.
-            if (project.findProperty("debugReleaseSigning") == "true") {
-                signingConfig = signingConfigs.getByName("debug")
+            // Use release keystore if available (CI), otherwise fall back to debug
+            val ksFile = System.getenv("KEYSTORE_FILE")
+            signingConfig = if (ksFile != null && file(ksFile).exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
 
@@ -64,6 +78,19 @@ android {
     buildFeatures {
 		buildConfig = true
         compose = true
+    }
+
+    // Reproducible builds: disable non-deterministic PNG crunching
+    @Suppress("DEPRECATION")
+    aaptOptions {
+        cruncherEnabled = false
+    }
+
+    packaging {
+        resources {
+            // Exclude non-deterministic VCS info (AGP 8.3+)
+            excludes += "META-INF/version-control-info.textproto"
+        }
     }
 
 }
