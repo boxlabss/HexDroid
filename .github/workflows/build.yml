@@ -26,7 +26,15 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > $GITHUB_WORKSPACE/release.keystore
-
+          
+        - name: Verify keystore
+                env:
+                  KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+                  KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+                run: |
+                  ls -la $GITHUB_WORKSPACE/release.keystore
+                  keytool -list -keystore $GITHUB_WORKSPACE/release.keystore -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>&1 || true
+          
       - name: Build release APK
         env:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_BASE64 != '' && format('{0}/release.keystore', github.workspace) || '' }}
