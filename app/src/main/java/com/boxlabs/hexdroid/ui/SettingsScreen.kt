@@ -39,10 +39,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -80,7 +81,7 @@ private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: S
     return try {
         val inputStream = ctx.contentResolver.openInputStream(uri) ?: return null
         val fontsDir = File(ctx.filesDir, "fonts").apply { mkdirs() }
-        
+
         // Get original filename or use a default
         val cursor = ctx.contentResolver.query(uri, null, null, null, null)
         val fileName = cursor?.use {
@@ -89,7 +90,7 @@ private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: S
                 if (idx >= 0) it.getString(idx) else null
             } else null
         } ?: "custom_font.ttf"
-        
+
         val destFile = File(fontsDir, "${prefix}_$fileName")
         destFile.outputStream().use { out ->
             inputStream.copyTo(out)
@@ -284,7 +285,7 @@ fun SettingsScreen(
                 Text("${(s.fontScale * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_ui)) }
             item {
@@ -325,8 +326,8 @@ fun SettingsScreen(
                     )
                 }
             }
-			
-            item { Divider() }
+
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_highlights)) }
 
@@ -347,10 +348,10 @@ fun SettingsScreen(
                 )
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_irc)) }
-			
+
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Row(
@@ -365,7 +366,7 @@ fun SettingsScreen(
                     }
                 }
             }
-			
+
             item {
                 Text("Quit message.", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
@@ -375,7 +376,7 @@ fun SettingsScreen(
                     singleLine = true
                 )
             }
-			
+
             item {
                 Text("Part message", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
@@ -424,7 +425,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_notifications)) }
 
@@ -441,7 +442,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_logging)) }
 
@@ -454,7 +455,7 @@ fun SettingsScreen(
                     Text("Log folder", style = MaterialTheme.typography.titleSmall)
                     Text(label, style = MaterialTheme.typography.bodySmall)
                     if (!s.logFolderUri.isNullOrBlank()) {
-                        Text(s.logFolderUri!!, style = MaterialTheme.typography.bodySmall)
+                        Text(s.logFolderUri, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -500,7 +501,7 @@ fun SettingsScreen(
                 )
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_ircv3_history)) }
 
@@ -524,7 +525,7 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_count_unread), s.ircHistoryCountsAsUnread) { onUpdate { copy(ircHistoryCountsAsUnread = !ircHistoryCountsAsUnread) } } }
             item { SettingToggle(stringResource(R.string.setting_trigger_notif), s.ircHistoryTriggersNotifications) { onUpdate { copy(ircHistoryTriggersNotifications = !ircHistoryTriggersNotifications) } } }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_file_transfers)) }
 
@@ -536,7 +537,7 @@ fun SettingsScreen(
                     Text("Download folder", style = MaterialTheme.typography.titleSmall)
                     Text(dccFolderLabel, style = MaterialTheme.typography.bodySmall)
                     if (!s.dccDownloadFolderUri.isNullOrBlank()) {
-                        Text(s.dccDownloadFolderUri!!, style = MaterialTheme.typography.bodySmall)
+                        Text(s.dccDownloadFolderUri, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -659,7 +660,7 @@ private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
             label = { Text("Language") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for (lang in languages) {
@@ -702,7 +703,7 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
             label = { Text("Theme") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Dark") }, onClick = { onPick(ThemeMode.DARK); expanded = false })
@@ -737,7 +738,7 @@ private fun FontPicker(
             label = { Text(fieldLabel) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             // Open Sans is the default UI font.
@@ -747,7 +748,7 @@ private fun FontPicker(
             if (onPickCustom != null) {
                 DropdownMenuItem(
                     text = { Text("Custom font file...") },
-                    onClick = { 
+                    onClick = {
                         expanded = false
                         onPickCustom()
                     }
@@ -776,7 +777,7 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
             label = { Text("Chat font style") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Regular") }, onClick = { onPick(ChatFontStyle.REGULAR); expanded = false })
@@ -805,7 +806,7 @@ private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIn
             label = { Text("Vibration intensity") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Low") }, onClick = { onPick(VibrateIntensity.LOW); expanded = false })

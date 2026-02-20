@@ -162,7 +162,7 @@ fun TransfersScreen(
                 ) { Text("Start DCC CHAT") }
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { Text("Incoming chat offers", style = MaterialTheme.typography.titleMedium) }
 
@@ -183,7 +183,7 @@ fun TransfersScreen(
                 }
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { Text("Incoming offers", style = MaterialTheme.typography.titleMedium) }
 
@@ -205,7 +205,7 @@ fun TransfersScreen(
                 }
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { Text("Transfers", style = MaterialTheme.typography.titleMedium) }
 
@@ -221,7 +221,7 @@ fun TransfersScreen(
                                     val pct =
                                         if (t.offer.size > 0) (t.received.toDouble() / t.offer.size.toDouble() * 100.0)
                                             .coerceIn(0.0, 100.0) else 0.0
-                                    LinearProgressIndicator(progress = (pct / 100.0).toFloat())
+                                    LinearProgressIndicator(progress = { (pct / 100.0).toFloat() })
                                     Text(
                                         "${t.received}/${t.offer.size} bytes • ${"%.1f".format(pct)}%",
                                         style = MaterialTheme.typography.bodySmall
