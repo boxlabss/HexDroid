@@ -291,7 +291,7 @@ sealed class IrcEvent {
     data class NamesEnd(val channel: String) : IrcEvent()
 
     data class Topic(val channel: String, val topic: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
-    
+
     // Topic text reurned by server (RPL_TOPIC / 332) sent after JOIN or /TOPIC.
     data class TopicReply(val channel: String, val topic: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
 
@@ -372,15 +372,15 @@ class IrcClient(val config: IrcConfig) {
     private fun casefold(s: String): String {
         val cm = caseMapping.lowercase(Locale.ROOT)
         val sb = StringBuilder(s.length)
-        
+
         for (ch0 in s) {
             var ch = ch0
-            
+
             // Standard ASCII case folding (always applied)
             if (ch in 'A'..'Z') {
                 ch = (ch.code + 32).toChar()
             }
-            
+
             when {
                 cm == "rfc1459" || cm == "strict-rfc1459" -> {
                     ch = when (ch) {
@@ -396,11 +396,11 @@ class IrcClient(val config: IrcConfig) {
                         }
                     }
                 }
-                
+
                 cm == "ascii" -> {
                     // ASCII-only: just the A-Z conversion above
                 }
-                
+
                 // Handle Bulgarian/Cyrillic case mapping
                 // Seen as: CASEMAPPING=BulgarianCyrillic+EnglishAlphabet
                 cm.contains("bulgarian") || cm.contains("cyrillic") -> {
@@ -418,7 +418,7 @@ class IrcClient(val config: IrcConfig) {
                         else -> ch
                     }
                 }
-                
+
                 // Default: treat unknown mappings as rfc1459-like
                 else -> {
                     ch = when (ch) {
@@ -430,7 +430,7 @@ class IrcClient(val config: IrcConfig) {
                     }
                 }
             }
-            
+
             sb.append(ch)
         }
         return sb.toString()
@@ -445,7 +445,7 @@ class IrcClient(val config: IrcConfig) {
     @Volatile private var lastTlsInfo: String? = null
 
     fun tlsInfo(): String? = lastTlsInfo
-	
+
 	fun isConnectedNow(): Boolean {
 		val s = socket ?: return false
 		if (!s.isConnected || s.isClosed) return false
@@ -522,7 +522,7 @@ class IrcClient(val config: IrcConfig) {
                 val arg1 = parts.getOrNull(1)
                 val hasChan = arg1 != null && isChannelName(arg1)
                 val chan = when {
-                    hasChan -> arg1!!
+                    hasChan -> arg1
                     currentBuffer != "*server*" -> currentBuffer
                     else -> arg1 ?: return
                 }
@@ -533,7 +533,7 @@ class IrcClient(val config: IrcConfig) {
                 val arg1 = parts.getOrNull(1)
                 val hasChan = arg1 != null && isChannelName(arg1)
                 val chan = when {
-                    hasChan -> arg1!!
+                    hasChan -> arg1
                     currentBuffer != "*server*" -> currentBuffer
                     else -> arg1 ?: return
                 }
@@ -689,7 +689,7 @@ class IrcClient(val config: IrcConfig) {
                 val target = parts.getOrNull(1) ?: return
                 val payload = parts.drop(2).joinToString(" ").trim().uppercase()
                 if (payload.isBlank()) return
-                
+
                 // For PING, add timestamp if not provided
                 val actualPayload = if (payload == "PING") {
                     "PING ${System.currentTimeMillis()}"
@@ -844,10 +844,10 @@ class IrcClient(val config: IrcConfig) {
         // Set up encoding-aware I/O using EncodingHelper
         val inputStream = s.getInputStream()
         val outputStream = s.getOutputStream()
-        
+
         // Create line reader with encoding detection
         val lineReader = EncodingLineReader(inputStream, config.encoding)
-        
+
         // Report encoding mode
         if (config.encoding.equals("auto", ignoreCase = true)) {
             send(IrcEvent.ServerText("*** Encoding: auto-detect (starting with UTF-8)"))
@@ -1170,13 +1170,13 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			while (true) {
 				val prevEncoding = lineReader.encoding
 				val line = withContext(Dispatchers.IO) { lineReader.readLine() } ?: break
-				
+
 				// Notify user if encoding was auto-detected and changed
 				if (!encodingNotified && lineReader.hasDetectedNonUtf8() && prevEncoding != lineReader.encoding) {
 					send(IrcEvent.ServerText("*** Detected encoding: ${lineReader.encoding}"))
 					encodingNotified = true
 				}
-				
+
 				send(IrcEvent.ServerLine(line))
 				val msg = parser.parse(line) ?: continue
 
@@ -2012,7 +2012,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 	private fun formatNumeric(msg: IrcMessage): String? {
 		val code = msg.command
 		if (code.length != 3 || !code.all { it.isDigit() }) return null
-		
+
 		// Don't double-emit for numerics that already have dedicated events.
 		if (code in setOf("001","321","322","323","324","332","333","353","366","367","368","433","471","472","473","474","475","476","477")) return null
 
@@ -2025,7 +2025,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			"372" -> t ?: p(1) ?: ""
 			"376" -> t ?: "— End of MOTD command —"
 			"422" -> t ?: "No MOTD found"
-			
+
 			// ISUPPORT
 			"005" -> {
 				val tokens = msg.params.drop(1).filter { it.isNotBlank() }
