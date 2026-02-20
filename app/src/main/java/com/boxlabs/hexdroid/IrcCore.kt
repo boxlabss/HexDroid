@@ -2032,17 +2032,6 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				if (tokens.isEmpty()) null else "ISUPPORT: " + tokens.joinToString(" ")
 			}
 
-			// Host hidden
-			"396" -> {
-				// Typical: :server 396 <nick> <hiddenHost> :is now your hidden host
-				val hidden = p(1)
-				when {
-					hidden != null -> "Your hidden host is now $hidden"
-					t != null -> t
-					else -> null
-				}
-			}
-
 			// LUSERS
 			"251" -> t ?: "There are ${p(1) ?: "?"} users and ${p(2) ?: "?"} invisible on ${p(3) ?: "?"} servers"
 			"252" -> {
