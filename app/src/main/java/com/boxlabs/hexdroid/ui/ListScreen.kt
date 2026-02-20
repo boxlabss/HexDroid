@@ -63,7 +63,7 @@ fun ListScreen(
                 if (state.listInProgress) { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp); Text("Loading… (${state.channelDirectory.size})", style = MaterialTheme.typography.bodySmall) }
                 else Text("${items.size} channels", style = MaterialTheme.typography.bodySmall)
             }
-            Divider()
+            HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
                 items(items.take(3000)) { ch ->
                     Column(Modifier.fillMaxWidth().clickable { onJoin(ch.channel) }.padding(vertical = 10.dp)) {
@@ -75,7 +75,7 @@ fun ListScreen(
                         }
                         if (ch.topic.isNotBlank()) Text(ch.topic, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                     }
-                    Divider()
+                    HorizontalDivider()
                 }
             }
         }

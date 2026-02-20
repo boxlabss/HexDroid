@@ -297,7 +297,7 @@ class IrcViewModel(
         val names: LinkedHashSet<String> = linkedSetOf()
     )
 
-    
+
 data class NetSupport(
         val chantypes: String = "#&",
         val caseMapping: String = "rfc1459",
@@ -813,20 +813,20 @@ data class NetSupport(
                 maybeRestoreDesiredConnections()
             }
         }
-        
+
         // Monitor network connectivity changes to detect when we need to reconnect
         registerNetworkCallback()
-        
+
         notifier.ensureChannels()
     }
-    
+
     // Network Connectivity Monitoring
-    
+
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    
+
     private fun registerNetworkCallback() {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
-        
+
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
                 // Network became available - check if any desired connections need reconnecting
@@ -847,7 +847,7 @@ data class NetSupport(
                     }
                 }
             }
-            
+
             override fun onLost(network: android.net.Network) {
                 // Network lost - check if we still have connectivity via another network
                 viewModelScope.launch {
@@ -866,7 +866,7 @@ data class NetSupport(
                     }
                 }
             }
-            
+
             override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
                 // Network capabilities changed (e.g., WiFi got internet access)
                 // This can indicate the connection path changed and sockets may be stale.
@@ -875,7 +875,7 @@ data class NetSupport(
                 // the next IrcCore ping will fail and trigger a reconnect.
             }
         }
-        
+
         try {
             val request = android.net.NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -1026,7 +1026,7 @@ if (_state.value.activeNetworkId != netId) setActiveNetwork(netId)
 
     // Network
 
-    
+
     /**
      * Restore the built-in AfterNET profile (used for support) if the user deleted it.
      * Safe to call multiple times; it no-ops if a profile named/id AfterNET already exists.
@@ -1175,7 +1175,7 @@ fun startAddNetwork() {
                 repo.secretStore.clearSaslPassword(profile.id)
             }
 
-            
+
 // Store server password securely (plaintext serverPassword is never persisted in networks_json)
 val sp = profile.serverPassword?.trim()
 if (!sp.isNullOrBlank()) {
@@ -1363,13 +1363,13 @@ if (!sp.isNullOrBlank()) {
                     }
             }
         }
-		
+
         // NOTE: Connection keepalive and timeout detection is handled by IrcCore's pingJob.
         // IrcCore sends PING :hexlag-<timestamp> every 30 seconds and closes the socket
         // if no PONG is received within PING_TIMEOUT_MS. The LagUpdated event updates the UI.
         // Having a second ping system here was redundant, wasted battery, and caused bugs
         // when the two systems' PONG responses didn't match.
-        
+
         // Safety net: if the collector dies without emitting Disconnected, reflect it in UI
         // and (optionally) trigger auto-reconnect.
         rt.job?.invokeOnCompletion {
@@ -1578,7 +1578,7 @@ if (!sp.isNullOrBlank()) {
         var changed = false
         val newMap = st.connections.toMutableMap()
         val networksToReconnect = mutableListOf<String>()
-        
+
         for (net in st.networks) {
             val rt = runtimes[net.id]
             val actual = rt?.client?.isConnectedNow() == true
@@ -1607,7 +1607,7 @@ if (!sp.isNullOrBlank()) {
         if (changed) {
             _state.value = syncActiveNetworkSummary(st.copy(connections = newMap))
         }
-        
+
         // Trigger reconnection for networks that dropped while backgrounded
         if (networksToReconnect.isNotEmpty() && hasInternetConnection()) {
             viewModelScope.launch {
@@ -1768,7 +1768,7 @@ if (!sp.isNullOrBlank()) {
                         }
 
                         // Track this request so we can print a clean consolidated list.
-                        rt?.namesRequests?.set(namesKeyFold(target), NamesRequest(replyBufferKey = currentKey))
+                        rt.namesRequests.set(namesKeyFold(target), NamesRequest(replyBufferKey = currentKey))
                         c.sendRaw("NAMES $target")
                         return@launch
                     }
@@ -2013,12 +2013,12 @@ if (!sp.isNullOrBlank()) {
             // Only split if the message exceeds the server's max line length.
             // The IRC protocol limit is typically 512 bytes (including CRLF), but many
             // servers support more via ISUPPORT LINELEN.
-            
+
             // Replace newlines with spaces to create one continuous message
             val fullMessage = trimmed.replace('\n', ' ').replace('\r', ' ').replace("  ", " ").trim()
-            
+
             if (fullMessage.isEmpty()) return@launch
-            
+
             if (isDccChatBufferName(bufferName)) {
                 sendDccChatLine(currentKey, fullMessage, isAction = false)
                 return@launch
@@ -2031,7 +2031,7 @@ if (!sp.isNullOrBlank()) {
                 c.sendRaw(fullMessage)
                 return@launch
             }
-            
+
             // Calculate max message length for PRIVMSG
             // Format: ":nick!user@host PRIVMSG <target> :<message>\r\n"
             // IRC RFC 1459 limit is 512 bytes total. We use 400 as a safe message length
@@ -2039,10 +2039,10 @@ if (!sp.isNullOrBlank()) {
             // This is conservative but avoids truncation on any server.
             val myNick = st.connections[netId]?.myNick ?: st.myNick
             val maxMsgLen = 400
-            
+
             // Split message if it exceeds max length
             val chunks = splitMessageByLength(fullMessage, maxMsgLen)
-            
+
             for (chunk in chunks) {
                 if (chunk.isEmpty()) continue
                 c.privmsg(bufferName, chunk)
@@ -2051,7 +2051,7 @@ if (!sp.isNullOrBlank()) {
             }
         }
     }
-    
+
     /**
      * Split a message into chunks that don't exceed maxLen bytes (UTF-8).
      * Tries to split on word boundaries when possible.
@@ -2060,16 +2060,16 @@ if (!sp.isNullOrBlank()) {
         if (text.toByteArray(Charsets.UTF_8).size <= maxLen) {
             return listOf(text)
         }
-        
+
         val chunks = mutableListOf<String>()
         var remaining = text
-        
+
         while (remaining.isNotEmpty()) {
             if (remaining.toByteArray(Charsets.UTF_8).size <= maxLen) {
                 chunks.add(remaining)
                 break
             }
-            
+
             // Find a good split point
             var splitAt = maxLen
             // Start from maxLen and work backwards to find a character boundary
@@ -2077,19 +2077,19 @@ if (!sp.isNullOrBlank()) {
                     .toByteArray(Charsets.UTF_8).size > maxLen) {
                 splitAt--
             }
-            
+
             if (splitAt == 0) splitAt = 1  // Ensure we make progress
             splitAt = minOf(splitAt, remaining.length)
-            
+
             // Try to split on a word boundary (space)
             val chunk = remaining.substring(0, splitAt)
             val lastSpace = chunk.lastIndexOf(' ')
             val actualSplit = if (lastSpace > splitAt / 2) lastSpace else splitAt
-            
+
             chunks.add(remaining.substring(0, actualSplit).trim())
             remaining = remaining.substring(actualSplit).trim()
         }
-        
+
         return chunks.filter { it.isNotEmpty() }
     }
 
@@ -2538,7 +2538,7 @@ if (targets.isEmpty()) {
                     // Re-read state after appends/setNetConn so we don't overwrite newer state.
                     val st1 = _state.value
 
-                    
+
 // Update nicklists for this network (multi-status safe).
 moveNickAcrossChannels(netId, ev.oldNick, ev.newNick)
 
@@ -2703,7 +2703,7 @@ var next = st1.copy(nicklists = updatedNicklists)
                 val (selNet, _) = splitKey(sel)
                 val destKey = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
                 ensureBuffer(destKey)
-                
+
                 val text = when (ev.command.uppercase()) {
                     "PING" -> {
                         // Calculate round-trip time if args is a timestamp we sent
@@ -2805,7 +2805,7 @@ var next = st1.copy(nicklists = updatedNicklists)
                     )
                 }
 
-                
+
 val myNickNow = st0.connections[netId]?.myNick ?: st0.myNick
 val isMeNow = casefoldText(netId, ev.nick) == casefoldText(netId, myNickNow)
 
@@ -2843,7 +2843,7 @@ if (isMeNow || shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
 }
             }
 
-            
+
             is IrcEvent.Parted -> {
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
@@ -3065,8 +3065,6 @@ if (affectLive) {
                 _state.value = st.copy(channelDirectory = updated)
             }
             is IrcEvent.ChannelListEnd -> _state.value = _state.value.copy(listInProgress = false)
-        
-            else -> Unit
         }
     }
 
@@ -3175,8 +3173,8 @@ if (affectLive) {
 
                 // Only show scrollback marker if there are actual old messages (not from current session)
                 // and there's a meaningful time gap between scrollback and live messages.
-                val showMarker = cur.settings.loggingEnabled && 
-                    olderLoaded.isNotEmpty() && 
+                val showMarker = cur.settings.loggingEnabled &&
+                    olderLoaded.isNotEmpty() &&
                     liveDuringLoad.isNotEmpty() &&
                     (firstLiveTime - olderLoaded.maxOf { it.timeMs }) > 5000L  // At least 5 second gap
 
@@ -4159,7 +4157,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         }
     }
 
-    
+
 private fun queryDisplayName(uri: android.net.Uri): String? {
     return try {
         val proj = arrayOf(

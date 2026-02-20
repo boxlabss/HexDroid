@@ -72,12 +72,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -95,7 +95,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -124,7 +124,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -141,6 +140,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
@@ -329,7 +329,7 @@ fun ChatScreen(
 
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var inputHasFocus by remember { mutableStateOf(false) }
-	
+
 	var showColorPicker by remember { mutableStateOf(false) }
 	var selectedFgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
 	var selectedBgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
@@ -434,14 +434,14 @@ fun ChatScreen(
     fun sendNow() {
         val t = input.text.trim()
         if (t.isEmpty()) return
-        
+
         // Build IRC formatting prefix based on active formatting state
         val formattedText = buildString {
             if (boldActive) append("\u0002")
             if (italicActive) append("\u001D")
             if (underlineActive) append("\u001F")
             if (reverseActive) append("\u0016")
-            
+
             if (selectedFgColor != null) {
                 append("\u0003")
                 append(selectedFgColor.toString().padStart(2, '0'))
@@ -450,13 +450,13 @@ fun ChatScreen(
                     append(selectedBgColor.toString().padStart(2, '0'))
                 }
             }
-            
+
             append(t)
         }
-        
+
         input = TextFieldValue("")
         onSend(formattedText)
-        
+
         // Optionally reset formatting after sending (comment out to keep it persistent)
         // selectedFgColor = null
         // selectedBgColor = null
@@ -556,7 +556,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                             )
                         }
                         is SidebarItem.DividerItem -> {
-                            Divider(Modifier.padding(top = 12.dp))
+                            HorizontalDivider(Modifier.padding(top = 12.dp))
                         }
                     }
                 }
@@ -569,7 +569,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
         Column(mod.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text("Nicklist", fontWeight = FontWeight.Bold)
             Text("$selBufName • ${nicklist.size} users", style = MaterialTheme.typography.bodySmall)
-            Divider()
+            HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
                 items(nicklist) { n ->
                     val cleaned = baseNick(n)
@@ -757,14 +757,14 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f)
                     )
-					
+
                     // Colour/formatting picker button with active state indicator
                     run {
                         val colorInteraction = remember { MutableInteractionSource() }
                         val colorPressed by colorInteraction.collectIsPressedAsState()
-                        val hasActiveFormatting = selectedFgColor != null || selectedBgColor != null || 
+                        val hasActiveFormatting = selectedFgColor != null || selectedBgColor != null ||
                             boldActive || italicActive || underlineActive || reverseActive
-                        
+
                         Box(
                             modifier = Modifier
                                 .size(30.dp)
@@ -832,7 +832,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         val nicklistInteraction = remember { MutableInteractionSource() }
                         val nicklistPressed by nicklistInteraction.collectIsPressedAsState()
                         val nicklistEnabled = isChannel
-                        
+
                         Box(
                             modifier = Modifier
                                 .size(30.dp)
@@ -906,7 +906,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                                 text = { Text("About") },
                                 onClick = { overflowExpanded = false; onAbout() }
                             )
-                            Divider()
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Reconnect") },
                                 enabled = state.networks.isNotEmpty() && !state.connecting,
@@ -916,7 +916,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                                 text = { Text("Disconnect") },
                                 onClick = { overflowExpanded = false; onDisconnect() }
                             )
-                            Divider()
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Exit") },
                                 onClick = { overflowExpanded = false; onExit() }
@@ -963,7 +963,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         }
                     }
                 }
-                Divider()
+                HorizontalDivider()
             }
 
             SelectionContainer(
@@ -1164,7 +1164,7 @@ modifier = Modifier
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Send,
+                            imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send message",
                             tint = Color.White.copy(alpha = if (sendPressed) 0.7f else 1f),
                             modifier = Modifier.size(20.dp)
@@ -1409,7 +1409,7 @@ fun SplitHandle(
             ) {
                 Text("Channel tools", style = MaterialTheme.typography.titleLarge)
                 Text("$selNetName • $selBufName", style = MaterialTheme.typography.bodySmall)
-                Divider()
+                HorizontalDivider()
 
                 if (canTopic) {
                     Text("Topic", fontWeight = FontWeight.Bold)
@@ -1428,7 +1428,7 @@ fun SplitHandle(
                         }) { Text("Set") }
                         OutlinedButton(onClick = { opsTopic = topic ?: "" }) { Text("Reset") }
                     }
-                    Divider()
+                    HorizontalDivider()
                 }
 
                 if (canKick || canBan) {
@@ -1499,7 +1499,7 @@ fun SplitHandle(
             }
         }
     }
-	
+
 	// mIRC colour/style picker sheet
 	if (showColorPicker) {
 		ModalBottomSheet(onDismissRequest = { showColorPicker = false }) {
@@ -1651,7 +1651,7 @@ fun SplitHandle(
 			}
 		}
 	}
-	
+
     if (showChanListSheet && isChannel) {
         val banTimeFmt = remember { SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", Locale.getDefault()) }
 
@@ -1718,7 +1718,7 @@ fun SplitHandle(
 				// Get context once, safely inside the composable scope
 				val context = LocalContext.current
 
-				TabRow(selectedTabIndex = chanListTab) {
+				PrimaryTabRow(selectedTabIndex = chanListTab) {
 					Tab(
 						selected = chanListTab == 0,
 						onClick = { chanListTab = 0 }
@@ -1784,7 +1784,7 @@ fun SplitHandle(
                     OutlinedButton(onClick = { showChanListSheet = false }) { Text("Close") }
                 }
 
-                Divider()
+                HorizontalDivider()
 
                 if (!ui.loading && ui.entries.isEmpty()) {
                     val unsupportedMsg = when (chanListTab) {
@@ -1847,7 +1847,7 @@ fun SplitHandle(
         ModalBottomSheet(onDismissRequest = { showNickActions = false }) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(selectedNick, style = MaterialTheme.typography.titleLarge)
-                Divider()
+                HorizontalDivider()
                 Button(
                     onClick = {
                         onSelectBuffer("$selNetId::$selectedNick")
@@ -1869,7 +1869,7 @@ fun SplitHandle(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (isIgnored) "Unignore" else "Ignore") }
                 if (isChannel && (canKick || canBan) && !selectedNick.equals(myNick, ignoreCase = true)) {
-                    Divider()
+                    HorizontalDivider()
                     Text("Moderation", fontWeight = FontWeight.Bold)
                     Button(
                         onClick = {

@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -192,7 +192,7 @@ fun NetworkEditScreen(
                 title = { Text("Edit Network") },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Cancel")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel")
                     }
                 },
                 actions = {
@@ -449,7 +449,7 @@ fun NetworkEditScreen(
                                 readOnly = true,
                                 label = { Text("Mechanism") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = mechExpanded) },
-                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                             )
                             ExposedDropdownMenu(mechExpanded, { mechExpanded = false }) {
                                 SaslMechanism.entries.forEach { mech ->
@@ -522,7 +522,7 @@ fun NetworkEditScreen(
                             readOnly = true,
                             label = { Text("Certificate format") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = certFormatExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(
                             expanded = certFormatExpanded,
@@ -609,7 +609,7 @@ fun NetworkEditScreen(
                     }
                 }
             }
-			
+
             CardSection("Auto-join Channels") {
                 Text(
                     "One per line. Format: #channel [key]",
@@ -672,7 +672,7 @@ fun NetworkEditScreen(
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor(),
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                         label = { Text("Encoding") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = encodingExpanded) }
                     )
