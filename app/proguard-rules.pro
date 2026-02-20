@@ -1,9 +1,11 @@
 # ProGuard rules
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Reproducible builds - remove debugging info that contains timestamps
+-dontpreverify
+-optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep attributes but ensure deterministic order
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+
+-keep class kotlinx.coroutines.CoroutineExceptionHandler
+-keep class kotlinx.coroutines.internal.MainDispatcherFactory

@@ -1,15 +1,9 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
-	dependenciesInfo {
-		includeInApk = false
-		includeInBundle = false
-	}
-	
     namespace = "com.boxlabs.hexdroid"
     compileSdk = 36
 
@@ -19,8 +13,28 @@ android {
         targetSdk = 36
         versionCode = 9
         versionName = "1.5.3"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+
+	buildTypes {
+		release {
+			isMinifyEnabled = true
+			isShrinkResources = true
+            isCrunchPngs = false
+            vcsInfo.include = false
+			proguardFiles(
+				getDefaultProguardFile("proguard-android-optimize.txt"),
+				"proguard-rules.pro"
+			)
+
+            // Use release keystore if available (CI), otherwise fall back to debug
+            val ksFile = System.getenv("KEYSTORE_FILE")
+            signingConfig = if (ksFile != null && file(ksFile).exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+	}
 
     signingConfigs {
         create("release") {
@@ -34,87 +48,57 @@ android {
         }
     }
 
-	buildTypes {
-		getByName("release") {
-			isMinifyEnabled = true
-			isShrinkResources = true
-			proguardFiles(
-				getDefaultProguardFile("proguard-android-optimize.txt"),
-				"proguard-rules.pro"
-			)
-            // Use release keystore if available (CI), otherwise fall back to debug
-            val ksFile = System.getenv("KEYSTORE_FILE")
-            signingConfig = if (ksFile != null && file(ksFile).exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
-        }
-
-		// A debug-signed build variant that still runs R8 + resource shrinker
-		create("minifiedDebug") {
-			initWith(getByName("debug"))
-			matchingFallbacks += listOf("debug")
-
-			isMinifyEnabled = false
-			isShrinkResources = false
-
-			proguardFiles(
-				getDefaultProguardFile("proguard-android-optimize.txt"),
-				"proguard-rules.pro"
-			)
-		}
-	}
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-
-    kotlinOptions {
-        jvmTarget = "11"
-    }
-
     buildFeatures {
 		buildConfig = true
         compose = true
     }
 
-    // Reproducible builds: disable non-deterministic PNG crunching
-    androidResources {
-        noCompress += "png"
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     packaging {
-        resources {
-            // Exclude non-deterministic VCS info (AGP 8.3+)
-            excludes += "META-INF/version-control-info.textproto"
-        }
+        jniLibs.keepDebugSymbols.add("**/*.so")
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
 }
 
 dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.activity.compose)
+    implementation(libs.kotlinx.coroutines.android)
     implementation(platform(libs.androidx.compose.bom))
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
-	implementation("androidx.compose.foundation:foundation:1.6.8")
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.icons.extended)
+    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material3)
-	implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-	implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("androidx.compose.material:material-icons-extended:1.6.8")
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+
+    implementation(libs.material)
+
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    debugImplementation(libs.androidx.compose.ui.tooling)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.junit)
+
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    debugImplementation(libs.androidx.compose.ui.tooling)
 }
