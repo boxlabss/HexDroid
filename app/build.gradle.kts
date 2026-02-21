@@ -92,6 +92,9 @@ android {
         }
     }
 
+    lint {
+        disable.add("MissingTranslation")
+    }
 }
 
 dependencies {
@@ -110,6 +113,7 @@ dependencies {
 	implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
+    implementation("sh.calvin.reorderable:reorderable:3.0.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
