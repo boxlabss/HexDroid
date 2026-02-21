@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,10 +103,10 @@ fun WelcomeScreen(
         SUPPORTED_LANGUAGES.firstOrNull { it.code == tag }?.code ?: "en"
     }
 
-    var selectedLang by remember { mutableStateOf(deviceLang) }
-    var nick by remember { mutableStateOf("") }
-    var nickError by remember { mutableStateOf<String?>(null) }
-    var showContent by remember { mutableStateOf(false) }
+    var selectedLang by rememberSaveable { mutableStateOf(deviceLang) }
+    var nick by rememberSaveable { mutableStateOf("") }
+    var nickError by rememberSaveable { mutableStateOf<String?>(null) }
+    var showContent by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { showContent = true }
 
@@ -165,7 +166,11 @@ fun WelcomeScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { selectedLang = lang.code }
+                                    .clickable {
+                                        selectedLang = lang.code
+                                        applyLocale(context, lang.code)
+                                        (context as? android.app.Activity)?.recreate()
+                                    }
                                     .background(
                                         if (isSelected) MaterialTheme.colorScheme.primaryContainer
                                         else Color.Transparent
@@ -213,8 +218,9 @@ fun WelcomeScreen(
                     singleLine = true,
                     placeholder = { Text(stringResource(R.string.welcome_nick_hint)) },
                     supportingText = {
-                        if (nickError != null) {
-                            Text(nickError!!, color = MaterialTheme.colorScheme.error)
+                        val currentError = nickError
+                        if (currentError != null) {
+                            Text(currentError, color = MaterialTheme.colorScheme.error)
                         } else {
                             Text(stringResource(R.string.welcome_nick_helper))
                         }
@@ -240,7 +246,6 @@ fun WelcomeScreen(
                                 nickError = context.getString(R.string.welcome_nick_error_invalid)
                             }
                             else -> {
-                                applyLocale(context, selectedLang)
                                 onContinue(selectedLang, trimmed)
                             }
                         }
