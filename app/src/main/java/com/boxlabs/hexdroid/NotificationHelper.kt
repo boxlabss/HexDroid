@@ -24,10 +24,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import android.Manifest
 
 class NotificationHelper(private val ctx: Context) {
 
@@ -152,6 +155,16 @@ class NotificationHelper(private val ctx: Context) {
         return PendingIntent.getActivity(ctx, requestCode, i, flags)
     }
 
+    private fun safeNotify(id: Int, notification: Notification) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            // Permission not granted, quietly drop the notification
+            return
+        }
+        NotificationManagerCompat.from(ctx).notify(id, notification)
+    }
+
 
     fun buildConnectionNotification(networkId: String, serverLabel: String, status: String): Notification {
         ensureChannels()
@@ -170,7 +183,7 @@ class NotificationHelper(private val ctx: Context) {
 
     fun showConnection(networkId: String, serverLabel: String, status: String) {
         val n = buildConnectionNotification(networkId, serverLabel, status)
-        NotificationManagerCompat.from(ctx).notify(NOTIF_ID_CONNECTION, n)
+        safeNotify(NOTIF_ID_CONNECTION, n)
     }
 
     fun cancelConnection() {
@@ -186,7 +199,7 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setContentIntent(openBufferPendingIntent(networkId, buffer))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        safeNotify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
     fun notifyPm(networkId: String, buffer: String, text: String) {
@@ -198,7 +211,7 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setContentIntent(openBufferPendingIntent(networkId, buffer))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        safeNotify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
     fun notifyFileDone(networkId: String, filename: String, where: String) {
@@ -212,7 +225,7 @@ class NotificationHelper(private val ctx: Context) {
             .addAction(0, "Quit", actionPendingIntent(networkId, ACTION_QUIT))
             .addAction(0, "Exit", actionPendingIntent(networkId, ACTION_EXIT))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        safeNotify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
     fun notifyDccIncomingFile(networkId: String, from: String, filename: String) {
@@ -224,7 +237,7 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setContentIntent(openTransfersPendingIntent(networkId))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        safeNotify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
     fun notifyDccIncomingChat(networkId: String, from: String) {
@@ -236,7 +249,7 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setContentIntent(openTransfersPendingIntent(networkId))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        safeNotify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
 }

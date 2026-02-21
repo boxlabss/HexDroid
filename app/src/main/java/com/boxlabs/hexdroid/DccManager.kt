@@ -26,6 +26,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import androidx.annotation.RequiresApi
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -176,6 +177,7 @@ class DccManager(ctx: Context) {
         return Pair(outputStream, newFile.uri.toString())
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun createMediaStoreOutputStream(filename: String): Pair<OutputStream, String> {
         val resolver = ctx.contentResolver
         

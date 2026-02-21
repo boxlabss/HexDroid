@@ -1,3 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Placeholder: translate from values/strings.xml -->
+    <string name="app_name">HexDroid IRC</string>
+
+    <string name="welcome_title">Bem-vindo(a) ao HexDroid</string>
+    <string name="welcome_subtitle">Vamos configurar tudo antes de começar.</string>
+    <string name="welcome_language_label">Idioma</string>
+    <string name="welcome_nick_label">Nickname</string>
+    <string name="welcome_nick_hint">Escolha seu nickname do IRC</string>
+    <string name="welcome_nick_helper">Este nickname será usado em todos os perfis de servidor padrão.</string>
+    <string name="welcome_continue">Continuar</string>
+    <string name="welcome_nick_error_empty">O nickname não pode ficar em branco</string>
+    <string name="welcome_nick_error_invalid">O nickname contém caracteres inválidos</string>
+    <string name="welcome_nick_error_long">O nickname deve ter 16 caracteres ou menos</string>
+
+    <string name="back">Voltar</string>
+    <string name="cancel">Cancelar</string>
+    <string name="save">Salvar</string>
+    <string name="delete">Excluir</string>
+    <string name="close">Fechar</string>
+    <string name="done">Concluído</string>
+    <string name="next">Próximo</string>
+    <string name="skip">Pular</string>
+    <string name="run">Executar</string>
+    <string name="set">Definir</string>
+    <string name="reset">Redefinir</string>
+    <string name="manage">Gerenciar</string>
+    <string name="not_now">Agora não</string>
+    <string name="copy_text">Copiar</string>
+
+    <string name="settings_title">Configurações</string>
+    <string name="settings_intro_tour">Tour de introdução</string>
+    <string name="settings_intro_tour_desc">Um guia rápido pelas telas principais e atalhos.</string>
+    <string name="section_appearance">Aparência</string>
+    <string name="section_ui">Interface</string>
+    <string name="section_landscape">Barra lateral (Paisagem)</string>
+    <string name="section_portrait">Lista de nicks (Retrato)</string>
+    <string name="section_highlights">Destaques</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">Notificações</string>
+    <string name="section_logging">Registros (Logs)</string>
+    <string name="section_ircv3_history">Histórico IRCv3</string>
+    <string name="section_file_transfers">Transferência de arquivos</string>
+
+    <string name="setting_font_size">Tamanho da fonte</string>
+    <string name="setting_colorise_nicks">Colorir nicks</string>
+    <string name="setting_mirc_colours">Ativar cores do mIRC</string>
+    <string name="setting_show_topic_bar">Mostrar barra de tópico</string>
+    <string name="setting_show_timestamps">Mostrar horário</string>
+    <string name="setting_timestamp_format">Formato de hora (Java)</string>
+    <string name="setting_hide_motd">Ocultar MOTD ao conectar</string>
+    <string name="setting_hide_joinpartquit">Ocultar mensagens de entrada/saída</string>
+    <string name="setting_show_buffers_default">Mostrar redes/canais por padrão</string>
+    <string name="setting_show_nicklist_default">Mostrar lista de nicks por padrão</string>
+    <string name="setting_highlight_on_nick">Destacar no meu nick</string>
+    <string name="setting_extra_highlights">Palavras extras para destaque (uma por linha)</string>
+    <string name="setting_compact_mode">Modo compacto</string>
+
+    <string name="setting_portrait_nicklist_overlay">Painel lateral de nicks</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Mostra a lista de nicks como um painel lateral redimensionável em vez de um pop-up. Se ativado, o botão de nicklist atua como mostrar/ocultar permanentemente.</string>
+
+    <string name="setting_ignore_list">Lista de ignorados</string>
+    <string name="setting_ignore_list_desc">Ocultar mensagens e ofertas DCC de nicks específicos (por rede).</string>
+    <string name="setting_quit_message">Mensagem de saída (Quit)</string>
+    <string name="setting_part_message">Mensagem de saída (Part)</string>
+
+    <string name="setting_auto_reconnect">Reconexão automática</string>
+    <string name="setting_reconnect_interval">Intervalo de reconexão (segundos)</string>
+    <string name="setting_reconnect_interval_desc">Com que frequência tentar novamente quando a conexão cair.</string>
+    <string name="setting_seconds">Segundos</string>
+    <string name="setting_auto_connect_startup">Conectar automaticamente ao iniciar o app</string>
+
+    <string name="setting_enable_notifications">Ativar notificações</string>
+    <string name="setting_notify_highlights">Notificações de destaques</string>
+    <string name="setting_notify_pm">Notificações de mensagens privadas</string>
+    <string name="setting_connection_status">Notificação de status da conexão</string>
+    <string name="setting_sound_highlight">Som ao destacar</string>
+    <string name="setting_vibrate_highlight">Vibrar ao destacar</string>
+
+    <string name="setting_enable_logging">Ativar logs (registros)</string>
+    <string name="setting_log_server">Registrar janela do servidor</string>
+    <string name="setting_log_folder">Pasta de logs</string>
+    <string name="setting_choose_folder">Escolher pasta</string>
+    <string name="setting_retention_days">Dias de retenção</string>
+    <string name="setting_max_scrollback">Linhas máximas de rolagem (scrollback)</string>
+
+    <string name="setting_history_limit">Limite de busca de histórico</string>
+    <string name="setting_history_limit_desc">Número de mensagens a solicitar por canal ao entrar (CHATHISTORY LATEST). Defina como 0 para desativar.</string>
+    <string name="setting_messages">Mensagens</string>
+    <string name="setting_count_unread">Contar histórico baixado como não lido</string>
+    <string name="setting_trigger_notif">Acionar notificações com o histórico baixado</string>
+
+    <string name="setting_download_folder">Pasta de downloads</string>
+    <string name="setting_incoming_port_min">Porta de entrada mínima</string>
+    <string name="setting_incoming_port_max">Porta de entrada máxima</string>
+
+    <string name="setting_keep_alive">Manter a conexão ativa</string>
+    <string name="setting_enable_dcc">Ativar DCC</string>
+    <string name="setting_open_app_settings">Abrir configurações do app</string>
+    <string name="setting_battery_optimization">Lista de otimização de bateria</string>
+
+    <string name="theme_label">Tema</string>
+    <string name="theme_dark">Escuro</string>
+    <string name="theme_light">Claro</string>
+    <string name="theme_matrix">Matrix</string>
+    <string name="theme_system">Sistema</string>
+
+    <string name="font_open_sans">Open Sans</string>
+    <string name="font_inter">Inter</string>
+    <string name="font_monospace">Monospace</string>
+    <string name="font_custom">Arquivo de fonte personalizado…</string>
+
+    <string name="chat_font_style">Estilo da fonte do chat</string>
+    <string name="style_regular">Normal</string>
+    <string name="style_bold">Negrito</string>
+    <string name="style_italic">Itálico</string>
+    <string name="style_bold_italic">Negrito + Itálico</string>
+
+    <string name="vibration_intensity">Intensidade da vibração</string>
+    <string name="vibration_low">Baixa</string>
+    <string name="vibration_medium">Média</string>
+    <string name="vibration_high">Alta</string>
+
+    <string name="chat_nicklist">Lista de Nicks</string>
+    <string name="chat_users_format">%1$s • %2$d usuários</string>
+    <string name="chat_no_channel">Não está em um canal</string>
+    <string name="chat_disconnected">Desconectado</string>
+    <string name="chat_type_message">Digite uma mensagem…</string>
+    <string name="chat_channel_tools">Ferramentas do canal</string>
+    <string name="chat_topic">Tópico</string>
+    <string name="chat_new_topic">Novo tópico</string>
+    <string name="chat_kick_ban">Kickar / Banir</string>
+    <string name="chat_nick">Nick</string>
+    <string name="chat_reason">Motivo</string>
+    <string name="chat_kick">Kickar</string>
+    <string name="chat_ban">Banir</string>
+    <string name="chat_kick_ban_btn">Kick+Ban</string>
+
+    <string name="networks_title">Redes</string>
+    <string name="networks_connect">Conectar</string>
+    <string name="networks_disconnect">Desconectar</string>
+    <string name="networks_edit">Editar</string>
+    <string name="networks_add">Adicionar rede</string>
+    <string name="networks_auto_connect">Conexão automática</string>
+
+    <string name="network_edit_title">Editar rede</string>
+    <string name="network_add_title">Adicionar rede</string>
+    <string name="network_name">Nome</string>
+    <string name="network_host">Servidor (Host)</string>
+    <string name="network_port">Porta</string>
+    <string name="network_use_tls">Usar TLS (SSL)</string>
+    <string name="network_allow_invalid_certs">Permitir certificados inválidos</string>
+    <string name="network_nick">Nickname</string>
+    <string name="network_alt_nick">Nick alternativo</string>
+    <string name="network_username">Nome de usuário</string>
+    <string name="network_realname">Nome real</string>
+
+    <string name="tour_add_network_title">Adicionar uma rede</string>
+    <string name="tour_add_network_body">Toque em + para adicionar uma nova rede ou editar uma existente. O HexDroid vem com algumas redes padrão para você começar rapidamente.</string>
+    <string name="tour_connect_title">Conectar</string>
+    <string name="tour_connect_body">Conecte-se à rede selecionada. Depois de conectar, abra o chat para entrar em canais e conversar.</string>
+    <string name="tour_settings_title">Configurações</string>
+    <string name="tour_settings_body">Ajuste a aparência, fontes e outras preferências aqui.</string>
+    <string name="tour_switcher_title">Painel lateral</string>
+    <string name="tour_switcher_body">Esta barra lateral mostra o seu servidor, canais e mensagens privadas. Toque em qualquer item para alternar entre eles.</string>
+    <string name="tour_more_title">Mais ações</string>
+    <string name="tour_more_body">Este menu contém a lista de canais, transferência de arquivos, configurações, redes e muito mais.</string>
+    <string name="tour_send_title">Enviar mensagens</string>
+    <string name="tour_send_body">Digite aqui para conversar. Você também pode usar comandos com barra como /join #canal, /msg nick oi, /whois nick, etc.</string>
+    <string name="tour_dcc_title">Ativar DCC</string>
+    <string name="tour_dcc_body">Ative o DCC para enviar/receber arquivos. Se você estiver atrás de um NAT, o modo Passivo pode ajudar.</string>
+    <string name="tour_send_file_title">Enviar um arquivo</string>
+    <string name="tour_send_file_body">Digite o nick de destino e escolha o arquivo para enviar. (Requer que o DCC esteja ativado.) Ofertas recebidas também aparecem nesta tela.</string>
+    <string name="tour_support_title">Precisa de suporte?</string>
+    <string name="tour_support_body">Você pode se conectar aqui se precisar de ajuda no #HexDroid.</string>
+    <string name="tour_support_fallback">Se você não ver a AfterNET na sua lista, toque em Adicionar AfterNET (ou +) para adicioná-la novamente. Você poderá se conectar lá para obter suporte no #HexDroid.</string>
+    <string name="tour_support_action">Adicionar AfterNET</string>
+    <string name="tour_replay_title">Ver este tour novamente</string>
+    <string name="tour_replay_body">Você pode rever este guia a qualquer momento nas Configurações.</string>
+
+    <string name="about_title">Sobre</string>
+    <string name="about_subtitle">Cliente IRC para Android</string>
+    <string name="about_version">Versão %1$s</string>
+    <string name="about_doc_support">Documentação e Suporte</string>
+    <string name="about_doc_support_desc">Visite o site para guias, perguntas frequentes e para relatar problemas.</string>
+    <string name="about_open_website">Abrir site</string>
+    <string name="about_free_app_by">HexDroid - Um aplicativo gratuito (e sem anúncios) por</string>
+
+    <string name="transfers_title">Transferência de arquivos</string>
+    <string name="ignore_title">Lista de ignorados</string>
+    <string name="list_title">Lista de canais</string>
+
+    <string name="setting_ui_font">Fonte da interface</string>
+    <string name="setting_storage_internal">Armazenamento interno</string>
+    <string name="setting_storage_custom_folder">Pasta personalizada selecionada</string>
+    <string name="setting_download_folder_default">Downloads (padrão)</string>
+    <string name="setting_download_folder_custom">Pasta personalizada</string>
+
+    <string name="settings_backup_restore_title">Backup e Restauração</string>
+    <string name="settings_backup_export_desc">Exporte suas configurações de rede e do aplicativo para um arquivo JSON. Senhas e certificados TLS não estão incluídos.</string>
+    <string name="settings_backup_export_btn">Exportar backup</string>
+    <string name="settings_backup_restore_action">Restaurar backup</string>
+    <string name="settings_backup_restore_warning">A restauração substitui todas as redes e configurações atuais.</string>
+    <string name="settings_backup_restore_confirm_title">Restaurar backup?</string>
+    <string name="settings_backup_restore_confirm_desc">Isso substituirá todas as redes e configurações atuais pelas do arquivo de backup. As senhas não foram incluídas no backup e precisarão ser inseridas novamente.\n\nIsso não pode ser desfeito.</string>
+    <string name="settings_backup_restore_btn">Restaurar</string>
+    <string name="settings_backup_failed_prefix">Falha no backup</string>
+    <string name="settings_restore_failed_prefix">Falha na restauração</string>
+    <string name="error">Erro</string>
+    <string name="ok">OK</string>
+
+    <string name="battery_dialog_text">Para continuar conectado em segundo plano, desative a Otimização de Bateria para este app e permita a atividade em segundo plano.</string>
+    <string name="battery_dialog_oneplus_tip">Dica OnePlus: bloqueie também o app na tela de Recentes (cadeado) e certifique-se de que a atividade em segundo plano / início automático está permitida nas configurações de bateria.</string>
+    <string name="custom">Personalizado</string>
+
+    <string name="netedit_error_no_network">Nenhuma rede selecionada</string>
+    <string name="netedit_section_connection">Conexão</string>
+    <string name="netedit_network_name">Nome da Rede</string>
+    <string name="netedit_allow_insecure_plaintext">Permitir texto simples inseguro</string>
+    <string name="netedit_section_identity">Identidade</string>
+    <string name="netedit_username_ident">Nome de usuário (ident)</string>
+    <string name="netedit_section_autoconnect">Conexão Automática e Senha</string>
+    <string name="netedit_connect_on_start">Conectar ao iniciar o app</string>
+    <string name="netedit_auto_reconnect">Reconectar automaticamente</string>
+    <string name="netedit_server_password">Senha do servidor (PASS)</string>
+    <string name="netedit_section_sasl">Autenticação SASL</string>
+    <string name="netedit_enable_sasl">Ativar SASL</string>
+    <string name="netedit_mechanism">Mecanismo</string>
+    <string name="netedit_sasl_username">Nome de usuário (authcid)</string>
+    <string name="netedit_password">Senha</string>
+    <string name="netedit_sasl_external_desc">Usa certificado de cliente TLS para autenticação</string>
+    <string name="netedit_section_tls_cert">Certificado de Cliente TLS</string>
+    <string name="netedit_cert_selected">Selecionado: %1$s</string>
+    <string name="netedit_cert_none">Nenhum certificado selecionado.</string>
+    <string name="netedit_cert_format">Formato do certificado</string>
+    <string name="netedit_error_cert_key_missing">Por favor, selecione tanto um certificado quanto uma chave</string>
+    <string name="netedit_format_pem">PEM (.pem)</string>
+    <string name="netedit_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="netedit_format_p12">PKCS#12 (.p12)</string>
+    <string name="netedit_cert_pem_desc">O arquivo .pem deve incluir tanto seu certificado quanto a chave privada.</string>
+    <string name="netedit_cert_choose_pem">Escolher .pem</string>
+    <string name="netedit_cert_replace_pem">Substituir .pem</string>
+    <string name="netedit_cert_clear">Limpar</string>
+    <string name="netedit_cert_choose_crt">Escolher .crt</string>
+    <string name="netedit_cert_replace_crt">Substituir .crt</string>
+    <string name="netedit_cert_choose_key">Escolher .key</string>
+    <string name="netedit_cert_replace_key">Substituir .key</string>
+    <string name="netedit_cert_label_crt">Certificado: %1$s</string>
+    <string name="netedit_cert_label_key">Chave: %1$s</string>
+    <string name="netedit_cert_key_password">Senha da chave (se criptografada)</string>
+    <string name="netedit_cert_remove">Remover</string>
+    <string name="netedit_cert_undo_remove">Desfazer remoção</string>
+    <string name="netedit_section_autojoin">Entrar Automático (Canais)</string>
+    <string name="netedit_autojoin_desc">Um por linha. Formato: #canal [senha]</string>
+    <string name="netedit_section_commands">Comandos Pós-Conexão</string>
+    <string name="netedit_cmd_delay">Atraso antes dos comandos (segundos)</string>
+    <string name="netedit_cmd_delay_desc">Aguardar estes segundos após conectar antes de executar os comandos</string>
+    <string name="netedit_cmd_auth">Comando de autenticação</string>
+    <string name="netedit_cmd_auth_desc">Ex: /msg NickServ IDENTIFY senha</string>
+    <string name="netedit_cmd_extra">Comandos adicionais (um por linha):</string>
+    <string name="netedit_cmd_extra_desc">Comandos para executar após conectar, ex: /join #canal</string>
+    <string name="netedit_section_encoding">Codificação de Caracteres</string>
+    <string name="netedit_encoding">Codificação</string>
+    <string name="netedit_enc_auto">Recomendado. Inicia com UTF-8 e detecta automaticamente outras codificações.</string>
+    <string name="netedit_enc_cp1251">Use para redes búlgaras, russas, sérvias e outras redes cirílicas.</string>
+    <string name="netedit_enc_utf8">Unicode padrão. Funciona com a maioria das redes IRC modernas.</string>
+    <string name="netedit_enc_manual">Seleção manual de codificação para redes antigas.</string>
+    <string name="netedit_section_ircv3">Capacidades IRCv3.x</string>
+    <string name="netedit_ircv3_advanced">Mostrar opções avançadas</string>
+    <string name="netedit_ircv3_basic_desc">Recursos básicos do IRCv3 ativados por padrão. Ative para ver opções avançadas.</string>
+
+    <string name="transfers_dcc_disabled_warning">O DCC está desativado no momento. Ative-o para enviar/aceitar arquivos.</string>
+    <string name="transfers_dcc_send_mode">Modo de envio DCC</string>
+    <string name="transfers_mode_auto">Automático</string>
+    <string name="transfers_mode_active">Ativo</string>
+    <string name="transfers_mode_passive">Passivo</string>
+    <string name="transfers_mode_auto_desc">Auto: tenta DCC Passivo ou reverte para Ativo se não houver resposta.</string>
+    <string name="transfers_mode_active_desc">Ativo: DCC SEND clássico (o destinatário se conecta a você).</string>
+    <string name="transfers_mode_passive_desc">Passivo: solicita ao destinatário que abra uma porta e, em seguida, você se conecta a ele.</string>
+    <string name="transfers_send_file">Enviar arquivo</string>
+    <string name="transfers_target_nick">Nick de destino</string>
+    <string name="transfers_pick_file">Escolher arquivo para enviar</string>
+    <string name="transfers_dcc_chat">DCC CHAT</string>
+    <string name="transfers_start_dcc_chat">Iniciar DCC CHAT</string>
+    <string name="transfers_incoming_chat_offers">Ofertas de chat recebidas</string>
+    <string name="transfers_no_chat_offers">Nenhuma oferta de chat ainda.</string>
+    <string name="transfers_from_chat_offer">De %1$s: DCC CHAT (%2$s)</string>
+    <string name="action_accept">Aceitar</string>
+    <string name="action_reject">Rejeitar</string>
+    <string name="transfers_incoming_offers">Ofertas recebidas</string>
+    <string name="transfers_no_offers">Nenhuma oferta ainda.</string>
+    <string name="transfers_from_file_offer">De %1$s: %2$s%3$s</string>
+    <string name="transfers_passive_suffix"> (passivo)</string>
+    <string name="transfers_reply_port_waiting">porta de resposta: (aguardando)</string>
+    <string name="transfers_size_bytes_format">%1$s • %2$d bytes</string>
+    <string name="transfers_section_title">Transferências</string>
+    <string name="transfers_no_transfers">Nenhuma transferência em andamento.</string>
+    <string name="transfers_incoming_format">Recebendo: %1$s de %2$s</string>
+    <string name="transfers_progress_format">%1$d/%2$d bytes • %3$s%%</string>
+    <string name="transfers_share_file">Compartilhar arquivo</string>
+    <string name="transfers_error_format">Erro: %1$s</string>
+    <string name="transfers_outgoing_format">Enviando: %1$s para %2$s</string>
+    <string name="transfers_bytes_sent_format">%1$d bytes enviados</string>
+
+    <string name="list_channels">Canais</string>
+    <string name="list_search_label">Pesquisar canais / tópico</string>
+    <string name="list_loading_format">Carregando… (%1$d)</string>
+    <string name="list_channel_count_format">%1$d canais</string>
+    <string name="list_join_action">Entrar</string>
+
+    <string name="ignore_no_networks">Nenhuma rede configurada ainda.</string>
+    <string name="ignore_network_label">Rede</string>
+    <string name="ignore_nick_label">Nick para ignorar</string>
+    <string name="action_add">Adicionar</string>
+    <string name="ignore_help_text">Nicks ignorados não diferenciam maiúsculas de minúsculas e se aplicam ao chat + avisos + ofertas de DCC recebidas nesta rede.</string>
+    <string name="ignore_empty">Nenhum nick ignorado.</string>
+    <string name="ignore_tip">Dica: você também pode ignorar alguém pela lista de nicks ou tocando no nome da pessoa no chat.</string>
+    <string name="action_remove">Remover</string>
 </resources>

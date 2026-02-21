@@ -168,7 +168,9 @@ fun AppRoot(
         Surface(modifier = Modifier.fillMaxSize()) {
 
         // Welcome screen gate: shown before everything else on first launch.
-        if (showWelcome) {
+        if (!state.settingsLoaded) {
+            Box(modifier = Modifier.fillMaxSize())
+        } else if (showWelcome) {
             WelcomeScreen(
                 onContinue = { langCode, nick ->
                     vm.completeWelcome(langCode, nick)

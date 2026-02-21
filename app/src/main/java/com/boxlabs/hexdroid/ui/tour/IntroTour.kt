@@ -44,75 +44,73 @@ data class IntroTourStep(
 
 /**
  * Build the intro tour with localised strings.
- * Falls back to English defaults when called without a context.
+ * Relies on Android's native resource system to fall back to default English
+ * strings.xml if a specific localization is missing.
  */
-fun buildIntroTour(context: Context? = null): List<IntroTourStep> {
-    // Helper that resolves a string resource, or returns the English fallback.
-    fun s(resId: Int, fallback: String): String = context?.getString(resId) ?: fallback
-
+fun buildIntroTour(context: Context): List<IntroTourStep> {
     return listOf(
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_ADD_FAB,
-            title = s(R.string.tour_add_network_title, "Add a network"),
-            body = s(R.string.tour_add_network_body, "Tap + to add a new network, or edit an existing one. HexDroid ships with a few defaults so you can get going quickly.")
+            title = context.getString(R.string.tour_add_network_title),
+            body = context.getString(R.string.tour_add_network_body)
         ),
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_CONNECT_BUTTON,
-            title = s(R.string.tour_connect_title, "Connect"),
-            body = s(R.string.tour_connect_body, "Connect to the selected network. Once connected, open chat to join channels and talk.")
+            title = context.getString(R.string.tour_connect_title),
+            body = context.getString(R.string.tour_connect_body)
         ),
         IntroTourStep(
             screen = AppScreen.SETTINGS,
             target = TourTarget.SETTINGS_APPEARANCE_SECTION,
-            title = s(R.string.tour_settings_title, "Settings"),
-            body = s(R.string.tour_settings_body, "Tweak settings such as appearance, fonts and other preferences here.")
+            title = context.getString(R.string.tour_settings_title),
+            body = context.getString(R.string.tour_settings_body)
         ),
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_BUFFER_DRAWER,
-            title = s(R.string.tour_switcher_title, "Switcher"),
-            body = s(R.string.tour_switcher_body, "This sidebar shows your server, channels, and private messages. Tap any item to switch between them.")
+            title = context.getString(R.string.tour_switcher_title),
+            body = context.getString(R.string.tour_switcher_body)
         ),
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_OVERFLOW_BUTTON,
-            title = s(R.string.tour_more_title, "More actions"),
-            body = s(R.string.tour_more_body, "This menu contains channel list, file transfers, settings, networks, and more.")
+            title = context.getString(R.string.tour_more_title),
+            body = context.getString(R.string.tour_more_body)
         ),
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_INPUT,
-            title = s(R.string.tour_send_title, "Send messages"),
-            body = s(R.string.tour_send_body, "Type here to chat. You can also use slash commands like /join #channel, /msg nick hi, /whois nick, etc.")
+            title = context.getString(R.string.tour_send_title),
+            body = context.getString(R.string.tour_send_body)
         ),
         IntroTourStep(
             screen = AppScreen.TRANSFERS,
             target = TourTarget.TRANSFERS_ENABLE_DCC,
-            title = s(R.string.tour_dcc_title, "Enable DCC"),
-            body = s(R.string.tour_dcc_body, "Turn on DCC to send/receive files. If you're behind NAT, Passive mode can help.")
+            title = context.getString(R.string.tour_dcc_title),
+            body = context.getString(R.string.tour_dcc_body)
         ),
         IntroTourStep(
             screen = AppScreen.TRANSFERS,
             target = TourTarget.TRANSFERS_PICK_FILE,
-            title = s(R.string.tour_send_file_title, "Send a file"),
-            body = s(R.string.tour_send_file_body, "Enter a target nick, then pick a file to send. (Requires DCC to be enabled.) Incoming offers appear on this screen too.")
+            title = context.getString(R.string.tour_send_file_title),
+            body = context.getString(R.string.tour_send_file_body)
         ),
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_AFTERNET_ITEM,
             fallbackTarget = TourTarget.NETWORKS_ADD_FAB,
-            title = s(R.string.tour_support_title, "Need support?"),
-            body = s(R.string.tour_support_body, "You can connect here if you need support in #HexDroid."),
-            fallbackBody = s(R.string.tour_support_fallback, "If you don't see AfterNET in your list, tap Add AfterNET (or +) to add it again. You can connect there for support in #HexDroid."),
-            action = IntroTourAction(IntroTourActionId.ADD_AFTERNET, s(R.string.tour_support_action, "Add AfterNET"), fallbackOnly = true),
+            title = context.getString(R.string.tour_support_title),
+            body = context.getString(R.string.tour_support_body),
+            fallbackBody = context.getString(R.string.tour_support_fallback),
+            action = IntroTourAction(IntroTourActionId.ADD_AFTERNET, context.getString(R.string.tour_support_action), fallbackOnly = true),
         ),
         IntroTourStep(
             screen = AppScreen.SETTINGS,
             target = TourTarget.SETTINGS_RUN_TOUR,
-            title = s(R.string.tour_replay_title, "Run this tour again"),
-            body = s(R.string.tour_replay_body, "You can replay the walkthrough any time from Settings.")
+            title = context.getString(R.string.tour_replay_title),
+            body = context.getString(R.string.tour_replay_body)
         )
     )
 }

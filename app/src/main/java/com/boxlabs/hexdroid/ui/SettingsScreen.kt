@@ -202,7 +202,7 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
                 actions = { IconButton(onClick = onOpenNetworks) { Text("🌐") } }
             )
@@ -243,16 +243,16 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Intro tour", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.settings_intro_tour), style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "A quick walkthrough of the main screens and shortcuts.",
+                        stringResource(R.string.settings_intro_tour_desc),
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
                 OutlinedButton(
                     onClick = onRunTour,
                     modifier = Modifier.tourTarget(TourTarget.SETTINGS_RUN_TOUR)
-                ) { Text("Run") }
+                ) { Text(stringResource(R.string.run)) }
             }
         }
     }
@@ -275,7 +275,7 @@ fun SettingsScreen(
 
             item {
                 FontPicker(
-                    fieldLabel = "UI font",
+                    fieldLabel = stringResource(R.string.setting_ui_font),
                     current = s.fontChoice,
                     customFontName = getCustomFontName(s.customFontPath),
                     onPick = { choice ->
@@ -312,7 +312,7 @@ fun SettingsScreen(
             }
 
             item {
-                Text("Font size", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.setting_font_size), style = MaterialTheme.typography.titleSmall)
                 Slider(
                     value = s.fontScale,
                     onValueChange = { v -> onUpdate { copy(fontScale = v.coerceIn(0.85f, 1.35f)) } },
@@ -338,7 +338,7 @@ fun SettingsScreen(
                 OutlinedTextField(
                     value = s.timestampFormat,
                     onValueChange = { v -> onUpdate { copy(timestampFormat = v) } },
-                    label = { Text("Timestamp format (Java)") },
+                    label = { Text(stringResource(R.string.setting_timestamp_format)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -378,7 +378,7 @@ fun SettingsScreen(
                         val words = v.lines().map { it.trim() }.filter { it.isNotBlank() }.distinct()
                         onUpdate { copy(extraHighlightWords = words) }
                     },
-                    label = { Text("Extra highlight words (one per line)") },
+                    label = { Text(stringResource(R.string.setting_extra_highlights)) },
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -395,16 +395,16 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Ignore list", style = MaterialTheme.typography.titleSmall)
-                            Text("Hide messages and DCC offers from specific nicks (per network).", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.setting_ignore_list), style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.setting_ignore_list_desc), style = MaterialTheme.typography.bodySmall)
                         }
-                        OutlinedButton(onClick = onOpenIgnoreList) { Text("Manage") }
+                        OutlinedButton(onClick = onOpenIgnoreList) { Text(stringResource(R.string.manage)) }
                     }
                 }
             }
 			
             item {
-                Text("Quit message.", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.setting_quit_message), style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = s.quitMessage,
                     onValueChange = { v -> onUpdate { copy(quitMessage = v) } },
@@ -414,7 +414,7 @@ fun SettingsScreen(
             }
 			
             item {
-                Text("Part message", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.setting_part_message), style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = s.partMessage,
                     onValueChange = { v -> onUpdate { copy(partMessage = v) } },
@@ -425,7 +425,7 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_connection_status), s.showConnectionStatusNotification) { onUpdate { copy(showConnectionStatusNotification = !showConnectionStatusNotification) } } }
             item {
                 SettingToggle(
-                    "Keep connection alive",
+                    stringResource(R.string.setting_keep_alive),
                     s.keepAliveInBackground
                 ) {
                     val newValue = !s.keepAliveInBackground
@@ -445,8 +445,8 @@ fun SettingsScreen(
 
             item {
                 Column(Modifier.fillMaxWidth()) {
-                    Text("Reconnect interval (seconds)", style = MaterialTheme.typography.titleSmall)
-                    Text("How often to retry when the connection drops.", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.setting_reconnect_interval), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.setting_reconnect_interval_desc), style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = s.autoReconnectDelaySec.toString(),
@@ -455,7 +455,7 @@ fun SettingsScreen(
                             val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
                             onUpdate { copy(autoReconnectDelaySec = n.coerceIn(5, 600)) }
                         },
-                        label = { Text("Seconds") },
+                        label = { Text(stringResource(R.string.setting_seconds)) },
                         singleLine = true,
                         modifier = Modifier.widthIn(max = 180.dp)
                     )
@@ -486,16 +486,16 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_log_server), s.logServerBuffer) { onUpdate { copy(logServerBuffer = !logServerBuffer) } } }
 
             item {
-                val label = if (s.logFolderUri.isNullOrBlank()) "Internal storage" else "Custom folder selected"
+                val label = if (s.logFolderUri.isNullOrBlank()) stringResource(R.string.setting_storage_internal) else stringResource(R.string.setting_storage_custom_folder)
                 Column(Modifier.fillMaxWidth()) {
-                    Text("Log folder", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.setting_log_folder), style = MaterialTheme.typography.titleSmall)
                     Text(label, style = MaterialTheme.typography.bodySmall)
                     if (!s.logFolderUri.isNullOrBlank()) {
                         Text(s.logFolderUri!!, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { folderPicker.launch(null) }) { Text("Choose folder") }
+                        Button(onClick = { folderPicker.launch(null) }) { Text(stringResource(R.string.setting_choose_folder)) }
                         if (!s.logFolderUri.isNullOrBlank()) {
                             OutlinedButton(onClick = {
                                 runCatching {
@@ -506,7 +506,7 @@ fun SettingsScreen(
                                 }
                                 onUpdate { copy(logFolderUri = null) }
                             }) {
-                                Text("Reset")
+                                Text(stringResource(R.string.reset))
                             }
                         }
                     }
@@ -520,7 +520,7 @@ fun SettingsScreen(
                         val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
                         onUpdate { copy(retentionDays = n.coerceIn(1, 365)) }
                     },
-                    label = { Text("Retention days") },
+                    label = { Text(stringResource(R.string.setting_retention_days)) },
                     singleLine = true
                 )
             }
@@ -532,7 +532,7 @@ fun SettingsScreen(
                         val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
                         onUpdate { copy(maxScrollbackLines = n.coerceIn(200, 5000)) }
                     },
-                    label = { Text("Max scrollback lines") },
+                    label = { Text(stringResource(R.string.setting_max_scrollback)) },
                     singleLine = true
                 )
             }
@@ -543,8 +543,8 @@ fun SettingsScreen(
 
             item {
                 Column(Modifier.fillMaxWidth()) {
-                    Text("History fetch limit", style = MaterialTheme.typography.titleSmall)
-                    Text("Number of messages to request per channel on join (CHATHISTORY LATEST). Set to 0 to disable.", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.setting_history_limit), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.setting_history_limit_desc), style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = s.ircHistoryLimit.toString(),
@@ -552,7 +552,7 @@ fun SettingsScreen(
                             val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
                             onUpdate { copy(ircHistoryLimit = n.coerceIn(0, 500)) }
                         },
-                        label = { Text("Messages") },
+                        label = { Text(stringResource(R.string.setting_messages)) },
                         singleLine = true
                     )
                 }
@@ -568,16 +568,16 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_enable_dcc), s.dccEnabled) { onUpdate { copy(dccEnabled = !dccEnabled) } } }
 
             item {
-                val dccFolderLabel = if (s.dccDownloadFolderUri.isNullOrBlank()) "Downloads (default)" else "Custom folder"
+                val dccFolderLabel = if (s.dccDownloadFolderUri.isNullOrBlank()) stringResource(R.string.setting_download_folder_default) else stringResource(R.string.setting_download_folder_custom)
                 Column(Modifier.fillMaxWidth()) {
-                    Text("Download folder", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.setting_download_folder), style = MaterialTheme.typography.titleSmall)
                     Text(dccFolderLabel, style = MaterialTheme.typography.bodySmall)
                     if (!s.dccDownloadFolderUri.isNullOrBlank()) {
                         Text(s.dccDownloadFolderUri!!, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { dccFolderPicker.launch(null) }) { Text("Choose folder") }
+                        Button(onClick = { dccFolderPicker.launch(null) }) { Text(stringResource(R.string.setting_choose_folder)) }
                         if (!s.dccDownloadFolderUri.isNullOrBlank()) {
                             OutlinedButton(onClick = {
                                 runCatching {
@@ -588,7 +588,7 @@ fun SettingsScreen(
                                 }
                                 onUpdate { copy(dccDownloadFolderUri = null) }
                             }) {
-                                Text("Reset")
+                                Text(stringResource(R.string.reset))
                             }
                         }
                     }
@@ -602,7 +602,7 @@ fun SettingsScreen(
                         val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
                         onUpdate { copy(dccIncomingPortMin = n.coerceIn(1, 65535)) }
                     },
-                    label = { Text("Incoming port min") },
+                    label = { Text(stringResource(R.string.setting_incoming_port_min)) },
                     singleLine = true
                 )
             }
@@ -614,7 +614,7 @@ fun SettingsScreen(
                         val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
                         onUpdate { copy(dccIncomingPortMax = n.coerceIn(1, 65535)) }
                     },
-                    label = { Text("Incoming port max") },
+                    label = { Text(stringResource(R.string.setting_incoming_port_max)) },
                     singleLine = true
                 )
             }
@@ -623,29 +623,28 @@ fun SettingsScreen(
 
             // ----- Backup & Restore -----
             item { HorizontalDivider() }
-            item { SectionTitle("Backup & Restore") }
+            item { SectionTitle(stringResource(R.string.settings_backup_restore_title)) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
                     Text(
-                        "Export your network configurations and app settings to a JSON file. " +
-                            "Passwords and TLS certificates are not included.",
+                        stringResource(R.string.settings_backup_export_desc),
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { exportBackupLauncher.launch(backupFileName) }) {
-                            Text("Export backup")
+                            Text(stringResource(R.string.settings_backup_export_btn))
                         }
                         OutlinedButton(onClick = {
                             importBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                         }) {
-                            Text("Restore backup")
+                            Text(stringResource(R.string.settings_backup_restore_action))
                         }
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Restoring replaces all current networks and settings.",
+                        stringResource(R.string.settings_backup_restore_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -662,13 +661,9 @@ fun SettingsScreen(
                 showRestoreConfirmDialog = false
                 pendingRestoreUri = null
             },
-            title = { Text("Restore backup?") },
+            title = { Text(stringResource(R.string.settings_backup_restore_confirm_title)) },
             text = {
-                Text(
-                    "This will replace all current networks and settings with those in the backup file. " +
-                        "Passwords were not included in the backup and will need to be re-entered.\n\n" +
-                        "This cannot be undone."
-                )
+                Text(stringResource(R.string.settings_backup_restore_confirm_desc))
             },
             confirmButton = {
                 Button(onClick = {
@@ -676,7 +671,7 @@ fun SettingsScreen(
                     pendingRestoreUri?.let { uri -> onImportBackup(uri) }
                     pendingRestoreUri = null
                 }) {
-                    Text("Restore")
+                    Text(stringResource(R.string.settings_backup_restore_btn))
                 }
             },
             dismissButton = {
@@ -684,7 +679,7 @@ fun SettingsScreen(
                     showRestoreConfirmDialog = false
                     pendingRestoreUri = null
                 }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -692,15 +687,20 @@ fun SettingsScreen(
 
     // Backup / restore result dialog
     if (showBackupResultDialog && state.backupMessage != null) {
+        val backupFailedPrefix = stringResource(R.string.settings_backup_failed_prefix)
+        val restoreFailedPrefix = stringResource(R.string.settings_restore_failed_prefix)
+
         AlertDialog(
             onDismissRequest = {
                 showBackupResultDialog = false
                 onClearBackupMessage()
             },
             title = {
-                val isError = state.backupMessage.startsWith("Backup failed") ||
+                val isError = state.backupMessage.startsWith(backupFailedPrefix) ||
+                    state.backupMessage.startsWith(restoreFailedPrefix) ||
+                    state.backupMessage.startsWith("Backup failed") ||
                     state.backupMessage.startsWith("Restore failed")
-                Text(if (isError) "Error" else "Done")
+                Text(if (isError) stringResource(R.string.error) else stringResource(R.string.done))
             },
             text = { Text(state.backupMessage) },
             confirmButton = {
@@ -708,7 +708,7 @@ fun SettingsScreen(
                     showBackupResultDialog = false
                     onClearBackupMessage()
                 }) {
-                    Text("OK")
+                    Text(stringResource(R.string.ok))
                 }
             }
         )
@@ -717,19 +717,13 @@ fun SettingsScreen(
     if (showBatteryHelpDialog) {
         AlertDialog(
             onDismissRequest = { showBatteryHelpDialog = false },
-            title = { Text("Keep the connection alive") },
+            title = { Text(stringResource(R.string.setting_keep_alive)) },
             text = {
                 Column {
-                    Text(
-                        "To stay connected overnight, please disable Battery Optimization for this app " +
-                            "and allow background activity."
-                    )
+                    Text(stringResource(R.string.battery_dialog_text))
                     if (isOnePlus) {
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            "OnePlus tip: also lock the app in Recents (padlock) and ensure " +
-                                "background activity / auto-launch is allowed in battery settings."
-                        )
+                        Text(stringResource(R.string.battery_dialog_oneplus_tip))
                     }
                 }
             },
@@ -743,7 +737,7 @@ fun SettingsScreen(
                         }
                     )
                 }) {
-                    Text("Open app settings")
+                    Text(stringResource(R.string.setting_open_app_settings))
                 }
             },
             dismissButton = {
@@ -756,10 +750,10 @@ fun SettingsScreen(
                             }
                         )
                     }) {
-                        Text("Battery optimization list")
+                        Text(stringResource(R.string.setting_battery_optimization))
                     }
                     TextButton(onClick = { showBatteryHelpDialog = false }) {
-                        Text("Not now")
+                        Text(stringResource(R.string.not_now))
                     }
                 }
             }
@@ -778,14 +772,15 @@ private fun SectionTitle(t: String, modifier: Modifier = Modifier) {
 private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val languages = com.boxlabs.hexdroid.ui.SUPPORTED_LANGUAGES
-    val currentLabel = languages.firstOrNull { it.code == currentCode }?.nativeName ?: "System"
+    val systemLabel = stringResource(R.string.theme_system)
+    val currentLabel = languages.firstOrNull { it.code == currentCode }?.nativeName ?: systemLabel
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
         OutlinedTextField(
             value = currentLabel,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Language") },
+            label = { Text(stringResource(R.string.welcome_language_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
@@ -818,10 +813,10 @@ private fun SettingToggle(label: String, checked: Boolean, onClick: () -> Unit) 
 private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val label = when (current) {
-        ThemeMode.DARK -> "Dark"
-        ThemeMode.LIGHT -> "Light"
-        ThemeMode.MATRIX -> "Matrix"
-        ThemeMode.SYSTEM -> "System default"
+        ThemeMode.DARK -> stringResource(R.string.theme_dark)
+        ThemeMode.LIGHT -> stringResource(R.string.theme_light)
+        ThemeMode.MATRIX -> stringResource(R.string.theme_matrix)
+        ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
     }
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
@@ -829,16 +824,16 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Theme") },
+            label = { Text(stringResource(R.string.theme_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Dark") }, onClick = { onPick(ThemeMode.DARK); expanded = false })
-            DropdownMenuItem(text = { Text("Light") }, onClick = { onPick(ThemeMode.LIGHT); expanded = false })
-            DropdownMenuItem(text = { Text("Matrix") }, onClick = { onPick(ThemeMode.MATRIX); expanded = false })
-            DropdownMenuItem(text = { Text("System default") }, onClick = { onPick(ThemeMode.SYSTEM); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.theme_dark)) }, onClick = { onPick(ThemeMode.DARK); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.theme_light)) }, onClick = { onPick(ThemeMode.LIGHT); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.theme_matrix)) }, onClick = { onPick(ThemeMode.MATRIX); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.theme_system)) }, onClick = { onPick(ThemeMode.SYSTEM); expanded = false })
         }
     }
 }
@@ -853,11 +848,12 @@ private fun FontPicker(
     onPickCustom: (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val customLabel = stringResource(R.string.custom)
     val currentLabel = when (current) {
-        FontChoice.OPEN_SANS -> "Open Sans"
-        FontChoice.INTER -> "Inter"
-        FontChoice.MONOSPACE -> "Monospace"
-        FontChoice.CUSTOM -> customFontName ?: "Custom"
+        FontChoice.OPEN_SANS -> stringResource(R.string.font_open_sans)
+        FontChoice.INTER -> stringResource(R.string.font_inter)
+        FontChoice.MONOSPACE -> stringResource(R.string.font_monospace)
+        FontChoice.CUSTOM -> customFontName ?: customLabel
     }
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
@@ -872,13 +868,13 @@ private fun FontPicker(
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             // Open Sans is the default UI font.
-            DropdownMenuItem(text = { Text("Open Sans") }, onClick = { onPick(FontChoice.OPEN_SANS); expanded = false })
-            DropdownMenuItem(text = { Text("Inter") }, onClick = { onPick(FontChoice.INTER); expanded = false })
-            DropdownMenuItem(text = { Text("Monospace") }, onClick = { onPick(FontChoice.MONOSPACE); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.font_open_sans)) }, onClick = { onPick(FontChoice.OPEN_SANS); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.font_inter)) }, onClick = { onPick(FontChoice.INTER); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.font_monospace)) }, onClick = { onPick(FontChoice.MONOSPACE); expanded = false })
             if (onPickCustom != null) {
                 DropdownMenuItem(
-                    text = { Text("Custom font file...") },
-                    onClick = { 
+                    text = { Text(stringResource(R.string.font_custom)) },
+                    onClick = {
                         expanded = false
                         onPickCustom()
                     }
@@ -893,10 +889,10 @@ private fun FontPicker(
 private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val currentLabel = when (current) {
-        ChatFontStyle.REGULAR -> "Regular"
-        ChatFontStyle.BOLD -> "Bold"
-        ChatFontStyle.ITALIC -> "Italic"
-        ChatFontStyle.BOLD_ITALIC -> "Bold + Italic"
+        ChatFontStyle.REGULAR -> stringResource(R.string.style_regular)
+        ChatFontStyle.BOLD -> stringResource(R.string.style_bold)
+        ChatFontStyle.ITALIC -> stringResource(R.string.style_italic)
+        ChatFontStyle.BOLD_ITALIC -> stringResource(R.string.style_bold_italic)
     }
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
@@ -904,16 +900,16 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
             value = currentLabel,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Chat font style") },
+            label = { Text(stringResource(R.string.chat_font_style)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Regular") }, onClick = { onPick(ChatFontStyle.REGULAR); expanded = false })
-            DropdownMenuItem(text = { Text("Bold") }, onClick = { onPick(ChatFontStyle.BOLD); expanded = false })
-            DropdownMenuItem(text = { Text("Italic") }, onClick = { onPick(ChatFontStyle.ITALIC); expanded = false })
-            DropdownMenuItem(text = { Text("Bold + Italic") }, onClick = { onPick(ChatFontStyle.BOLD_ITALIC); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.style_regular)) }, onClick = { onPick(ChatFontStyle.REGULAR); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.style_bold)) }, onClick = { onPick(ChatFontStyle.BOLD); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.style_italic)) }, onClick = { onPick(ChatFontStyle.ITALIC); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.style_bold_italic)) }, onClick = { onPick(ChatFontStyle.BOLD_ITALIC); expanded = false })
         }
     }
 }
@@ -923,9 +919,9 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
 private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIntensity) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val label = when (current) {
-        VibrateIntensity.LOW -> "Low"
-        VibrateIntensity.MEDIUM -> "Medium"
-        VibrateIntensity.HIGH -> "High"
+        VibrateIntensity.LOW -> stringResource(R.string.vibration_low)
+        VibrateIntensity.MEDIUM -> stringResource(R.string.vibration_medium)
+        VibrateIntensity.HIGH -> stringResource(R.string.vibration_high)
     }
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
@@ -933,15 +929,15 @@ private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIn
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Vibration intensity") },
+            label = { Text(stringResource(R.string.vibration_intensity)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Low") }, onClick = { onPick(VibrateIntensity.LOW); expanded = false })
-            DropdownMenuItem(text = { Text("Medium") }, onClick = { onPick(VibrateIntensity.MEDIUM); expanded = false })
-            DropdownMenuItem(text = { Text("High") }, onClick = { onPick(VibrateIntensity.HIGH); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.vibration_low)) }, onClick = { onPick(VibrateIntensity.LOW); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.vibration_medium)) }, onClick = { onPick(VibrateIntensity.MEDIUM); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.vibration_high)) }, onClick = { onPick(VibrateIntensity.HIGH); expanded = false })
         }
     }
 }

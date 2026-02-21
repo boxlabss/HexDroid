@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.UiState
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 
 @Composable
 fun ListScreen(
@@ -48,7 +50,7 @@ fun ListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Channels") },
+                title = { Text(stringResource(R.string.list_channels)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
                 actions = {
                     IconButton(onClick = onRefresh) { Text("⟳") }
@@ -58,10 +60,10 @@ fun ListScreen(
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(value = state.listFilter, onValueChange = onFilterChange, label = { Text("Search channels / topic") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = state.listFilter, onValueChange = onFilterChange, label = { Text(stringResource(R.string.list_search_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state.listInProgress) { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp); Text("Loading… (${state.channelDirectory.size})", style = MaterialTheme.typography.bodySmall) }
-                else Text("${items.size} channels", style = MaterialTheme.typography.bodySmall)
+                if (state.listInProgress) { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp); Text(stringResource(R.string.list_loading_format, state.channelDirectory.size), style = MaterialTheme.typography.bodySmall) }
+                else Text(stringResource(R.string.list_channel_count_format, items.size), style = MaterialTheme.typography.bodySmall)
             }
             HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
@@ -71,7 +73,7 @@ fun ListScreen(
                             Text(ch.channel, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             Text("${ch.users}", style = MaterialTheme.typography.bodySmall)
                             Spacer(Modifier.width(8.dp))
-                            Text("Join", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.list_join_action), style = MaterialTheme.typography.bodySmall)
                         }
                         if (ch.topic.isNotBlank()) Text(ch.topic, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                     }

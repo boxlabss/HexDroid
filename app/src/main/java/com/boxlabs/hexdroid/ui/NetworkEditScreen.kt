@@ -42,6 +42,8 @@ import com.boxlabs.hexdroid.SaslMechanism
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.data.AutoJoinChannel
 import com.boxlabs.hexdroid.data.NetworkProfile
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +53,7 @@ fun NetworkEditScreen(
     onSave: (NetworkProfile, ClientCertDraft?, Boolean) -> Unit
 ) {
     val n0 = state.editingNetwork ?: run {
-        Text("No network selected")
+        Text(stringResource(R.string.netedit_error_no_network))
         return
     }
 
@@ -189,10 +191,10 @@ fun NetworkEditScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Edit Network") },
+                title = { Text(stringResource(R.string.network_edit_title)) },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cancel))
                     }
                 },
                 actions = {
@@ -254,7 +256,7 @@ fun NetworkEditScreen(
                                     keyDisplayName = pendingKeyLabel
                                 )
                                 pendingCertUri != null || pendingKeyUri != null -> {
-                                    clientCertUiError = "Please select both a certificate and a key"
+                                    clientCertUiError = ctx.getString(R.string.netedit_error_cert_key_missing)
                                     return@Button
                                 }
                                 else -> null
@@ -301,7 +303,7 @@ fun NetworkEditScreen(
                             removeClientCert
                         )
                     }) {
-                        Text("Save")
+                        Text(stringResource(R.string.save))
                     }
                 }
             )
@@ -319,23 +321,23 @@ fun NetworkEditScreen(
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
 
-            CardSection("Connection") {
+            CardSection(stringResource(R.string.netedit_section_connection)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Network Name") },
+                    label = { Text(stringResource(R.string.netedit_network_name)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
-                    label = { Text("Host") },
+                    label = { Text(stringResource(R.string.network_host)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = port,
                     onValueChange = { port = it.filter { c -> c.isDigit() } },
-                    label = { Text("Port") },
+                    label = { Text(stringResource(R.string.network_port)) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -346,7 +348,7 @@ fun NetworkEditScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Use TLS")
+                    Text(stringResource(R.string.network_use_tls))
                     Switch(checked = tls, onCheckedChange = { tls = it })
                 }
 
@@ -356,7 +358,7 @@ fun NetworkEditScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Allow insecure plaintext")
+                        Text(stringResource(R.string.netedit_allow_insecure_plaintext))
                         Switch(checked = allowInsecurePlaintext, onCheckedChange = { allowInsecurePlaintext = it })
                     }
                 }
@@ -367,46 +369,46 @@ fun NetworkEditScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Allow invalid certificates")
+                        Text(stringResource(R.string.network_allow_invalid_certs))
                         Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it })
                     }
                 }
             }
 
-            CardSection("Identity") {
+            CardSection(stringResource(R.string.netedit_section_identity)) {
                 OutlinedTextField(
                     value = nick,
                     onValueChange = { nick = it },
-                    label = { Text("Nickname") },
+                    label = { Text(stringResource(R.string.network_nick)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = altNick,
                     onValueChange = { altNick = it },
-                    label = { Text("Alternate Nick") },
+                    label = { Text(stringResource(R.string.network_alt_nick)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    label = { Text("Username (ident)") },
+                    label = { Text(stringResource(R.string.netedit_username_ident)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = realname,
                     onValueChange = { realname = it },
-                    label = { Text("Real Name") },
+                    label = { Text(stringResource(R.string.network_realname)) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            CardSection("Auto-connect & Password") {
+            CardSection(stringResource(R.string.netedit_section_autoconnect)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Connect on app start")
+                    Text(stringResource(R.string.netedit_connect_on_start))
                     Switch(checked = autoConnect, onCheckedChange = { autoConnect = it })
                 }
                 Row(
@@ -414,7 +416,7 @@ fun NetworkEditScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Auto-reconnect on disconnect")
+                    Text(stringResource(R.string.netedit_auto_reconnect))
                     Switch(checked = autoReconnect, onCheckedChange = { autoReconnect = it })
                 }
 
@@ -423,19 +425,19 @@ fun NetworkEditScreen(
                 OutlinedTextField(
                     value = serverPassword,
                     onValueChange = { serverPassword = it },
-                    label = { Text("Server password (PASS)") },
+                    label = { Text(stringResource(R.string.netedit_server_password)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            CardSection("SASL Authentication") {
+            CardSection(stringResource(R.string.netedit_section_sasl)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Enable SASL")
+                    Text(stringResource(R.string.netedit_enable_sasl))
                     Switch(checked = saslEnabled, onCheckedChange = { saslEnabled = it })
                 }
 
@@ -447,7 +449,7 @@ fun NetworkEditScreen(
                                 value = mechLabels[saslMechanism] ?: saslMechanism.name,
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Mechanism") },
+                                label = { Text(stringResource(R.string.netedit_mechanism)) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = mechExpanded) },
                                 modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                             )
@@ -465,20 +467,20 @@ fun NetworkEditScreen(
                             OutlinedTextField(
                                 value = saslAuthcid,
                                 onValueChange = { saslAuthcid = it },
-                                label = { Text("Username (authcid)") },
+                                label = { Text(stringResource(R.string.netedit_sasl_username)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             OutlinedTextField(
                                 value = saslPassword,
                                 onValueChange = { saslPassword = it },
-                                label = { Text("Password") },
+                                label = { Text(stringResource(R.string.netedit_password)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         } else {
                             Text(
-                                "Uses TLS client certificate for authentication",
+                                stringResource(R.string.netedit_sasl_external_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -488,7 +490,7 @@ fun NetworkEditScreen(
             }
 
             AnimatedVisibility(visible = tls) {
-                CardSection("TLS Client Certificate") {
+                CardSection(stringResource(R.string.netedit_section_tls_cert)) {
                     val activeLabel = when {
                         pendingPemLabel != null -> pendingPemLabel
                         pendingCertLabel != null -> pendingCertLabel
@@ -497,9 +499,9 @@ fun NetworkEditScreen(
                     }
 
                     if (activeLabel != null) {
-                        Text("Selected: $activeLabel", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.netedit_cert_selected, activeLabel), style = MaterialTheme.typography.bodySmall)
                     } else {
-                        Text("No certificate selected.", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.netedit_cert_none), style = MaterialTheme.typography.bodySmall)
                     }
 
                     if (clientCertUiError != null) {
@@ -512,15 +514,15 @@ fun NetworkEditScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         val label = when (certFormat) {
-                            ClientCertFormat.PEM_BUNDLE -> "PEM (.pem)"
-                            ClientCertFormat.CERT_AND_KEY -> "CRT + KEY (.crt/.key)"
-                            ClientCertFormat.PKCS12 -> "PKCS#12 (.p12)"
+                            ClientCertFormat.PEM_BUNDLE -> stringResource(R.string.netedit_format_pem)
+                            ClientCertFormat.CERT_AND_KEY -> stringResource(R.string.netedit_format_crt_key)
+                            ClientCertFormat.PKCS12 -> stringResource(R.string.netedit_format_p12)
                         }
                         OutlinedTextField(
                             value = label,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Certificate format") },
+                            label = { Text(stringResource(R.string.netedit_cert_format)) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = certFormatExpanded) },
                             modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
@@ -529,7 +531,7 @@ fun NetworkEditScreen(
                             onDismissRequest = { certFormatExpanded = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("PEM (.pem)") },
+                                text = { Text(stringResource(R.string.netedit_format_pem)) },
                                 onClick = {
                                     certFormat = ClientCertFormat.PEM_BUNDLE
                                     clearPendingCertSelection()
@@ -537,7 +539,7 @@ fun NetworkEditScreen(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("CRT + KEY (.crt/.key)") },
+                                text = { Text(stringResource(R.string.netedit_format_crt_key)) },
                                 onClick = {
                                     certFormat = ClientCertFormat.CERT_AND_KEY
                                     clearPendingCertSelection()
@@ -551,7 +553,7 @@ fun NetworkEditScreen(
                         ClientCertFormat.PEM_BUNDLE -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { pickPem.launch(arrayOf("*/*")) }) {
-                                    Text(if (pendingPemUri == null) "Choose .pem" else "Replace .pem")
+                                    Text(if (pendingPemUri == null) stringResource(R.string.netedit_cert_choose_pem) else stringResource(R.string.netedit_cert_replace_pem))
                                 }
                                 OutlinedButton(
                                     enabled = pendingPemUri != null,
@@ -561,21 +563,21 @@ fun NetworkEditScreen(
                                         pendingKeyPassword = ""
                                         clientCertUiError = null
                                     }
-                                ) { Text("Clear") }
+                                ) { Text(stringResource(R.string.netedit_cert_clear)) }
                             }
-                            Text("The .pem should include both your certificate and private key.", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.netedit_cert_pem_desc), style = MaterialTheme.typography.bodySmall)
                         }
                         ClientCertFormat.CERT_AND_KEY -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { pickCrt.launch(arrayOf("*/*")) }) {
-                                    Text(if (pendingCertUri == null) "Choose .crt" else "Replace .crt")
+                                    Text(if (pendingCertUri == null) stringResource(R.string.netedit_cert_choose_crt) else stringResource(R.string.netedit_cert_replace_crt))
                                 }
                                 Button(onClick = { pickKey.launch(arrayOf("*/*")) }) {
-                                    Text(if (pendingKeyUri == null) "Choose .key" else "Replace .key")
+                                    Text(if (pendingKeyUri == null) stringResource(R.string.netedit_cert_choose_key) else stringResource(R.string.netedit_cert_replace_key))
                                 }
                             }
-                            val certName = pendingCertLabel?.let { "Certificate: $it" }
-                            val keyName = pendingKeyLabel?.let { "Key: $it" }
+                            val certName = pendingCertLabel?.let { stringResource(R.string.netedit_cert_label_crt, it) }
+                            val keyName = pendingKeyLabel?.let { stringResource(R.string.netedit_cert_label_key, it) }
                             if (certName != null) Text(certName, style = MaterialTheme.typography.bodySmall)
                             if (keyName != null) Text(keyName, style = MaterialTheme.typography.bodySmall)
                         }
@@ -587,7 +589,7 @@ fun NetworkEditScreen(
                         onValueChange = { pendingKeyPassword = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        label = { Text("Key password (if encrypted)") }
+                        label = { Text(stringResource(R.string.netedit_cert_key_password)) }
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -598,21 +600,21 @@ fun NetworkEditScreen(
                                 tlsClientCertLabel = ""
                                 removeClientCert = true
                             }
-                        ) { Text("Remove") }
+                        ) { Text(stringResource(R.string.netedit_cert_remove)) }
                         OutlinedButton(
                             enabled = removeClientCert,
                             onClick = {
                                 removeClientCert = false
                                 clientCertUiError = null
                             }
-                        ) { Text("Undo remove") }
+                        ) { Text(stringResource(R.string.netedit_cert_undo_remove)) }
                     }
                 }
             }
 			
-            CardSection("Auto-join Channels") {
+            CardSection(stringResource(R.string.netedit_section_autojoin)) {
                 Text(
-                    "One per line. Format: #channel [key]",
+                    stringResource(R.string.netedit_autojoin_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -624,29 +626,29 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection("Post-connect Commands") {
+            CardSection(stringResource(R.string.netedit_section_commands)) {
                 OutlinedTextField(
                     value = postDelayText,
                     onValueChange = { postDelayText = it.filter { c -> c.isDigit() } },
-                    label = { Text("Delay before commands (seconds)") },
+                    label = { Text(stringResource(R.string.netedit_cmd_delay)) },
                     modifier = Modifier.fillMaxWidth(),
                     supportingText = {
-                        Text("Wait this many seconds after connecting before running commands")
+                        Text(stringResource(R.string.netedit_cmd_delay_desc))
                     }
                 )
 
                 OutlinedTextField(
                     value = serviceAuthCommand,
                     onValueChange = { serviceAuthCommand = it },
-                    label = { Text("Service auth command") },
+                    label = { Text(stringResource(R.string.netedit_cmd_auth)) },
                     modifier = Modifier.fillMaxWidth(),
                     supportingText = {
-                        Text("e.g., /msg NickServ IDENTIFY password")
+                        Text(stringResource(R.string.netedit_cmd_auth_desc))
                     }
                 )
 
                 Text(
-                    "Additional commands (one per line):",
+                    stringResource(R.string.netedit_cmd_extra),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -656,12 +658,12 @@ fun NetworkEditScreen(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                     supportingText = {
-                        Text("Commands to run after connecting, e.g., /join #channel")
+                        Text(stringResource(R.string.netedit_cmd_extra_desc))
                     }
                 )
             }
 
-            CardSection("Character Encoding") {
+            CardSection(stringResource(R.string.netedit_section_encoding)) {
                 ExposedDropdownMenuBox(
                     expanded = encodingExpanded,
                     onExpandedChange = { encodingExpanded = it }
@@ -673,7 +675,7 @@ fun NetworkEditScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                        label = { Text("Encoding") },
+                        label = { Text(stringResource(R.string.netedit_encoding)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = encodingExpanded) }
                     )
                     ExposedDropdownMenu(
@@ -693,23 +695,23 @@ fun NetworkEditScreen(
                 }
                 Text(
                     when (encoding) {
-                        "auto" -> "Recommended. Starts with UTF-8 and auto-detects other encodings."
-                        "windows-1251" -> "Use for Bulgarian, Russian, Serbian, and other Cyrillic networks."
-                        "UTF-8" -> "Standard Unicode. Works with most modern IRC networks."
-                        else -> "Manual encoding selection for legacy networks."
+                        "auto" -> stringResource(R.string.netedit_enc_auto)
+                        "windows-1251" -> stringResource(R.string.netedit_enc_cp1251)
+                        "UTF-8" -> stringResource(R.string.netedit_enc_utf8)
+                        else -> stringResource(R.string.netedit_enc_manual)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            CardSection("IRCv3.x Capabilities") {
+            CardSection(stringResource(R.string.netedit_section_ircv3)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Show advanced options")
+                    Text(stringResource(R.string.netedit_ircv3_advanced))
                     Switch(
                         checked = showAdvancedCaps,
                         onCheckedChange = { showAdvancedCaps = it }
@@ -747,7 +749,7 @@ fun NetworkEditScreen(
 
                 if (!showAdvancedCaps) {
                     Text(
-                        "Basic IRCv3 features enabled by default. Switch on to see advanced options.",
+                        stringResource(R.string.netedit_ircv3_basic_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
