@@ -156,6 +156,20 @@
     <string name="setting_storage_custom_folder">Benutzerdefinierter Ordner ausgewählt</string>
     <string name="setting_download_folder_default">Downloads (Standard)</string>
     <string name="setting_download_folder_custom">Benutzerdefinierter Ordner</string>
+
+    <string name="settings_backup_restore_title">Sichern &amp; Wiederherstellen</string>
+    <string name="settings_backup_export_desc">Exportieren Sie Ihre Netzwerkkonfigurationen und App-Einstellungen in eine JSON-Datei. Passwörter und TLS-Zertifikate sind nicht enthalten.</string>
+    <string name="settings_backup_export_btn">Backup exportieren</string>
+    <string name="settings_backup_restore_action">Backup wiederherstellen</string>
+    <string name="settings_backup_restore_warning">Die Wiederherstellung ersetzt alle aktuellen Netzwerke und Einstellungen.</string>
+    <string name="settings_backup_restore_confirm_title">Backup wiederherstellen?</string>
+    <string name="settings_backup_restore_confirm_desc">Dies ersetzt alle aktuellen Netzwerke und Einstellungen durch jene in der Backup-Datei. Passwörter sind im Backup nicht enthalten und müssen neu eingegeben werden.\n\nDies kann nicht rückgängig gemacht werden.</string>
+    <string name="settings_backup_restore_btn">Wiederherstellen</string>
+    <string name="settings_backup_failed_prefix">Backup fehlgeschlagen</string>
+    <string name="settings_restore_failed_prefix">Wiederherstellung fehlgeschlagen</string>
+    <string name="error">Fehler</string>
+    <string name="ok">OK</string>
+
     <string name="battery_dialog_text">Um über Nacht verbunden zu bleiben, deaktiviere bitte die Akku-Optimierung für diese App und erlaube Hintergrundaktivitäten.</string>
     <string name="battery_dialog_oneplus_tip">OnePlus-Tipp: Sperre die App auch in den kürzlich verwendeten Apps (Vorhängeschloss) und stelle sicher, dass Hintergrundaktivität / Autostart in den Akkueinstellungen erlaubt ist.</string>
     <string name="custom">Benutzerdefiniert</string>

@@ -623,29 +623,28 @@ fun SettingsScreen(
 
             // ----- Backup & Restore -----
             item { HorizontalDivider() }
-            item { SectionTitle("Backup & Restore") }
+            item { SectionTitle(stringResource(R.string.settings_backup_restore_title)) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
                     Text(
-                        "Export your network configurations and app settings to a JSON file. " +
-                            "Passwords and TLS certificates are not included.",
+                        stringResource(R.string.settings_backup_export_desc),
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { exportBackupLauncher.launch(backupFileName) }) {
-                            Text("Export backup")
+                            Text(stringResource(R.string.settings_backup_export_btn))
                         }
                         OutlinedButton(onClick = {
                             importBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                         }) {
-                            Text("Restore backup")
+                            Text(stringResource(R.string.settings_backup_restore_action))
                         }
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Restoring replaces all current networks and settings.",
+                        stringResource(R.string.settings_backup_restore_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -662,13 +661,9 @@ fun SettingsScreen(
                 showRestoreConfirmDialog = false
                 pendingRestoreUri = null
             },
-            title = { Text("Restore backup?") },
+            title = { Text(stringResource(R.string.settings_backup_restore_confirm_title)) },
             text = {
-                Text(
-                    "This will replace all current networks and settings with those in the backup file. " +
-                        "Passwords were not included in the backup and will need to be re-entered.\n\n" +
-                        "This cannot be undone."
-                )
+                Text(stringResource(R.string.settings_backup_restore_confirm_desc))
             },
             confirmButton = {
                 Button(onClick = {
@@ -676,7 +671,7 @@ fun SettingsScreen(
                     pendingRestoreUri?.let { uri -> onImportBackup(uri) }
                     pendingRestoreUri = null
                 }) {
-                    Text("Restore")
+                    Text(stringResource(R.string.settings_backup_restore_btn))
                 }
             },
             dismissButton = {
@@ -684,7 +679,7 @@ fun SettingsScreen(
                     showRestoreConfirmDialog = false
                     pendingRestoreUri = null
                 }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -692,15 +687,20 @@ fun SettingsScreen(
 
     // Backup / restore result dialog
     if (showBackupResultDialog && state.backupMessage != null) {
+        val backupFailedPrefix = stringResource(R.string.settings_backup_failed_prefix)
+        val restoreFailedPrefix = stringResource(R.string.settings_restore_failed_prefix)
+
         AlertDialog(
             onDismissRequest = {
                 showBackupResultDialog = false
                 onClearBackupMessage()
             },
             title = {
-                val isError = state.backupMessage.startsWith("Backup failed") ||
+                val isError = state.backupMessage.startsWith(backupFailedPrefix) ||
+                    state.backupMessage.startsWith(restoreFailedPrefix) ||
+                    state.backupMessage.startsWith("Backup failed") ||
                     state.backupMessage.startsWith("Restore failed")
-                Text(if (isError) "Error" else "Done")
+                Text(if (isError) stringResource(R.string.error) else stringResource(R.string.done))
             },
             text = { Text(state.backupMessage) },
             confirmButton = {
@@ -708,7 +708,7 @@ fun SettingsScreen(
                     showBackupResultDialog = false
                     onClearBackupMessage()
                 }) {
-                    Text("OK")
+                    Text(stringResource(R.string.ok))
                 }
             }
         )

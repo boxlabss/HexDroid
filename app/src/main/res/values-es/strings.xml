@@ -163,6 +163,20 @@
     <string name="setting_storage_custom_folder">Carpeta personalizada seleccionada</string>
     <string name="setting_download_folder_default">Descargas (predeterminado)</string>
     <string name="setting_download_folder_custom">Carpeta personalizada</string>
+
+    <string name="settings_backup_restore_title">Copia de seguridad y restauración</string>
+    <string name="settings_backup_export_desc">Exporte sus configuraciones de red y ajustes de la aplicación a un archivo JSON. Las contraseñas y los certificados TLS no están incluidos.</string>
+    <string name="settings_backup_export_btn">Exportar copia</string>
+    <string name="settings_backup_restore_action">Restaurar copia</string>
+    <string name="settings_backup_restore_warning">Restaurar reemplaza todas las redes y configuraciones actuales.</string>
+    <string name="settings_backup_restore_confirm_title">¿Restaurar copia de seguridad?</string>
+    <string name="settings_backup_restore_confirm_desc">Esto reemplazará todas las redes y configuraciones actuales con las del archivo de copia de seguridad. Las contraseñas no se incluyeron en la copia y deberán volver a introducirse.\n\nEsto no se puede deshacer.</string>
+    <string name="settings_backup_restore_btn">Restaurar</string>
+    <string name="settings_backup_failed_prefix">Error al hacer copia</string>
+    <string name="settings_restore_failed_prefix">Error al restaurar</string>
+    <string name="error">Error</string>
+    <string name="ok">Aceptar</string>
+
     <string name="battery_dialog_text">Para mantener la conexión activa durante la noche, desactiva la optimización de batería para esta aplicación y permite la actividad en segundo plano.</string>
     <string name="battery_dialog_oneplus_tip">Consejo para OnePlus: bloquea también la aplicación en la pantalla de Recientes (candado) y asegúrate de que la actividad en segundo plano / inicio automático esté permitida en la configuración de la batería.</string>
     <string name="custom">Personalizado</string>

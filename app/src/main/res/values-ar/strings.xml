@@ -123,7 +123,6 @@
     <string name="about_doc_support_desc">قم بزيارة الموقع الإلكتروني للحصول على الأدلة والأسئلة الشائعة وللإبلاغ عن المشكلات.</string>
     <string name="about_open_website">افتح الموقع</string>
     <string name="about_free_app_by">HexDroid - تطبيق مجاني (بدون إعلانات) بواسطة</string>
-
     <string name="transfers_title">عمليات النقل</string>
     <string name="ignore_title">قائمة التجاهل</string>
     <string name="list_title">قائمة القنوات</string>
@@ -133,6 +132,20 @@
     <string name="setting_storage_custom_folder">تم تحديد مجلد مخصص</string>
     <string name="setting_download_folder_default">التنزيلات (الافتراضي)</string>
     <string name="setting_download_folder_custom">مجلد مخصص</string>
+
+    <string name="settings_backup_restore_title">النسخ الاحتياطي والاستعادة</string>
+    <string name="settings_backup_export_desc">قم بتصدير تكوينات الشبكة وإعدادات التطبيق إلى ملف JSON. لا يتم تضمين كلمات المرور وشهادات TLS.</string>
+    <string name="settings_backup_export_btn">تصدير النسخة الاحتياطية</string>
+    <string name="settings_backup_restore_action">استعادة النسخة الاحتياطية</string>
+    <string name="settings_backup_restore_warning">الاستعادة تستبدل جميع الشبكات والإعدادات الحالية.</string>
+    <string name="settings_backup_restore_confirm_title">استعادة النسخة الاحتياطية؟</string>
+    <string name="settings_backup_restore_confirm_desc">سيؤدي هذا إلى استبدال جميع الشبكات والإعدادات الحالية بتلك الموجودة في ملف النسخة الاحتياطية. لم يتم تضمين كلمات المرور في النسخة الاحتياطية وسيلزم إعادة إدخالها.\n\nلا يمكن التراجع عن هذا الإجراء.</string>
+    <string name="settings_backup_restore_btn">استعادة</string>
+    <string name="settings_backup_failed_prefix">فشل النسخ الاحتياطي</string>
+    <string name="settings_restore_failed_prefix">فشلت الاستعادة</string>
+    <string name="error">خطأ</string>
+    <string name="ok">حسناً</string>
+
     <string name="battery_dialog_text">للبقاء متصلاً طوال الليل، يرجى تعطيل تحسين البطارية لهذا التطبيق والسماح بالنشاط في الخلفية.</string>
     <string name="battery_dialog_oneplus_tip">نصيحة لأجهزة OnePlus: اقفل التطبيق أيضاً في قائمة التطبيقات الحديثة (رمز القفل) وتأكد من السماح بالنشاط في الخلفية / التشغيل التلقائي في إعدادات البطارية.</string>
     <string name="custom">مخصص</string>

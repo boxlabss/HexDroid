@@ -195,6 +195,20 @@
     <string name="setting_storage_custom_folder">Pasta personalizada selecionada</string>
     <string name="setting_download_folder_default">Downloads (padrão)</string>
     <string name="setting_download_folder_custom">Pasta personalizada</string>
+
+    <string name="settings_backup_restore_title">Backup e Restauração</string>
+    <string name="settings_backup_export_desc">Exporte suas configurações de rede e do aplicativo para um arquivo JSON. Senhas e certificados TLS não estão incluídos.</string>
+    <string name="settings_backup_export_btn">Exportar backup</string>
+    <string name="settings_backup_restore_action">Restaurar backup</string>
+    <string name="settings_backup_restore_warning">A restauração substitui todas as redes e configurações atuais.</string>
+    <string name="settings_backup_restore_confirm_title">Restaurar backup?</string>
+    <string name="settings_backup_restore_confirm_desc">Isso substituirá todas as redes e configurações atuais pelas do arquivo de backup. As senhas não foram incluídas no backup e precisarão ser inseridas novamente.\n\nIsso não pode ser desfeito.</string>
+    <string name="settings_backup_restore_btn">Restaurar</string>
+    <string name="settings_backup_failed_prefix">Falha no backup</string>
+    <string name="settings_restore_failed_prefix">Falha na restauração</string>
+    <string name="error">Erro</string>
+    <string name="ok">OK</string>
+
     <string name="battery_dialog_text">Para continuar conectado em segundo plano, desative a Otimização de Bateria para este app e permita a atividade em segundo plano.</string>
     <string name="battery_dialog_oneplus_tip">Dica OnePlus: bloqueie também o app na tela de Recentes (cadeado) e certifique-se de que a atividade em segundo plano / início automático está permitida nas configurações de bateria.</string>
     <string name="custom">Personalizado</string>

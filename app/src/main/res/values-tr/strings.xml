@@ -136,6 +136,20 @@
     <string name="setting_storage_custom_folder">Özel klasör seçildi</string>
     <string name="setting_download_folder_default">İndirmeler (varsayılan)</string>
     <string name="setting_download_folder_custom">Özel klasör</string>
+
+    <string name="settings_backup_restore_title">Yedekle ve Geri Yükle</string>
+    <string name="settings_backup_export_desc">Ağ yapılandırmalarınızı ve uygulama ayarlarınızı bir JSON dosyasına dışa aktarın. Parolalar ve TLS sertifikaları dahil değildir.</string>
+    <string name="settings_backup_export_btn">Yedeği dışa aktar</string>
+    <string name="settings_backup_restore_action">Yedeği geri yükle</string>
+    <string name="settings_backup_restore_warning">Geri yükleme, tüm mevcut ağları ve ayarları değiştirir.</string>
+    <string name="settings_backup_restore_confirm_title">Yedek geri yüklensin mi?</string>
+    <string name="settings_backup_restore_confirm_desc">Bu işlem, tüm mevcut ağları ve ayarları yedekleme dosyasındakilerle değiştirecektir. Parolalar yedeğe dahil edilmemiştir ve yeniden girilmeleri gerekecektir.\n\nBu işlem geri alınamaz.</string>
+    <string name="settings_backup_restore_btn">Geri Yükle</string>
+    <string name="settings_backup_failed_prefix">Yedekleme başarısız</string>
+    <string name="settings_restore_failed_prefix">Geri yükleme başarısız</string>
+    <string name="error">Hata</string>
+    <string name="ok">Tamam</string>
+
     <string name="battery_dialog_text">Gece boyunca bağlı kalmak için lütfen bu uygulama için Pil Optimizasyonunu devre dışı bırakın ve arka plan etkinliğine izin verin.</string>
     <string name="battery_dialog_oneplus_tip">OnePlus ipucu: Ayrıca uygulamayı Son Kullanılanlar\'da kilitleyin (asma kilit) ve pil ayarlarında arka plan etkinliğine / otomatik başlatmaya izin verildiğinden emin olun.</string>
     <string name="custom">Özel</string>
