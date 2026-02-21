@@ -208,6 +208,62 @@
     <string name="battery_dialog_oneplus_tip">OnePlus tip: also lock the app in Recents (padlock) and ensure background activity / auto-launch is allowed in battery settings.</string>
     <string name="custom">Custom</string>
 
+    <string name="netedit_error_no_network">No network selected</string>
+    <string name="netedit_section_connection">Connection</string>
+    <string name="netedit_network_name">Network Name</string>
+    <string name="netedit_allow_insecure_plaintext">Allow insecure plaintext</string>
+    <string name="netedit_section_identity">Identity</string>
+    <string name="netedit_username_ident">Username (ident)</string>
+    <string name="netedit_section_autoconnect">Auto-connect &amp; Password</string>
+    <string name="netedit_connect_on_start">Connect on app start</string>
+    <string name="netedit_auto_reconnect">Auto-reconnect on disconnect</string>
+    <string name="netedit_server_password">Server password (PASS)</string>
+    <string name="netedit_section_sasl">SASL Authentication</string>
+    <string name="netedit_enable_sasl">Enable SASL</string>
+    <string name="netedit_mechanism">Mechanism</string>
+    <string name="netedit_sasl_username">Username (authcid)</string>
+    <string name="netedit_password">Password</string>
+    <string name="netedit_sasl_external_desc">Uses TLS client certificate for authentication</string>
+    <string name="netedit_section_tls_cert">TLS Client Certificate</string>
+    <string name="netedit_cert_selected">Selected: %1$s</string>
+    <string name="netedit_cert_none">No certificate selected.</string>
+    <string name="netedit_cert_format">Certificate format</string>
+    <string name="netedit_error_cert_key_missing">Please select both a certificate and a key</string>
+    <string name="netedit_format_pem">PEM (.pem)</string>
+    <string name="netedit_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="netedit_format_p12">PKCS#12 (.p12)</string>
+    <string name="netedit_cert_pem_desc">The .pem should include both your certificate and private key.</string>
+    <string name="netedit_cert_choose_pem">Choose .pem</string>
+    <string name="netedit_cert_replace_pem">Replace .pem</string>
+    <string name="netedit_cert_clear">Clear</string>
+    <string name="netedit_cert_choose_crt">Choose .crt</string>
+    <string name="netedit_cert_replace_crt">Replace .crt</string>
+    <string name="netedit_cert_choose_key">Choose .key</string>
+    <string name="netedit_cert_replace_key">Replace .key</string>
+    <string name="netedit_cert_label_crt">Certificate: %1$s</string>
+    <string name="netedit_cert_label_key">Key: %1$s</string>
+    <string name="netedit_cert_key_password">Key password (if encrypted)</string>
+    <string name="netedit_cert_remove">Remove</string>
+    <string name="netedit_cert_undo_remove">Undo remove</string>
+    <string name="netedit_section_autojoin">Auto-join Channels</string>
+    <string name="netedit_autojoin_desc">One per line. Format: #channel [key]</string>
+    <string name="netedit_section_commands">Post-connect Commands</string>
+    <string name="netedit_cmd_delay">Delay before commands (seconds)</string>
+    <string name="netedit_cmd_delay_desc">Wait this many seconds after connecting before running commands</string>
+    <string name="netedit_cmd_auth">Service auth command</string>
+    <string name="netedit_cmd_auth_desc">e.g., /msg NickServ IDENTIFY password</string>
+    <string name="netedit_cmd_extra">Additional commands (one per line):</string>
+    <string name="netedit_cmd_extra_desc">Commands to run after connecting, e.g., /join #channel</string>
+    <string name="netedit_section_encoding">Character Encoding</string>
+    <string name="netedit_encoding">Encoding</string>
+    <string name="netedit_enc_auto">Recommended. Starts with UTF-8 and auto-detects other encodings.</string>
+    <string name="netedit_enc_cp1251">Use for Bulgarian, Russian, Serbian, and other Cyrillic networks.</string>
+    <string name="netedit_enc_utf8">Standard Unicode. Works with most modern IRC networks.</string>
+    <string name="netedit_enc_manual">Manual encoding selection for legacy networks.</string>
+    <string name="netedit_section_ircv3">IRCv3.x Capabilities</string>
+    <string name="netedit_ircv3_advanced">Show advanced options</string>
+    <string name="netedit_ircv3_basic_desc">Basic IRCv3 features enabled by default. Switch on to see advanced options.</string>
+
     <!-- Language names (native) – not translated -->
     <string name="lang_en" translatable="false">English</string>
     <string name="lang_de" translatable="false">Deutsch</string>
