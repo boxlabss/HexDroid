@@ -254,4 +254,13 @@
     <string name="list_loading_format">Cargando… (%1$d)</string>
     <string name="list_channel_count_format">%1$d canales</string>
     <string name="list_join_action">Unirse</string>
+
+    <string name="ignore_no_networks">Aún no hay redes configuradas.</string>
+    <string name="ignore_network_label">Red</string>
+    <string name="ignore_nick_label">Nick a ignorar</string>
+    <string name="action_add">Añadir</string>
+    <string name="ignore_help_text">Los nicks ignorados coinciden sin distinguir mayúsculas de minúsculas y se aplican al chat + avisos + ofertas DCC entrantes en esta red.</string>
+    <string name="ignore_empty">No hay nicks ignorados.</string>
+    <string name="ignore_tip">Consejo: también puedes ignorar a alguien desde la lista de nicks o tocando su nombre en el chat.</string>
+    <string name="action_remove">Eliminar</string>
 </resources>

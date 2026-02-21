@@ -50,7 +50,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.UiState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,7 +85,7 @@ fun IgnoreListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Ignore list") },
+                title = { Text(stringResource(R.string.ignore_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
             )
         }
@@ -96,7 +98,7 @@ fun IgnoreListScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (nets.isEmpty()) {
-                Text("No networks configured yet.")
+                Text(stringResource(R.string.ignore_no_networks))
                 return@Column
             }
 
@@ -106,7 +108,7 @@ fun IgnoreListScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Network", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.ignore_network_label), style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = { netMenuExpanded = true }) {
                     Text(selNet?.name ?: selectedNetId)
@@ -135,7 +137,7 @@ fun IgnoreListScreen(
                 OutlinedTextField(
                     value = addNick,
                     onValueChange = { addNick = it },
-                    label = { Text("Nick to ignore") },
+                    label = { Text(stringResource(R.string.ignore_nick_label)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
@@ -148,11 +150,11 @@ fun IgnoreListScreen(
                             addNick = ""
                         }
                     }
-                ) { Text("Add") }
+                ) { Text(stringResource(R.string.action_add)) }
             }
 
             Text(
-                "Ignored nicks are matched case-insensitively and apply to chat + notices + incoming DCC offers on this network.",
+                stringResource(R.string.ignore_help_text),
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -163,9 +165,9 @@ fun IgnoreListScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text("No ignored nicks.")
+                        Text(stringResource(R.string.ignore_empty))
                         Spacer(Modifier.height(4.dp))
-                        Text("Tip: you can also ignore someone from the nick list or by tapping their name in chat.", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.ignore_tip), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             } else {
@@ -187,7 +189,7 @@ fun IgnoreListScreen(
                                 Spacer(Modifier.width(8.dp))
                                 OutlinedButton(
                                     onClick = { onUnignoreNick(selectedNetId, nick) }
-                                ) { Text("Remove") }
+                                ) { Text(stringResource(R.string.action_remove)) }
                             }
                         }
                     }

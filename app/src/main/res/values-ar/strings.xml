@@ -224,4 +224,13 @@
     <string name="list_loading_format">جارٍ التحميل… (%1$d)</string>
     <string name="list_channel_count_format">%1$d قنوات</string>
     <string name="list_join_action">انضمام</string>
+
+    <string name="ignore_no_networks">لم يتم تكوين أي شبكات بعد.</string>
+    <string name="ignore_network_label">الشبكة</string>
+    <string name="ignore_nick_label">الاسم (Nick) المراد تجاهله</string>
+    <string name="action_add">إضافة</string>
+    <string name="ignore_help_text">تتم مطابقة الأسماء المتجاهلة بدون تحسس حالة الأحرف وتنطبق على الدردشة + الإشعارات + عروض DCC الواردة على هذه الشبكة.</string>
+    <string name="ignore_empty">لا توجد أسماء متجاهلة.</string>
+    <string name="ignore_tip">نصيحة: يمكنك أيضاً تجاهل شخص ما من قائمة الأسماء أو بالنقر على اسمه في الدردشة.</string>
+    <string name="action_remove">إزالة</string>
 </resources>

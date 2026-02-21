@@ -302,6 +302,15 @@
     <string name="list_loading_format">Loading… (%1$d)</string>
     <string name="list_channel_count_format">%1$d channels</string>
     <string name="list_join_action">Join</string>
+    
+    <string name="ignore_no_networks">No networks configured yet.</string>
+    <string name="ignore_network_label">Network</string>
+    <string name="ignore_nick_label">Nick to ignore</string>
+    <string name="action_add">Add</string>
+    <string name="ignore_help_text">Ignored nicks are matched case-insensitively and apply to chat + notices + incoming DCC offers on this network.</string>
+    <string name="ignore_empty">No ignored nicks.</string>
+    <string name="ignore_tip">Tip: you can also ignore someone from the nick list or by tapping their name in chat.</string>
+    <string name="action_remove">Remove</string>
 
     <!-- Language names (native) – not translated -->
     <string name="lang_en" translatable="false">English</string>

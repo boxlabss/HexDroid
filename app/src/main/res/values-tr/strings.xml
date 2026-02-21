@@ -227,4 +227,13 @@
     <string name="list_loading_format">Yükleniyor… (%1$d)</string>
     <string name="list_channel_count_format">%1$d kanal</string>
     <string name="list_join_action">Katıl</string>
+
+    <string name="ignore_no_networks">Henüz yapılandırılmış ağ yok.</string>
+    <string name="ignore_network_label">Ağ</string>
+    <string name="ignore_nick_label">Yoksayılacak nick</string>
+    <string name="action_add">Ekle</string>
+    <string name="ignore_help_text">Yoksayılan nickler büyük/küçük harfe duyarsız olarak eşleştirilir ve bu ağdaki sohbet + bildirimler + gelen DCC teklifleri için geçerlidir.</string>
+    <string name="ignore_empty">Yoksayılan nick yok.</string>
+    <string name="ignore_tip">İpucu: Birini nick listesinden veya sohbette adına dokunarak da yoksayabilirsiniz.</string>
+    <string name="action_remove">Kaldır</string>
 </resources>

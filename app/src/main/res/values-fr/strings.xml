@@ -254,4 +254,13 @@
     <string name="list_loading_format">Chargement… (%1$d)</string>
     <string name="list_channel_count_format">%1$d canaux</string>
     <string name="list_join_action">Rejoindre</string>
+
+    <string name="ignore_no_networks">Aucun réseau configuré pour le moment.</string>
+    <string name="ignore_network_label">Réseau</string>
+    <string name="ignore_nick_label">Pseudo à ignorer</string>
+    <string name="action_add">Ajouter</string>
+    <string name="ignore_help_text">Les pseudos ignorés correspondent sans tenir compte de la casse et s\'appliquent au chat + aux notices + aux offres DCC entrantes sur ce réseau.</string>
+    <string name="ignore_empty">Aucun pseudo ignoré.</string>
+    <string name="ignore_tip">Astuce : vous pouvez également ignorer quelqu\'un depuis la liste des pseudos ou en appuyant sur son nom dans le chat.</string>
+    <string name="action_remove">Supprimer</string>
 </resources>
