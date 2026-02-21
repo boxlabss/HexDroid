@@ -573,9 +573,8 @@ private fun FlaskHero(
                     .align(Alignment.TopCenter)
                     .padding(top = 8.dp)
             )
-
             Text(
-                "A free (and ad-free) app by",
+                "HexDroid - A free (and ad-free) app by",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = flaskSize + 14.dp),

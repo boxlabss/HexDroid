@@ -120,14 +120,6 @@ object EncodingHelper {
         }.getOrDefault(Charsets.UTF_8)
     }
     
-    /**
-     * Check if a charset name is valid and supported.
-     */
-    fun isValidCharset(name: String): Boolean {
-        if (name.isBlank()) return false
-        if (name.equals("auto", ignoreCase = true)) return true
-        return runCatching { Charset.forName(name) }.isSuccess
-    }
     
     /**
      * Try to detect the encoding of a byte array.
@@ -145,7 +137,14 @@ object EncodingHelper {
      */
     fun detectEncoding(bytes: ByteArray): String {
         if (bytes.isEmpty()) return "UTF-8"
-        
+
+        // Short-circuit: if there are no bytes ≥ 0x80 the content is pure ASCII, which is
+        // valid UTF-8 by definition.  Skipping the scoring loop for these lines avoids the
+        // length-bonus false-positive that would otherwise cause windows-1251 to "win" on
+        // long ASCII MOTD lines purely because it maps every byte without replacement chars.
+        val hasHighBytes = bytes.any { it.toInt() and 0xFF >= 0x80 }
+        if (!hasHighBytes) return "UTF-8"
+
         // First, check if it's valid UTF-8 (most IRC networks today use UTF-8)
         if (isValidUtf8(bytes)) return "UTF-8"
         
@@ -168,7 +167,7 @@ object EncodingHelper {
     /**
      * Check if bytes are valid UTF-8 without replacement characters.
      */
-    fun isValidUtf8(bytes: ByteArray): Boolean {
+    internal fun isValidUtf8(bytes: ByteArray): Boolean {
         val decoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
@@ -216,9 +215,27 @@ object EncodingHelper {
                 // Standard line endings
                 ch == '\n' || ch == '\r' -> { /* neutral */ }
 
-                // ----- Script-specific ranges: give heavier bonus -----
-                // Cyrillic (windows-1251, KOI8-R)
-                ch.code in 0x0400..0x04FF -> score += 4
+			   /** 
+				* Script-specific ranges: give heavier bonus
+				* Cyrillic tiebreaker - windows-1251 vs KOI8-R:
+				*
+				* Both encodings map 0xC0-0xFF to standard Cyrillic А-я, so those bytes
+				* score equally under either charset.  The discriminating bytes are in
+				* the 0x80-0xBF range:
+				*
+				* windows-1251 0x80-0x9F - Cyrillic supplement letters (Ђ,Ѓ,Љ,Њ…)
+				* windows-1251 0xA0-0xBF - more Cyrillic letters (Ё,Є,Ї…)
+				* KOI8-R       0x80-0x9F - C1 control characters (penalised −15 below)
+				* KOI8-R       0xA0-0xBF - box-drawing symbols (cat So, +2 below)
+				*
+				* The supplement block U+0400-U+040F gets an extra +2 bump (+6 total)
+				* because windows-1251 maps 14 of its 0x80-0xBF bytes into this range
+				* while KOI8-R maps only one (0xB3 > Ё, U+0401).  Any line with
+				* Bulgarian/Ukrainian letters (Ё, Ї, Ђ…) therefore scores noticeably
+				* higher for windows-1251 than for KOI8-R.
+				*/
+                ch.code in 0x0400..0x040F -> score += 6  // Cyrillic supplement (windows-1251 advantage)
+                ch.code in 0x0410..0x04FF -> score += 4  // Main Cyrillic А-я block
                 // Arabic (windows-1256, ISO-8859-6)
                 ch.code in 0x0600..0x06FF -> score += 4
                 // Arabic supplementary
@@ -249,9 +266,20 @@ object EncodingHelper {
             }
         }
         
-        // Bonus for longer text without issues (suggests encoding is correct)
+        // Bonus for longer text without issues — but ONLY when the decoded text actually
+        // contains non-ASCII characters.  Every single-byte codepage (windows-1251, 1252,
+        // ISO-8859-1 …) can decode any byte without producing a replacement character, so a
+        // pure-ASCII line always has 0 replacements regardless of which codepage is tried.
+        // Awarding text.length/5 in that case makes windows-1251 win the scoring race for
+        // long ASCII MOTD lines simply because it is listed before 1252/ISO-8859-1 in
+        // COMMON_ENCODINGS — the root cause of the spurious CP-1251 auto-detection bug.
         if (replacements == 0 && text.length > 10) {
-            score += text.length / 5
+            val nonAsciiCount = text.count { it.code > 0x7F && !it.isISOControl() }
+            if (nonAsciiCount > 0) {
+                // Scale bonus to non-ASCII density rather than raw length.
+                score += (nonAsciiCount * 2).coerceAtMost(text.length / 5)
+            }
+            // Pure-ASCII clean decode: no bonus — every single-byte codec ties here
         }
 
         // Bonus: if the raw byte stream has common multi-byte lead-byte patterns
@@ -278,7 +306,7 @@ object EncodingHelper {
      * @param preferredEncoding Encoding to use, or "auto" for detection
      * @return Pair of (decoded text, actual encoding used)
      */
-    fun decode(bytes: ByteArray, preferredEncoding: String): Pair<String, String> {
+    internal fun decode(bytes: ByteArray, preferredEncoding: String): Pair<String, String> {
         if (bytes.isEmpty()) return "" to "UTF-8"
         
         val actualEncoding = if (preferredEncoding.equals("auto", ignoreCase = true)) {
@@ -316,7 +344,7 @@ object EncodingHelper {
      * @param autoDetect If true, run detection on each line
      * @return Pair of (decoded line or null if EOF, actual encoding used)
      */
-    fun readLine(
+    internal fun readLine(
         input: InputStream,
         encoding: String,
         autoDetect: Boolean = true
@@ -363,82 +391,145 @@ object EncodingHelper {
  * A line reader that wraps an InputStream and handles encoding detection.
  * Maintains state for detected encoding across multiple reads.
  *
- * Detection strategy:
- * - Start assuming UTF-8 (overwhelmingly the most common modern encoding).
- * - On every line, run byte-level detection. If a non-UTF-8 encoding wins
- *   consistently (same encoding detected N times in a row), lock to it.
- * - Once locked, stop running detection (saves CPU).
+ * ## Detection strategy
+ *
+ * 1. Start assuming UTF-8 (overwhelmingly the most common modern encoding).
+ * 2. On every line that contains at least one byte ≥ 0x80 (i.e. non-ASCII content),
+ *    run [EncodingHelper.detectEncoding] on the raw bytes.
+ * 3. If the same non-UTF-8 encoding wins on [LOCK_THRESHOLD] such lines in a row,
+ *    commit to it and stop running detection (saves CPU per line).
+ *
+ * ## Key design invariants
+ *
+ * **Speculative-update prevention:** [currentEncoding] is NOT changed until the streak
+ * reaches [LOCK_THRESHOLD].  Each line during the streak is decoded with a fresh
+ * auto-detect pass, not with a half-committed encoding.
+ *
+ * **ASCII neutrality:** Pure ASCII lines (no bytes ≥ 0x80) are always valid UTF-8,
+ * but they carry zero information about the server's legacy encoding.  On a Bulgarian
+ * windows-1251 server, `NICK`, `PING`, `JOIN`, and many MOTD lines are pure ASCII and
+ * arrive interleaved with Cyrillic chat lines.  Treating those ASCII lines as evidence
+ * for UTF-8 would perpetually reset the streak and prevent the encoding from ever
+ * locking.  Instead, pure-ASCII lines are skipped in streak accounting entirely.
+ *
+ * **Streak reset:** The streak is only reset when a line with actual non-ASCII content
+ * is detected as a *different* encoding from the current candidate — i.e. genuinely
+ * contradicting evidence.
  */
 class EncodingLineReader(
     private val input: InputStream,
     initialEncoding: String = "auto"
 ) {
-    private var currentEncoding = if (initialEncoding.equals("auto", ignoreCase = true)) {
-        "UTF-8" // Start with UTF-8 assumption
+    /** The committed encoding used to decode lines. Only changes on lock-commit or [setEncoding]. */
+    private var currentEncoding: String = if (initialEncoding.equals("auto", ignoreCase = true)) {
+        "UTF-8"
     } else {
         initialEncoding
     }
-    
-    private val autoDetect = initialEncoding.equals("auto", ignoreCase = true)
-    private var encodingLocked = !autoDetect
 
-    /** How many consecutive lines must agree on a non-UTF-8 encoding before we lock. */
-    private val lockThreshold = 2
-    private var consecutiveNonUtf8Hits = 0
-    private var lastDetectedNonUtf8: String? = null
-    
+    private val autoDetect: Boolean = initialEncoding.equals("auto", ignoreCase = true)
+    private var encodingLocked: Boolean = !autoDetect
+
     /**
-     * The currently detected/used encoding.
+     * How many consecutive non-ASCII lines must agree on a non-UTF-8 encoding before
+     * we commit to it.  2 is enough: on a real legacy server the first two non-ASCII
+     * lines almost always agree, and ASCII lines in between no longer cause false resets.
      */
+    private val LOCK_THRESHOLD = 2
+
+    /** The candidate non-UTF-8 encoding currently accumulating streak count. */
+    private var streakEncoding: String? = null
+    private var streakCount: Int = 0
+
+    /** The currently committed/used encoding. */
     val encoding: String get() = currentEncoding
-    
+
     /**
-     * Read a line from the stream.
-     * 
-     * @return The decoded line, or null on EOF
+     * Read and decode the next line from the stream.
+     * Returns null on EOF.
      */
     fun readLine(): String? {
-        val doDetect = autoDetect && !encodingLocked
-        val (line, detected) = EncodingHelper.readLine(input, currentEncoding, doDetect)
-        
-        if (doDetect && detected != currentEncoding) {
-            if (detected != "UTF-8") {
-                // Non-UTF-8 detected
-                if (detected == lastDetectedNonUtf8) {
-                    consecutiveNonUtf8Hits++
-                } else {
-                    lastDetectedNonUtf8 = detected
-                    consecutiveNonUtf8Hits = 1
-                }
-                // Lock after threshold consecutive agreements
-                if (consecutiveNonUtf8Hits >= lockThreshold) {
-                    currentEncoding = detected
-                    encodingLocked = true
-                } else {
-                    // Use the detected encoding for this line but don't lock yet
-                    // (Re-decode is already done inside EncodingHelper.readLine)
-                    currentEncoding = detected
-                }
-            } else {
-                // Detected UTF-8 — reset streak counter
-                consecutiveNonUtf8Hits = 0
-                lastDetectedNonUtf8 = null
+        if (!autoDetect || encodingLocked) {
+            // Fast path: locked or explicit encoding — read and decode directly.
+            val (line, _) = EncodingHelper.readLine(input, currentEncoding, autoDetect = false)
+            return line
+        }
+
+        // Detection path: read raw bytes first so we can inspect them before decoding.
+        val buffer = ByteArrayOutputStream(512)
+        var b: Int
+        while (true) {
+            b = input.read()
+            if (b == -1) {
+                // EOF — decode whatever we have and return.
+                if (buffer.size() == 0) return null
+                break
+            }
+            when (b) {
+                '\n'.code -> break
+                '\r'.code -> { /* skip CR */ }
+                else -> buffer.write(b)
             }
         }
-        
-        return line
+        if (b == -1 && buffer.size() == 0) return null
+
+        val bytes = buffer.toByteArray()
+
+        // Check whether the line has any non-ASCII bytes at all.
+        val hasHighBytes = bytes.any { it.toInt() and 0xFF >= 0x80 }
+
+        if (!hasHighBytes) {
+            // Pure ASCII encoding-neutral. Don't touch the streak; just decode as UTF-8.
+            return String(bytes, Charsets.UTF_8)
+        }
+
+        // Non-ASCII content: run detection to get evidence about the encoding.
+        val detected = EncodingHelper.detectEncoding(bytes)
+        val decodedLine = String(bytes, EncodingHelper.getCharset(detected))
+
+        when {
+            detected == "UTF-8" -> {
+                // Genuine UTF-8 non-ASCII content — this is real contradicting evidence.
+                // Reset the streak; this server is probably UTF-8.
+                streakEncoding = null
+                streakCount = 0
+            }
+            detected == streakEncoding -> {
+                // Same candidate as before — advance the streak.
+                streakCount++
+                if (streakCount >= LOCK_THRESHOLD) {
+                    currentEncoding = detected
+                    encodingLocked = true
+                    streakEncoding = null
+                    streakCount = 0
+                }
+            }
+            else -> {
+                // Different non-UTF-8 candidate; restart streak with the new candidate.
+                streakEncoding = detected
+                streakCount = 1
+                // (currentEncoding stays "UTF-8" - no update)
+            }
+        }
+
+        return decodedLine
     }
-    
+
     /**
-     * Check if encoding detection has settled on a non-UTF-8 encoding.
+     * Returns true once auto-detection has locked onto a non-UTF-8 encoding,
+     * or if a non-UTF-8 encoding was configured explicitly.
      */
-    fun hasDetectedNonUtf8(): Boolean = currentEncoding != "UTF-8" && (encodingLocked || consecutiveNonUtf8Hits > 0)
-    
+    fun hasDetectedNonUtf8(): Boolean = currentEncoding != "UTF-8" && encodingLocked
+
     /**
-     * Force a specific encoding (disables auto-detection).
+     * Override the encoding, disabling auto-detection.
+     * Passing "auto" leaves UTF-8 as the fixed encoding (re-enabling auto-detect
+     * requires constructing a new [EncodingLineReader]).
      */
     fun setEncoding(encoding: String) {
         currentEncoding = if (encoding.equals("auto", ignoreCase = true)) "UTF-8" else encoding
         encodingLocked = true
+        streakEncoding = null
+        streakCount = 0
     }
 }

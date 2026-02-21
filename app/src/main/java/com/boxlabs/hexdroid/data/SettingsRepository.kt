@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
 
 private fun parseFontChoice(raw: String?, fallback: com.boxlabs.hexdroid.FontChoice): com.boxlabs.hexdroid.FontChoice {
     val normalized = when (raw) {
@@ -127,6 +128,15 @@ class SettingsRepository(private val ctx: Context) {
         }
     }
 
+    /** Atomically replace the entire network list in a single DataStore write.
+     *  Use this instead of calling upsertNetwork() in a loop, which can race when
+     *  multiple coroutines interleave their read-modify-write cycles. */
+    suspend fun saveNetworks(profiles: List<NetworkProfile>) {
+        ctx.dataStore.edit { prefs ->
+            prefs[Keys.NETWORKS_JSON] = toNetworksJson(profiles).toString()
+        }
+    }
+
     suspend fun upsertNetwork(profile: NetworkProfile) {
         ctx.dataStore.edit { prefs ->
             val list = parseNetworks(prefs[Keys.NETWORKS_JSON]).toMutableList()
@@ -187,7 +197,7 @@ class SettingsRepository(private val ctx: Context) {
             UiSettings(
                 themeMode = runCatching {
                     ThemeMode.valueOf(o.optString("themeMode", ThemeMode.DARK.name))
-                }.getOrDefault(ThemeMode.SYSTEM),
+                }.getOrDefault(ThemeMode.DARK),
                 compactMode = o.optBoolean("compactMode", false),
 
                 showTimestamps = o.optBoolean("showTimestamps", true),
@@ -407,6 +417,8 @@ class SettingsRepository(private val ctx: Context) {
                     autoCommandsText = o.optString("autoCommandsText", ""),
 
                     encoding = o.optString("encoding", "auto"),
+                    sortOrder = o.optInt("sortOrder", 0),
+                    isFavourite = o.optBoolean("isFavourite", false),
                 )
             }
             out
@@ -467,6 +479,8 @@ class SettingsRepository(private val ctx: Context) {
             o.put("autoCommandsText", n.autoCommandsText)
 
             o.put("encoding", n.encoding)
+            o.put("sortOrder", n.sortOrder)
+            o.put("isFavourite", n.isFavourite)
             arr.put(o)
         }
         return arr
@@ -616,9 +630,84 @@ class SettingsRepository(private val ctx: Context) {
         val key = parts.getOrNull(1)
         return AutoJoinChannel(chan, key?.takeIf { it.isNotBlank() })
     }
+
+    // -----------------------------------------------------------------------------------------
+    // Backup / Restore
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * Produce a JSON string representing the current networks and settings.
+     *
+     * Passwords (SASL, server) and TLS client certificates are intentionally excluded — they
+     * are stored encrypted using hardware-backed Android Keystore keys that are device-specific
+     * and cannot be exported.
+     */
+    fun exportBackupJson(networks: List<NetworkProfile>, settings: com.boxlabs.hexdroid.UiSettings): String {
+        val root = JSONObject()
+        // version: incremented only when a field is REMOVED or RENAMED (breaking change).
+        // minCompatVersion: the oldest app version that can safely import this backup.
+        // New optional fields added in later versions are silently ignored by older builds
+        // because all parse* calls use optXxx() with defaults throughout.
+        root.put("version", 2)
+        root.put("minCompatVersion", 1)
+        root.put("app", "HexDroid")
+        root.put("exportedAt", java.time.Instant.now().toString())
+        root.put("note", "Passwords and TLS certificates are not included in the backup.")
+        root.put("schemaChanges", org.json.JSONArray(listOf(
+            "v2: added sortOrder and isFavourite fields on NetworkProfile"
+        )))
+        root.put("settings", toSettingsJson(settings))
+        root.put("networks", toNetworksJson(networks))
+        return root.toString(2)
+    }
+
+    /**
+     * Parse a backup JSON string and restore settings and networks.
+     *
+     * On success, all existing networks are replaced with those in the backup.
+     * Networks whose IDs already exist are overwritten; networks not in the backup are removed.
+     *
+     * @throws IllegalArgumentException if the JSON is invalid or the version is unsupported.
+     */
+    suspend fun importBackup(json: String) {
+        val root = try {
+            JSONObject(json)
+        } catch (e: Throwable) {
+            throw IllegalArgumentException("Not a valid backup file: ${e.message}")
+        }
+
+        val version = root.optInt("version", 1)
+        // minCompatVersion declares the *minimum* app backup-format version needed to safely
+        // import this file.  If minCompatVersion is absent, assume it equals version (old
+        // backups that predate this field are version 1 and this build supports version 1).
+        val minCompat = root.optInt("minCompatVersion", version)
+        val appBackupVersion = 2  // this build's highest supported backup version
+        if (minCompat > appBackupVersion) {
+            throw IllegalArgumentException(
+                "This backup requires a newer version of HexDroid (backup minCompatVersion=$minCompat, app supports up to $appBackupVersion). Please update the app."
+            )
+        }
+        // version > appBackupVersion but minCompat <= appBackupVersion:
+        // The backup has newer optional fields we don't know about yet.  Import proceeds
+        // normally — unknown fields are silently ignored by all the optXxx() parse calls.
+
+        val settingsJson = root.optJSONObject("settings")
+        val networksJson = root.optJSONArray("networks")
+
+        ctx.dataStore.edit { prefs ->
+            if (settingsJson != null) {
+                val restoredSettings = parseSettings(settingsJson.toString())
+                prefs[Keys.SETTINGS_JSON] = toSettingsJson(restoredSettings).toString()
+            }
+            if (networksJson != null) {
+                val restoredNetworks = parseNetworks(networksJson.toString())
+                prefs[Keys.NETWORKS_JSON] = toNetworksJson(restoredNetworks).toString()
+            }
+        }
+    }
 }
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class ThemeMode { SYSTEM, LIGHT, DARK, MATRIX }
 
 data class AutoJoinChannel(val channel: String, val key: String? = null) {
     fun toLine(): String = if (key.isNullOrBlank()) channel else "$channel $key"
@@ -672,6 +761,12 @@ data class NetworkProfile(
      * - Or explicit: "UTF-8", "windows-1251", "ISO-8859-1", etc.
      */
     val encoding: String = "auto",
+
+    /** Sort position in the network list. Lower = higher in list. */
+    val sortOrder: Int = 0,
+
+    /** If true, this network is pinned to the top of the sorted list (above non-favourites). */
+    val isFavourite: Boolean = false,
 ) {
     fun toIrcConfig(
         saslPasswordOverride: String? = null,

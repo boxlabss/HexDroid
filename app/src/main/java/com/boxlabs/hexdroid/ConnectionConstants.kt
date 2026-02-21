@@ -55,7 +55,14 @@ object ConnectionConstants {
     /** Socket connect timeout (ms). */
     const val SOCKET_CONNECT_TIMEOUT_MS = 30_000
     
-    /** TLS handshake timeout (ms). */
+    /**
+     * Timeout for the TLS handshake (ms).
+     *
+     * Applied as SSLSocket.soTimeout *only* during startHandshake(), then restored to
+     * SOCKET_READ_TIMEOUT_MS. This bounds the handshake on devices whose BoringSSL
+     * implementation stalls or emits SSL_ERROR_SYSCALL/"Success" when the radio suspends.
+     * 30 s is generous for any reachable IRC server; typical handshakes finish in < 1 s.
+     */
     const val TLS_HANDSHAKE_TIMEOUT_MS = 30_000
     
     /** IRC registration timeout - time to receive 001 RPL_WELCOME (ms). */
@@ -69,6 +76,14 @@ object ConnectionConstants {
     /** TCP keep-alive enable. */
     const val TCP_KEEPALIVE = true
     
-    /** Socket read timeout (0 = infinite, relies on PING/PONG for liveness). */
+    /** Socket read timeout (0 = infinite, relies on PING/PONG for liveness).
+     *
+     * We keep this at 0 (infinite) and rely exclusively on the PING/PONG loop in IrcCore
+     * for mid-session liveness detection.  Using a non-zero soTimeout here would cause
+     * SocketTimeoutException on every quiet period longer than the timeout, producing
+     * false disconnects on low-traffic channels.  The PING loop fires every 60-90 s and
+     * closes the socket after PING_TIMEOUT_MS (180 s) of silence — that is the correct
+     * mechanism for detecting half-open connections on mobile.
+     */
     const val SOCKET_READ_TIMEOUT_MS = 0
 }

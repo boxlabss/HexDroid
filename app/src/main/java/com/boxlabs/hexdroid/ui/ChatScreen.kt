@@ -26,9 +26,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.shape.RoundedCornerShape
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.draggable
@@ -65,24 +67,27 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -92,6 +97,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -113,7 +119,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.border
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
@@ -124,12 +129,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -141,11 +144,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.stripIrcFormatting
-import com.boxlabs.hexdroid.ui.components.HexGradientButton
 import com.boxlabs.hexdroid.ui.components.LagBar
 import com.boxlabs.hexdroid.ui.theme.fontFamilyForChoice
 import com.boxlabs.hexdroid.ui.tour.TourTarget
@@ -158,7 +161,9 @@ import java.util.Locale
 
 private sealed class SidebarItem(val stableKey: String) {
     data class Header(val netId: String, val title: String) : SidebarItem("h:$netId")
-    data class Buffer(val key: String, val label: String, val indent: androidx.compose.ui.unit.Dp) : SidebarItem("b:$key")
+    data class Buffer(val key: String, val label: String, val indent: androidx.compose.ui.unit.Dp) :
+        SidebarItem("b:$key")
+
     data class DividerItem(val netId: String) : SidebarItem("d:$netId")
 }
 
@@ -185,6 +190,7 @@ fun ChatScreen(
     onSysInfo: () -> Unit,
     onAbout: () -> Unit,
     onUpdateSettings: (UiSettings.() -> UiSettings) -> Unit,
+    onReorderNetworks: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
@@ -197,7 +203,8 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // Intro tour
-    val tourWantsBuffers = tourActive && (tourTarget == TourTarget.CHAT_BUFFER_DRAWER || tourTarget == TourTarget.CHAT_DRAWER_BUTTON)
+    val tourWantsBuffers =
+        tourActive && (tourTarget == TourTarget.CHAT_BUFFER_DRAWER || tourTarget == TourTarget.CHAT_DRAWER_BUTTON)
 
     // When the tour is on the "Switch buffers" step, ensure the buffer list is actually visible.
     // On narrow layouts that means opening the drawer; on wide layouts we temporarily force the split pane to show.
@@ -210,12 +217,16 @@ fun ChatScreen(
 
     fun splitKey(key: String): Pair<String, String> {
         val idx = key.indexOf("::")
-        return if (idx <= 0) ("unknown" to key) else (key.substring(0, idx) to key.substring(idx + 2))
+        return if (idx <= 0) ("unknown" to key) else (key.substring(
+            0,
+            idx
+        ) to key.substring(idx + 2))
     }
 
     fun baseNick(display: String): String = display.trimStart('~', '&', '@', '%', '+')
 
-    fun nickPrefix(display: String): Char? = display.firstOrNull()?.takeIf { it in listOf('~','&','@','%','+') }
+    fun nickPrefix(display: String): Char? =
+        display.firstOrNull()?.takeIf { it in listOf('~', '&', '@', '%', '+') }
 
     fun netName(netId: String): String =
         state.networks.firstOrNull { it.id == netId }?.name ?: netId
@@ -290,7 +301,11 @@ fun ChatScreen(
 
                 if (!lagLabel.isNullOrBlank()) {
                     Spacer(Modifier.width(8.dp))
-                    Text(lagLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        lagLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 if (hi > 0) {
@@ -329,14 +344,14 @@ fun ChatScreen(
 
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var inputHasFocus by remember { mutableStateOf(false) }
-	
-	var showColorPicker by remember { mutableStateOf(false) }
-	var selectedFgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
-	var selectedBgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
-	var boldActive by remember { mutableStateOf(false) }
-	var italicActive by remember { mutableStateOf(false) }
-	var underlineActive by remember { mutableStateOf(false) }
-	var reverseActive by remember { mutableStateOf(false) }
+
+    var showColorPicker by remember { mutableStateOf(false) }
+    var selectedFgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
+    var selectedBgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
+    var boldActive by remember { mutableStateOf(false) }
+    var italicActive by remember { mutableStateOf(false) }
+    var underlineActive by remember { mutableStateOf(false) }
+    var reverseActive by remember { mutableStateOf(false) }
 
 
     // Tracks IME bottom inset (keyboard) in pixels so we can avoid disabling tail-follow during IME resize.
@@ -344,8 +359,11 @@ fun ChatScreen(
         WindowInsets.ime.asPaddingValues().calculateBottomPadding().toPx().toInt()
     }
     val timeFmt = remember(state.settings.timestampFormat) {
-        try { SimpleDateFormat(state.settings.timestampFormat, Locale.getDefault()) }
-        catch (_: Throwable) { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+        try {
+            SimpleDateFormat(state.settings.timestampFormat, Locale.getDefault())
+        } catch (_: Throwable) {
+            SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        }
     }
 
     val isChannel = selBufName.startsWith("#") || selBufName.startsWith("&")
@@ -380,28 +398,28 @@ fun ChatScreen(
     val myNick = state.connections[selNetId]?.myNick ?: state.myNick
     val myDisplay = nicklist.firstOrNull { baseNick(it).equals(myNick, ignoreCase = true) }
     val myPrefix = myDisplay?.let { nickPrefix(it) }
-    val canKick = isChannel && myPrefix in listOf('~','&','@','%')
-    val canBan = isChannel && myPrefix in listOf('~','&','@')
-    val canTopic = isChannel && myPrefix in listOf('~','&','@','%')
+    val canKick = isChannel && myPrefix in listOf('~', '&', '@', '%')
+    val canBan = isChannel && myPrefix in listOf('~', '&', '@')
+    val canTopic = isChannel && myPrefix in listOf('~', '&', '@', '%')
 
     val bgLum = MaterialTheme.colorScheme.background.luminance()
 
     // Precompute a perceptually-separated palette and assign unique colours within this buffer.
     val nickPalette = remember(bgLum) { NickColors.buildPalette(bgLum) }
-	val nickColorMap = remember(selected, nicklist, messages, bgLum, state.settings.colorizeNicks) {
-		if (!state.settings.colorizeNicks) emptyMap()
-		else {
-			val bases = LinkedHashSet<String>()
-			for (n in nicklist) bases.add(baseNick(n).lowercase())
-			for (m in messages) m.from?.let { bases.add(baseNick(it).lowercase()) }
-			NickColors.assignColors(bases.toList(), nickPalette)
-		}
-	}
+    val nickColorMap = remember(selected, nicklist, messages, bgLum, state.settings.colorizeNicks) {
+        if (!state.settings.colorizeNicks) emptyMap()
+        else {
+            val bases = LinkedHashSet<String>()
+            for (n in nicklist) bases.add(baseNick(n).lowercase())
+            for (m in messages) m.from?.let { bases.add(baseNick(it).lowercase()) }
+            NickColors.assignColors(bases.toList(), nickPalette)
+        }
+    }
 
-	fun nickColor(nick: String): Color {
-		val base = baseNick(nick).lowercase()
-		return nickColorMap[base] ?: NickColors.colorFromHash(base, nickPalette)
-	}
+    fun nickColor(nick: String): Color {
+        val base = baseNick(nick).lowercase()
+        return nickColorMap[base] ?: NickColors.colorFromHash(base, nickPalette)
+    }
 
     var showNickSheet by remember { mutableStateOf(false) }
 
@@ -434,14 +452,14 @@ fun ChatScreen(
     fun sendNow() {
         val t = input.text.trim()
         if (t.isEmpty()) return
-        
+
         // Build IRC formatting prefix based on active formatting state
         val formattedText = buildString {
             if (boldActive) append("\u0002")
             if (italicActive) append("\u001D")
             if (underlineActive) append("\u001F")
             if (reverseActive) append("\u0016")
-            
+
             if (selectedFgColor != null) {
                 append("\u0003")
                 append(selectedFgColor.toString().padStart(2, '0'))
@@ -450,13 +468,13 @@ fun ChatScreen(
                     append(selectedBgColor.toString().padStart(2, '0'))
                 }
             }
-            
+
             append(t)
         }
-        
+
         input = TextFieldValue("")
         onSend(formattedText)
-        
+
         // Optionally reset formatting after sending (comment out to keep it persistent)
         // selectedFgColor = null
         // selectedBgColor = null
@@ -472,14 +490,17 @@ fun ChatScreen(
     }
 
     fun mention(nick: String) {
-        input = if (input.text.isBlank()) TextFieldValue("$nick: ") else TextFieldValue(input.text + " $nick")
+        input =
+            if (input.text.isBlank()) TextFieldValue("$nick: ") else TextFieldValue(input.text + " $nick")
     }
 
     @Composable
     fun BufferDrawer(mod: Modifier = Modifier) {
         val sidebarItems = remember(state.networks, buffersByNet, state.channelsOnly, selected) {
             val out = mutableListOf<SidebarItem>()
-            for (net in state.networks) {
+            val sortedNets = state.networks
+                .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+            for (net in sortedNets) {
                 val nId = net.id
                 val header = net.name
                 val grouped = buffersByNet[nId]
@@ -521,42 +542,152 @@ fun ChatScreen(
             }
         }
 
-Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            mod.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            val listState = rememberLazyListState()
+
+            // Reorderable state for network-level drag-to-reorder in the sidebar.
+            // Only Header and server-Buffer items (indent == 0.dp) represent network
+            // positions - child buffers and dividers ride along implicitly.
+            // We map the dragged item's index back to a network-level index by counting
+            // how many network "root" items precede it in the flat list.
+            val reorderState = rememberReorderableLazyListState(
+                lazyListState = listState,
+                onMove = { from, to ->
+                    // Translate flat list indices to network-level indices by counting
+                    // only Header / root-Buffer items (one per network).
+                    fun netIndexOf(flatIdx: Int): Int {
+                        var count = 0
+                        for (i in 0 until flatIdx) {
+                            val si = sidebarItems.getOrNull(i) ?: break
+                            if (si is SidebarItem.Header ||
+                                (si is SidebarItem.Buffer && si.indent.value == 0f)) count++
+                        }
+                        return count
+                    }
+                    val fromNet = netIndexOf(from.index)
+                    val toNet   = netIndexOf(to.index)
+                    if (fromNet != toNet) onReorderNetworks(fromNet, toNet)
+                }
+            )
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize().tourTarget(TourTarget.CHAT_BUFFER_DRAWER),
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .tourTarget(TourTarget.CHAT_BUFFER_DRAWER),
                 contentPadding = PaddingValues(vertical = 6.dp)
             ) {
                 items(sidebarItems, key = { it.stableKey }) { item ->
-                    when (item) {
-                        is SidebarItem.Header -> {
-                            val (lagLabel, lagProgress) = lagInfoByNet[item.netId] ?: ("—" to 0f)
-                            Column(Modifier.padding(start = 6.dp, top = 12.dp, bottom = 8.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(item.title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                    Text(lagLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Only network root items (Header in channelsOnly mode, or the
+                    // server Buffer row otherwise) get a ReorderableItem wrapper and
+                    // drag handle. Child buffer rows and dividers are not draggable.
+                    val isNetworkRoot = item is SidebarItem.Header ||
+                        (item is SidebarItem.Buffer && item.indent.value == 0f)
+
+                    if (isNetworkRoot) {
+                        ReorderableItem(reorderState, key = item.stableKey) { isDragging ->
+                            when (item) {
+                                is SidebarItem.Header -> {
+                                    val (lagLabel, lagProgress) = lagInfoByNet[item.netId] ?: ("—" to 0f)
+                                    Column(Modifier.padding(start = 6.dp, top = 12.dp, bottom = 8.dp)) {
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                item.title,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                lagLabel,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            // Drag handle for network header rows
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .draggableHandle(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.DragHandle,
+                                                    contentDescription = "Drag to reorder",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                                )
+                                            }
+                                        }
+                                        LagBar(
+                                            progress = lagProgress,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            height = 5.dp
+                                        )
+                                    }
                                 }
-                                LagBar(progress = lagProgress, modifier = Modifier.fillMaxWidth(), height = 5.dp)
+                                is SidebarItem.Buffer -> {
+                                    // Server buffer row (indent == 0) acting as network header
+                                    val (netId, name) = splitKey(item.key)
+                                    val lag = lagInfoByNet[netId]
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            BufferRow(
+                                                key = item.key,
+                                                label = item.label,
+                                                selected = selected,
+                                                meta = state.buffers[item.key],
+                                                indent = item.indent,
+                                                closable = false,
+                                                onClose = {},
+                                                lagLabel = lag?.first,
+                                                lagProgress = lag?.second,
+                                            )
+                                        }
+                                        // Drag handle for server buffer rows
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .draggableHandle(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                Icons.Default.DragHandle,
+                                                contentDescription = "Drag to reorder",
+                                                modifier = Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                    }
+                                }
+                                else -> {} // dividers are never isNetworkRoot
                             }
                         }
-                        is SidebarItem.Buffer -> {
-                            val (netId, name) = splitKey(item.key)
-                            val closable = name != "*server*"
-                            val lag = if (name == "*server*") lagInfoByNet[netId] else null
-                            BufferRow(
-                                key = item.key,
-                                label = item.label,
-                                selected = selected,
-                                meta = state.buffers[item.key],
-                                indent = item.indent,
-                                closable = closable,
-                                onClose = { onSend("/closekey ${item.key}") },
-                                lagLabel = lag?.first,
-                                lagProgress = lag?.second,
-                            )
-                        }
-                        is SidebarItem.DividerItem -> {
-                            Divider(Modifier.padding(top = 12.dp))
+                    } else {
+                        // Non-root items: child buffers and dividers — not reorderable
+                        when (item) {
+                            is SidebarItem.Buffer -> {
+                                val (netId, name) = splitKey(item.key)
+                                val closable = name != "*server*"
+                                BufferRow(
+                                    key = item.key,
+                                    label = item.label,
+                                    selected = selected,
+                                    meta = state.buffers[item.key],
+                                    indent = item.indent,
+                                    closable = closable,
+                                    onClose = { onSend("/closekey ${item.key}") },
+                                    lagLabel = null,
+                                    lagProgress = null,
+                                )
+                            }
+                            is SidebarItem.DividerItem -> {
+                                HorizontalDivider(Modifier.padding(top = 12.dp))
+                            }
+                            else -> {}
                         }
                     }
                 }
@@ -567,9 +698,16 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
     @Composable
     fun NicklistContent(mod: Modifier = Modifier) {
         Column(mod.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("Nicklist", fontWeight = FontWeight.Bold)
-            Text("$selBufName • ${nicklist.size} users", style = MaterialTheme.typography.bodySmall)
-            Divider()
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${nicklist.size} users",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
                 items(nicklist) { n ->
                     val cleaned = baseNick(n)
@@ -599,78 +737,86 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-	// Only auto-scroll when the user is at the bottom AND they are not currently interacting
-	// with the messages list (e.g. scrolling/holding for selection).
-	var isTouchingMessages by remember(selected) { mutableStateOf(false) }
+    // Only auto-scroll when the user is at the bottom AND they are not currently interacting
+    // with the messages list (e.g. scrolling/holding for selection).
+    var isTouchingMessages by remember(selected) { mutableStateOf(false) }
 
-	// Much more reliable than inspecting visibleItemsInfo (which can lag a frame behind during fast updates).
-	val isAtBottom by remember(selected) {
-		derivedStateOf { !listState.canScrollForward }
-	}
+    // Much more reliable than inspecting visibleItemsInfo (which can lag a frame behind during fast updates).
+    val isAtBottom by remember(selected) {
+        derivedStateOf { !listState.canScrollForward }
+    }
 
-	var followTail by remember(selected) { mutableStateOf(true) }
+    var followTail by remember(selected) { mutableStateOf(true) }
 
-	// When switching buffers, listState may still reflect the previous channel for a moment.
-	// Suppress followTail updates until we've had a chance to scroll-to-bottom once.
-	var suppressFollowUpdate by remember(selected) { mutableStateOf(true) }
+    // When switching buffers, listState may still reflect the previous channel for a moment.
+    // Suppress followTail updates until we've had a chance to scroll-to-bottom once.
+    var suppressFollowUpdate by remember(selected) { mutableStateOf(true) }
 
-	// If the user scrolls up, stop following. If they scroll back to the bottom, resume following.
-	LaunchedEffect(selected, isAtBottom, listState.isScrollInProgress, isTouchingMessages, suppressFollowUpdate, inputHasFocus, imeBottomPx) {
-		if (suppressFollowUpdate) return@LaunchedEffect
-		// When the IME opens, the viewport shrinks and isAtBottom can briefly flip false.
-		// Don't drop followTail during that resize while the input is focused.
-		if (inputHasFocus && imeBottomPx > 0) return@LaunchedEffect
-		if (!isTouchingMessages && !listState.isScrollInProgress) {
-			followTail = isAtBottom
-		} else if (!isAtBottom) {
-			followTail = false
-		}
-	}
+    // If the user scrolls up, stop following. If they scroll back to the bottom, resume following.
+    LaunchedEffect(
+        selected,
+        isAtBottom,
+        listState.isScrollInProgress,
+        isTouchingMessages,
+        suppressFollowUpdate,
+        inputHasFocus,
+        imeBottomPx
+    ) {
+        if (suppressFollowUpdate) return@LaunchedEffect
+        // When the IME opens, the viewport shrinks and isAtBottom can briefly flip false.
+        // Don't drop followTail during that resize while the input is focused.
+        if (inputHasFocus && imeBottomPx > 0) return@LaunchedEffect
+        if (!isTouchingMessages && !listState.isScrollInProgress) {
+            followTail = isAtBottom
+        } else if (!isAtBottom) {
+            followTail = false
+        }
+    }
 
-	LaunchedEffect(resumeTick, selected) {
-		if (messages.isNotEmpty() && followTail) {
-			// Let layout settle after resume.
-			delay(30)
-			runCatching { listState.scrollToItem(messages.size - 1) }
-			delay(30)
-			runCatching { listState.scrollToItem(messages.size - 1) }
-		}
-	}
+    LaunchedEffect(resumeTick, selected) {
+        if (messages.isNotEmpty() && followTail) {
+            // Let layout settle after resume.
+            delay(30)
+            runCatching { listState.scrollToItem(messages.size - 1) }
+            delay(30)
+            runCatching { listState.scrollToItem(messages.size - 1) }
+        }
+    }
 
-	val lastMsgId = messages.lastOrNull()?.id
+    val lastMsgId = messages.lastOrNull()?.id
 
-	LaunchedEffect(selected, lastMsgId, messages.size) {
-		// Tail-follow new messages (only if we're already following).
-		if (lastMsgId == null) return@LaunchedEffect
-		if (followTail && !isTouchingMessages && !listState.isScrollInProgress) {
-			// Give the LazyColumn a moment to measure the new content (especially important for long wrapped lines).
-			delay(20)
-			runCatching { listState.scrollToItem(messages.lastIndex) }
-			delay(20)
-			runCatching { listState.scrollToItem(messages.lastIndex) }
-			suppressFollowUpdate = false
-		}
-	}
+    LaunchedEffect(selected, lastMsgId, messages.size) {
+        // Tail-follow new messages (only if we're already following).
+        if (lastMsgId == null) return@LaunchedEffect
+        if (followTail && !isTouchingMessages && !listState.isScrollInProgress) {
+            // Give the LazyColumn a moment to measure the new content (especially important for long wrapped lines).
+            delay(20)
+            runCatching { listState.scrollToItem(messages.lastIndex) }
+            delay(20)
+            runCatching { listState.scrollToItem(messages.lastIndex) }
+            suppressFollowUpdate = false
+        }
+    }
 
-	LaunchedEffect(inputHasFocus, selected, imeBottomPx) {
-		if (inputHasFocus && imeBottomPx > 0 && messages.isNotEmpty() && !isTouchingMessages) {
-			// When keyboard opens, the viewport shrinks; keep the tail in view if we were following.
-			if (followTail || isAtBottom) {
-				suppressFollowUpdate = true
-				followTail = true
-				// The IME animates; scroll a few times as insets settle.
-				repeat(3) {
-					delay(120)
-					runCatching { listState.scrollToItem(messages.lastIndex) }
-				}
-				suppressFollowUpdate = false
-			}
-		}
-	}
+    LaunchedEffect(inputHasFocus, selected, imeBottomPx) {
+        if (inputHasFocus && imeBottomPx > 0 && messages.isNotEmpty() && !isTouchingMessages) {
+            // When keyboard opens, the viewport shrinks; keep the tail in view if we were following.
+            if (followTail || isAtBottom) {
+                suppressFollowUpdate = true
+                followTail = true
+                // The IME animates; scroll a few times as insets settle.
+                repeat(3) {
+                    delay(120)
+                    runCatching { listState.scrollToItem(messages.lastIndex) }
+                }
+                suppressFollowUpdate = false
+            }
+        }
+    }
 
-	LaunchedEffect(selected, isTouchingMessages) {
-		if (isTouchingMessages) suppressFollowUpdate = false
-	}
+    LaunchedEffect(selected, isTouchingMessages) {
+        if (isTouchingMessages) suppressFollowUpdate = false
+    }
 
     val uriHandler = LocalUriHandler.current
     val (baseWeight, baseStyle) = when (state.settings.chatFontStyle) {
@@ -700,6 +846,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                 onSend("/join $value")
                 if (netId.isNotBlank()) onSelectBuffer("$netId::$value")
             }
+
             ANN_NICK -> {
                 if (value.isNotBlank()) openNickActions(value)
             }
@@ -713,7 +860,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
         val barHeight = when {
             cfg.orientation == Configuration.ORIENTATION_LANDSCAPE -> 44.dp
             state.settings.compactMode -> 48.dp
-            else -> 56.dp
+            else -> 50.dp
         }
 
         val cs = MaterialTheme.colorScheme
@@ -745,9 +892,15 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (isWide) {
-                        IconButton(onClick = onToggleBufferList, modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON)) { Text("☰") }
+                        IconButton(
+                            onClick = onToggleBufferList,
+                            modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
+                        ) { Text("☰") }
                     } else {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }, modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON)) { Text("☰") }
+                        IconButton(
+                            onClick = { scope.launch { drawerState.open() } },
+                            modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
+                        ) { Text("☰") }
                     }
 
                     Text(
@@ -757,23 +910,31 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f)
                     )
-					
+
                     // Colour/formatting picker button with active state indicator
                     run {
                         val colorInteraction = remember { MutableInteractionSource() }
                         val colorPressed by colorInteraction.collectIsPressedAsState()
-                        val hasActiveFormatting = selectedFgColor != null || selectedBgColor != null || 
-                            boldActive || italicActive || underlineActive || reverseActive
-                        
+                        val hasActiveFormatting =
+                            selectedFgColor != null || selectedBgColor != null ||
+                                    boldActive || italicActive || underlineActive || reverseActive
+
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
+                                .size(25.dp)
                                 .scale(if (colorPressed) 0.92f else 1f)
                                 .background(
                                     brush = if (hasActiveFormatting) {
                                         // Show the active foreground color or a gradient if formatting is active
-                                        val fgCol = selectedFgColor?.let { mircColor(it) } ?: Color(0xFFFF6B6B)
-                                        Brush.linearGradient(listOf(fgCol, fgCol.copy(alpha = 0.7f)))
+                                        val fgCol = selectedFgColor?.let { mircColor(it) } ?: Color(
+                                            0xFFFF6B6B
+                                        )
+                                        Brush.linearGradient(
+                                            listOf(
+                                                fgCol,
+                                                fgCol.copy(alpha = 0.7f)
+                                            )
+                                        )
                                     } else {
                                         Brush.sweepGradient(
                                             colors = listOf(
@@ -790,7 +951,11 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                                 )
                                 .then(
                                     if (hasActiveFormatting) {
-                                        Modifier.border(2.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
+                                        Modifier.border(
+                                            2.dp,
+                                            Color.White.copy(alpha = 0.8f),
+                                            RoundedCornerShape(10.dp)
+                                        )
                                     } else Modifier
                                 )
                                 .clickable(
@@ -832,10 +997,10 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         val nicklistInteraction = remember { MutableInteractionSource() }
                         val nicklistPressed by nicklistInteraction.collectIsPressedAsState()
                         val nicklistEnabled = isChannel
-                        
+
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
+                                .size(25.dp)
                                 .scale(if (nicklistPressed) 0.92f else 1f)
                                 .alpha(if (nicklistEnabled) 1f else 0.4f)
                                 .background(
@@ -877,7 +1042,10 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                     }
 
                     Box {
-                        IconButton(onClick = { overflowExpanded = true }, modifier = Modifier.tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON)) { Text("⋮") }
+                        IconButton(
+                            onClick = { overflowExpanded = true },
+                            modifier = Modifier.tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON)
+                        ) { Text("⋮") }
                         DropdownMenu(
                             expanded = overflowExpanded,
                             onDismissRequest = { overflowExpanded = false }
@@ -906,7 +1074,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                                 text = { Text("About") },
                                 onClick = { overflowExpanded = false; onAbout() }
                             )
-                            Divider()
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Reconnect") },
                                 enabled = state.networks.isNotEmpty() && !state.connecting,
@@ -916,7 +1084,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                                 text = { Text("Disconnect") },
                                 onClick = { overflowExpanded = false; onDisconnect() }
                             )
-                            Divider()
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Exit") },
                                 onClick = { overflowExpanded = false; onExit() }
@@ -936,12 +1104,10 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .heightIn(min = 30.dp)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Topic:", fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(8.dp))
                         IrcLinkifiedText(
                             text = topic,
                             mircColorsEnabled = state.settings.mircColorsEnabled,
@@ -963,7 +1129,7 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
                         }
                     }
                 }
-                Divider()
+                HorizontalDivider()
             }
 
             SelectionContainer(
@@ -974,22 +1140,23 @@ Column(mod.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = 
             ) {
                 LazyColumn(
                     state = listState,
-modifier = Modifier
-    .fillMaxSize()
-    .pointerInput(selected) {
-        // Mark that the user is touching/gesturing on the messages list so we don't auto-jump to bottom.
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            isTouchingMessages = true
-            waitForUpOrCancellation()
-            isTouchingMessages = false
-        }
-    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(selected) {
+                            // Mark that the user is touching/gesturing on the messages list so we don't auto-jump to bottom.
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                isTouchingMessages = true
+                                waitForUpOrCancellation()
+                                isTouchingMessages = false
+                            }
+                        },
 
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     items(items = messages, key = { it.id }) { m ->
-                        val ts = if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
+                        val ts =
+                            if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
                         val fromNick = m.from
                         if (fromNick == null) {
                             IrcLinkifiedText(
@@ -1013,7 +1180,11 @@ modifier = Modifier
                                 ) { append(fromDisplay) }
                                 pop()
                                 append(" ")
-                                appendIrcStyledLinkified(m.text, linkStyle, state.settings.mircColorsEnabled)
+                                appendIrcStyledLinkified(
+                                    m.text,
+                                    linkStyle,
+                                    state.settings.mircColorsEnabled
+                                )
                             }
                             AnnotatedClickableText(
                                 text = annotated,
@@ -1034,7 +1205,11 @@ modifier = Modifier
                                 ) { append(fromDisplay) }
                                 pop()
                                 append("> ")
-                                appendIrcStyledLinkified(m.text, linkStyle, state.settings.mircColorsEnabled)
+                                appendIrcStyledLinkified(
+                                    m.text,
+                                    linkStyle,
+                                    state.settings.mircColorsEnabled
+                                )
                             }
                             AnnotatedClickableText(
                                 text = annotated,
@@ -1074,9 +1249,9 @@ modifier = Modifier
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
                     .padding(bottom = bottomInset),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Build the text style for the input based on active formatting
@@ -1089,17 +1264,57 @@ modifier = Modifier
                     background = selectedBgColor?.let { mircColor(it) } ?: Color.Unspecified
                 )
 
-				OutlinedTextField(
+				val interactionSource = remember { MutableInteractionSource() }
+				val tfColors = OutlinedTextFieldDefaults.colors(
+					focusedBorderColor = MaterialTheme.colorScheme.primary,
+					unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+					focusedTextColor = MaterialTheme.colorScheme.onSurface,
+					unfocusedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+					cursorColor = MaterialTheme.colorScheme.primary
+				)
+				BasicTextField(
 					value = input,
 					onValueChange = { input = it },
-					modifier = Modifier.weight(1f).tourTarget(TourTarget.CHAT_INPUT).onFocusChanged { inputHasFocus = it.isFocused },
-					singleLine = false, // Set to false to enable multiline input, allowing the return key to insert newlines ('\n') instead of treating the field as a single line that ignores or replaces newlines with spaces.
-					maxLines = 2, // Limits the maximum number of visible lines to 5 (adjust as needed for your UI; this prevents unlimited vertical growth while allowing multiple lines). The field will scroll vertically if content exceeds this.
-					minLines = 1, // Minimum number of lines (default is 1, but explicitly set for clarity; ensures the field starts at least 1 line high).
-					placeholder = { Text("Message", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+					modifier = Modifier
+						.weight(1f)
+						.heightIn(min = 40.dp)
+						.tourTarget(TourTarget.CHAT_INPUT)
+						.onFocusChanged { inputHasFocus = it.isFocused },
 					textStyle = inputTextStyle,
-					keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default), // Keeps Default, which for multiline fields instructs the keyboard to show a standard return/enter key that inserts a newline ('\n') automatically without triggering any special actions like closing the keyboard or sending.
-					keyboardActions = KeyboardActions(onSend = { sendNow() }), // This remains as-is, but note that with imeAction=Default and multiline enabled, pressing the return key will not trigger the onSend callback (which is intended for ImeAction.Send). Instead, it inserts a newline. If you have a separate send button in your UI (common in chat inputs), use that for sending; otherwise, if you want return to send the message, change imeAction to ImeAction.Send and keep singleLine=true, but that would revert to no newlines.
+					keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+					keyboardActions = KeyboardActions(onSend = { sendNow() }),
+					singleLine = false,
+					maxLines = 2,
+					minLines = 1,
+					interactionSource = interactionSource,
+					decorationBox = { innerTextField ->
+						OutlinedTextFieldDefaults.DecorationBox(
+							value = input.text,
+							innerTextField = innerTextField,
+							enabled = true,
+							singleLine = false,
+							visualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
+							interactionSource = interactionSource,
+							placeholder = {
+								Text(
+									text = "Message",
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+									style = inputTextStyle
+								)
+							},
+							contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+							colors = tfColors,
+							container = {
+								OutlinedTextFieldDefaults.Container(
+									enabled = true,
+									isError = false,
+									interactionSource = interactionSource,
+									colors = tfColors,
+									shape = RoundedCornerShape(10.dp)
+								)
+							}
+						)
+					}
 				)
 
                 // Channel ops button - only shown when user has permissions
@@ -1109,7 +1324,7 @@ modifier = Modifier
 
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(40.dp)
                             .scale(if (opsPressed) 0.92f else 1f)
                             .background(
                                 brush = Brush.linearGradient(
@@ -1144,7 +1359,7 @@ modifier = Modifier
 
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(40.dp)
                             .scale(if (sendPressed) 0.92f else 1f)
                             .background(
                                 brush = Brush.linearGradient(
@@ -1164,7 +1379,7 @@ modifier = Modifier
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Send,
+                            imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send message",
                             tint = Color.White.copy(alpha = if (sendPressed) 0.7f else 1f),
                             modifier = Modifier.size(20.dp)
@@ -1174,7 +1389,7 @@ modifier = Modifier
             }
         }
     }
-
+	
     val scaffoldContent: @Composable (PaddingValues) -> Unit = { padding ->
         if (!isWide) {
             // Portrait: either full-width messages, or split messages + nicklist pane
@@ -1187,18 +1402,33 @@ modifier = Modifier
                 val minPortraitNickFrac = 0.20f
                 val maxPortraitNickFrac = 0.55f
                 var portraitNickFrac by remember(state.settings.portraitNickPaneFrac) {
-                    mutableStateOf(state.settings.portraitNickPaneFrac.coerceIn(minPortraitNickFrac, maxPortraitNickFrac))
+                    mutableStateOf(
+                        state.settings.portraitNickPaneFrac.coerceIn(
+                            minPortraitNickFrac,
+                            maxPortraitNickFrac
+                        )
+                    )
                 }
-                val nickPaneW = (portraitScreenW * portraitNickFrac).coerceIn(70.dp, portraitScreenW * maxPortraitNickFrac)
+                val nickPaneW = (portraitScreenW * portraitNickFrac).coerceIn(
+                    70.dp,
+                    portraitScreenW * maxPortraitNickFrac
+                )
 
                 var portraitDragging by remember { mutableStateOf(false) }
                 val portraitDragSt = rememberDraggableState { dxPx ->
                     val dxFrac = dxPx / portraitScreenWpx
-                    portraitNickFrac = (portraitNickFrac - dxFrac).coerceIn(minPortraitNickFrac, maxPortraitNickFrac)
+                    portraitNickFrac = (portraitNickFrac - dxFrac).coerceIn(
+                        minPortraitNickFrac,
+                        maxPortraitNickFrac
+                    )
                 }
 
-                Row(Modifier.fillMaxSize().padding(padding)) {
-                    MessagesPane(Modifier.weight(1f).fillMaxHeight())
+                Row(Modifier
+                    .fillMaxSize()
+                    .padding(padding)) {
+                    MessagesPane(Modifier
+                        .weight(1f)
+                        .fillMaxHeight())
 
                     // Thin drag handle
                     Box(
@@ -1212,7 +1442,10 @@ modifier = Modifier
                                 onDragStarted = { portraitDragging = true },
                                 onDragStopped = {
                                     portraitDragging = false
-                                    val clamped = portraitNickFrac.coerceIn(minPortraitNickFrac, maxPortraitNickFrac)
+                                    val clamped = portraitNickFrac.coerceIn(
+                                        minPortraitNickFrac,
+                                        maxPortraitNickFrac
+                                    )
                                     portraitNickFrac = clamped
                                     onUpdateSettings { copy(portraitNickPaneFrac = clamped) }
                                 },
@@ -1228,10 +1461,14 @@ modifier = Modifier
                         )
                     }
 
-                    NicklistContent(Modifier.width(nickPaneW).fillMaxHeight())
+                    NicklistContent(Modifier
+                        .width(nickPaneW)
+                        .fillMaxHeight())
                 }
             } else {
-                MessagesPane(Modifier.fillMaxSize().padding(padding))
+                MessagesPane(Modifier
+                    .fillMaxSize()
+                    .padding(padding))
             }
         } else {
 
@@ -1279,42 +1516,42 @@ modifier = Modifier
             val handleAlpha = if (showResizeHint) pulseAlpha else 0.25f
 
             @Composable
-fun SplitHandle(
-    onDragDeltaPx: (Float) -> Unit,
-    onDragEnd: () -> Unit,
-) {
-    var dragging by remember { mutableStateOf(false) }
+            fun SplitHandle(
+                onDragDeltaPx: (Float) -> Unit,
+                onDragEnd: () -> Unit,
+            ) {
+                var dragging by remember { mutableStateOf(false) }
 
-    val dragState = rememberDraggableState { deltaPx ->
-        onDragDeltaPx(deltaPx)
-    }
+                val dragState = rememberDraggableState { deltaPx ->
+                    onDragDeltaPx(deltaPx)
+                }
 
-    Box(
-        modifier = Modifier
-            // Bigger touch target helps a lot in landscape / gesture navigation.
-            .width(15.dp)
-            .fillMaxHeight()
-            .draggable(
-                orientation = Orientation.Horizontal,
-                state = dragState,
-                startDragImmediately = true,
-                onDragStarted = { dragging = true },
-                onDragStopped = {
-                    dragging = false
-                    onDragEnd()
-                },
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        VerticalDivider(
-            modifier = Modifier.fillMaxHeight(),
-            thickness = 2.dp,
-            color = MaterialTheme.colorScheme.outline.copy(
-                alpha = if (dragging) 0.9f else handleAlpha
-            )
-        )
-    }
-}
+                Box(
+                    modifier = Modifier
+                        // Bigger touch target helps a lot in landscape / gesture navigation.
+                        .width(15.dp)
+                        .fillMaxHeight()
+                        .draggable(
+                            orientation = Orientation.Horizontal,
+                            state = dragState,
+                            startDragImmediately = true,
+                            onDragStarted = { dragging = true },
+                            onDragStopped = {
+                                dragging = false
+                                onDragEnd()
+                            },
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    VerticalDivider(
+                        modifier = Modifier.fillMaxHeight(),
+                        thickness = 2.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(
+                            alpha = if (dragging) 0.9f else handleAlpha
+                        )
+                    )
+                }
+            }
 
 
             val bufferPaneW = (screenW * bufferFrac).coerceIn(minBufferDp, maxBufferDp)
@@ -1322,15 +1559,20 @@ fun SplitHandle(
 
             // In split-pane mode (landscape), keep side panes above the global input bar.
             // Scaffold's padding already accounts for top/bottom bars.
-            Row(Modifier.fillMaxSize().padding(padding)) {
+            Row(Modifier
+                .fillMaxSize()
+                .padding(padding)) {
                 if (state.showBufferList || tourWantsBuffers) {
                     Surface(tonalElevation = 1.dp) {
-                        BufferDrawer(Modifier.width(bufferPaneW).fillMaxHeight())
+                        BufferDrawer(Modifier
+                            .width(bufferPaneW)
+                            .fillMaxHeight())
                     }
                     SplitHandle(
                         onDragDeltaPx = { dxPx ->
                             val dxFrac = dxPx / screenWpx
-                            bufferFrac = (bufferFrac + dxFrac).coerceIn(minBufferFrac, maxBufferFrac)
+                            bufferFrac =
+                                (bufferFrac + dxFrac).coerceIn(minBufferFrac, maxBufferFrac)
                         },
                         onDragEnd = {
                             val clamped = bufferFrac.coerceIn(minBufferFrac, maxBufferFrac)
@@ -1340,7 +1582,9 @@ fun SplitHandle(
                     )
                 }
 
-                MessagesPane(Modifier.weight(1f).fillMaxHeight())
+                MessagesPane(Modifier
+                    .weight(1f)
+                    .fillMaxHeight())
 
                 if (state.showNickList && isChannel) {
                     SplitHandle(
@@ -1356,7 +1600,9 @@ fun SplitHandle(
                         }
                     )
                     Surface(tonalElevation = 1.dp) {
-                        NicklistContent(Modifier.width(nickPaneW).fillMaxHeight())
+                        NicklistContent(Modifier
+                            .width(nickPaneW)
+                            .fillMaxHeight())
                     }
                 }
             }
@@ -1365,7 +1611,11 @@ fun SplitHandle(
 
     val scaffold: @Composable () -> Unit = {
         Scaffold(
-            modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+            modifier = Modifier.windowInsetsPadding(
+                WindowInsets.navigationBars.only(
+                    WindowInsetsSides.Horizontal
+                )
+            ),
             topBar = topBar,
             bottomBar = bottomBar,
             content = scaffoldContent,
@@ -1387,7 +1637,9 @@ fun SplitHandle(
                     showNickSheet = false
                 }
             ) {
-                NicklistContent(Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 520.dp))
+                NicklistContent(Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 240.dp, max = 520.dp))
             }
         }
     } else {
@@ -1409,7 +1661,7 @@ fun SplitHandle(
             ) {
                 Text("Channel tools", style = MaterialTheme.typography.titleLarge)
                 Text("$selNetName • $selBufName", style = MaterialTheme.typography.bodySmall)
-                Divider()
+                HorizontalDivider()
 
                 if (canTopic) {
                     Text("Topic", fontWeight = FontWeight.Bold)
@@ -1428,7 +1680,7 @@ fun SplitHandle(
                         }) { Text("Set") }
                         OutlinedButton(onClick = { opsTopic = topic ?: "" }) { Text("Reset") }
                     }
-                    Divider()
+                    HorizontalDivider()
                 }
 
                 if (canKick || canBan) {
@@ -1499,161 +1751,166 @@ fun SplitHandle(
             }
         }
     }
-	
-	// mIRC colour/style picker sheet
-	if (showColorPicker) {
-		ModalBottomSheet(onDismissRequest = { showColorPicker = false }) {
-			Column(
-				Modifier
-					.fillMaxWidth()
-					.padding(16.dp)
-					.navigationBarsPadding()
-					.imePadding()
-					.verticalScroll(rememberScrollState()),
-				verticalArrangement = Arrangement.spacedBy(16.dp)
-			) {
-				Text("Text Formatting", style = MaterialTheme.typography.titleLarge)
 
-				// Live preview
-				val previewText = buildAnnotatedString {
-					val styleState = MircStyleState(
-						fg = selectedFgColor,
-						bg = selectedBgColor,
-						bold = boldActive,
-						italic = italicActive,
-						underline = underlineActive,
-						reverse = reverseActive
-					)
-					withStyle(styleState.toSpanStyle()) {
-						append("Preview: The quick brown fox jumps over the lazy dog")
-					}
-				}
-				Surface(
-					tonalElevation = 1.dp,
-					shape = MaterialTheme.shapes.medium,
-					modifier = Modifier.fillMaxWidth()
-				) {
-					Text(
-						text = previewText,
-						modifier = Modifier.padding(16.dp),
-						style = chatTextStyle
-					)
-				}
+    // mIRC colour/style picker sheet
+    if (showColorPicker) {
+        ModalBottomSheet(onDismissRequest = { showColorPicker = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Text Formatting", style = MaterialTheme.typography.titleLarge)
 
-				// Foreground colours
-				Text("Text Colour", fontWeight = FontWeight.SemiBold)
-				LazyRow(
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					modifier = Modifier.fillMaxWidth()
-				) {
-					items(count = 16) { code ->
-						val col = mircColor(code) ?: Color.Gray
-						Box(
-							modifier = Modifier
-								.size(30.dp)
-								.background(col, MaterialTheme.shapes.small)
-								.border(
-									width = 3.dp,
-									color = if (selectedFgColor == code) MaterialTheme.colorScheme.primary else Color.Transparent,
-									shape = MaterialTheme.shapes.small
-								)
-								.clickable { selectedFgColor = if (selectedFgColor == code) null else code }
-						)
-					}
-				}
+                // Live preview
+                val previewText = buildAnnotatedString {
+                    val styleState = MircStyleState(
+                        fg = selectedFgColor,
+                        bg = selectedBgColor,
+                        bold = boldActive,
+                        italic = italicActive,
+                        underline = underlineActive,
+                        reverse = reverseActive
+                    )
+                    withStyle(styleState.toSpanStyle()) {
+                        append("Preview: The quick brown fox jumps over the lazy dog")
+                    }
+                }
+                Surface(
+                    tonalElevation = 1.dp,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = previewText,
+                        modifier = Modifier.padding(16.dp),
+                        style = chatTextStyle
+                    )
+                }
 
-				// Background colours
-				Text("Background Colour", fontWeight = FontWeight.SemiBold)
-				LazyRow(
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					modifier = Modifier.fillMaxWidth()
-				) {
-					items(count = 16) { code ->
-						val col = mircColor(code) ?: Color.Gray
-						Box(
-							modifier = Modifier
-								.size(30.dp)
-								.background(col, MaterialTheme.shapes.small)
-								.border(
-									width = 3.dp,
-									color = if (selectedBgColor == code) MaterialTheme.colorScheme.primary else Color.Transparent,
-									shape = MaterialTheme.shapes.small
-								)
-								.clickable { selectedBgColor = if (selectedBgColor == code) null else code }
-						)
-					}
-				}
+                // Foreground colours
+                Text("Text Colour", fontWeight = FontWeight.SemiBold)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(count = 16) { code ->
+                        val col = mircColor(code) ?: Color.Gray
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .background(col, MaterialTheme.shapes.small)
+                                .border(
+                                    width = 3.dp,
+                                    color = if (selectedFgColor == code) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = MaterialTheme.shapes.small
+                                )
+                                .clickable {
+                                    selectedFgColor = if (selectedFgColor == code) null else code
+                                }
+                        )
+                    }
+                }
 
-				// Style toggles
-				Row(
-					Modifier.fillMaxWidth(),
-					horizontalArrangement = Arrangement.SpaceEvenly
-				) {
-					FilterChip(
-						selected = boldActive,
-						onClick = { boldActive = !boldActive },
-						label = { Text("Bold") }
-					)
-					FilterChip(
-						selected = italicActive,
-						onClick = { italicActive = !italicActive },
-						label = { Text("Italic") }
-					)
-					FilterChip(
-						selected = underlineActive,
-						onClick = { underlineActive = !underlineActive },
-						label = { Text("Underline") }
-					)
-					FilterChip(
-						selected = reverseActive,
-						onClick = { reverseActive = !reverseActive },
-						label = { Text("Reverse") }
-					)
-				}
+                // Background colours
+                Text("Background Colour", fontWeight = FontWeight.SemiBold)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(count = 16) { code ->
+                        val col = mircColor(code) ?: Color.Gray
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .background(col, MaterialTheme.shapes.small)
+                                .border(
+                                    width = 3.dp,
+                                    color = if (selectedBgColor == code) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = MaterialTheme.shapes.small
+                                )
+                                .clickable {
+                                    selectedBgColor = if (selectedBgColor == code) null else code
+                                }
+                        )
+                    }
+                }
 
-				// Action buttons: Clear All | Done
-				Row(
-					Modifier
-						.fillMaxWidth()
-						.padding(top = 8.dp),
-					horizontalArrangement = Arrangement.spacedBy(12.dp)
-				) {
-					OutlinedButton(
-						onClick = {
-							selectedFgColor = null
-							selectedBgColor = null
-							boldActive = false
-							italicActive = false
-							underlineActive = false
-							reverseActive = false
-						},
-						modifier = Modifier.weight(1f)
-					) {
-						Text("Clear All")
-					}
+                // Style toggles
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    FilterChip(
+                        selected = boldActive,
+                        onClick = { boldActive = !boldActive },
+                        label = { Text("Bold") }
+                    )
+                    FilterChip(
+                        selected = italicActive,
+                        onClick = { italicActive = !italicActive },
+                        label = { Text("Italic") }
+                    )
+                    FilterChip(
+                        selected = underlineActive,
+                        onClick = { underlineActive = !underlineActive },
+                        label = { Text("Underline") }
+                    )
+                    FilterChip(
+                        selected = reverseActive,
+                        onClick = { reverseActive = !reverseActive },
+                        label = { Text("Reverse") }
+                    )
+                }
 
-					Button(
-						onClick = { showColorPicker = false },
-						modifier = Modifier.weight(1f)
-					) {
-						Text("Done")
-					}
-				}
+                // Action buttons: Clear All | Done
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            selectedFgColor = null
+                            selectedBgColor = null
+                            boldActive = false
+                            italicActive = false
+                            underlineActive = false
+                            reverseActive = false
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Clear All")
+                    }
 
-				Text(
-					"Formatting will be applied when you send your message",
-					style = MaterialTheme.typography.bodySmall,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
-					modifier = Modifier.padding(top = 4.dp)
-				)
+                    Button(
+                        onClick = { showColorPicker = false },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Done")
+                    }
+                }
 
-				Spacer(Modifier.height(8.dp))
-			}
-		}
-	}
-	
+                Text(
+                    "Formatting will be applied when you send your message",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+
     if (showChanListSheet && isChannel) {
-        val banTimeFmt = remember { SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", Locale.getDefault()) }
+        val banTimeFmt =
+            remember { SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", Locale.getDefault()) }
 
         val listModes = state.connections[selNetId]?.listModes ?: "bqeI"
         val supportsQuiet = listModes.contains('q')
@@ -1691,10 +1948,41 @@ fun SplitHandle(
         )
 
         val ui = when (chanListTab) {
-            0 -> ListUi("Ban list (+b)", state.banlists[selected].orEmpty(), state.banlistLoading[selected] == true, "Unban", "b", "/banlist")
-            1 -> ListUi("Quiet list (+q)", state.quietlists[selected].orEmpty(), state.quietlistLoading[selected] == true, "Unquiet", "q", "/quietlist")
-            2 -> ListUi("Except list (+e)", state.exceptlists[selected].orEmpty(), state.exceptlistLoading[selected] == true, "Remove", "e", "/exceptlist")
-            else -> ListUi("Invex list (+I)", state.invexlists[selected].orEmpty(), state.invexlistLoading[selected] == true, "Remove", "I", "/invexlist")
+            0 -> ListUi(
+                "Ban list (+b)",
+                state.banlists[selected].orEmpty(),
+                state.banlistLoading[selected] == true,
+                "Unban",
+                "b",
+                "/banlist"
+            )
+
+            1 -> ListUi(
+                "Quiet list (+q)",
+                state.quietlists[selected].orEmpty(),
+                state.quietlistLoading[selected] == true,
+                "Unquiet",
+                "q",
+                "/quietlist"
+            )
+
+            2 -> ListUi(
+                "Except list (+e)",
+                state.exceptlists[selected].orEmpty(),
+                state.exceptlistLoading[selected] == true,
+                "Remove",
+                "e",
+                "/exceptlist"
+            )
+
+            else -> ListUi(
+                "Invex list (+I)",
+                state.invexlists[selected].orEmpty(),
+                state.invexlistLoading[selected] == true,
+                "Remove",
+                "I",
+                "/invexlist"
+            )
         }
 
         ModalBottomSheet(onDismissRequest = { showChanListSheet = false }) {
@@ -1708,70 +1996,77 @@ fun SplitHandle(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(ui.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(
+                        ui.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f)
+                    )
                     if (ui.loading) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
                     }
                 }
                 Text("$selNetName • $selBufName", style = MaterialTheme.typography.bodySmall)
 
-				// Get context once, safely inside the composable scope
-				val context = LocalContext.current
+                // Get context once, safely inside the composable scope
+                val context = LocalContext.current
 
-				TabRow(selectedTabIndex = chanListTab) {
-					Tab(
-						selected = chanListTab == 0,
-						onClick = { chanListTab = 0 }
-					) { Text("Bans") }
+                TabRow(selectedTabIndex = chanListTab) {
+                    Tab(
+                        selected = chanListTab == 0,
+                        onClick = { chanListTab = 0 }
+                    ) { Text("Bans") }
 
-					Tab(
-						selected = chanListTab == 1,
-						onClick = {
-							if (supportsQuiet) {
-								chanListTab = 1
-							} else {
-								Toast.makeText(
-									context,  // ← use the captured context here
-									"Quiet lists not supported on this server",
-									Toast.LENGTH_SHORT
-								).show()
-								chanListTab = 0
-							}
-						}
-					) { Text("Quiets") }
+                    Tab(
+                        selected = chanListTab == 1,
+                        onClick = {
+                            if (supportsQuiet) {
+                                chanListTab = 1
+                            } else {
+                                Toast.makeText(
+                                    context,  // ← use the captured context here
+                                    "Quiet lists not supported on this server",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                chanListTab = 0
+                            }
+                        }
+                    ) { Text("Quiets") }
 
-					Tab(
-						selected = chanListTab == 2,
-						onClick = {
-							if (supportsExcept) {
-								chanListTab = 2
-							} else {
-								Toast.makeText(
-									context,
-									"Exception lists not supported on this server",
-									Toast.LENGTH_SHORT
-								).show()
-								chanListTab = 0
-							}
-						}
-					) { Text("Except") }
+                    Tab(
+                        selected = chanListTab == 2,
+                        onClick = {
+                            if (supportsExcept) {
+                                chanListTab = 2
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Exception lists not supported on this server",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                chanListTab = 0
+                            }
+                        }
+                    ) { Text("Except") }
 
-					Tab(
-						selected = chanListTab == 3,
-						onClick = {
-							if (supportsInvex) {
-								chanListTab = 3
-							} else {
-								Toast.makeText(
-									context,
-									"Invex lists not supported on this server",
-									Toast.LENGTH_SHORT
-								).show()
-								chanListTab = 0
-							}
-						}
-					) { Text("Invex") }
-				}
+                    Tab(
+                        selected = chanListTab == 3,
+                        onClick = {
+                            if (supportsInvex) {
+                                chanListTab = 3
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Invex lists not supported on this server",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                chanListTab = 0
+                            }
+                        }
+                    ) { Text("Invex") }
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val canRefresh = when (chanListTab) {
@@ -1780,11 +2075,15 @@ fun SplitHandle(
                         2 -> supportsExcept
                         else -> supportsInvex
                     }
-                    OutlinedButton(enabled = canRefresh, onClick = { refreshCurrentList() }) { Text("Refresh") }
+                    OutlinedButton(enabled = canRefresh, onClick = { refreshCurrentList() }) {
+                        Text(
+                            "Refresh"
+                        )
+                    }
                     OutlinedButton(onClick = { showChanListSheet = false }) { Text("Close") }
                 }
 
-                Divider()
+                HorizontalDivider()
 
                 if (!ui.loading && ui.entries.isEmpty()) {
                     val unsupportedMsg = when (chanListTab) {
@@ -1796,7 +2095,9 @@ fun SplitHandle(
                     Text(unsupportedMsg ?: "No entries.", style = chatTextStyle)
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxWidth().weight(1f, fill = true),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = true),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(ui.entries, key = { it.mask }) { e ->
@@ -1806,7 +2107,9 @@ fun SplitHandle(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
-                                    Modifier.fillMaxWidth().padding(12.dp),
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -1845,9 +2148,14 @@ fun SplitHandle(
 
     if (showNickActions && selectedNick.isNotBlank()) {
         ModalBottomSheet(onDismissRequest = { showNickActions = false }) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(selectedNick, style = MaterialTheme.typography.titleLarge)
-                Divider()
+                HorizontalDivider()
                 Button(
                     onClick = {
                         onSelectBuffer("$selNetId::$selectedNick")
@@ -1855,21 +2163,35 @@ fun SplitHandle(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Open query") }
-                Button(onClick = { onWhois(selectedNick); showNickActions = false }, modifier = Modifier.fillMaxWidth()) { Text("Whois") }
-                Button(onClick = { mention(selectedNick); showNickActions = false }, modifier = Modifier.fillMaxWidth()) { Text("Mention") }
-                val ignored = state.networks.firstOrNull { it.id == selNetId }?.ignoredNicks.orEmpty()
+                Button(
+                    onClick = { onWhois(selectedNick); showNickActions = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Whois") }
+                Button(
+                    onClick = { mention(selectedNick); showNickActions = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Mention") }
+                val ignored =
+                    state.networks.firstOrNull { it.id == selNetId }?.ignoredNicks.orEmpty()
                 val isIgnored = ignored.any { it.equals(selectedNick, ignoreCase = true) }
                 val canIgnore = !selectedNick.equals(myNick, ignoreCase = true)
                 Button(
                     enabled = canIgnore,
                     onClick = {
-                        if (isIgnored) onUnignoreNick(selNetId, selectedNick) else onIgnoreNick(selNetId, selectedNick)
+                        if (isIgnored) onUnignoreNick(selNetId, selectedNick) else onIgnoreNick(
+                            selNetId,
+                            selectedNick
+                        )
                         showNickActions = false
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (isIgnored) "Unignore" else "Ignore") }
-                if (isChannel && (canKick || canBan) && !selectedNick.equals(myNick, ignoreCase = true)) {
-                    Divider()
+                if (isChannel && (canKick || canBan) && !selectedNick.equals(
+                        myNick,
+                        ignoreCase = true
+                    )
+                ) {
+                    HorizontalDivider()
                     Text("Moderation", fontWeight = FontWeight.Bold)
                     Button(
                         onClick = {
@@ -2103,12 +2425,15 @@ private fun parseMircRuns(input: String): List<MircRun> {
             '\u0002' -> { // bold
                 flush(); st.bold = !st.bold; i++
             }
+
             '\u001D' -> { // italic
                 flush(); st.italic = !st.italic; i++
             }
+
             '\u001F' -> { // underline
                 flush(); st.underline = !st.underline; i++
             }
+
             '\u0016' -> { // reverse
                 flush(); st.reverse = !st.reverse; i++
             }
@@ -2160,37 +2485,37 @@ private fun AnnotatedClickableText(
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
     var layout: TextLayoutResult? by remember { mutableStateOf(null) }
-Text(
-    text = text,
-    style = style,
-    maxLines = maxLines,
-    overflow = overflow,
-    onTextLayout = {
-        layout = it
-        onTextLayout?.invoke(it)
-    },
-    modifier = modifier.pointerInput(text) {
-        val vc = viewConfiguration
-        awaitEachGesture {
-            // Don't consume gestures: allow selection (long-press/drag) to work.
-            val down = awaitFirstDown(requireUnconsumed = false)
-            val downPos = down.position
-            val downTime = down.uptimeMillis
+    Text(
+        text = text,
+        style = style,
+        maxLines = maxLines,
+        overflow = overflow,
+        onTextLayout = {
+            layout = it
+            onTextLayout?.invoke(it)
+        },
+        modifier = modifier.pointerInput(text) {
+            val vc = viewConfiguration
+            awaitEachGesture {
+                // Don't consume gestures: allow selection (long-press/drag) to work.
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val downPos = down.position
+                val downTime = down.uptimeMillis
 
-            val up = waitForUpOrCancellation() ?: return@awaitEachGesture
-            val dt = up.uptimeMillis - downTime
-            val dist = (up.position - downPos).getDistance()
+                val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+                val dt = up.uptimeMillis - downTime
+                val dist = (up.position - downPos).getDistance()
 
-            // Treat only quick taps as clicks so selection gestures don't accidentally open links.
-            if (dt <= 200 && dist <= vc.touchSlop) {
-                val l = layout ?: return@awaitEachGesture
-                val offset = l.getOffsetForPosition(up.position)
-                val ann = text.getStringAnnotations(start = offset, end = offset).firstOrNull()
-                if (ann != null) onAnnotationClick(ann.tag, ann.item)
+                // Treat only quick taps as clicks so selection gestures don't accidentally open links.
+                if (dt <= 200 && dist <= vc.touchSlop) {
+                    val l = layout ?: return@awaitEachGesture
+                    val offset = l.getOffsetForPosition(up.position)
+                    val ann = text.getStringAnnotations(start = offset, end = offset).firstOrNull()
+                    if (ann != null) onAnnotationClick(ann.tag, ann.item)
+                }
             }
         }
-    }
-)
+    )
 }
 
 @Composable

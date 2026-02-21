@@ -40,3 +40,12 @@ val DarkBackground = Color(0xFF0F111A)
 val DarkSurface = Color(0xFF141827)
 val DarkSurfaceVariant = Color(0xFF1B2133)
 val DarkOutline = Color(0xFF3A425E)
+
+// Matrix / "old school terminal" green theme palette
+val MatrixGreen          = Color(0xFF00FF41)   // classic bright phosphor green
+val MatrixGreenDim       = Color(0xFF00B32A)   // dimmer green for secondary elements
+val MatrixGreenMuted     = Color(0xFF007A1C)   // subtle green for outlines / containers
+val MatrixBackground     = Color(0xFF000000)   // true black — optimal on OLED
+val MatrixSurface        = Color(0xFF030D03)   // near-black with faint green tint
+val MatrixSurfaceVariant = Color(0xFF0A1A0A)   // slightly lighter surface for cards
+val MatrixOutline        = Color(0xFF0F2B0F)   // dark green border

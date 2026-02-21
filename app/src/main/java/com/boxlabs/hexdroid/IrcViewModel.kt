@@ -266,7 +266,10 @@ data class UiState(
     // DCC (active network only)
     val dccOffers: List<DccOffer> = emptyList(),
     val dccChatOffers: List<DccChatOffer> = emptyList(),
-    val dccTransfers: List<DccTransferState> = emptyList()
+    val dccTransfers: List<DccTransferState> = emptyList(),
+
+    // Backup / restore feedback (shown as a transient message in SettingsScreen)
+    val backupMessage: String? = null,
 )
 
 class IrcViewModel(
@@ -335,6 +338,24 @@ data class NetSupport(
     private val manualDisconnecting = mutableSetOf<String>()
     // Suppress repeated "no network" messaging/notifications while offline.
     private val noNetworkNotice = mutableSetOf<String>()
+
+    // --- Sidebar collapse state -------------------------------------------------------
+    // Tracks which network server rows are expanded in the buffer list sidebar.
+    // Not persisted: resets to all-expanded on process restart (same as HexChat behaviour).
+    private val _expandedNetworkIds = MutableStateFlow<Set<String>>(emptySet())
+    val expandedNetworkIds: StateFlow<Set<String>> get() = _expandedNetworkIds
+
+    fun toggleNetworkExpanded(netId: String) {
+        _expandedNetworkIds.update { current ->
+            if (current.contains(netId)) current - netId else current + netId
+        }
+    }
+
+    fun setNetworkExpanded(netId: String, expanded: Boolean) {
+        _expandedNetworkIds.update { current ->
+            if (expanded) current + netId else current - netId
+        }
+    }
 
     // Serialize connect/disconnect/reconnect per-network to avoid overlapping socket lifecycles.
     private val netOpLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
@@ -1240,12 +1261,90 @@ if (!sp.isNullOrBlank()) {
         if (st.activeNetworkId == id) _state.value = syncActiveNetworkSummary(st.copy(activeNetworkId = st.networks.firstOrNull { it.id != id }?.id))
     }
 
-    // Connections
+    // Backup / Restore
+    /** Clear the transient backup/restore result message (called after the UI has shown it). */
+    fun clearBackupMessage() {
+        _state.update { it.copy(backupMessage = null) }
+    }
+
+    /**
+     * Write a backup of current settings and networks to [uri] (obtained from
+     * ACTION_CREATE_DOCUMENT).  The URI must be writable.
+     *
+     * Passwords and TLS client certificates are excluded - they are tied to device-specific
+     * Android Keystore keys and cannot be transferred.
+     */
+    fun exportBackup(uri: android.net.Uri) {
+        val st = _state.value
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val json = repo.exportBackupJson(st.networks, st.settings)
+                appContext.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(json.toByteArray(Charsets.UTF_8))
+                } ?: throw java.io.IOException("Unable to open output stream for backup file")
+                "Backup saved successfully.\nNote: passwords and certificates are not included."
+            }
+            val msg = result.getOrElse { e -> "Backup failed: ${e.message}" }
+            _state.update { it.copy(backupMessage = msg) }
+        }
+    }
+
+    /**
+     * Read a backup file from [uri] (obtained from ACTION_OPEN_DOCUMENT) and restore
+     * settings and networks.  Existing networks are replaced.
+     *
+     * On success, UI settings take effect on next DataStore emission.
+     * Passwords are not restored and will need to be re-entered.
+     */
+    fun importBackup(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val json = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?.toString(Charsets.UTF_8)
+                    ?: throw java.io.IOException("Unable to read backup file")
+                repo.importBackup(json)
+                "Backup restored successfully.\nPasswords were not restored — please re-enter them in each network's settings."
+            }
+            val msg = result.getOrElse { e -> "Restore failed: ${e.message}" }
+            _state.update { it.copy(backupMessage = msg) }
+        }
+    }
 
     fun connectActive() {
         val st = _state.value
         val netId = st.activeNetworkId ?: st.networks.firstOrNull()?.id ?: return
         connectNetwork(netId)
+    }
+
+    // --- Network list ordering / favourites -------------------------------------------
+
+    /**
+     * Reorder the network list after a drag-and-drop gesture.
+     * [fromIndex] and [toIndex] are indices into the currently-displayed sorted list.
+     * sortOrder values are reassigned sequentially so they remain stable after serialisation.
+     */
+    fun reorderNetworks(fromIndex: Int, toIndex: Int) {
+        viewModelScope.launch {
+            val sorted = _state.value.networks
+                .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+                .toMutableList()
+            if (fromIndex !in sorted.indices || toIndex !in sorted.indices) return@launch
+            val item = sorted.removeAt(fromIndex)
+            sorted.add(toIndex, item)
+            val updated = sorted.mapIndexed { i, n -> n.copy(sortOrder = i) }
+            // Single atomic DataStore write - avoids read-modify-write races that occur
+            // when calling upsertNetwork() in a loop (each call reads stale data before
+            // the previous write lands, silently discarding earlier sortOrder updates).
+            repo.saveNetworks(updated)
+        }
+    }
+
+    /** Toggle the favourite flag for a network. Favourites sort before non-favourites. */
+    fun toggleFavourite(netId: String) {
+        viewModelScope.launch {
+            val profile = _state.value.networks.firstOrNull { it.id == netId } ?: return@launch
+            repo.upsertNetwork(profile.copy(isFavourite = !profile.isFavourite))
+        }
     }
 
     fun connectNetwork(netId: String, force: Boolean = false) {
@@ -1355,12 +1454,20 @@ if (!sp.isNullOrBlank()) {
 
         rt.job?.cancel()
         rt.job = viewModelScope.launch(Dispatchers.IO) {
-            client.events().collect { ev ->
-                runCatching { handleEvent(netId, ev) }
-                    .onFailure { t ->
-                        val msg = (t.message ?: t::class.java.simpleName)
-                        append(bufKey(netId, "*server*"), from = "CLIENT", text = "Event handler error: $msg", isHighlight = true)
-                    }
+            // Hold a scoped WakeLock for the connect/TLS handshake burst, then release it.
+            // The foreground service keeps the process alive; the lock just covers the CPU-
+            // intensive initial handshake so Android can't suspend us mid-handshake.
+            KeepAliveService.acquireScopedWakeLock(appContext)
+            try {
+                client.events().collect { ev ->
+                    runCatching { handleEvent(netId, ev) }
+                        .onFailure { t ->
+                            val msg = (t.message ?: t::class.java.simpleName)
+                            append(bufKey(netId, "*server*"), from = "CLIENT", text = "Event handler error: $msg", isHighlight = true)
+                        }
+                }
+            } finally {
+                KeepAliveService.releaseScopedWakeLock()
             }
         }
 		
@@ -1561,7 +1668,7 @@ if (!sp.isNullOrBlank()) {
                 if (st.activeNetworkId == netId) updateConnectionNotification("Retrying to connect…")
 
                 // Force a clean reconnect (drops stale runtimes if present).
-                withNetLock(netId) { connectNetworkInternal(netId, force = true) }
+                withNetLock(netId) { KeepAliveService.withWakeLock(appContext) { connectNetworkInternal(netId, force = true) } }
                 reconnectAttempts[netId] = (attempt + 1).coerceAtMost(ConnectionConstants.RECONNECT_MAX_ATTEMPTS)
             }
             autoReconnectJobs.remove(netId)
@@ -2426,7 +2533,7 @@ if (code == "442") {
                     profile?.serviceAuthCommand?.takeIf { it.isNotBlank() }?.let { cmd ->
                         val trimmed = cmd.trim()
                         if (trimmed.startsWith("/")) {
-                            // Client command — expand aliases like /msg → PRIVMSG
+                            // Client command aliases
                             rt.client.handleSlashCommand(trimmed.drop(1), "*server*")
                         } else {
                             // Raw IRC line
@@ -3523,21 +3630,42 @@ private fun isHighlight(netId: String, text: String, isPrivate: Boolean): Boolea
         return sb.toString()
     }
 
+/**
+ * Casefold [s] using the CASEMAPPING advertised by the given network's ISUPPORT 005.
+ *
+ * Mirrors IrcClient.casefold() exactly so that buffer-key comparisons in the ViewModel
+ * are consistent with the comparisons IrcCore makes when routing incoming messages.
+ *
+ * rfc1459 / strict-rfc1459 — map the four extended ASCII special-char pairs.
+ * ascii                     — ASCII A-Z only.
+ * anything else             — full Unicode lowercase + RFC1459 special-char pairs.
+ *   (Covers "BulgarianCyrillic+EnglishAlphabet" and any other non-standard token.)
+ */
 private fun casefoldText(netId: String, s: String): String {
     val cm = (runtimes[netId]?.support?.caseMapping ?: "rfc1459").lowercase(Locale.ROOT)
     val sb = StringBuilder(s.length)
     for (ch0 in s) {
         var ch = ch0
         if (ch in 'A'..'Z') ch = (ch.code + 32).toChar()
-        if (cm == "rfc1459" || cm == "strict-rfc1459") {
-            ch = when (ch) {
-                '[', '{' -> '{'
-                ']', '}' -> '}'
-                '\\', '|' -> '|'
-                else -> ch
-            }
-            if (cm == "rfc1459") {
+        when (cm) {
+            "rfc1459", "strict-rfc1459" -> {
                 ch = when (ch) {
+                    '[', '{' -> '{'
+                    ']', '}' -> '}'
+                    '\\', '|' -> '|'
+                    else -> ch
+                }
+                if (cm == "rfc1459") {
+                    if (ch == '^' || ch == '~') ch = '~'
+                }
+            }
+            "ascii" -> { /* ASCII A-Z already handled */ }
+            else -> {
+                ch = ch.lowercaseChar()
+                ch = when (ch) {
+                    '[', '{' -> '{'
+                    ']', '}' -> '}'
+                    '\\', '|' -> '|'
                     '^', '~' -> '~'
                     else -> ch
                 }

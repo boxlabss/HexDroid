@@ -22,10 +22,15 @@ package com.boxlabs.hexdroid.ui
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -33,6 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,16 +49,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.UiState
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun NetworksScreen(
     state: UiState,
-	onBack: () -> Unit,
+    onBack: () -> Unit,
     onSelect: (String) -> Unit,
     onAdd: () -> Unit,
     onEdit: (String) -> Unit,
@@ -63,35 +72,60 @@ fun NetworksScreen(
     onAllowPlaintextConnect: (String) -> Unit,
     onDismissPlaintextWarning: () -> Unit,
     onOpenSettings: () -> Unit,
+    onReorder: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onToggleFavourite: (String) -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
     val active = state.activeNetworkId
 
+    // Sort: favourites first, then by sortOrder, then alphabetically
+    val sortedNetworks = state.networks
+        .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Networks") },
-				navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
-                actions = { IconButton(onClick = onOpenSettings, modifier = Modifier.tourTarget(TourTarget.NETWORKS_SETTINGS)) { Text("⚙") } }
+                navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
+                actions = {
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.tourTarget(TourTarget.NETWORKS_SETTINGS)
+                    ) { Text("⚙") }
+                }
             )
         },
-        floatingActionButton = { FloatingActionButton(onClick = onAdd, modifier = Modifier.tourTarget(TourTarget.NETWORKS_ADD_FAB)) { Text("+") } }
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onAdd,
+                modifier = Modifier.tourTarget(TourTarget.NETWORKS_ADD_FAB)
+            ) { Text("+") }
+        }
     ) { padding ->
         val listState = rememberLazyListState()
 
-                // Tour: if we are highlighting the AfterNET entry (or its Connect button), scroll it into view.
+        // Reorderable state — onMove is called while dragging, giving live visual feedback
+        val reorderState = rememberReorderableLazyListState(
+            lazyListState = listState,
+            onMove = { from, to ->
+                // Map back from sorted indices to the onReorder callback
+                onReorder(from.index, to.index)
+            }
+        )
+
+        // Tour: scroll AfterNET into view when highlighted
         LaunchedEffect(tourActive, tourTarget, state.networks) {
             if (!tourActive) return@LaunchedEffect
-            if (tourTarget == TourTarget.NETWORKS_AFTERNET_ITEM || tourTarget == TourTarget.NETWORKS_CONNECT_BUTTON) {
-                val idx = state.networks.indexOfFirst {
-                    it.id.equals("AfterNET", ignoreCase = true) || it.name.equals("AfterNET", ignoreCase = true)
+            if (tourTarget == TourTarget.NETWORKS_AFTERNET_ITEM ||
+                tourTarget == TourTarget.NETWORKS_CONNECT_BUTTON
+            ) {
+                val idx = sortedNetworks.indexOfFirst {
+                    it.id.equals("AfterNET", ignoreCase = true) ||
+                    it.name.equals("AfterNET", ignoreCase = true)
                 }
                 if (idx >= 0) {
-                    try {
-                        // Keep a little top breathing room so the highlighted control isn't under the app bar.
-                        listState.animateScrollToItem(idx)
-                    } catch (_: Throwable) { }
+                    runCatching { listState.animateScrollToItem(idx) }
                 }
             }
         }
@@ -102,8 +136,6 @@ fun NetworksScreen(
                 .padding(padding)
                 .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            // Proper spacing between cards is controlled by LazyColumn's verticalArrangement,
-            // and contentPadding ensures the last item isn't obscured by the FAB.
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -112,89 +144,138 @@ fun NetworksScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(top = 2.dp, bottom = 96.dp)
             ) {
-                items(state.networks, key = { it.id }) { n ->
+                items(sortedNetworks, key = { it.id }) { n ->
                     val conn = state.connections[n.id]
                     val isConn = conn?.connected == true
                     val isConnecting = conn?.connecting == true
                     val status = conn?.status ?: "Disconnected"
 
-                    val isAfterNet = n.id.equals("AfterNET", ignoreCase = true) || n.name.equals("AfterNET", ignoreCase = true)
-                    val cardMod = if (isAfterNet) {
-                        Modifier
-                            .fillMaxWidth()
-                            .tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    }
+                    val isAfterNet = n.id.equals("AfterNET", ignoreCase = true) ||
+                                     n.name.equals("AfterNET", ignoreCase = true)
 
-                    Card(
-                        modifier = cardMod,
-                        onClick = { onSelect(n.id) }
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ReorderableItem(reorderState, key = n.id) { isDragging ->
+                        val elevation by animateFloatAsState(if (isDragging) 8f else 0f, label = "drag_elev")
+
+                        val cardMod = if (isAfterNet) {
+                            Modifier.fillMaxWidth().tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
+                        } else {
+                            Modifier.fillMaxWidth()
+                        }
+
+                        Card(
+                            modifier = cardMod,
+                            onClick = { onSelect(n.id) }
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    n.name,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (n.id == active) Badge { Text("Selected") }
-                            }
-
-                            Text(
-                                "${n.host}:${n.port}  •  TLS ${if (n.useTls) "on" else "off"}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                "Nick: ${n.nick}${n.altNick?.let { " (alt: $it)" } ?: ""}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "Auto-connect",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Switch(
-                                    checked = n.autoConnect,
-                                    onCheckedChange = { onSetAutoConnect(n.id, it) }
-                                )
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                if (isConnecting) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp
+                                // Title row: name + favourite star + selected badge + drag handle
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Favourite toggle
+                                    IconButton(
+                                        onClick = { onToggleFavourite(n.id) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        if (n.isFavourite) {
+                                            Icon(
+                                                Icons.Filled.Star,
+                                                contentDescription = "Remove from favourites",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Outlined.StarOutline,
+                                                contentDescription = "Add to favourites",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        n.name,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
                                     )
-                                } else {
-                                    Text(if (isConn) "●" else "○")
+                                    if (n.id == active) Badge { Text("Selected") }
+
+                                    // Drag handle — only active during touch
+                                    IconButton(
+                                        onClick = {},
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .draggableHandle()
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DragHandle,
+                                            contentDescription = "Drag to reorder",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
-                                Text(status, style = MaterialTheme.typography.bodySmall)
-                            }
 
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                OutlinedButton(onClick = { onEdit(n.id) }) { Text("Edit") }
-                                OutlinedButton(onClick = { onDelete(n.id) }) { Text("Delete") }
+                                Text(
+                                    "${n.host}:${n.port}  •  TLS ${if (n.useTls) "on" else "off"}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "Nick: ${n.nick}${n.altNick?.let { " (alt: $it)" } ?: ""}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
 
-                                Spacer(Modifier.weight(1f))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "Auto-connect",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = n.autoConnect,
+                                        onCheckedChange = { onSetAutoConnect(n.id, it) }
+                                    )
+                                }
 
-                                val connectMod = if (n.id == active) Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON) else Modifier
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    if (isConnecting) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Text(if (isConn) "●" else "○")
+                                    }
+                                    Text(status, style = MaterialTheme.typography.bodySmall)
+                                }
 
-                                if (isConn || isConnecting) {
-                                    Button(onClick = { onSelect(n.id); onDisconnect(n.id) }, modifier = connectMod) { Text("Disconnect") }
-                                } else {
-                                    Button(onClick = { onSelect(n.id); onConnect(n.id) }, modifier = connectMod) { Text("Connect") }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedButton(onClick = { onEdit(n.id) }) { Text("Edit") }
+                                    OutlinedButton(onClick = { onDelete(n.id) }) { Text("Delete") }
+                                    Spacer(Modifier.weight(1f))
+
+                                    val connectMod = if (n.id == active) {
+                                        Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON)
+                                    } else Modifier
+
+                                    if (isConn || isConnecting) {
+                                        Button(
+                                            onClick = { onSelect(n.id); onDisconnect(n.id) },
+                                            modifier = connectMod
+                                        ) { Text("Disconnect") }
+                                    } else {
+                                        Button(
+                                            onClick = { onSelect(n.id); onConnect(n.id) },
+                                            modifier = connectMod
+                                        ) { Text("Connect") }
+                                    }
                                 }
                             }
                         }
@@ -211,6 +292,7 @@ fun NetworksScreen(
             }
         }
     }
+
     // Warn when user attempts to connect without TLS and without explicit opt-in.
     val warnNetId = state.plaintextWarningNetworkId
     if (warnNetId != null) {
@@ -239,5 +321,4 @@ fun NetworksScreen(
             }
         )
     }
-
 }

@@ -113,7 +113,7 @@ data class IrcConfig(
     val historyLimit: Int = 50,
     val connectTimeoutMs: Int = ConnectionConstants.SOCKET_CONNECT_TIMEOUT_MS,
     val readTimeoutMs: Int = ConnectionConstants.SOCKET_READ_TIMEOUT_MS,
-    val tcpNoDelay: Boolean = true,
+    val tcpNoDelay: Boolean = false,  // Nagle coalescing is fine for IRC; disabling it causes extra radio wake-ups
     val keepAlive: Boolean = ConnectionConstants.TCP_KEEPALIVE,
     val ctcpVersionReply: String = "HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.boxlabs.uk/",
     /**
@@ -372,17 +372,31 @@ class IrcClient(val config: IrcConfig) {
     private fun casefold(s: String): String {
         val cm = caseMapping.lowercase(Locale.ROOT)
         val sb = StringBuilder(s.length)
-        
+
         for (ch0 in s) {
             var ch = ch0
-            
-            // Standard ASCII case folding (always applied)
-            if (ch in 'A'..'Z') {
-                ch = (ch.code + 32).toChar()
-            }
-            
-            when {
-                cm == "rfc1459" || cm == "strict-rfc1459" -> {
+
+            // Standard ASCII case folding (always applied for all modes)
+            if (ch in 'A'..'Z') ch = (ch.code + 32).toChar()
+
+            // Non-ASCII case folding based on server-advertised CASEMAPPING.
+            //
+            // rfc1459 / strict-rfc1459:
+            //   Map the four extended ASCII pairs used in old European IRC nicks.
+            //   rfc1459 additionally equates ^ and ~ (the "tilde" pair).
+            //
+            // ascii:
+            //   Only ASCII A-Z folding; all other chars are left as-is.
+            //
+            // Non-standard caseMapping values (e.g. "BulgarianCyrillic+EnglishAlphabet"):
+            //   Use Char.lowercaseChar() for full Unicode lowercasing, then apply the
+            //   standard RFC1459 special-char pairs on top.  This is correct for any
+            //   Cyrillic-based network and is a safe fallback for any other unknown mapping.
+            //
+            // Unknown / unrecognised:
+            //   Fall back to rfc1459-like behaviour (the most common default on IRC).
+            when (cm) {
+                "rfc1459", "strict-rfc1459" -> {
                     ch = when (ch) {
                         '[', '{' -> '{'
                         ']', '}' -> '}'
@@ -390,37 +404,18 @@ class IrcClient(val config: IrcConfig) {
                         else -> ch
                     }
                     if (cm == "rfc1459") {
-                        ch = when (ch) {
-                            '^', '~' -> '~'
-                            else -> ch
-                        }
+                        if (ch == '^' || ch == '~') ch = '~'
                     }
                 }
-                
-                cm == "ascii" -> {
-                    // ASCII-only: just the A-Z conversion above
-                }
-                
-                // Handle Bulgarian/Cyrillic case mapping
-                // Seen as: CASEMAPPING=BulgarianCyrillic+EnglishAlphabet
-                cm.contains("bulgarian") || cm.contains("cyrillic") -> {
-                    // Bulgarian Cyrillic uppercase (А-Я) to lowercase (а-я)
-                    // А (U+0410) through Я (U+042F) -> а (U+0430) through я (U+044F)
-                    if (ch.code in 0x0410..0x042F) {
-                        ch = (ch.code + 0x20).toChar()
-                    }
-                    // Also handle RFC1459 special chars since these networks may use them
-                    ch = when (ch) {
-                        '[', '{' -> '{'
-                        ']', '}' -> '}'
-                        '\\', '|' -> '|'
-                        '^', '~' -> '~'
-                        else -> ch
-                    }
-                }
-                
-                // Default: treat unknown mappings as rfc1459-like
+
+                "ascii" -> { /* ASCII-only: A-Z already handled above */ }
+
                 else -> {
+                    // Full Unicode lowercasing covers Cyrillic, Greek, and any other script
+                    // advertised via a non-standard CASEMAPPING token.
+                    ch = ch.lowercaseChar()
+                    // Also apply RFC1459 special-char pairs, which many non-ASCII IRC
+                    // networks still use in nick/channel names alongside Cyrillic.
                     ch = when (ch) {
                         '[', '{' -> '{'
                         ']', '}' -> '}'
@@ -430,7 +425,7 @@ class IrcClient(val config: IrcConfig) {
                     }
                 }
             }
-            
+
             sb.append(ch)
         }
         return sb.toString()
@@ -495,7 +490,18 @@ class IrcClient(val config: IrcConfig) {
         // as separate commands, causing "Unknown command" errors.
         val sanitized = line.replace("\r", "").replace("\n", " ").trim()
         if (sanitized.isNotEmpty()) {
-            outbound.send(sanitized)
+            // Use trySend so that calling sendRaw on a disconnecting/reconnecting client
+            // (whose outbound Channel may have been closed by forceClose()) never throws
+            // ClosedSendChannelException (surfaced in Play crash reports as obfuscated k7.m).
+            // If the channel is closed or full, the line is silently dropped — this is
+            // safe because the connection is already gone or saturated.
+            val result = outbound.trySend(sanitized)
+            if (result.isFailure && !result.isClosed) {
+                // Channel is full (capacity=300) but still open fall back to a
+                // suspending send so legitimate bursts are not silently discarded.
+                // This path is rare; the capacity guard above handles the common cases.
+                runCatching { outbound.send(sanitized) }
+            }
         }
     }
 
@@ -522,7 +528,7 @@ class IrcClient(val config: IrcConfig) {
                 val arg1 = parts.getOrNull(1)
                 val hasChan = arg1 != null && isChannelName(arg1)
                 val chan = when {
-                    hasChan -> arg1!!
+                    hasChan -> arg1
                     currentBuffer != "*server*" -> currentBuffer
                     else -> arg1 ?: return
                 }
@@ -533,7 +539,7 @@ class IrcClient(val config: IrcConfig) {
                 val arg1 = parts.getOrNull(1)
                 val hasChan = arg1 != null && isChannelName(arg1)
                 val chan = when {
-                    hasChan -> arg1!!
+                    hasChan -> arg1
                     currentBuffer != "*server*" -> currentBuffer
                     else -> arg1 ?: return
                 }
@@ -880,9 +886,12 @@ class IrcClient(val config: IrcConfig) {
             // Wait a moment so the socket is fully established.
             delay(5_000)
             while (true) {
-                // Ping interval: 60 seconds is sufficient for most NAT routers (which typically
-                // have 2-5 minute timeouts). More aggressive pinging wastes battery.
-                delay(60_000)
+                // Adaptive ping interval: when the app is in the foreground (screen on, user
+                // active) ping every 60 s for a responsive lag meter. When backgrounded, stretch
+                // to 90 s — still well within the 2-5 min NAT timeout window — saving ~1/3 of
+                // periodic radio wake-ups.
+                val pingInterval = if (AppVisibility.isForeground) 60_000L else 90_000L
+                delay(pingInterval)
 
                 // If we're waiting on a PONG for a previous probe and it's taking too long,
                 // consider the connection stalled and force a reconnect.
@@ -1313,56 +1322,6 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				}
 
 				when (msg.command.uppercase(Locale.ROOT)) {
-					"001" -> {
-						val me = msg.params.getOrNull(0) ?: config.nick
-						currentNick = me
-						send(IrcEvent.Registered(me))
-					}
-
-
-					"005" -> {
-						// Parse ISUPPORT (005) tokens to drive channel detection, rank prefixes, and casemapping.
-						// Example: PREFIX=(qaohv)~&@%+ CHANTYPES=#& CASEMAPPING=rfc1459 STATUSMSG=@+
-						val tokens = msg.params.drop(1)
-						var chant = chantypes
-						var cm = caseMapping
-						var pm = prefixModes
-						var ps = prefixSymbols
-						var sm: String? = statusMsg
-
-						for (tok in tokens) {
-							if (tok.isBlank()) continue
-							val parts = tok.split("=", limit = 2)
-							val k = parts[0].trim().uppercase(Locale.ROOT)
-							val v = parts.getOrNull(1)?.trim()
-							when (k) {
-								"CHANTYPES" -> if (!v.isNullOrBlank()) chant = v
-								"CASEMAPPING" -> if (!v.isNullOrBlank()) cm = v
-								"STATUSMSG" -> if (!v.isNullOrBlank()) sm = v
-								"PREFIX" -> if (!v.isNullOrBlank()) {
-									val m = Regex("^\\(([^)]+)\\)(.+)$").find(v)
-									if (m != null) {
-										pm = m.groupValues[1]
-										ps = m.groupValues[2]
-									}
-								}
-							}
-						}
-
-						chantypes = chant
-						caseMapping = cm
-						statusMsg = sm
-						prefixModes = pm
-						prefixSymbols = ps
-
-						val mp = mutableMapOf<Char, Char>()
-						val n = minOf(pm.length, ps.length)
-						for (i in 0 until n) mp[pm[i]] = ps[i]
-						if (mp.isNotEmpty()) prefixModeToSymbol = mp
-
-						send(IrcEvent.ISupport(chantypes, caseMapping, prefixModes, prefixSymbols, statusMsg))
-					}
-
 					"NICK" -> {
 						val old = msg.prefixNick()
 						val newNick = (msg.trailing ?: msg.params.firstOrNull())
@@ -1686,50 +1645,6 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					}
 
 
-					"324" -> {
-						// RPL_CHANNELMODEIS: <me> <channel> <modes> [mode params...]
-						val chan = msg.params.getOrNull(1) ?: continue
-						val modes = msg.params.drop(2).joinToString(" ").trim()
-						if (modes.isNotBlank()) {
-							send(IrcEvent.ChannelModeIs(chan, modes, code = msg.command))
-						}
-					}
-
-					"471", "472", "473", "474", "475", "476", "477" -> {
-						// Join failures: channel is usually param[1], message is trailing.
-						val chan = msg.params.getOrNull(1) ?: continue
-						val reason = msg.trailing?.let { stripIrcFormatting(it) }
-							?: "Cannot join $chan"
-						send(IrcEvent.JoinError(chan, reason, code = msg.command))
-					}
-
-					"332" -> {
-						val chan = msg.params.getOrNull(1) ?: continue
-						val topic = msg.trailing
-						send(IrcEvent.TopicReply(chan, topic, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
-					}
-
-					"333" -> {
-						val chan = msg.params.getOrNull(1) ?: continue
-						val setter = msg.params.getOrNull(2) ?: continue
-						val rawTs = msg.params.getOrNull(3)?.toLongOrNull()
-						val setAtMs = rawTs?.let { if (it in 1..9_999_999_999L) it * 1000L else it }
-						send(IrcEvent.TopicWhoTime(chan, setter, setAtMs, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
-					}
-					"353" -> {
-						val chan = msg.params.getOrNull(2) ?: continue
-						val raw = msg.trailing ?: ""
-						val names = raw.split(' ')
-							.filter { it.isNotBlank() }
-							.distinct()
-						send(IrcEvent.Names(chan, names))
-					}
-
-					"366" -> {
-						val chan = msg.params.getOrNull(1) ?: continue
-						send(IrcEvent.NamesEnd(chan))
-					}
-
 					"MODE" -> {
 						val rawTarget = msg.params.getOrNull(0) ?: continue
 						val target = normalizeMsgTarget(rawTarget)
@@ -1749,16 +1664,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						send(IrcEvent.ChannelModeLine(target, "*** $setter sets mode $modeStr$extra", timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
 					}
 
-					"321" -> send(IrcEvent.ChannelListStart)
 
-					"322" -> {
-						val chan = msg.params.getOrNull(1) ?: continue
-						val users = msg.params.getOrNull(2)?.toIntOrNull() ?: 0
-						val topic = msg.trailing ?: ""
-						send(IrcEvent.ChannelListItem(chan, users, topic))
-					}
-
-					"323" -> send(IrcEvent.ChannelListEnd)
 				}
 			}
 
@@ -1776,11 +1682,18 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			joinedChannelCases.clear()
 			runCatching { writerJob.cancel() }
 			runCatching { pingJob.cancel() }
-			// Attempt graceful SSL shutdown before hard-closing
-			runCatching {
-				(s as? SSLSocket)?.let { ssl ->
-					// close the output side to send SSL close_notify
-					runCatching { ssl.shutdownOutput() }
+			// Attempt graceful SSL close_notify only when the connection ended cleanly
+			// (i.e. the user requested a disconnect, not an error path). Calling
+			// shutdownOutput() on a socket that already got an SSL_ERROR_SYSCALL or a
+			// BoringSSL "Success" error causes a second SSLException that can confuse
+			// the reconnect state machine on some devices. Safe to skip on error paths
+			// because the server will time out the half-open session anyway.
+			if (userClosing) {
+				runCatching {
+					(s as? SSLSocket)?.let { ssl ->
+						ssl.soTimeout = 2_000  // don't hang waiting for close_notify echo
+						runCatching { ssl.shutdownOutput() }
+					}
 				}
 			}
 			runCatching { s.close() }
@@ -1906,7 +1819,25 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			val ss = sslContext.socketFactory.createSocket(raw, config.host, config.port, true) as SSLSocket
 			val allowed = ss.supportedProtocols.filter { it == "TLSv1.3" || it == "TLSv1.2" }
 			if (allowed.isNotEmpty()) ss.enabledProtocols = allowed.toTypedArray()
-			ss.startHandshake()
+
+			// Apply a bounded soTimeout during startHandshake() so TLS negotiation cannot hang
+			// forever. On some devices (MediaTek SoCs, certain MIUI/OneUI builds) BoringSSL
+			// stalls mid-handshake and eventually surfaces SSL_ERROR_SYSCALL with errno 0
+			// ("Success" / "I/O error during system call, Success") — or never returns at all
+			// when the radio power-manager suspends the socket during negotiation.
+			// A bounded timeout ensures a clean exception and re-entry into the reconnect loop
+			// rather than a permanently hung coroutine.
+			// After the handshake we restore readTimeoutMs (normally 0 = infinite, relying on
+			// the PING/PONG loop for mid-session liveness detection).
+			ss.soTimeout = ConnectionConstants.TLS_HANDSHAKE_TIMEOUT_MS
+			try {
+				ss.startHandshake()
+			} catch (e: Exception) {
+				runCatching { ss.close() }
+				runCatching { raw.close() }
+				throw e
+			}
+			ss.soTimeout = config.readTimeoutMs  // restore post-handshake timeout
 
 			// Capture basic session info for UI (cipher/protocol/cert subject)
 			lastTlsInfo = runCatching {
@@ -1956,6 +1887,12 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		// General SSL exceptions (mid-session errors)
 		if (t is SSLException) {
 			return when {
+				// BoringSSL/OpenSSL "Success" (errno=0): TCP FIN received without SSL close_notify.
+				// Common on mobile when the radio silently drops the connection or when the
+				// server closes TCP without a proper SSL shutdown.  Not an error the user can
+				// action; connection will be re-established automatically.
+				raw.contains(", Success", ignoreCase = false) ||
+				raw.contains("I/O error during system call, Success", ignoreCase = true) ||
 				raw.contains("Internal error in SSL library", ignoreCase = true) ||
 				raw.contains("SSL_ERROR_INTERNAL", ignoreCase = true) ||
 				raw.contains("Internal OpenSSL error", ignoreCase = true) ->
@@ -2014,7 +1951,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		if (code.length != 3 || !code.all { it.isDigit() }) return null
 		
 		// Don't double-emit for numerics that already have dedicated events.
-		if (code in setOf("001","321","322","323","324","332","333","353","366","367","368","433","471","472","473","474","475","476","477")) return null
+		if (code in setOf("001","005","321","322","323","324","332","333","353","366","367","368","433","442","471","472","473","474","475","476","477")) return null
 
 		fun p(i: Int) = msg.params.getOrNull(i)
 		val t = msg.trailing?.let { stripIrcFormatting(it) }
@@ -2124,12 +2061,6 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			"335" -> {
 				val nick = p(1) ?: return null
 				t ?: "$nick is marked as a bot/service"
-			}
-
-			// Host hidden
-			"396" -> {
-				val hidden = p(1) ?: return null
-				t ?: "Your vhost/cloak is now $hidden"
 			}
 
 			// Common errors

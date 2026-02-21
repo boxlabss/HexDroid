@@ -39,8 +39,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.IconButton
@@ -74,6 +75,8 @@ import com.boxlabs.hexdroid.data.ThemeMode
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 // Copy a font file from a content URI to internal storage
 private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: String): String? {
@@ -118,12 +121,46 @@ fun SettingsScreen(
     onOpenIgnoreList: () -> Unit,
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
+    onExportBackup: (Uri) -> Unit = {},
+    onImportBackup: (Uri) -> Unit = {},
+    onClearBackupMessage: () -> Unit = {},
 ) {
     val s = state.settings
     val ctx = LocalContext.current
 
     var showBatteryHelpDialog by remember { mutableStateOf(false) }
     val isOnePlus = remember { Build.MANUFACTURER.equals("OnePlus", ignoreCase = true) }
+
+    // Backup / restore state
+    var showRestoreConfirmDialog by remember { mutableStateOf(false) }
+    var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    var showBackupResultDialog by remember { mutableStateOf(false) }
+
+    // Show result dialog whenever a backup message arrives
+    LaunchedEffect(state.backupMessage) {
+        if (state.backupMessage != null) showBackupResultDialog = true
+    }
+
+    // Filename for the backup uses a timestamp so files don't collide
+    val backupFileName = remember {
+        val ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+        "hexdroid_backup_$ts.json"
+    }
+
+    val exportBackupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) onExportBackup(uri)
+    }
+
+    val importBackupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            pendingRestoreUri = uri
+            showRestoreConfirmDialog = true
+        }
+    }
 
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -284,7 +321,7 @@ fun SettingsScreen(
                 Text("${(s.fontScale * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_ui)) }
             item {
@@ -326,7 +363,7 @@ fun SettingsScreen(
                 }
             }
 			
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_highlights)) }
 
@@ -347,7 +384,7 @@ fun SettingsScreen(
                 )
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_irc)) }
 			
@@ -424,7 +461,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_notifications)) }
 
@@ -441,7 +478,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_logging)) }
 
@@ -500,7 +537,7 @@ fun SettingsScreen(
                 )
             }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_ircv3_history)) }
 
@@ -524,7 +561,7 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_count_unread), s.ircHistoryCountsAsUnread) { onUpdate { copy(ircHistoryCountsAsUnread = !ircHistoryCountsAsUnread) } } }
             item { SettingToggle(stringResource(R.string.setting_trigger_notif), s.ircHistoryTriggersNotifications) { onUpdate { copy(ircHistoryTriggersNotifications = !ircHistoryTriggersNotifications) } } }
 
-            item { Divider() }
+            item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_file_transfers)) }
 
@@ -583,8 +620,100 @@ fun SettingsScreen(
             }
 
             item { Spacer(Modifier.height(16.dp)) }
+
+            // ----- Backup & Restore -----
+            item { HorizontalDivider() }
+            item { SectionTitle("Backup & Restore") }
+
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        "Export your network configurations and app settings to a JSON file. " +
+                            "Passwords and TLS certificates are not included.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { exportBackupLauncher.launch(backupFileName) }) {
+                            Text("Export backup")
+                        }
+                        OutlinedButton(onClick = {
+                            importBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                        }) {
+                            Text("Restore backup")
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Restoring replaces all current networks and settings.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            item { Spacer(Modifier.height(16.dp)) }
         }
     }
+    // Restore confirmation dialog
+    if (showRestoreConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showRestoreConfirmDialog = false
+                pendingRestoreUri = null
+            },
+            title = { Text("Restore backup?") },
+            text = {
+                Text(
+                    "This will replace all current networks and settings with those in the backup file. " +
+                        "Passwords were not included in the backup and will need to be re-entered.\n\n" +
+                        "This cannot be undone."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showRestoreConfirmDialog = false
+                    pendingRestoreUri?.let { uri -> onImportBackup(uri) }
+                    pendingRestoreUri = null
+                }) {
+                    Text("Restore")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showRestoreConfirmDialog = false
+                    pendingRestoreUri = null
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Backup / restore result dialog
+    if (showBackupResultDialog && state.backupMessage != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showBackupResultDialog = false
+                onClearBackupMessage()
+            },
+            title = {
+                val isError = state.backupMessage.startsWith("Backup failed") ||
+                    state.backupMessage.startsWith("Restore failed")
+                Text(if (isError) "Error" else "Done")
+            },
+            text = { Text(state.backupMessage) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBackupResultDialog = false
+                    onClearBackupMessage()
+                }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
     if (showBatteryHelpDialog) {
         AlertDialog(
             onDismissRequest = { showBatteryHelpDialog = false },
@@ -659,7 +788,7 @@ private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
             label = { Text("Language") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for (lang in languages) {
@@ -691,7 +820,8 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
     val label = when (current) {
         ThemeMode.DARK -> "Dark"
         ThemeMode.LIGHT -> "Light"
-        ThemeMode.SYSTEM -> "System"
+        ThemeMode.MATRIX -> "Matrix"
+        ThemeMode.SYSTEM -> "System default"
     }
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
@@ -702,12 +832,13 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
             label = { Text("Theme") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Dark") }, onClick = { onPick(ThemeMode.DARK); expanded = false })
             DropdownMenuItem(text = { Text("Light") }, onClick = { onPick(ThemeMode.LIGHT); expanded = false })
-            DropdownMenuItem(text = { Text("System") }, onClick = { onPick(ThemeMode.SYSTEM); expanded = false })
+            DropdownMenuItem(text = { Text("Matrix") }, onClick = { onPick(ThemeMode.MATRIX); expanded = false })
+            DropdownMenuItem(text = { Text("System default") }, onClick = { onPick(ThemeMode.SYSTEM); expanded = false })
         }
     }
 }
@@ -737,7 +868,7 @@ private fun FontPicker(
             label = { Text(fieldLabel) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             // Open Sans is the default UI font.
@@ -776,7 +907,7 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
             label = { Text("Chat font style") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Regular") }, onClick = { onPick(ChatFontStyle.REGULAR); expanded = false })
@@ -805,7 +936,7 @@ private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIn
             label = { Text("Vibration intensity") },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Low") }, onClick = { onPick(VibrateIntensity.LOW); expanded = false })

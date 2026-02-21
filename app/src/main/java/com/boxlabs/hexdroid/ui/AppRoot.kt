@@ -135,8 +135,9 @@ fun AppRoot(
     }
 
 
-    val darkTheme = when (state.settings.themeMode) {
-        ThemeMode.DARK -> true
+    val themeMode = state.settings.themeMode
+    val darkTheme = when (themeMode) {
+        ThemeMode.DARK, ThemeMode.MATRIX -> true
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
@@ -158,9 +159,9 @@ fun AppRoot(
     val fontScale = state.settings.fontScale.coerceIn(0.8f, 2.0f)
     val scaledDensity = Density(density = baseDensity.density, fontScale = baseDensity.fontScale * fontScale)
 
-    key(darkTheme, state.settings.fontChoice, state.settings.fontScale, state.settings.customFontPath) {
+    key(themeMode, state.settings.fontChoice, state.settings.fontScale, state.settings.customFontPath) {
         HexDroidIRCTheme(
-            darkTheme = darkTheme,
+            themeMode = themeMode,
             fontChoice = state.settings.fontChoice,
             customFontPath = state.settings.customFontPath
         ) {
@@ -222,6 +223,7 @@ fun AppRoot(
                     onSysInfo = { vm.sendInput("/sysinfo") },
                     onAbout = { vm.goTo(AppScreen.ABOUT) },
                     onUpdateSettings = vm::updateSettings,
+                    onReorderNetworks = vm::reorderNetworks,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )
@@ -239,6 +241,8 @@ fun AppRoot(
                     onAllowPlaintextConnect = vm::allowPlaintextAndConnect,
                     onDismissPlaintextWarning = vm::dismissPlaintextWarning,
                     onOpenSettings = { vm.goTo(AppScreen.SETTINGS) },
+                    onReorder = vm::reorderNetworks,
+                    onToggleFavourite = vm::toggleFavourite,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )
@@ -269,6 +273,9 @@ fun AppRoot(
                     onOpenIgnoreList = vm::openIgnoreList,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
+                    onExportBackup = vm::exportBackup,
+                    onImportBackup = vm::importBackup,
+                    onClearBackupMessage = vm::clearBackupMessage,
                 )
 
                 AppScreen.TRANSFERS -> TransfersScreen(
