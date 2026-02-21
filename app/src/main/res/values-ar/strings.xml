@@ -121,6 +121,13 @@
     <string name="ignore_title">قائمة التجاهل</string>
     <string name="list_title">قائمة القنوات</string>
 
+    <string name="about_subtitle">عميل IRC لنظام Android</string>
+    <string name="about_version">الإصدار %1$s</string>
+    <string name="about_doc_support">الوثائق والدعم</string>
+    <string name="about_doc_support_desc">قم بزيارة الموقع الإلكتروني للحصول على الأدلة والأسئلة الشائعة وللإبلاغ عن المشكلات.</string>
+    <string name="about_open_website">افتح الموقع</string>
+    <string name="about_free_app_by">HexDroid - تطبيق مجاني (بدون إعلانات) بواسطة</string>
+
     <string name="setting_ui_font">خط واجهة المستخدم</string>
     <string name="setting_storage_internal">التخزين الداخلي</string>
     <string name="setting_storage_custom_folder">تم تحديد مجلد مخصص</string>
