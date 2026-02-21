@@ -98,6 +98,7 @@
     <string name="theme_label">Design</string>
     <string name="theme_dark">Dunkel</string>
     <string name="theme_light">Hell</string>
+    <string name="theme_matrix">Matrix</string>
     <string name="theme_system">System</string>
 
     <string name="chat_nicklist">Nickliste</string>
@@ -142,4 +143,13 @@
     <string name="transfers_title">Übertragungen</string>
     <string name="ignore_title">Ignorieren-Liste</string>
     <string name="list_title">Kanalliste</string>
+
+    <string name="setting_ui_font">UI-Schriftart</string>
+    <string name="setting_storage_internal">Interner Speicher</string>
+    <string name="setting_storage_custom_folder">Benutzerdefinierter Ordner ausgewählt</string>
+    <string name="setting_download_folder_default">Downloads (Standard)</string>
+    <string name="setting_download_folder_custom">Benutzerdefinierter Ordner</string>
+    <string name="battery_dialog_text">Um über Nacht verbunden zu bleiben, deaktiviere bitte die Akku-Optimierung für diese App und erlaube Hintergrundaktivitäten.</string>
+    <string name="battery_dialog_oneplus_tip">OnePlus-Tipp: Sperre die App auch in den kürzlich verwendeten Apps (Vorhängeschloss) und stelle sicher, dass Hintergrundaktivität / Autostart in den Akkueinstellungen erlaubt ist.</string>
+    <string name="custom">Benutzerdefiniert</string>
 </resources>

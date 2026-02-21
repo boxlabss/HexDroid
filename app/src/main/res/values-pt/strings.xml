@@ -102,6 +102,7 @@
     <string name="theme_label">Tema</string>
     <string name="theme_dark">Escuro</string>
     <string name="theme_light">Claro</string>
+    <string name="theme_matrix">Matrix</string>
     <string name="theme_system">Sistema</string>
 
     <string name="font_open_sans">Open Sans</string>
@@ -181,4 +182,13 @@
     <string name="transfers_title">Transferência de arquivos</string>
     <string name="ignore_title">Lista de ignorados</string>
     <string name="list_title">Lista de canais</string>
+
+    <string name="setting_ui_font">Fonte da interface</string>
+    <string name="setting_storage_internal">Armazenamento interno</string>
+    <string name="setting_storage_custom_folder">Pasta personalizada selecionada</string>
+    <string name="setting_download_folder_default">Downloads (padrão)</string>
+    <string name="setting_download_folder_custom">Pasta personalizada</string>
+    <string name="battery_dialog_text">Para continuar conectado em segundo plano, desative a Otimização de Bateria para este app e permita a atividade em segundo plano.</string>
+    <string name="battery_dialog_oneplus_tip">Dica OnePlus: bloqueie também o app na tela de Recentes (cadeado) e certifique-se de que a atividade em segundo plano / início automático está permitida nas configurações de bateria.</string>
+    <string name="custom">Personalizado</string>
 </resources>

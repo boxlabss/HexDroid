@@ -78,6 +78,7 @@
     <string name="theme_label">السمة</string>
     <string name="theme_dark">داكن</string>
     <string name="theme_light">فاتح</string>
+    <string name="theme_matrix">ماتريكس</string>
     <string name="theme_system">النظام</string>
 
     <string name="chat_nicklist">قائمة المستخدمين</string>
@@ -119,4 +120,13 @@
     <string name="transfers_title">عمليات النقل</string>
     <string name="ignore_title">قائمة التجاهل</string>
     <string name="list_title">قائمة القنوات</string>
+
+    <string name="setting_ui_font">خط واجهة المستخدم</string>
+    <string name="setting_storage_internal">التخزين الداخلي</string>
+    <string name="setting_storage_custom_folder">تم تحديد مجلد مخصص</string>
+    <string name="setting_download_folder_default">التنزيلات (الافتراضي)</string>
+    <string name="setting_download_folder_custom">مجلد مخصص</string>
+    <string name="battery_dialog_text">للبقاء متصلاً طوال الليل، يرجى تعطيل تحسين البطارية لهذا التطبيق والسماح بالنشاط في الخلفية.</string>
+    <string name="battery_dialog_oneplus_tip">نصيحة لأجهزة OnePlus: اقفل التطبيق أيضاً في قائمة التطبيقات الحديثة (رمز القفل) وتأكد من السماح بالنشاط في الخلفية / التشغيل التلقائي في إعدادات البطارية.</string>
+    <string name="custom">مخصص</string>
 </resources>

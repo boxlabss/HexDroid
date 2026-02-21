@@ -98,6 +98,7 @@
     <string name="theme_label">Thème</string>
     <string name="theme_dark">Sombre</string>
     <string name="theme_light">Clair</string>
+    <string name="theme_matrix">Matrix</string>
     <string name="theme_system">Système</string>
 
     <string name="chat_nicklist">Liste de pseudos</string>
@@ -149,4 +150,13 @@
     <string name="transfers_title">Transferts</string>
     <string name="ignore_title">Liste d\'ignorés</string>
     <string name="list_title">Liste des canaux</string>
+
+    <string name="setting_ui_font">Police de l\'interface</string>
+    <string name="setting_storage_internal">Stockage interne</string>
+    <string name="setting_storage_custom_folder">Dossier personnalisé sélectionné</string>
+    <string name="setting_download_folder_default">Téléchargements (par défaut)</string>
+    <string name="setting_download_folder_custom">Dossier personnalisé</string>
+    <string name="battery_dialog_text">Pour rester connecté toute la nuit, veuillez désactiver l\'optimisation de la batterie pour cette application et autoriser l\'activité en arrière-plan.</string>
+    <string name="battery_dialog_oneplus_tip">Astuce OnePlus : verrouillez également l\'application dans les applications récentes (cadenas) et assurez-vous que l\'activité en arrière-plan / le lancement automatique est autorisé dans les paramètres de la batterie.</string>
+    <string name="custom">Personnalisé</string>
 </resources>

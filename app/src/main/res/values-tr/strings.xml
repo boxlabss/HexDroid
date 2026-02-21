@@ -81,6 +81,7 @@
     <string name="theme_label">Tema</string>
     <string name="theme_dark">Koyu</string>
     <string name="theme_light">Açık</string>
+    <string name="theme_matrix">Matrix</string>
     <string name="theme_system">Sistem</string>
 
     <string name="chat_nicklist">Kullanıcı listesi</string>
@@ -122,4 +123,13 @@
     <string name="transfers_title">Aktarımlar</string>
     <string name="ignore_title">Yoksayma listesi</string>
     <string name="list_title">Kanal listesi</string>
+
+    <string name="setting_ui_font">Arayüz yazı tipi</string>
+    <string name="setting_storage_internal">Dahili depolama</string>
+    <string name="setting_storage_custom_folder">Özel klasör seçildi</string>
+    <string name="setting_download_folder_default">İndirmeler (varsayılan)</string>
+    <string name="setting_download_folder_custom">Özel klasör</string>
+    <string name="battery_dialog_text">Gece boyunca bağlı kalmak için lütfen bu uygulama için Pil Optimizasyonunu devre dışı bırakın ve arka plan etkinliğine izin verin.</string>
+    <string name="battery_dialog_oneplus_tip">OnePlus ipucu: Ayrıca uygulamayı Son Kullanılanlar\'da kilitleyin (asma kilit) ve pil ayarlarında arka plan etkinliğine / otomatik başlatmaya izin verildiğinden emin olun.</string>
+    <string name="custom">Özel</string>
 </resources>

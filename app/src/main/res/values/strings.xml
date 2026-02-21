@@ -105,6 +105,7 @@
     <string name="theme_label">Theme</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
+    <string name="theme_matrix">Matrix</string>
     <string name="theme_system">System</string>
 
     <!-- Font picker -->
@@ -197,6 +198,15 @@
 
     <!-- List -->
     <string name="list_title">Channel list</string>
+
+    <string name="setting_ui_font">UI font</string>
+    <string name="setting_storage_internal">Internal storage</string>
+    <string name="setting_storage_custom_folder">Custom folder selected</string>
+    <string name="setting_download_folder_default">Downloads (default)</string>
+    <string name="setting_download_folder_custom">Custom folder</string>
+    <string name="battery_dialog_text">To stay connected overnight, please disable Battery Optimization for this app and allow background activity.</string>
+    <string name="battery_dialog_oneplus_tip">OnePlus tip: also lock the app in Recents (padlock) and ensure background activity / auto-launch is allowed in battery settings.</string>
+    <string name="custom">Custom</string>
 
     <!-- Language names (native) – not translated -->
     <string name="lang_en" translatable="false">English</string>
