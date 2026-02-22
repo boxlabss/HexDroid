@@ -25,7 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalDensity
@@ -60,7 +60,7 @@ fun AppRoot(
     vm: IrcViewModel,
     onExit: () -> Unit = {}
 ) {
-    val state by vm.state.collectAsState()
+    val state by vm.state.collectAsStateWithLifecycle()
 
 	val tourRegistry = remember { TourRegistry() }
 	var tourActive by rememberSaveable { mutableStateOf(false) }
@@ -226,6 +226,7 @@ fun AppRoot(
                     onAbout = { vm.goTo(AppScreen.ABOUT) },
                     onUpdateSettings = vm::updateSettings,
                     onReorderNetworks = vm::reorderNetworks,
+                    onToggleNetworkExpanded = vm::toggleNetworkExpanded,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )

@@ -21,6 +21,11 @@ package com.boxlabs.hexdroid.ui
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -29,8 +34,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.draggable
@@ -62,6 +70,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -75,7 +84,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.People
@@ -100,6 +112,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -113,6 +126,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -132,15 +147,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -153,21 +172,275 @@ import com.boxlabs.hexdroid.ui.components.LagBar
 import com.boxlabs.hexdroid.ui.theme.fontFamilyForChoice
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private sealed class SidebarItem(val stableKey: String) {
-    data class Header(val netId: String, val title: String) : SidebarItem("h:$netId")
-    data class Buffer(val key: String, val label: String, val indent: androidx.compose.ui.unit.Dp) :
-        SidebarItem("b:$key")
+/** Commands with a short description shown in the hint popup. */
+private data class IrcCommand(val name: String, val usage: String, val description: String)
 
+private val IRC_COMMANDS = listOf(
+    // Messaging
+    IrcCommand("me",         "/me <action>",                   "Send a CTCP ACTION (/me waves)"),
+    IrcCommand("msg",        "/msg <nick> <message>",          "Send a private message"),
+    IrcCommand("notice",     "/notice <target> <text>",        "Send a NOTICE to a user or channel"),
+    IrcCommand("amsg",       "/amsg <message>",                "Send a message to all open channels"),
+    IrcCommand("ame",        "/ame <action>",                  "Send an action to all open channels"),
+
+    // Channels
+    IrcCommand("join",       "/join <channel> [key]",          "Join a channel"),
+    IrcCommand("part",       "/part [channel] [reason]",       "Leave a channel"),
+    IrcCommand("cycle",      "/cycle [channel]",               "Rejoin a channel (part then join)"),
+    IrcCommand("topic",      "/topic [new topic]",             "Show or set the channel topic"),
+    IrcCommand("invite",     "/invite <nick> [channel]",       "Invite a user to a channel"),
+    IrcCommand("list",       "/list",                          "List all channels on the server"),
+    IrcCommand("names",      "/names [channel]",               "List users in a channel"),
+
+    // Buffer management
+    IrcCommand("close",      "/close",                         "Close the current buffer"),
+    IrcCommand("closekey",   "/closekey <net::buffer>",        "Close a specific buffer by key"),
+    IrcCommand("find",       "/find <text>",                   "Search messages in the current buffer"),
+    IrcCommand("grep",       "/grep <text>",                   "Alias for /find"),
+    IrcCommand("search",     "/search <text>",                 "Alias for /find"),
+
+    // User & nick
+    IrcCommand("nick",       "/nick <new nick>",               "Change your nickname"),
+    IrcCommand("away",       "/away [message]",                "Set away; /away with no args clears it"),
+    IrcCommand("whois",      "/whois <nick>",                  "Query detailed info about a user"),
+    IrcCommand("who",        "/who <mask>",                    "Query users matching a mask"),
+    IrcCommand("ignore",     "/ignore [nick]",                 "Ignore a user (no args = list ignored)"),
+    IrcCommand("unignore",   "/unignore <nick>",               "Remove a user from the ignore list"),
+    IrcCommand("quit",       "/quit [reason]",                 "Quit IRC and disconnect"),
+
+    // Moderation
+    IrcCommand("kick",       "/kick <nick> [reason]",          "Kick a user from the channel"),
+    IrcCommand("ban",        "/ban <nick>",                    "Ban a user from the channel"),
+    IrcCommand("unban",      "/unban <nick>",                  "Remove a ban from the channel"),
+    IrcCommand("kb",         "/kb <nick> [reason]",            "Kick and ban a user"),
+    IrcCommand("kickban",    "/kickban <nick> [reason]",       "Alias for /kb"),
+    IrcCommand("op",         "/op <nick> [channel]",           "Grant operator (+o) to a user"),
+    IrcCommand("deop",       "/deop <nick> [channel]",         "Remove operator (-o) from a user"),
+    IrcCommand("voice",      "/voice <nick> [channel]",        "Grant voice (+v) to a user"),
+    IrcCommand("devoice",    "/devoice <nick> [channel]",      "Remove voice (-v) from a user"),
+    IrcCommand("mode",       "/mode [target] <modes>",         "Set channel or user modes"),
+
+    // Mode lists
+    IrcCommand("banlist",    "/banlist",                       "Show the channel ban list (+b)"),
+    IrcCommand("quietlist",  "/quietlist",                     "Show the quiet/mute list (+q)"),
+    IrcCommand("exceptlist", "/exceptlist",                    "Show the ban exception list (+e)"),
+    IrcCommand("invexlist",  "/invexlist",                     "Show the invite exception list (+I)"),
+
+    // CTCP
+    IrcCommand("ctcp",       "/ctcp <nick> <command>",         "Send a CTCP request"),
+    IrcCommand("ping",       "/ping <nick>",                   "CTCP PING a user"),
+    IrcCommand("ctcpping",   "/ctcpping <nick>",               "Alias for /ping"),
+    IrcCommand("version",    "/version [nick]",                "CTCP VERSION query (no arg = server)"),
+    IrcCommand("time",       "/time [server]",                 "Request server or remote time"),
+    IrcCommand("finger",     "/finger <nick>",                 "CTCP FINGER a user"),
+    IrcCommand("userinfo",   "/userinfo <nick>",               "CTCP USERINFO query"),
+    IrcCommand("clientinfo", "/clientinfo <nick>",             "CTCP CLIENTINFO query"),
+
+    // Server queries
+    IrcCommand("motd",       "/motd [server]",                 "Request the server Message of the Day"),
+    IrcCommand("admin",      "/admin [server]",                "Show server admin info"),
+    IrcCommand("info",       "/info [server]",                 "Show server software info"),
+    IrcCommand("dns",        "/dns <host|ip>",                 "Resolve a hostname or IP address"),
+
+    // DCC
+    IrcCommand("dcc",        "/dcc chat <nick>",               "Open a direct DCC chat with a user"),
+
+    // IRC operator
+    IrcCommand("oper",       "/oper <user> <password>",        "Authenticate as an IRC operator"),
+    IrcCommand("sajoin",     "/sajoin <nick> <channel>",       "Force-join a user (IRCop only)"),
+    IrcCommand("sapart",     "/sapart <nick> [channel]",       "Force-part a user (IRCop only)"),
+    IrcCommand("kill",       "/kill <nick> [reason]",          "Kill (disconnect) a user (IRCop only)"),
+    IrcCommand("kline",      "/kline <mask> <duration> [reason]","K-Line: ban by user@host (IRCop)"),
+    IrcCommand("gline",      "/gline <mask> <duration> [reason]","G-Line: global ban (IRCop)"),
+    IrcCommand("zline",      "/zline <ip> <duration> [reason]","Z-Line: ban by IP (IRCop)"),
+    IrcCommand("dline",      "/dline <ip> <duration> [reason]","D-Line: deny connection by IP (IRCop)"),
+    IrcCommand("eline",      "/eline <mask> <duration> [reason]","E-Line: ban exception (IRCop)"),
+    IrcCommand("qline",      "/qline <mask> <duration> [reason]","Q-Line: nickname ban (IRCop)"),
+    IrcCommand("shun",       "/shun <mask> <duration> [reason]","Shun: silence a user (IRCop)"),
+    IrcCommand("wallops",    "/wallops <message>",             "Send a WALLOPS message (IRCop)"),
+    IrcCommand("globops",    "/globops <message>",             "Send a GLOBOPS message (IRCop)"),
+    IrcCommand("locops",     "/locops <message>",              "Send a LOCOPS message (IRCop)"),
+    IrcCommand("operwall",   "/operwall <message>",            "Send an OPERWALL message (IRCop)"),
+
+    // Misc
+    IrcCommand("raw",        "/raw <command>",                 "Send a raw IRC line to the server"),
+    IrcCommand("sysinfo",    "/sysinfo",                       "Post device system info to chat"),
+)
+
+/**
+ * Command-completion bar shown above the input field when the user starts /typing
+ *
+ *   ┌───────────────────────────────────────────────────────────────┐
+ *   │  /close  /closekey  /cycle  /ctcp   ....						 |
+ *   ├───────────────────────────────────────────────────────────────┤
+ *   │  /close                   Close the current buffer            │
+ *   └───────────────────────────────────────────────────────────────┘
+ *
+ * Tapping a tab completes the command name (+ trailing space) into the input field.
+ */
+@Composable
+private fun CommandHints(
+    query: String,           // text after the leading '/' — must be non-empty
+    onPick: (String) -> Unit // called with "/command " ready to type args
+) {
+    val matches = remember(query) {
+        IRC_COMMANDS.filter { it.name.startsWith(query, ignoreCase = true) }
+    }
+
+    // Track which chip the user has highlighted (defaults to first match)
+    var highlighted by remember(matches) { mutableStateOf(matches.firstOrNull()) }
+
+    AnimatedVisibility(
+        visible = matches.isNotEmpty(),
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit  = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+    ) {
+        Surface(
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp,
+            shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column {
+                // Tabs
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(matches, key = { it.name }) { cmd ->
+                        val isHighlighted = highlighted?.name == cmd.name
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isHighlighted)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable {
+                                highlighted = cmd
+                                onPick("/${cmd.name} ")
+                            }
+                        ) {
+                            Text(
+                                text = "/${cmd.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isHighlighted)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Detail row for the highlighted command
+                highlighted?.let { cmd ->
+                    HorizontalDivider(thickness = 0.5.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick("/${cmd.name} ") }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Usage signature (args portion after the command name)
+                        val argsText = cmd.usage.removePrefix("/${cmd.name}").trim()
+                        Text(
+                            text = "/${cmd.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        if (argsText.isNotEmpty()) {
+                            Text(
+                                text = argsText,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+                        Text(
+                            text = cmd.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private sealed class SidebarItem(val stableKey: String) {
+    data class Header(val netId: String, val title: String, val expanded: Boolean = true) : SidebarItem("h:$netId")
+    data class Buffer(
+        val key: String,
+        val label: String,
+        val indent: Dp,
+        val isNetworkHeader: Boolean = false,
+        val netId: String? = null,
+        val expanded: Boolean = true,
+    ) : SidebarItem("b:$key")
     data class DividerItem(val netId: String) : SidebarItem("d:$netId")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+
+/** Drag handle for sidebar network rows. Long-press to start drag.
+ *  onDrag receives the CUMULATIVE y offset from the drag start position. */
+@Composable
+private fun SidebarDragHandle(
+    onStart: () -> Unit,
+    onDrag: (totalOffsetY: Float) -> Unit,
+    onEnd: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .pointerInput(Unit) {
+                var accumulated = 0f
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { accumulated = 0f; onStart() },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        accumulated += dragAmount.y
+                        onDrag(accumulated)
+                    },
+                    onDragEnd = { onEnd() },
+                    onDragCancel = { onEnd() }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            Icons.Default.DragHandle,
+            contentDescription = "Drag to reorder",
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
     state: UiState,
@@ -191,6 +464,7 @@ fun ChatScreen(
     onAbout: () -> Unit,
     onUpdateSettings: (UiSettings.() -> UiSettings) -> Unit,
     onReorderNetworks: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onToggleNetworkExpanded: (netId: String) -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
@@ -217,10 +491,7 @@ fun ChatScreen(
 
     fun splitKey(key: String): Pair<String, String> {
         val idx = key.indexOf("::")
-        return if (idx <= 0) ("unknown" to key) else (key.substring(
-            0,
-            idx
-        ) to key.substring(idx + 2))
+        return if (idx <= 0) ("unknown" to key) else (key.take(idx) to key.drop(idx + 2))
     }
 
     fun baseNick(display: String): String = display.trimStart('~', '&', '@', '%', '+')
@@ -239,7 +510,7 @@ fun ChatScreen(
         for (k in state.buffers.keys) {
             val idx = k.indexOf("::")
             if (idx <= 0) continue
-            val netId = k.substring(0, idx)
+            val netId = k.take(idx)
             groups.getOrPut(netId) { mutableListOf() }.add(k)
         }
 
@@ -267,7 +538,7 @@ fun ChatScreen(
         label: String,
         selected: String,
         meta: com.boxlabs.hexdroid.UiBuffer?,
-        indent: androidx.compose.ui.unit.Dp,
+        indent: Dp,
         closable: Boolean,
         onClose: () -> Unit,
         lagLabel: String? = null,
@@ -398,9 +669,12 @@ fun ChatScreen(
     val myNick = state.connections[selNetId]?.myNick ?: state.myNick
     val myDisplay = nicklist.firstOrNull { baseNick(it).equals(myNick, ignoreCase = true) }
     val myPrefix = myDisplay?.let { nickPrefix(it) }
-    val canKick = isChannel && myPrefix in listOf('~', '&', '@', '%')
-    val canBan = isChannel && myPrefix in listOf('~', '&', '@')
+    val canKick  = isChannel && myPrefix in listOf('~', '&', '@', '%')
+    val canBan   = isChannel && myPrefix in listOf('~', '&', '@')
     val canTopic = isChannel && myPrefix in listOf('~', '&', '@', '%')
+    val canMode  = isChannel && myPrefix in listOf('~', '&', '@')
+    val isIrcOper = state.connections[selNetId]?.isIrcOper == true
+    val currentModeString = if (isChannel) state.buffers[selected]?.modeString else null
 
     val bgLum = MaterialTheme.colorScheme.background.luminance()
 
@@ -427,8 +701,9 @@ fun ChatScreen(
     var selectedNick by remember { mutableStateOf("") }
 
     var showChanOps by remember { mutableStateOf(false) }
+    var showIrcOpTools by remember { mutableStateOf(false) }
     var showChanListSheet by remember { mutableStateOf(false) }
-    var chanListTab by remember { mutableStateOf(0) } // 0=bans,1=quiets,2=excepts,3=invex
+    var chanListTab by remember { mutableIntStateOf(0) } // 0=bans,1=quiets,2=excepts,3=invex
     var opsNick by remember { mutableStateOf("") }
     var opsReason by remember { mutableStateOf("") }
     var opsTopic by remember(selected, topic) { mutableStateOf(topic ?: "") }
@@ -494,206 +769,351 @@ fun ChatScreen(
             if (input.text.isBlank()) TextFieldValue("$nick: ") else TextFieldValue(input.text + " $nick")
     }
 
-    @Composable
-    fun BufferDrawer(mod: Modifier = Modifier) {
-        val sidebarItems = remember(state.networks, buffersByNet, state.channelsOnly, selected) {
-            val out = mutableListOf<SidebarItem>()
-            val sortedNets = state.networks
-                .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
-            for (net in sortedNets) {
-                val nId = net.id
-                val header = net.name
-                val grouped = buffersByNet[nId]
-                val serverKey = grouped?.serverKey ?: "$nId::*server*"
-                val otherKeys = grouped?.others ?: emptyList()
+	@Composable
+	fun BufferDrawer(mod: Modifier = Modifier) {
+		// During a drag this holds the reordered network IDs so that child rows
+		// (channels) move with their parent without any graphicsLayer hacks.
+		// null means "use the natural sort order".
+		var dragNetworkOrder by remember { mutableStateOf<List<String>?>(null) }
 
-                if (state.channelsOnly) {
-                    out.add(SidebarItem.Header(nId, header))
-                } else {
-                    // Use the server buffer row as the network "header" to avoid showing the network name twice.
-                    out.add(SidebarItem.Buffer(serverKey, header, 0.dp))
-                }
-                for (k in otherKeys) {
-                    val (_, name) = splitKey(k)
-                    out.add(SidebarItem.Buffer(k, name, 14.dp))
-                }
-                out.add(SidebarItem.DividerItem(nId))
-            }
-            out
-        }
+		val sidebarItems = remember(state.networks, buffersByNet, state.channelsOnly, selected, state.collapsedNetworkIds, dragNetworkOrder) {
+			val out = mutableListOf<SidebarItem>()
+			val naturalOrder = state.networks
+				.sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+			val sortedNets = if (dragNetworkOrder != null) {
+				// Reorder according to live drag state — nets not in the drag list fall back to end
+				val map = naturalOrder.associateBy { it.id }
+				dragNetworkOrder!!.mapNotNull { map[it] } +
+					naturalOrder.filter { it.id !in dragNetworkOrder!! }
+			} else naturalOrder
+			for (net in sortedNets) {
+				val nId = net.id
+				val header = net.name
+				val grouped = buffersByNet[nId]
+				val serverKey = grouped?.serverKey ?: "$nId::*server*"
+				val otherKeys = grouped?.others ?: emptyList()
 
-        val lagInfoByNet = remember(state.networks, state.connections) {
-            state.networks.associate { net ->
-                val con = state.connections[net.id]
-                val lagMs = con?.lagMs
-                val lagS = if (lagMs == null) null else (lagMs / 1000f)
-                val label = when {
-                    con == null -> "—"
-                    con.connecting -> "connecting"
-                    !con.connected -> "disconnected"
-                    lagS == null -> "…"
-                    else -> String.format(Locale.getDefault(), "%.1fs", lagS)
-                }
-                val progress = when {
-                    lagMs == null -> 0f
-                    else -> (lagMs / 10_000f).coerceIn(0f, 1f)
-                }
-                net.id to (label to progress)
-            }
-        }
+				// A network is expanded unless its id is in the collapsed set.
+				// Empty set (default) = all expanded, matching HexChat behaviour.
+				val expanded = nId !in state.collapsedNetworkIds
 
-        Column(
-            mod.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            val listState = rememberLazyListState()
+				if (state.channelsOnly) {
+					out.add(SidebarItem.Header(nId, header, expanded))
+				} else {
+					// Use the server buffer row as the network "header" to avoid showing the network name twice.
+					out.add(SidebarItem.Buffer(serverKey, header, 0.dp, isNetworkHeader = true, netId = nId, expanded = expanded))
+				}
+				if (expanded) {
+					for (k in otherKeys) {
+						val (_, name) = splitKey(k)
+						out.add(SidebarItem.Buffer(k, name, 14.dp))
+					}
+				}
+				out.add(SidebarItem.DividerItem(nId))
+			}
+			out
+		}
 
-            // Reorderable state for network-level drag-to-reorder in the sidebar.
-            // Only Header and server-Buffer items (indent == 0.dp) represent network
-            // positions - child buffers and dividers ride along implicitly.
-            // We map the dragged item's index back to a network-level index by counting
-            // how many network "root" items precede it in the flat list.
-            val reorderState = rememberReorderableLazyListState(
-                lazyListState = listState,
-                onMove = { from, to ->
-                    // Translate flat list indices to network-level indices by counting
-                    // only Header / root-Buffer items (one per network).
-                    fun netIndexOf(flatIdx: Int): Int {
-                        var count = 0
-                        for (i in 0 until flatIdx) {
-                            val si = sidebarItems.getOrNull(i) ?: break
-                            if (si is SidebarItem.Header ||
-                                (si is SidebarItem.Buffer && si.indent.value == 0f)) count++
-                        }
-                        return count
-                    }
-                    val fromNet = netIndexOf(from.index)
-                    val toNet   = netIndexOf(to.index)
-                    if (fromNet != toNet) onReorderNetworks(fromNet, toNet)
-                }
-            )
+		val lagInfoByNet = remember(state.networks, state.connections) {
+			state.networks.associate { net ->
+				val con = state.connections[net.id]
+				val lagMs = con?.lagMs
+				val lagS = if (lagMs == null) null else (lagMs / 1000f)
+				val label = when {
+					con == null -> "—"
+					con.connecting -> "connecting"
+					!con.connected -> "disconnected"
+					lagS == null -> "…"
+					else -> String.format(Locale.getDefault(), "%.1fs", lagS)
+				}
+				val progress = when {
+					lagMs == null -> 0f
+					else -> (lagMs / 10_000f).coerceIn(0f, 1f)
+				}
+				net.id to (label to progress)
+			}
+		}
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .tourTarget(TourTarget.CHAT_BUFFER_DRAWER),
-                contentPadding = PaddingValues(vertical = 6.dp)
-            ) {
-                items(sidebarItems, key = { it.stableKey }) { item ->
-                    // Only network root items (Header in channelsOnly mode, or the
-                    // server Buffer row otherwise) get a ReorderableItem wrapper and
-                    // drag handle. Child buffer rows and dividers are not draggable.
-                    val isNetworkRoot = item is SidebarItem.Header ||
-                        (item is SidebarItem.Buffer && item.indent.value == 0f)
+		Column(
+			mod.padding(horizontal = 16.dp, vertical = 14.dp),
+			verticalArrangement = Arrangement.spacedBy(10.dp)
+		) {
+			val listState = rememberLazyListState()
 
-                    if (isNetworkRoot) {
-                        ReorderableItem(reorderState, key = item.stableKey) { isDragging ->
-                            when (item) {
-                                is SidebarItem.Header -> {
-                                    val (lagLabel, lagProgress) = lagInfoByNet[item.netId] ?: ("—" to 0f)
-                                    Column(Modifier.padding(start = 6.dp, top = 12.dp, bottom = 8.dp)) {
-                                        Row(
-                                            Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                item.title,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Text(
-                                                lagLabel,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            // Drag handle for network header rows
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(20.dp)
-                                                    .draggableHandle(),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.DragHandle,
-                                                    contentDescription = "Drag to reorder",
-                                                    modifier = Modifier.size(14.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                                )
-                                            }
-                                        }
-                                        LagBar(
-                                            progress = lagProgress,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            height = 5.dp
-                                        )
-                                    }
-                                }
-                                is SidebarItem.Buffer -> {
-                                    // Server buffer row (indent == 0) acting as network header
-                                    val (netId, name) = splitKey(item.key)
-                                    val lag = lagInfoByNet[netId]
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(modifier = Modifier.weight(1f)) {
-                                            BufferRow(
-                                                key = item.key,
-                                                label = item.label,
-                                                selected = selected,
-                                                meta = state.buffers[item.key],
-                                                indent = item.indent,
-                                                closable = false,
-                                                onClose = {},
-                                                lagLabel = lag?.first,
-                                                lagProgress = lag?.second,
-                                            )
-                                        }
-                                        // Drag handle for server buffer rows
-                                        Box(
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .draggableHandle(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Default.DragHandle,
-                                                contentDescription = "Drag to reorder",
-                                                modifier = Modifier.size(14.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                            )
-                                        }
-                                    }
-                                }
-                                else -> {} // dividers are never isNetworkRoot
-                            }
-                        }
-                    } else {
-                        // Non-root items: child buffers and dividers — not reorderable
-                        when (item) {
-                            is SidebarItem.Buffer -> {
-                                val (netId, name) = splitKey(item.key)
-                                val closable = name != "*server*"
-                                BufferRow(
-                                    key = item.key,
-                                    label = item.label,
-                                    selected = selected,
-                                    meta = state.buffers[item.key],
-                                    indent = item.indent,
-                                    closable = closable,
-                                    onClose = { onSend("/closekey ${item.key}") },
-                                    lagLabel = null,
-                                    lagProgress = null,
-                                )
-                            }
-                            is SidebarItem.DividerItem -> {
-                                HorizontalDivider(Modifier.padding(top = 12.dp))
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
-        }
-    }
+			// Current display order of root netIds — kept in sync with sidebarItems
+			val netOrder = remember(sidebarItems) {
+				sidebarItems.mapNotNull { item ->
+					when {
+						item is SidebarItem.Header -> item.netId
+						item is SidebarItem.Buffer && item.isNetworkHeader -> item.netId
+						else -> null
+					}
+				}
+			}
+			// Drag state — index-based swap approach:
+			// We track the dragged item's current index in netOrder and how far it has moved.
+			// When the cumulative offset exceeds half the height of the next/previous slot,
+			// we swap it one position and reset the offset accumulator.
+			var dragNetId       by remember { mutableStateOf<String?>(null) }
+			var dragOriginalIdx by remember { mutableIntStateOf(-1) }
+			var dragCurrentIdx  by remember { mutableIntStateOf(-1) }
+			var dragAdjustmentY by remember { mutableFloatStateOf(0f) }
+			var dragTranslationY by remember { mutableFloatStateOf(0f) }
+			// netId -> measured height (updated freely, used for swap threshold)
+			val slotHeights = remember { mutableMapOf<String, Float>() }
+
+			LazyColumn(
+				state = listState,
+				modifier = Modifier
+					.fillMaxSize()
+					.tourTarget(TourTarget.CHAT_BUFFER_DRAWER),
+				contentPadding = PaddingValues(vertical = 6.dp)
+			) {
+				items(sidebarItems, key = { it.stableKey }) { item ->
+					// Derive root netId directly from item properties — no index lookup needed
+					val rootNetId: String? = when {
+						item is SidebarItem.Header -> item.netId
+						item is SidebarItem.Buffer && item.isNetworkHeader -> item.netId
+						else -> null
+					}
+					val isRoot    = rootNetId != null
+					val isDragging = isRoot && dragNetId == rootNetId
+
+					Box(modifier = Modifier
+						.animateItem()
+						.graphicsLayer { if (isDragging) translationY = dragTranslationY else 0f }
+						.then(
+							if (isDragging)
+								Modifier
+									.background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
+									.zIndex(1f)
+							else Modifier
+						)) {
+						when (item) {
+							is SidebarItem.Header -> {
+								val (lagLabel, lagProgress) = lagInfoByNet[item.netId] ?: ("—" to 0f)
+								Column(
+									Modifier
+										.padding(start = 6.dp, top = 12.dp, bottom = 8.dp)
+										.onGloballyPositioned { coords ->
+											val id = rootNetId ?: return@onGloballyPositioned
+											slotHeights[id] = coords.size.height.toFloat()
+										}
+								) {
+									Row(
+										Modifier
+											.fillMaxWidth()
+											.clickable { onToggleNetworkExpanded(item.netId) },
+										verticalAlignment = Alignment.CenterVertically
+									) {
+										Icon(
+											imageVector = if (item.expanded) Icons.Default.KeyboardArrowDown
+														  else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+											contentDescription = if (item.expanded) "Collapse" else "Expand",
+											modifier = Modifier.size(16.dp),
+											tint = MaterialTheme.colorScheme.onSurfaceVariant
+										)
+										Text(
+											item.title,
+											fontWeight = FontWeight.Bold,
+											modifier = Modifier.weight(1f)
+										)
+										Text(
+											lagLabel,
+											style = MaterialTheme.typography.bodySmall,
+											color = MaterialTheme.colorScheme.onSurfaceVariant
+										)
+										if (rootNetId != null) {
+											SidebarDragHandle(
+												onStart = {
+													val id = rootNetId ?: return@SidebarDragHandle
+													val idx = netOrder.indexOf(id)
+													if (idx < 0) return@SidebarDragHandle
+													dragNetId       = id
+													dragOriginalIdx = idx
+													dragCurrentIdx  = idx
+													dragAdjustmentY = 0f
+													dragTranslationY = 0f
+													dragNetworkOrder = netOrder.toList()
+												},
+												onDrag = { dy ->
+													val order = dragNetworkOrder ?: return@SidebarDragHandle
+													dragNetId ?: return@SidebarDragHandle
+													var accum = dy - dragAdjustmentY
+													var curIdx = dragCurrentIdx
+													var curOrder = order.toMutableList()
+													var changed = false
+													while (true) {
+														if (accum >= 0f && curIdx < curOrder.size - 1) {
+															val nextId = curOrder[curIdx + 1]
+															val h = slotHeights[nextId] ?: 60f
+															val threshold = h / 2f
+															if (accum >= threshold) {
+																curOrder.add(curIdx + 1, curOrder.removeAt(curIdx))
+																dragAdjustmentY += h
+																accum -= h
+																curIdx++
+																changed = true
+																continue
+															}
+														} else if (accum < 0f && curIdx > 0) {
+															val prevId = curOrder[curIdx - 1]
+															val h = slotHeights[prevId] ?: 60f
+															val threshold = h / 2f
+															if (accum < -threshold) {
+																curOrder.add(curIdx - 1, curOrder.removeAt(curIdx))
+																dragAdjustmentY -= h
+																accum += h
+																curIdx--
+																changed = true
+																continue
+															}
+														}
+														break
+													}
+													if (changed) {
+														dragCurrentIdx = curIdx
+														dragNetworkOrder = curOrder
+													}
+													dragTranslationY = accum
+												},
+												onEnd = {
+													val origIdx = dragOriginalIdx
+													val newIdx = dragCurrentIdx
+													if (dragNetId != null && origIdx >= 0 && newIdx >= 0 && origIdx != newIdx)
+														onReorderNetworks(origIdx, newIdx)
+													dragNetId = null
+													dragOriginalIdx = -1
+													dragCurrentIdx = -1
+													dragAdjustmentY = 0f
+													dragTranslationY = 0f
+													dragNetworkOrder = null
+												}
+											)
+										}
+									}
+									LagBar(
+										progress = lagProgress,
+										modifier = Modifier.fillMaxWidth(),
+										height = 5.dp
+									)
+								}
+							}
+							is SidebarItem.Buffer -> {
+								val (netId, name) = splitKey(item.key)
+								val closable = name != "*server*"
+								val lag = if (name == "*server*") lagInfoByNet[netId] else null
+								val rowMod = if (isRoot) {
+									Modifier.onGloballyPositioned { coords ->
+										val id = rootNetId ?: return@onGloballyPositioned
+										slotHeights[id] = coords.size.height.toFloat()
+									}
+								} else Modifier
+								Row(modifier = rowMod, verticalAlignment = Alignment.CenterVertically) {
+									// Chevron for network header rows (server buffer acting as header)
+									if (item.isNetworkHeader && item.netId != null) {
+										Icon(
+											imageVector = if (item.expanded) Icons.Default.KeyboardArrowDown
+														  else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+											contentDescription = if (item.expanded) "Collapse" else "Expand",
+											modifier = Modifier
+												.size(16.dp)
+												.clickable { onToggleNetworkExpanded(item.netId) },
+											tint = MaterialTheme.colorScheme.onSurfaceVariant
+										)
+									}
+									Box(modifier = Modifier.weight(1f)) {
+										BufferRow(
+											key = item.key,
+											label = item.label,
+											selected = selected,
+											meta = state.buffers[item.key],
+											indent = item.indent,
+											closable = closable,
+											onClose = { onSend("/closekey ${item.key}") },
+											lagLabel = lag?.first,
+											lagProgress = lag?.second,
+										)
+									}
+									if (isRoot) {
+										SidebarDragHandle(
+											onStart = {
+												val id = rootNetId ?: return@SidebarDragHandle
+												val idx = netOrder.indexOf(id)
+												if (idx < 0) return@SidebarDragHandle
+												dragNetId       = id
+												dragOriginalIdx = idx
+												dragCurrentIdx  = idx
+												dragAdjustmentY = 0f
+												dragTranslationY = 0f
+												dragNetworkOrder = netOrder.toList()
+											},
+											onDrag = { dy ->
+												val order = dragNetworkOrder ?: return@SidebarDragHandle
+												dragNetId ?: return@SidebarDragHandle
+												var accum = dy - dragAdjustmentY
+												var curIdx = dragCurrentIdx
+												var curOrder = order.toMutableList()
+												var changed = false
+												while (true) {
+													if (accum >= 0f && curIdx < curOrder.size - 1) {
+														val nextId = curOrder[curIdx + 1]
+														val h = slotHeights[nextId] ?: 60f
+														val threshold = h / 2f
+														if (accum >= threshold) {
+															curOrder.add(curIdx + 1, curOrder.removeAt(curIdx))
+															dragAdjustmentY += h
+															accum -= h
+															curIdx++
+															changed = true
+															continue
+														}
+													} else if (accum < 0f && curIdx > 0) {
+														val prevId = curOrder[curIdx - 1]
+														val h = slotHeights[prevId] ?: 60f
+														val threshold = h / 2f
+														if (accum < -threshold) {
+															curOrder.add(curIdx - 1, curOrder.removeAt(curIdx))
+															dragAdjustmentY -= h
+															accum += h
+															curIdx--
+															changed = true
+															continue
+														}
+													}
+													break
+												}
+												if (changed) {
+													dragCurrentIdx = curIdx
+													dragNetworkOrder = curOrder
+												}
+												dragTranslationY = accum
+											},
+											onEnd = {
+												val origIdx = dragOriginalIdx
+												val newIdx = dragCurrentIdx
+												if (dragNetId != null && origIdx >= 0 && newIdx >= 0 && origIdx != newIdx)
+													onReorderNetworks(origIdx, newIdx)
+												dragNetId = null
+												dragOriginalIdx = -1
+												dragCurrentIdx = -1
+												dragAdjustmentY = 0f
+												dragTranslationY = 0f
+												dragNetworkOrder = null
+											}
+										)
+									}
+								}
+							}
+							is SidebarItem.DividerItem -> {
+								HorizontalDivider(Modifier.padding(top = 12.dp))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
     @Composable
     fun NicklistContent(mod: Modifier = Modifier) {
@@ -727,7 +1147,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
 
     // Kick a tail-follow scroll when returning to the app.
-    var resumeTick by remember { mutableStateOf(0) }
+    var resumeTick by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, event ->
@@ -996,13 +1416,11 @@ fun ChatScreen(
                     run {
                         val nicklistInteraction = remember { MutableInteractionSource() }
                         val nicklistPressed by nicklistInteraction.collectIsPressedAsState()
-                        val nicklistEnabled = isChannel
-
                         Box(
                             modifier = Modifier
                                 .size(25.dp)
                                 .scale(if (nicklistPressed) 0.92f else 1f)
-                                .alpha(if (nicklistEnabled) 1f else 0.4f)
+                                .alpha(if (isChannel) 1f else 0.4f)
                                 .background(
                                     brush = Brush.linearGradient(
                                         colors = listOf(
@@ -1013,7 +1431,7 @@ fun ChatScreen(
                                     shape = MaterialTheme.shapes.small
                                 )
                                 .then(
-                                    if (nicklistEnabled) {
+                                    if (isChannel) {
                                         Modifier.clickable(
                                             interactionSource = nicklistInteraction,
                                             indication = ripple(bounded = false),
@@ -1070,6 +1488,12 @@ fun ChatScreen(
                                 text = { Text("System info") },
                                 onClick = { overflowExpanded = false; onSysInfo() }
                             )
+                            if (isIrcOper) {
+                                DropdownMenuItem(
+                                    text = { Text("IRCop tools") },
+                                    onClick = { overflowExpanded = false; showIrcOpTools = true }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("About") },
                                 onClick = { overflowExpanded = false; onAbout() }
@@ -1159,13 +1583,26 @@ fun ChatScreen(
                             if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
                         val fromNick = m.from
                         if (fromNick == null) {
-                            IrcLinkifiedText(
-                                text = ts + m.text,
-                                mircColorsEnabled = state.settings.mircColorsEnabled,
-                                linkStyle = linkStyle,
-                                onAnnotationClick = onAnnotationClick,
-                                style = chatTextStyle
-                            )
+                            if (m.isMotd && selBufName == "*server*") {
+                                // MOTD lines: auto-shrink font so they always fit on one line,
+                                // preserving ASCII art that depends on monospace column alignment.
+                                // lineHeight = fontSize so there's no extra internal leading.
+                                AutoSizedMotdLine(
+                                    text = m.text,  // timestamps omitted — would skew auto-sizing and look odd
+                                    style = chatTextStyle.copy(lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified),
+                                    mircColorsEnabled = state.settings.mircColorsEnabled,
+                                    linkStyle = linkStyle,
+                                    onAnnotationClick = onAnnotationClick,
+                                )
+                            } else {
+                                IrcLinkifiedText(
+                                    text = ts + m.text,
+                                    mircColorsEnabled = state.settings.mircColorsEnabled,
+                                    linkStyle = linkStyle,
+                                    onAnnotationClick = onAnnotationClick,
+                                    style = chatTextStyle
+                                )
+                            }
                         } else if (m.isAction) {
                             val fromDisplay = displayNick(fromNick)
                             val fromBase = baseNick(fromDisplay)
@@ -1217,7 +1654,10 @@ fun ChatScreen(
                                 style = chatTextStyle
                             )
                         }
-                        Spacer(Modifier.height(4.dp))
+                        // No spacing between MOTD lines — preserves ASCII art layout.
+                        if (!m.isMotd || selBufName != "*server*") {
+                            Spacer(Modifier.height(4.dp))
+                        }
                     }
                 }
             }
@@ -1238,6 +1678,24 @@ fun ChatScreen(
                 )
             )
         }
+
+        // Command-hint query: non-null only when user has typed at least one letter after /
+        // (bare "/" alone doesn't trigger — it would show all 68 commands at once)
+        val cmdQuery = remember(input.text) {
+            val t = input.text
+            if (t.length >= 2 && t.startsWith("/") && !t.contains(" ")) t.drop(1) else null
+        }
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Command hints popup — rendered above the input row inside a Column
+            if (cmdQuery != null) {
+                CommandHints(
+                    query = cmdQuery,
+                    onPick = { completion ->
+                        input = TextFieldValue(completion, TextRange(completion.length))
+                    }
+                )
+            }
 
         Surface(
             tonalElevation = 2.dp,
@@ -1293,7 +1751,7 @@ fun ChatScreen(
 							innerTextField = innerTextField,
 							enabled = true,
 							singleLine = false,
-							visualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
+							visualTransformation = VisualTransformation.None,
 							interactionSource = interactionSource,
 							placeholder = {
 								Text(
@@ -1388,6 +1846,7 @@ fun ChatScreen(
                 }
             }
         }
+        } // closes Column wrapper for CommandHints + Surface
     }
 	
     val scaffoldContent: @Composable (PaddingValues) -> Unit = { padding ->
@@ -1402,7 +1861,7 @@ fun ChatScreen(
                 val minPortraitNickFrac = 0.20f
                 val maxPortraitNickFrac = 0.55f
                 var portraitNickFrac by remember(state.settings.portraitNickPaneFrac) {
-                    mutableStateOf(
+                    mutableFloatStateOf(
                         state.settings.portraitNickPaneFrac.coerceIn(
                             minPortraitNickFrac,
                             maxPortraitNickFrac
@@ -1479,10 +1938,10 @@ fun ChatScreen(
 
             // Persisted fractions (updated on drag end).
             var bufferFrac by remember(state.settings.bufferPaneFracLandscape) {
-                mutableStateOf(state.settings.bufferPaneFracLandscape)
+                mutableFloatStateOf(state.settings.bufferPaneFracLandscape)
             }
             var nickFrac by remember(state.settings.nickPaneFracLandscape) {
-                mutableStateOf(state.settings.nickPaneFracLandscape)
+                mutableFloatStateOf(state.settings.nickPaneFracLandscape)
             }
 
             val minBufferDp = 130.dp
@@ -1496,9 +1955,8 @@ fun ChatScreen(
             val maxNickFrac = (maxNickDp.value / screenWdp).coerceIn(0.08f, 0.55f)
 
             // Subtle "hint" pulse to make split handles discoverable.
-            var showResizeHint by remember(isWide) { mutableStateOf(false) }
-            LaunchedEffect(isWide) {
-                if (!isWide) return@LaunchedEffect
+            var showResizeHint by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
                 showResizeHint = true
                 delay(1600)
                 showResizeHint = false
@@ -1657,12 +2115,25 @@ fun ChatScreen(
                     .navigationBarsPadding()
                     .imePadding()
                     .verticalScroll(scrollState),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text("Channel tools", style = MaterialTheme.typography.titleLarge)
                 Text("$selNetName • $selBufName", style = MaterialTheme.typography.bodySmall)
+                if (currentModeString != null) {
+                    Text(
+                        text = "Current modes: $currentModeString",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { onSend("/mode $selBufName") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Fetch current modes") }
+                }
                 HorizontalDivider()
 
+                // Topic
                 if (canTopic) {
                     Text("Topic", fontWeight = FontWeight.Bold)
                     OutlinedTextField(
@@ -1683,6 +2154,108 @@ fun ChatScreen(
                     HorizontalDivider()
                 }
 
+                // Channel mode toggles
+                if (canMode) {
+                    Text("Channel modes", fontWeight = FontWeight.Bold)
+
+                    // Parse active simple modes from currentModeString for toggle state
+                    val activeModes = currentModeString?.removePrefix("+") ?: ""
+
+                    @Composable
+                    fun ModeToggle(flag: Char, label: String, description: String) {
+                        val active = flag in activeModes
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSend("/mode $selBufName ${if (active) "-" else "+"}$flag")
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Switch(checked = active, onCheckedChange = {
+                                onSend("/mode $selBufName ${if (active) "-" else "+"}$flag")
+                            })
+                            Column(Modifier.weight(1f)) {
+                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                "+$flag",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    ModeToggle('n', "No external messages", "Block messages from users not in the channel")
+                    ModeToggle('t', "Ops-only topic", "Only ops can change the topic")
+                    ModeToggle('m', "Moderated", "Only voiced users and ops can speak")
+                    ModeToggle('i', "Invite only", "Users must be invited to join")
+                    ModeToggle('s', "Secret", "Channel hidden from /LIST and /WHOIS")
+                    ModeToggle('p', "Private", "Channel shown as private in /LIST")
+                    ModeToggle('r', "Registered only", "Only registered nicks can join")
+                    ModeToggle('c', "No colour", "Strip mIRC colour codes from messages")
+                    ModeToggle('C', "No CTCPs", "Block CTCP messages to the channel")
+
+                    // Key (password)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Channel key (+k)", fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium)
+                    var keyInput by remember { mutableStateOf("") }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = keyInput,
+                            onValueChange = { keyInput = it },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Key / password") }
+                        )
+                        Button(onClick = {
+                            val k = keyInput.trim()
+                            if (k.isNotBlank()) onSend("/mode $selBufName +k $k")
+                        }, enabled = keyInput.isNotBlank()) { Text("Set") }
+                        OutlinedButton(onClick = { onSend("/mode $selBufName -k *") }) { Text("Remove") }
+                    }
+
+                    // Limit
+                    Spacer(Modifier.height(4.dp))
+                    Text("User limit (+l)", fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium)
+                    var limitInput by remember { mutableStateOf("") }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = limitInput,
+                            onValueChange = { if (it.all { c -> c.isDigit() }) limitInput = it },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Max users") }
+                        )
+                        Button(onClick = {
+                            val l = limitInput.trim()
+                            if (l.isNotBlank()) onSend("/mode $selBufName +l $l")
+                        }, enabled = limitInput.isNotBlank()) { Text("Set") }
+                        OutlinedButton(onClick = { onSend("/mode $selBufName -l"); limitInput = "" }) { Text("Remove") }
+                    }
+
+                    HorizontalDivider()
+                }
+
+                // Kick / Ban
                 if (canKick || canBan) {
                     Text("Kick / Ban", fontWeight = FontWeight.Bold)
                     OutlinedTextField(
@@ -1734,12 +2307,10 @@ fun ChatScreen(
                             ) { Text("Kick+Ban") }
                         }
                     }
-
                     if (canBan) {
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(
                             onClick = {
-                                // Close the tools sheet and open the ban list popup.
                                 showChanOps = false
                                 chanListTab = 0
                                 showChanListSheet = true
@@ -1747,6 +2318,191 @@ fun ChatScreen(
                         ) { Text("Channel lists…") }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+
+    // IRCop tools
+    if (showIrcOpTools) {
+        ModalBottomSheet(onDismissRequest = { showIrcOpTools = false }) {
+            val scrollState = rememberScrollState()
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.92f)
+                    .padding(16.dp)
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.AdminPanelSettings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary)
+                    Text("IRCop tools", style = MaterialTheme.typography.titleLarge)
+                }
+                Text("$selNetName", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider()
+
+                var opTarget by remember { mutableStateOf("") }
+                var opReason by remember { mutableStateOf("") }
+                var opMask   by remember { mutableStateOf("") }
+                var opServer by remember { mutableStateOf("") }
+                var opMessage by remember { mutableStateOf("") }
+
+                // Target / Reason fields
+                Text("Target", fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = opTarget, onValueChange = { opTarget = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("Nick or host mask") }
+                )
+                OutlinedTextField(
+                    value = opReason, onValueChange = { opReason = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("Reason") }
+                )
+
+                // Kill / K-line / Z-line
+                Text("Punishments", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            val t = opTarget.trim()
+                            if (t.isNotBlank()) {
+                                val r = opReason.trim().ifBlank { "No reason" }
+                                onSend("/kill $t $r")
+                                showIrcOpTools = false
+                            }
+                        },
+                        enabled = opTarget.isNotBlank()
+                    ) { Text("Kill") }
+                    OutlinedButton(
+                        onClick = {
+                            val t = opTarget.trim()
+                            if (t.isNotBlank()) {
+                                val r = opReason.trim().ifBlank { "No reason" }
+                                onSend("/kline $t $r")
+                                showIrcOpTools = false
+                            }
+                        },
+                        enabled = opTarget.isNotBlank()
+                    ) { Text("K-line") }
+                    OutlinedButton(
+                        onClick = {
+                            val t = opMask.trim().ifBlank { opTarget.trim() }
+                            if (t.isNotBlank()) {
+                                val r = opReason.trim().ifBlank { "No reason" }
+                                onSend("/zline $t $r")
+                                showIrcOpTools = false
+                            }
+                        },
+                        enabled = opTarget.isNotBlank()
+                    ) { Text("Z-line") }
+                    OutlinedButton(
+                        onClick = {
+                            val t = opTarget.trim()
+                            if (t.isNotBlank()) {
+                                val r = opReason.trim().ifBlank { "No reason" }
+                                onSend("/gline $t $r")
+                                showIrcOpTools = false
+                            }
+                        },
+                        enabled = opTarget.isNotBlank()
+                    ) { Text("G-line") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val t = opTarget.trim()
+                            if (t.isNotBlank()) {
+                                val r = opReason.trim().ifBlank { "No reason" }
+                                onSend("/shun $t $r")
+                            }
+                        },
+                        enabled = opTarget.isNotBlank()
+                    ) { Text("Shun") }
+                    OutlinedButton(
+                        onClick = {
+                            val t = opTarget.trim()
+                            if (t.isNotBlank()) {
+                                val r = opReason.trim().ifBlank { "No reason" }
+                                onSend("/dline $t $r")
+                            }
+                        },
+                        enabled = opTarget.isNotBlank()
+                    ) { Text("D-line") }
+                }
+
+                HorizontalDivider()
+
+                // Force join/part
+                Text("Force join / part", fontWeight = FontWeight.Bold)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = opServer, onValueChange = { opServer = it },
+                        modifier = Modifier.weight(1f), singleLine = true,
+                        label = { Text("Channel") }
+                    )
+                    Button(
+                        onClick = {
+                            val t = opTarget.trim(); val ch = opServer.trim()
+                            if (t.isNotBlank() && ch.isNotBlank()) onSend("/sajoin $t $ch")
+                        },
+                        enabled = opTarget.isNotBlank() && opServer.isNotBlank()
+                    ) { Text("SAJoin") }
+                    OutlinedButton(
+                        onClick = {
+                            val t = opTarget.trim(); val ch = opServer.trim()
+                            if (t.isNotBlank() && ch.isNotBlank()) onSend("/sapart $t $ch")
+                        },
+                        enabled = opTarget.isNotBlank() && opServer.isNotBlank()
+                    ) { Text("SAPart") }
+                }
+
+                HorizontalDivider()
+
+                // Broadcast messages
+                Text("Broadcast", fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = opMessage, onValueChange = { opMessage = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("Message") }
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { if (opMessage.isNotBlank()) onSend("/wallops ${opMessage.trim()}") },
+                        enabled = opMessage.isNotBlank()
+                    ) { Text("WALLOPS") }
+                    OutlinedButton(
+                        onClick = { if (opMessage.isNotBlank()) onSend("/globops ${opMessage.trim()}") },
+                        enabled = opMessage.isNotBlank()
+                    ) { Text("GLOBOPS") }
+                    OutlinedButton(
+                        onClick = { if (opMessage.isNotBlank()) onSend("/locops ${opMessage.trim()}") },
+                        enabled = opMessage.isNotBlank()
+                    ) { Text("LOCOPS") }
+                }
+
+                HorizontalDivider()
+
+                // Server queries
+                Text("Server queries", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onSend("/motd"); showIrcOpTools = false }) { Text("MOTD") }
+                    OutlinedButton(onClick = { onSend("/admin"); showIrcOpTools = false }) { Text("ADMIN") }
+                    OutlinedButton(onClick = { onSend("/stats u"); showIrcOpTools = false }) { Text("Uptime") }
+                    OutlinedButton(onClick = { onSend("/stats l"); showIrcOpTools = false }) { Text("Links") }
+                }
+
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -2213,8 +2969,8 @@ private const val ANN_URL = "URL"
 private const val ANN_CHAN = "CHAN"
 private const val ANN_NICK = "NICK"
 
-private val urlRegex = Regex("https?://[^\\s]+")
-private val chanRegex = Regex("#[^\\s]+")
+private val urlRegex = Regex("https?://\\S+")
+private val chanRegex = Regex("#\\S+")
 private val trailingPunct = setOf('.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'')
 
 private data class LinkSpan(
@@ -2239,7 +2995,7 @@ private fun computeLinkSpans(text: String): List<LinkSpan> {
     // Find URLs first; then find channels that are NOT inside URLs.
     val urlMatches = urlRegex.findAll(text).mapNotNull { m ->
         val raw = m.value
-        val (token, trailing) = splitTrailingPunctuation(raw)
+        val (token, _) = splitTrailingPunctuation(raw)
         if (token.isBlank()) return@mapNotNull null
         val originalEnd = m.range.last + 1
         LinkSpan(
@@ -2258,7 +3014,7 @@ private fun computeLinkSpans(text: String): List<LinkSpan> {
         // Skip if the match is inside a URL.
         if (urlRanges.any { start in it }) return@mapNotNull null
         val raw = m.value
-        val (token, trailing) = splitTrailingPunctuation(raw)
+        val (token, _) = splitTrailingPunctuation(raw)
         if (token.isBlank()) return@mapNotNull null
         val originalEnd = m.range.last + 1
         LinkSpan(
@@ -2299,10 +3055,7 @@ private fun appendLinkified(builder: AnnotatedString.Builder, text: String, link
     if (i < text.length) builder.append(text.substring(i))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// mIRC colour/style rendering (optional)
-// ─────────────────────────────────────────────────────────────────────────────
-
+// mIRC colour/style rendering
 private data class MircStyleState(
     var fg: Int? = null,
     var bg: Int? = null,
@@ -2542,4 +3295,73 @@ private fun IrcLinkifiedText(
         overflow = overflow,
         onTextLayout = onTextLayout,
     )
+}
+
+/**
+ * Renders a MOTD line (IRC 372) using the largest font size that fits the text in a
+ * single line within the available width. Falls back to [minFontSp] if still too wide.
+ *
+ * Strategy: binary search between [minFontSp] and the style's natural size, using
+ * TextMeasurer to check whether the text fits in the available pixel width at each size.
+ * This avoids recomposition loops — the size is computed once in the measure phase.
+ */
+@Composable
+private fun AutoSizedMotdLine(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle,
+    mircColorsEnabled: Boolean,
+    linkStyle: SpanStyle,
+    onAnnotationClick: (String, String) -> Unit,
+    minFontSp: Float = 6f,
+) {
+    val textMeasurer = rememberTextMeasurer()
+    // Strip IRC formatting for the size measurement pass (formatting chars have no width).
+    val plainText = remember(text) { stripIrcFormatting(text) }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val availableWidthPx = constraints.maxWidth.toFloat()
+        val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
+
+        // Binary-search for the largest font size (in sp) where the plain text fits
+        // in one line within availableWidthPx.
+        val fittedSp = remember(plainText, availableWidthPx, naturalSizeSp) {
+            if (availableWidthPx <= 0f) return@remember naturalSizeSp
+            // Quick check: does it fit at the natural size?
+            val naturalMeasure = textMeasurer.measure(
+                text = plainText,
+                style = style.copy(fontSize = naturalSizeSp.sp),
+                constraints = Constraints(maxWidth = Int.MAX_VALUE),
+                maxLines = 1,
+                softWrap = false,
+            )
+            if (naturalMeasure.size.width <= availableWidthPx) {
+                return@remember naturalSizeSp  // No shrinking needed.
+            }
+            // Binary search between minFontSp and naturalSizeSp.
+            var lo = minFontSp
+            var hi = naturalSizeSp
+            repeat(8) {  // 8 iterations → ~0.4% precision, plenty for font sizes
+                val mid = (lo + hi) / 2f
+                val m = textMeasurer.measure(
+                    text = plainText,
+                    style = style.copy(fontSize = mid.sp),
+                    constraints = Constraints(maxWidth = Int.MAX_VALUE),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                if (m.size.width <= availableWidthPx) lo = mid else hi = mid
+            }
+            lo
+        }
+
+        IrcLinkifiedText(
+            text = text,
+            mircColorsEnabled = mircColorsEnabled,
+            linkStyle = linkStyle,
+            onAnnotationClick = onAnnotationClick,
+            style = style.copy(fontSize = fittedSp.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
+    }
 }

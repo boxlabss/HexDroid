@@ -157,6 +157,16 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 		if (config.capPrefs.draftRelaymsg) req += "draft/relaymsg"
 		if (config.capPrefs.draftReadMarker) req += "draft/read-marker"
 
+		// Bouncer-specific CAPs
+		if (config.isBouncer) {
+			// Legacy ZNC (< 1.7) uses znc.in/server-time-iso instead of server-time.
+			// Requesting both ensures replayed messages get correct timestamps on all ZNC versions.
+			req += "znc.in/server-time-iso"
+			// ZNC native playback: lets us request only messages since we were last seen,
+			// rather than receiving a fixed replay window every connect.
+			req += "znc.in/playback"
+		}
+
 		// Filter to only request what the server supports
 		val filtered = req.filter { serverCaps.contains(it.lowercase()) }
 

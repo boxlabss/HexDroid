@@ -5,6 +5,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/boxlabss/HexDroid)](https://github.com/boxlabss/HexDroid/releases)
 [![GitHub stars](https://img.shields.io/github/stars/boxlabss/HexDroid)](https://github.com/boxlabss/HexDroid/stargazers)
 [![Build](https://github.com/boxlabss/HexDroid/actions/workflows/build.yml/badge.svg)](https://github.com/boxlabss/HexDroid/actions)
+[![RB Status](https://shields.rbtlog.dev/simple/com.boxlabs.hexdroid)](https://shields.rbtlog.dev/com.boxlabs.hexdroid)
 
 A fast, modern IRC client for Android.
 
@@ -14,7 +15,7 @@ A fast, modern IRC client for Android.
 
 ## About
 
-HexDroid is a free and open source IRC client for Android devices. It provides a clean, modern interface while supporting the features users expect from a desktop client, including IRCv3 capabilities, SASL authentication, TLS encryption, DCC file transfers and an array of commands.
+HexDroid is a free and open source IRC client for Android devices. It provides a clean, modern interface while supporting the features users expect from a desktop client, including IRCv3 capabilities, SASL authentication, TLS encryption, Bouncer support, DCC file transfers and an array of commands.
 
 **Requirements:** Android 8.0 (API 26) or higher
 
@@ -32,6 +33,9 @@ HexDroid is a free and open source IRC client for Android devices. It provides a
 - Auto-reconnect with exponential backoff
 - Auto-join channels with optional keys
 - Post-connect commands with configurable delay
+
+### Bouncer support
+- Supports ZNC/soju with playback support
 
 ### Security
 
@@ -85,6 +89,7 @@ and more
 - Copy text from messages
 - Nick completion
 - Swipe gestures
+- Command completion
 
 ### Notifications
 
@@ -101,6 +106,8 @@ and more
 - Hide JOIN/PART/QUIT messages
 - Lag indicator
 - Channel list with search
+- Channel op tools
+- IRCop tools
 
 ---
 
@@ -157,7 +164,6 @@ HexDroid supports standard IRC commands. Commands are case-insensitive.
 | `/quit [reason]` | Disconnect from the server |
 | `/whois <nick>` | Get information about a user |
 | `/topic [#channel] [text]` | View or set channel topic |
-| `/close [#channel | user]` | Part and close a channel, or close a query |
 
 ### Channel Operator Commands
 
@@ -175,6 +181,7 @@ HexDroid supports standard IRC commands. Commands are case-insensitive.
 
 | Command | Description |
 |---------|-------------|
+| `/close [#channel or user]` | Part and close a channel, or close a query |
 | `/ctcp <target> <command>` | Send a CTCP request |
 | `/ctcpping <nick>` | Measure latency to a user |
 | `/dns <host/ip>` | DNS lookup |
@@ -212,6 +219,7 @@ Each network profile supports:
 - Logging options
 - DCC configuration
 
+From v1.5.4 these can be backed up and restored from a json file
 ---
 
 ## Troubleshooting

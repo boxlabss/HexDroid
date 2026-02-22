@@ -419,6 +419,7 @@ class SettingsRepository(private val ctx: Context) {
                     encoding = o.optString("encoding", "auto"),
                     sortOrder = o.optInt("sortOrder", 0),
                     isFavourite = o.optBoolean("isFavourite", false),
+                    isBouncer = o.optBoolean("isBouncer", false),
                 )
             }
             out
@@ -481,6 +482,7 @@ class SettingsRepository(private val ctx: Context) {
             o.put("encoding", n.encoding)
             o.put("sortOrder", n.sortOrder)
             o.put("isFavourite", n.isFavourite)
+            o.put("isBouncer", n.isBouncer)
             arr.put(o)
         }
         return arr
@@ -767,6 +769,15 @@ data class NetworkProfile(
 
     /** If true, this network is pinned to the top of the sorted list (above non-favourites). */
     val isFavourite: Boolean = false,
+
+    /**
+     * If true, this connection goes through a bouncer (ZNC, soju, etc).
+     * Effects:
+     * - Auto-join is skipped (bouncer keeps you joined server-side)
+     * - MOTD is never suppressed (bouncer MOTD contains useful status info)
+     * - znc.in/server-time-iso and znc.in/playback CAPs are requested
+     */
+    val isBouncer: Boolean = false,
 ) {
     fun toIrcConfig(
         saslPasswordOverride: String? = null,
@@ -793,7 +804,8 @@ data class NetworkProfile(
             clientCert = tlsClientCert,
             capPrefs = caps,
             autoJoin = autoJoin,
-            encoding = encoding
+            encoding = encoding,
+            isBouncer = isBouncer
         )
     }
 }

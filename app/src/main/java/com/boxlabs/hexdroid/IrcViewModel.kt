@@ -88,14 +88,18 @@ data class UiMessage(
     val timeMs: Long,
     val from: String?,
     val text: String,
-    val isAction: Boolean = false
+    val isAction: Boolean = false,
+    /** True for MOTD body lines (372) so the UI can auto-size them to fit in one line. */
+    val isMotd: Boolean = false
 )
 data class UiBuffer(
     val name: String,
     val messages: List<UiMessage> = emptyList(),
     val unread: Int = 0,
     val highlights: Int = 0,
-    val topic: String? = null
+    val topic: String? = null,
+    /** Channel mode string from 324 RPL_CHANNELMODEIS, e.g. "+nst" */
+    val modeString: String? = null
 )
 
 enum class FontChoice { OPEN_SANS, INTER, MONOSPACE, CUSTOM }
@@ -203,7 +207,9 @@ data class NetConnState(
      * Server-advertised *list* channel modes (from ISUPPORT CHANMODES group 1).
      * Common: b,e,I,q. Defaults to a permissive set until ISUPPORT arrives.
      */
-    val listModes: String = "bqeI"
+    val listModes: String = "bqeI",
+    /** True after 381 RPL_YOUREOPER is received for this connection */
+    val isIrcOper: Boolean = false
 )
 
 data class BanEntry(
@@ -250,6 +256,7 @@ data class UiState(
     val channelDirectory: List<ChannelListEntry> = emptyList(),
     val listFilter: String = "",
 
+    val collapsedNetworkIds: Set<String> = emptySet(),
     val settings: UiSettings = UiSettings(),
     // True once settings have been loaded from DataStore at least once (prevents one-frame "default" flicker).
     val settingsLoaded: Boolean = false,
@@ -342,18 +349,24 @@ data class NetSupport(
     // --- Sidebar collapse state -------------------------------------------------------
     // Tracks which network server rows are expanded in the buffer list sidebar.
     // Not persisted: resets to all-expanded on process restart (same as HexChat behaviour).
-    private val _expandedNetworkIds = MutableStateFlow<Set<String>>(emptySet())
-    val expandedNetworkIds: StateFlow<Set<String>> get() = _expandedNetworkIds
-
+    private val _collapsedNetworkIds = MutableStateFlow<Set<String>>(emptySet())
     fun toggleNetworkExpanded(netId: String) {
-        _expandedNetworkIds.update { current ->
+        _collapsedNetworkIds.update { current ->
             if (current.contains(netId)) current - netId else current + netId
         }
     }
 
     fun setNetworkExpanded(netId: String, expanded: Boolean) {
-        _expandedNetworkIds.update { current ->
-            if (expanded) current + netId else current - netId
+        _collapsedNetworkIds.update { current ->
+            if (expanded) current - netId else current + netId
+        }
+    }
+
+    private fun launchExpandedNetworkIdsSync() {
+        viewModelScope.launch {
+            _collapsedNetworkIds.collect { ids ->
+                _state.update { it.copy(collapsedNetworkIds = ids) }
+            }
         }
     }
 
@@ -769,6 +782,7 @@ data class NetSupport(
     }
 
     init {
+        launchExpandedNetworkIdsSync()
         viewModelScope.launch {
             repo.migrateLegacySecretsIfNeeded()
             repo.settingsFlow.collect { s ->
@@ -2300,7 +2314,18 @@ if (!sp.isNullOrBlank()) {
                 if (_state.value.activeNetworkId == netId) updateConnectionNotification("Connected")
             }
             is IrcEvent.LagUpdated -> {
-                setNetConn(netId) { it.copy(lagMs = ev.lagMs) }
+                // Skip the startService() IPC call when backgrounded — the notification
+                // text never shows lag values so there's nothing to update.
+                // Still update state so the lag bar is fresh when the user returns.
+                if (!AppVisibility.isForeground) {
+                    _state.update { st ->
+                        val old = st.connections[netId] ?: NetConnState()
+                        val newConns = st.connections + (netId to old.copy(lagMs = ev.lagMs))
+                        syncActiveNetworkSummary(st.copy(connections = newConns))
+                    }
+                } else {
+                    setNetConn(netId) { it.copy(lagMs = ev.lagMs) }
+                }
             }
             is IrcEvent.Disconnected -> {
                 val r = ev.reason?.trim()
@@ -2349,7 +2374,9 @@ if (!sp.isNullOrBlank()) {
                 val hideMotd = _state.value.settings.hideMotdOnConnect
                 val now = System.currentTimeMillis()
                 val manualMotdActive = rt?.manualMotdAtMs?.let { it != 0L && now - it < 60_000L } == true
-                if (!manualMotdActive && hideMotd && code != null && code in motdCodes) {
+                // Never suppress bouncer MOTD — it contains useful status (e.g. which upstream networks are connected).
+                val isBouncer = _state.value.networks.firstOrNull { it.id == netId }?.isBouncer == true
+                if (!manualMotdActive && hideMotd && !isBouncer && code != null && code in motdCodes) {
                     // Some connect paths can build the runtime before settings are loaded; re-arm suppression here too.
                     if (rt != null && !rt.suppressMotd) rt.suppressMotd = true
                     if (rt?.suppressMotd != false) {
@@ -2363,7 +2390,8 @@ if (!sp.isNullOrBlank()) {
                 } else {
                     bufKey(netId, "*server*")
                 }
-                append(targetKey, from = null, text = ev.text, doNotify = false)
+                val isMotdLine = code == "372"
+                append(targetKey, from = null, text = ev.text, doNotify = false, isMotd = isMotdLine)
 
 if (code == "442") {
     // Not on channel. If this was triggered by the UI close-buffer flow, remove the buffer anyway.
@@ -2401,6 +2429,20 @@ if (code == "442") {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 val dest = if (st.buffers.containsKey(chanKey)) chanKey else bufKey(netId, "*server*")
                 append(dest, from = null, text = "* Mode ${ev.channel} ${ev.modes}", doNotify = false)
+                // Store mode string so Channel Tools can show/toggle modes
+                val buf = st.buffers[chanKey]
+                if (buf != null) {
+                    val modeOnly = ev.modes.split(" ").firstOrNull() ?: ev.modes
+                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(modeString = modeOnly))) }
+                }
+            }
+
+            is IrcEvent.YoureOper -> {
+                append(bufKey(netId, "*server*"), from = null, text = "*** ${ev.message}", doNotify = false)
+                setNetConn(netId) { it.copy(isIrcOper = true) }
+            }
+            is IrcEvent.YoureDeOpered -> {
+                setNetConn(netId) { it.copy(isIrcOper = false) }
             }
 
             is IrcEvent.BanListItem -> {
@@ -2550,11 +2592,13 @@ if (code == "442") {
                         delay(delaySec * 1000L)
                     }
 
-                    // 3. Autojoin channels
-                    val aj = rt.client.config.autoJoin
-                    for (c in aj) {
-                        val join = if (c.key.isNullOrBlank()) "JOIN ${c.channel}" else "JOIN ${c.channel} ${c.key}"
-                        rt.client.sendRaw(join)
+                    // 3. Autojoin channels (skipped for bouncers — they keep you joined server-side)
+                    if (!rt.client.config.isBouncer) {
+                        val aj = rt.client.config.autoJoin
+                        for (c in aj) {
+                            val join = if (c.key.isNullOrBlank()) "JOIN ${c.channel}" else "JOIN ${c.channel} ${c.key}"
+                            rt.client.sendRaw(join)
+                        }
                     }
 
                     // 4. Post-connect commands (one per line, like mIRC's Perform)
@@ -3486,7 +3530,8 @@ private fun appendNamesList(bufferKey: String, channel: String, names: List<Stri
         isPrivate: Boolean = false,
         isLocal: Boolean = false,
         timeMs: Long? = null,
-        doNotify: Boolean = true
+        doNotify: Boolean = true,
+        isMotd: Boolean = false
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         val msg = UiMessage(
@@ -3494,7 +3539,8 @@ private fun appendNamesList(bufferKey: String, channel: String, names: List<Stri
             timeMs = ts,
             from = from,
             text = text,
-            isAction = isAction
+            isAction = isAction,
+            isMotd = isMotd
         )
 
         // Use atomic update to prevent race conditions when multiple messages arrive quickly.

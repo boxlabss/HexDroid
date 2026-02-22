@@ -22,7 +22,6 @@ package com.boxlabs.hexdroid.ui
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -47,7 +46,23 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -55,8 +70,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.UiState
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun NetworksScreen(
@@ -105,14 +118,12 @@ fun NetworksScreen(
     ) { padding ->
         val listState = rememberLazyListState()
 
-        // Reorderable state — onMove is called while dragging, giving live visual feedback
-        val reorderState = rememberReorderableLazyListState(
-            lazyListState = listState,
-            onMove = { from, to ->
-                // Map back from sorted indices to the onReorder callback
-                onReorder(from.index, to.index)
-            }
-        )
+        // Drag state keyed by netId — avoids index/favourites mapping issues
+        var dragFromId  by remember { mutableStateOf<String?>(null) }
+        var dragToId    by remember { mutableStateOf<String?>(null) }
+        var dragOffsetY by remember { mutableFloatStateOf(0f) }
+        val naturalTops = remember { mutableMapOf<String, Float>() }  // netId -> natural top Y (not updated during drag)
+        val itemHeights = remember { mutableMapOf<String, Float>() }  // netId -> height
 
         // Tour: scroll AfterNET into view when highlighted
         LaunchedEffect(tourActive, tourTarget, state.networks) {
@@ -144,7 +155,7 @@ fun NetworksScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(top = 2.dp, bottom = 96.dp)
             ) {
-                items(sortedNetworks, key = { it.id }) { n ->
+                itemsIndexed(sortedNetworks, key = { _, n -> n.id }) { idx, n ->
                     val conn = state.connections[n.id]
                     val isConn = conn?.connected == true
                     val isConnecting = conn?.connecting == true
@@ -153,19 +164,48 @@ fun NetworksScreen(
                     val isAfterNet = n.id.equals("AfterNET", ignoreCase = true) ||
                                      n.name.equals("AfterNET", ignoreCase = true)
 
-                    ReorderableItem(reorderState, key = n.id) { isDragging ->
-                        val elevation by animateFloatAsState(if (isDragging) 8f else 0f, label = "drag_elev")
-
-                        val cardMod = if (isAfterNet) {
-                            Modifier.fillMaxWidth().tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
-                        } else {
-                            Modifier.fillMaxWidth()
+                    val isDragging = dragFromId == n.id
+                    val draggedHeight = itemHeights[dragFromId] ?: 200f
+                    val fromIdx = sortedNetworks.indexOfFirst { it.id == dragFromId }
+                    val toIdx   = sortedNetworks.indexOfFirst { it.id == dragToId }
+                    val targetRawOffset: Float = when {
+                        isDragging -> dragOffsetY
+                        dragFromId != null && n.id != dragFromId -> when {
+                            fromIdx < toIdx && idx > fromIdx && idx <= toIdx -> -draggedHeight
+                            fromIdx > toIdx && idx < fromIdx && idx >= toIdx ->  draggedHeight
+                            else -> 0f
                         }
+                        else -> 0f
+                    }
+                    val animatedOffset by animateFloatAsState(
+                        targetValue = targetRawOffset,
+                        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                        label = "drag_offset_${n.id}"
+                    )
+                    val visualOffset = if (isDragging) dragOffsetY else animatedOffset
 
-                        Card(
-                            modifier = cardMod,
-                            onClick = { onSelect(n.id) }
-                        ) {
+                    val cardMod = if (isAfterNet) {
+                        Modifier.fillMaxWidth().tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
+                    } else {
+                        Modifier.fillMaxWidth()
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer { translationY = visualOffset }
+                            .onGloballyPositioned { coords ->
+                                if (dragFromId == null) {
+                                    naturalTops[n.id] = coords.positionInParent().y
+                                }
+                                itemHeights[n.id] = coords.size.height.toFloat()
+                            }
+                            .zIndex(if (isDragging) 1f else 0f)
+                    ) {
+                    Card(
+                        modifier = cardMod
+                            .then(if (isDragging) Modifier.shadow(8.dp) else Modifier),
+                        onClick = { onSelect(n.id) }
+                    ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -201,12 +241,50 @@ fun NetworksScreen(
                                     )
                                     if (n.id == active) Badge { Text("Selected") }
 
-                                    // Drag handle — only active during touch
-                                    IconButton(
-                                        onClick = {},
+                                    // Drag handle with long-press detection
+                                    Box(
                                         modifier = Modifier
                                             .size(32.dp)
-                                            .draggableHandle()
+                                            .pointerInput(n.id) {
+                                                detectDragGesturesAfterLongPress(
+                                                    onDragStart = {
+                                                        dragFromId  = n.id
+                                                        dragToId    = n.id
+                                                        dragOffsetY = 0f
+                                                    },
+                                                    onDrag = { change, dragAmount ->
+                                                        change.consume()
+                                                        dragOffsetY += dragAmount.y
+                                                        val fromNatural = naturalTops[dragFromId] ?: 0f
+                                                        val draggedH    = itemHeights[dragFromId] ?: 200f
+                                                        val curCentreY  = fromNatural + draggedH / 2f + dragOffsetY
+                                                        val snap = naturalTops.entries
+                                                            .minByOrNull { (id, top) ->
+                                                                val h = itemHeights[id] ?: draggedH
+                                                                kotlin.math.abs((top + h / 2f) - curCentreY)
+                                                            }?.key
+                                                        if (snap != null) dragToId = snap
+                                                    },
+                                                    onDragEnd = {
+                                                        val from = dragFromId
+                                                        val to   = dragToId
+                                                        if (from != null && to != null && from != to) {
+                                                            val fromIdx = sortedNetworks.indexOfFirst { it.id == from }
+                                                            val toIdx   = sortedNetworks.indexOfFirst { it.id == to }
+                                                            if (fromIdx >= 0 && toIdx >= 0) onReorder(fromIdx, toIdx)
+                                                        }
+                                                        dragFromId  = null
+                                                        dragToId    = null
+                                                        dragOffsetY = 0f
+                                                    },
+                                                    onDragCancel = {
+                                                        dragFromId  = null
+                                                        dragToId    = null
+                                                        dragOffsetY = 0f
+                                                    }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             Icons.Default.DragHandle,
@@ -280,7 +358,7 @@ fun NetworksScreen(
                             }
                         }
                     }
-                }
+                    }
             }
 
             if (active != null) {

@@ -76,14 +76,21 @@ object ConnectionConstants {
     /** TCP keep-alive enable. */
     const val TCP_KEEPALIVE = true
     
-    /** Socket read timeout (0 = infinite, relies on PING/PONG for liveness).
+    /**
+     * Socket read timeout — safety net for dead sockets on mobile.
      *
-     * We keep this at 0 (infinite) and rely exclusively on the PING/PONG loop in IrcCore
-     * for mid-session liveness detection.  Using a non-zero soTimeout here would cause
-     * SocketTimeoutException on every quiet period longer than the timeout, producing
-     * false disconnects on low-traffic channels.  The PING loop fires every 60-90 s and
-     * closes the socket after PING_TIMEOUT_MS (180 s) of silence — that is the correct
-     * mechanism for detecting half-open connections on mobile.
+     * Set to 150 s (2.5 min): safely above the 60 s PING interval so normal quiet
+     * channels never trigger it, but short enough to catch sockets that Doze mode
+     * has silently killed.
+     *
+     * Without this, InputStream.read() blocks indefinitely on a dead socket. The OS
+     * may buffer the outgoing PING so writeLine() succeeds, the PONG never arrives,
+     * and the 180 s ping timeout fires — meaning 4+ minutes pass before reconnect.
+     * Many servers detect the dead socket sooner and close it, which is what produces
+     * "Underlying socket operation returned zero" on the next read attempt.
+     *
+     * With 150 s soTimeout: a SocketTimeoutException is thrown after 2.5 min of
+     * silence, the coroutine exits cleanly, and auto-reconnect triggers immediately.
      */
-    const val SOCKET_READ_TIMEOUT_MS = 0
+    const val SOCKET_READ_TIMEOUT_MS = 150_000
 }

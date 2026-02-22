@@ -1,9 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!--
-        Adaptive icon background color used in the light/default launcher wallpaper context.
-        Matches DarkSurface (#141827) from the app's color palette so the icon looks
-        intentional on both light and dark wallpapers.
-    -->
-    <color name="ic_launcher_background">#141827</color>
+    <color name="ic_launcher_background">#1C263E</color>
 </resources>

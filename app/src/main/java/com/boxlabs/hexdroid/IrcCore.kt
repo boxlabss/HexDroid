@@ -121,7 +121,9 @@ data class IrcConfig(
      * - "auto" = try UTF-8, auto-detect non-UTF-8 encodings
      * - Or explicit: "UTF-8", "windows-1251", "ISO-8859-1", etc.
      */
-    val encoding: String = "auto"
+    val encoding: String = "auto",
+    /** True when connecting through a bouncer (ZNC, soju, etc). */
+    val isBouncer: Boolean = false
 )
 
 sealed class IrcEvent {
@@ -271,6 +273,12 @@ sealed class IrcEvent {
 
     // Numeric 442 (ERR_NOTONCHANNEL)
     data class NotOnChannel(val channel: String, val message: String, val code: String = "442") : IrcEvent()
+    /** 381 RPL_YOUREOPER — user successfully authenticated as IRC operator */
+    data class YoureOper(val message: String) : IrcEvent()
+    /** User MODE -o/-O received on our own nick — de-opered */
+    object YoureDeOpered : IrcEvent()
+    /** ChannelModeChanged — live MODE change on a channel (not 324 snapshot) */
+    data class ChannelModeChanged(val channel: String, val modes: String) : IrcEvent()
 
     data class Joined(val channel: String, val nick: String, val userHost: String? = null, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
     data class Parted(val channel: String, val nick: String, val userHost: String? = null, val reason: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
@@ -492,12 +500,12 @@ class IrcClient(val config: IrcConfig) {
         if (sanitized.isNotEmpty()) {
             // Use trySend so that calling sendRaw on a disconnecting/reconnecting client
             // (whose outbound Channel may have been closed by forceClose()) never throws
-            // ClosedSendChannelException (surfaced in Play crash reports as obfuscated k7.m).
+            // ClosedSendChannelException (surfaced in crash reports as obfuscated k7.m).
             // If the channel is closed or full, the line is silently dropped — this is
             // safe because the connection is already gone or saturated.
             val result = outbound.trySend(sanitized)
             if (result.isFailure && !result.isClosed) {
-                // Channel is full (capacity=300) but still open fall back to a
+                // Channel is full (capacity=300) but still open — fall back to a
                 // suspending send so legitimate bursts are not silently discarded.
                 // This path is rare; the capacity guard above handles the common cases.
                 runCatching { outbound.send(sanitized) }
@@ -886,12 +894,12 @@ class IrcClient(val config: IrcConfig) {
             // Wait a moment so the socket is fully established.
             delay(5_000)
             while (true) {
-                // Adaptive ping interval: when the app is in the foreground (screen on, user
-                // active) ping every 60 s for a responsive lag meter. When backgrounded, stretch
-                // to 90 s — still well within the 2-5 min NAT timeout window — saving ~1/3 of
-                // periodic radio wake-ups.
-                val pingInterval = if (AppVisibility.isForeground) 60_000L else 90_000L
-                delay(pingInterval)
+                // Always ping every 60 s regardless of foreground/background state.
+                // The previous 90 s background stretch was the root cause of random disconnects:
+                // many IRCds close connections idle for ~90 s before the next PING went out.
+                // Battery impact of one extra ping per 30 s is negligible — real savings come
+                // from the WifiLock (WIFI_MODE_FULL not HIGH_PERF) and TCP keepalive already in place.
+                delay(60_000L)
 
                 // If we're waiting on a PONG for a previous probe and it's taking too long,
                 // consider the connection stalled and force a reconnect.
@@ -908,8 +916,11 @@ class IrcClient(val config: IrcConfig) {
 
                 val token = "hexlag-$now"
                 pendingLagPingToken = token
-                pendingLagPingSentAtMs = now
-                if (runCatching { writeLine("PING :$token") }.isFailure && !userClosing) runCatching { s.close() }
+                // Capture send time after writeLine so RTT is pure network latency,
+                // not including coroutine scheduling jitter from delay().
+                val writeResult = runCatching { writeLine("PING :$token") }
+                pendingLagPingSentAtMs = System.currentTimeMillis()
+                if (writeResult.isFailure && !userClosing) runCatching { s.close() }
             }
         }
 
@@ -923,10 +934,15 @@ class IrcClient(val config: IrcConfig) {
         val irc = IrcSession(config, rng)
         val historyRequested = mutableSetOf<String>()
         val historyExpectUntil = mutableMapOf<String, Long>()
+        // znc.in/playback: last-seen timestamps sent by ZNC's *playback module.
+        // Key = lowercase buffer name. Value = epoch seconds (as sent by ZNC).
+        val zncLastSeen = mutableMapOf<String, Long>()
         val openPlaybackBatches = mutableSetOf<String>()
 
         fun parseServerTimeMs(tags: Map<String, String?>): Long? {
-            val raw = tags["time"] ?: return null
+            // "time" = IRCv3 server-time (standard)
+            // "t"    = znc.in/server-time-iso (legacy ZNC < 1.7)
+            val raw = tags["time"] ?: tags["t"] ?: return null
             return runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull()
         }
 
@@ -1035,6 +1051,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         val chan = msg.params.getOrNull(1) ?: return@handler
         val modes = msg.params.drop(2).joinToString(" ").trim()
         if (modes.isNotBlank()) send(IrcEvent.ChannelModeIs(chan, modes, code = msg.command))
+    },
+    "381" to handler@{ msg, _, _, _ ->
+        // RPL_YOUREOPER
+        val text = msg.trailing ?: msg.params.drop(1).joinToString(" ").trim().ifBlank { "You are now an IRC operator" }
+        send(IrcEvent.YoureOper(text))
     },
 
     // Names list
@@ -1339,6 +1360,18 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val target = normalizeMsgTarget(rawTarget)
 						val textRaw = msg.trailing ?: ""
 
+						// znc.in/playback: *playback module sends TIMESTAMP <buffer> <epoch>
+						// so we know when we were last seen and can request only missed messages.
+						if (config.isBouncer && from.equals("*playback", ignoreCase = true)) {
+							val parts = textRaw.trim().split(" ")
+							if (parts.size >= 2 && parts[0].equals("TIMESTAMP", ignoreCase = true)) {
+								val bufName = parts[1]
+								val epochSecs = parts.getOrNull(2)?.toLongOrNull()
+								if (epochSecs != null) zncLastSeen[bufName.lowercase()] = epochSecs
+							}
+							continue  // Don't surface *playback control messages in the UI
+						}
+
 						val isChannel = isChannelName(target)
 						val isPrivate = !isChannel
 
@@ -1542,6 +1575,18 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 									historyExpectUntil[chan.lowercase()] = nowMs + 7_000L
 								}
 							}
+
+							// znc.in/playback: request only messages we missed since last seen.
+							// Sends: PRIVMSG *playback :PLAY <buffer> <lastSeen> <now>
+							if (nickEquals(nick, currentNick)
+								&& config.isBouncer
+								&& irc.hasCap("znc.in/playback")
+							) {
+								val lastSeen = zncLastSeen[chan.lowercase()] ?: 0L
+								val nowSecs = nowMs / 1000L
+								writeLine("PRIVMSG *playback :PLAY $chan $lastSeen $nowSecs")
+								historyExpectUntil[chan.lowercase()] = nowMs + 15_000L
+							}
 						}
 					}
 
@@ -1648,7 +1693,29 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					"MODE" -> {
 						val rawTarget = msg.params.getOrNull(0) ?: continue
 						val target = normalizeMsgTarget(rawTarget)
-						if (!isChannelName(target)) continue
+						if (!isChannelName(target)) {
+							// User MODE change (target is a nick, not a channel).
+							// Detect +o/+O on our own nick — covers auto-oper via services,
+							// not just explicit /OPER (which triggers 381 RPL_YOUREOPER).
+							if (nickEquals(target, currentNick)) {
+								val modeStr = msg.params.getOrNull(1) ?: ""
+								var adding = true
+								for (ch in modeStr) {
+									when (ch) {
+										'+' -> adding = true
+										'-' -> adding = false
+										'o', 'O' -> {
+											if (adding) {
+												send(IrcEvent.YoureOper("You are now an IRC operator"))
+											} else {
+												send(IrcEvent.YoureDeOpered)
+											}
+										}
+									}
+								}
+							}
+							continue
+						}
 
 						val modeStr = msg.params.getOrNull(1) ?: continue
 						val args = msg.params.drop(2)
@@ -1674,6 +1741,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			val msg = friendlyErrorMessage(t)
 			if (userClosing) {
 				send(IrcEvent.Disconnected(lastQuitReason ?: "Disconnected"))
+			} else if (t is java.net.SocketTimeoutException) {
+				// Read timeout: socket silent for 150 s (Doze/NAT killed it).
+				// Reconnect quietly without showing a red error banner.
+				send(IrcEvent.Disconnected("Connection timed out"))
 			} else {
 				send(IrcEvent.Error("Connection error: $msg"))
 				send(IrcEvent.Disconnected(msg))
@@ -1951,13 +2022,18 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		if (code.length != 3 || !code.all { it.isDigit() }) return null
 		
 		// Don't double-emit for numerics that already have dedicated events.
-		if (code in setOf("001","005","321","322","323","324","332","333","353","366","367","368","433","442","471","472","473","474","475","476","477")) return null
+		if (code in setOf("001","005","321","322","323","324","332","333","353","366","367","368","381","433","442","471","472","473","474","475","476","477")) return null
 
 		fun p(i: Int) = msg.params.getOrNull(i)
-		val t = msg.trailing?.let { stripIrcFormatting(it) }
+		// Strip IRC formatting for most numerics, but preserve it for MOTD lines (372/375/376)
+		// so mIRC colours and bold/italic show up when the user has them enabled in settings.
+		// The rendering layer (IrcLinkifiedText) decides whether to show or strip colours
+		// based on the mircColorsEnabled setting.
+		val motdCodes = setOf("372", "375", "376")
+		val t = msg.trailing?.let { if (code in motdCodes) it else stripIrcFormatting(it) }
 
 		return when (code) {
-			// MOTD
+			// MOTD — pass raw text so colours/formatting are preserved for the renderer
 			"375" -> t ?: "— MOTD —"
 			"372" -> t ?: p(1) ?: ""
 			"376" -> t ?: "— End of MOTD command —"

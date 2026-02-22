@@ -1,20 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Monochrome adaptive icon layer for Android 13+ themed icons.
-    This is a single-color silhouette; the launcher tints it with the user's
-    wallpaper palette via Material You dynamic color.
-    Paths mirror ic_launcher_foreground.xml but use a flat @android:color/white fill
-    so the system can apply its tint. The drop-shadow path is omitted.
--->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="@android:color/white"
-        android:fillType="nonZero"
-        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
-        android:strokeWidth="1"
-        android:strokeColor="#00000000" />
+    android:viewportWidth="300"
+    android:viewportHeight="300">
+    <!-- 
+		hexdroid monochrome vector
+		we put it in a group to force the "tail" to scale properly in the icon's safe area so it doesn't get cut
+		(M106.19 ...) < hexdroid chat bubble
+		(M120, M165, M95, M90 ...) < #
+		making sure not to overlap bars so it appears properly
+    -->
+    <group
+        android:pivotX="150"
+        android:pivotY="150"
+        android:scaleX="0.65"
+        android:scaleY="0.65"
+        android:translateY="-10">
+        
+        <path
+            android:fillColor="#FF000000"
+            android:fillType="evenOdd"
+            android:pathData="M106.19 68.52 132.74 54.52c4.76-2.53 10.53-5.79 15.32-8.06 2.54.88 6.72 3.25 9.25 4.6l15.48 8.15 64.23 33.28c5.01 2.54 10.27 5.52 15.24 7.9 1.28.7 3.07 1.63 4.24 2.46.53.43 1.02.77 1.03 1.51.05 1.87.02 3.8.01 5.67-.02 3.63-.02 7.26-.01 10.89l.01 12.79c0 .87.06 5.02-.04 5.66.23 4.41.06 10.08.07 14.56-.09 11.51-.07 23.01.06 34.52.05 3.21-.21 7.53.03 10.61-.65.91-1.45 1.33-2.42 1.85-10.49 5.53-21.24 10.64-31.85 15.94-17.66 8.98-35.41 17.8-53.22 26.48-2.74 1.36-23.29 11.91-24.58 12-1.61.11-33.36-16.73-38.47-18.98-2.59 1.81-5.2 3.44-7.81 5.2l-19.58 13.2c-6.51 4.35-13.87 9.21-20.18 13.78-1.86 1.27-4.26 3.03-6.14 4.16-.76.55-1.06.78-1.67 1.52-.36-.33-.37-.55-.83-.85.19-.7.87-2.23 1.17-2.98l2.24-5.58 6.13-15.35c1.09-2.77 2.4-5.87 3.34-8.64.54-.77 1.55-4.03 1.98-5.11l3.97-9.82c.71-1.78 1.56-3.7 2.1-5.52-.82-.67-5.43-2.71-6.64-3.44-.9-.67-3.56-1.5-4.33-2.15-1.91-1.59-3.17-1.84-5.46-2.74-1.32-.52-2.79-1.78-4.12-2.41-3.77-1.8-8.28-3.5-11.44-6.23-.04-.05-.08-.09-.12-.14-.17-3.71-.02-7.81-.08-11.59.1-2.88.02-6.25.02-9.17l0-17.24c0-12.83.16-25.98-.02-38.78.23-7.01.05-15.72.02-22.81 1.4-1.08 4.45-2.56 6.09-3.42l10.88-5.73 30.21-15.82c4.73-2.47 9.71-4.98 14.36-7.52 1.58-.77 3.4-1.79 4.98-2.62z
+                          M120 105 h18 l-10 100 h-20z
+                          M165 105 h18 l-10 100 h-20z
+                          M95 125 h110 l-3 18 h-110z
+                          M90 165 h110 l-3 18 h-110z M117.6 125 L115.44 143 L134.2 143 L136 125z M112.8 165 L110.64 183 L130.2 183 L132 165z M162.6 125 L160.44 143 L179.2 143 L181 125z M157.8 165 L155.64 183 L175.2 183 L177 165z" />
+    </group>
 </vector>

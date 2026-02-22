@@ -136,6 +136,7 @@ fun NetworkEditScreen(
     var serverPassword by remember(n0.id, n0.serverPassword) { mutableStateOf(n0.serverPassword ?: "") }
     var autoConnect by remember(n0.id) { mutableStateOf(n0.autoConnect) }
     var autoReconnect by remember(n0.id) { mutableStateOf(n0.autoReconnect) }
+    var isBouncer by remember(n0.id) { mutableStateOf(n0.isBouncer) }
     var encoding by remember(n0.id) { mutableStateOf(n0.encoding) }
     var encodingExpanded by remember { mutableStateOf(false) }
 
@@ -294,6 +295,7 @@ fun NetworkEditScreen(
                                 autoJoin = aj,
                                 autoConnect = autoConnect,
                                 autoReconnect = autoReconnect,
+                                isBouncer = isBouncer,
                                 autoCommandDelaySeconds = postDelayText.toIntOrNull() ?: 0,
                                 serviceAuthCommand = serviceAuthCommand.trim().takeIf { it.isNotBlank() },
                                 autoCommandsText = autoCommandsText,
@@ -418,6 +420,21 @@ fun NetworkEditScreen(
                 ) {
                     Text(stringResource(R.string.netedit_auto_reconnect))
                     Switch(checked = autoReconnect, onCheckedChange = { autoReconnect = it })
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Bouncer (ZNC / soju)")
+                        Text(
+                            "Skips auto-join, requests playback of missed messages",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = isBouncer, onCheckedChange = { isBouncer = it })
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
