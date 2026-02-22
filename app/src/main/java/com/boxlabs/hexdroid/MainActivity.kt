@@ -24,12 +24,12 @@ import android.os.Bundle
 import android.view.View
 import android.os.Handler
 import android.os.Looper
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import com.boxlabs.hexdroid.ui.AppRoot
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var vm: IrcViewModel
 

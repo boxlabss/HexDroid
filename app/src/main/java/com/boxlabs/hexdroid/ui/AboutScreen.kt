@@ -94,6 +94,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -124,7 +125,7 @@ fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("About") },
+                title = { Text(stringResource(R.string.about_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF111111)
@@ -192,13 +193,13 @@ fun AboutScreen(onBack: () -> Unit) {
 @Composable
 private fun AboutContent(ctx: Context, website: String) {
     Text(
-        "IRC Client for Android",
+        stringResource(R.string.about_subtitle),
         style = MaterialTheme.typography.headlineSmall,
         fontWeight = FontWeight.SemiBold,
         color = Color.White
     )
     Text(
-        "Version ${BuildConfig.VERSION_NAME}",
+        stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
         style = MaterialTheme.typography.bodyMedium,
         color = Color.White.copy(alpha = 0.8f)
     )
@@ -218,12 +219,12 @@ private fun AboutContent(ctx: Context, website: String) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Documentation & Support",
+                stringResource(R.string.about_doc_support),
                 style = MaterialTheme.typography.titleSmall,
                 color = Color.White
             )
             Text(
-                "Visit the website for guides, FAQs, and to report issues.",
+                stringResource(R.string.about_doc_support_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.7f)
             )
@@ -236,7 +237,7 @@ private fun AboutContent(ctx: Context, website: String) {
                         )
                     }
                 }
-            ) { Text("Open Website") }
+            ) { Text(stringResource(R.string.about_open_website)) }
         }
     }
 }
@@ -574,7 +575,7 @@ private fun FlaskHero(
                     .padding(top = 8.dp)
             )
             Text(
-                "HexDroid - A free (and ad-free) app by",
+                stringResource(R.string.about_free_app_by),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = flaskSize + 14.dp),

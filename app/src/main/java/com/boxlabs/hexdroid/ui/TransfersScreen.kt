@@ -18,6 +18,8 @@
 
 package com.boxlabs.hexdroid.ui
 
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 
@@ -61,7 +63,7 @@ fun TransfersScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("File transfers") },
+                title = { Text(stringResource(R.string.transfers_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } }
             )
         }
@@ -75,7 +77,7 @@ fun TransfersScreen(
         ) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Enable DCC")
+                    Text(stringResource(R.string.setting_enable_dcc))
                     Switch(checked = state.settings.dccEnabled, onCheckedChange = { onSetDccEnabled(it) }, modifier = Modifier.tourTarget(TourTarget.TRANSFERS_ENABLE_DCC))
                 }
             }
@@ -83,28 +85,32 @@ fun TransfersScreen(
             item {
                 if (!state.settings.dccEnabled) {
                     Text(
-                        "DCC is currently disabled. Turn it on to send/accept files.",
+                        stringResource(R.string.transfers_dcc_disabled_warning),
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
                     var modeMenu by remember { mutableStateOf(false) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("DCC send mode")
+                        Text(stringResource(R.string.transfers_dcc_send_mode))
                         Box {
                             OutlinedButton(onClick = { modeMenu = true }) {
-                                Text(state.settings.dccSendMode.name.lowercase().replaceFirstChar { it.titlecase() })
+                                Text(when (state.settings.dccSendMode) {
+                                    DccSendMode.AUTO -> stringResource(R.string.transfers_mode_auto)
+                                    DccSendMode.ACTIVE -> stringResource(R.string.transfers_mode_active)
+                                    DccSendMode.PASSIVE -> stringResource(R.string.transfers_mode_passive)
+                                })
                             }
                             DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
                                 DropdownMenuItem(
-                                    text = { Text("Auto") },
+                                    text = { Text(stringResource(R.string.transfers_mode_auto)) },
                                     onClick = { modeMenu = false; onSetDccSendMode(DccSendMode.AUTO) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Active") },
+                                    text = { Text(stringResource(R.string.transfers_mode_active)) },
                                     onClick = { modeMenu = false; onSetDccSendMode(DccSendMode.ACTIVE) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Passive") },
+                                    text = { Text(stringResource(R.string.transfers_mode_passive)) },
                                     onClick = { modeMenu = false; onSetDccSendMode(DccSendMode.PASSIVE) }
                                 )
                             }
@@ -112,22 +118,22 @@ fun TransfersScreen(
                     }
                     Text(
                         when (state.settings.dccSendMode) {
-                            DccSendMode.AUTO -> "Auto: try Passive DCC or fall back to Active if there is no reply."
-                            DccSendMode.ACTIVE -> "Active: classic DCC SEND (the receiver connects to you)."
-                            DccSendMode.PASSIVE -> "Passive: request the receiver to open a port, then you connect to them."
+                            DccSendMode.AUTO -> stringResource(R.string.transfers_mode_auto_desc)
+                            DccSendMode.ACTIVE -> stringResource(R.string.transfers_mode_active_desc)
+                            DccSendMode.PASSIVE -> stringResource(R.string.transfers_mode_passive_desc)
                         },
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
 
-            item { Text("Send file", style = MaterialTheme.typography.titleMedium) }
+            item { Text(stringResource(R.string.transfers_send_file), style = MaterialTheme.typography.titleMedium) }
 
             item {
                 OutlinedTextField(
                     value = target,
                     onValueChange = { target = it },
-                    label = { Text("Target nick") },
+                    label = { Text(stringResource(R.string.transfers_target_nick)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -138,18 +144,18 @@ fun TransfersScreen(
                     onClick = { picker.launch(arrayOf("*/*")) },
                     enabled = state.settings.dccEnabled && target.trim().isNotBlank(),
                     modifier = Modifier.tourTarget(TourTarget.TRANSFERS_PICK_FILE)
-                ) { Text("Pick file to send") }
+                ) { Text(stringResource(R.string.transfers_pick_file)) }
             }
 
             item { Spacer(Modifier.height(12.dp)) }
 
-            item { Text("DCC CHAT", style = MaterialTheme.typography.titleMedium) }
+            item { Text(stringResource(R.string.transfers_dcc_chat), style = MaterialTheme.typography.titleMedium) }
 
             item {
                 OutlinedTextField(
                     value = chatTarget,
                     onValueChange = { chatTarget = it },
-                    label = { Text("Target nick") },
+                    label = { Text(stringResource(R.string.transfers_target_nick)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -159,24 +165,24 @@ fun TransfersScreen(
                 Button(
                     onClick = { onStartChat(chatTarget.trim()) },
                     enabled = state.settings.dccEnabled && chatTarget.trim().isNotBlank()
-                ) { Text("Start DCC CHAT") }
+                ) { Text(stringResource(R.string.transfers_start_dcc_chat)) }
             }
 
             item { HorizontalDivider() }
 
-            item { Text("Incoming chat offers", style = MaterialTheme.typography.titleMedium) }
+            item { Text(stringResource(R.string.transfers_incoming_chat_offers), style = MaterialTheme.typography.titleMedium) }
 
             if (state.dccChatOffers.isEmpty()) {
-                item { Text("No chat offers yet.") }
+                item { Text(stringResource(R.string.transfers_no_chat_offers)) }
             } else {
                 items(state.dccChatOffers) { o ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("From ${o.from}: DCC CHAT (${o.protocol})")
+                            Text(stringResource(R.string.transfers_from_chat_offer, o.from, o.protocol))
                             Text("${o.ip}:${o.port}", style = MaterialTheme.typography.bodySmall)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { onAcceptChat(o) }, enabled = state.settings.dccEnabled) { Text("Accept") }
-                                OutlinedButton(onClick = { onRejectChat(o) }) { Text("Reject") }
+                                Button(onClick = { onAcceptChat(o) }, enabled = state.settings.dccEnabled) { Text(stringResource(R.string.action_accept)) }
+                                OutlinedButton(onClick = { onRejectChat(o) }) { Text(stringResource(R.string.action_reject)) }
                             }
                         }
                     }
@@ -185,20 +191,21 @@ fun TransfersScreen(
 
             item { HorizontalDivider() }
 
-            item { Text("Incoming offers", style = MaterialTheme.typography.titleMedium) }
+            item { Text(stringResource(R.string.transfers_incoming_offers), style = MaterialTheme.typography.titleMedium) }
 
             if (state.dccOffers.isEmpty()) {
-                item { Text("No offers yet.") }
+                item { Text(stringResource(R.string.transfers_no_offers)) }
             } else {
                 items(state.dccOffers) { o ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("From ${o.from}: ${o.filename}${if (o.isPassive) " (passive)" else ""}")
-                            val ep = if (o.port > 0) "${o.ip}:${o.port}" else "reply-port: (waiting)"
-                            Text("$ep • ${o.size} bytes", style = MaterialTheme.typography.bodySmall)
+                            val passiveSuffix = if (o.isPassive) stringResource(R.string.transfers_passive_suffix) else ""
+                            Text(stringResource(R.string.transfers_from_file_offer, o.from, o.filename, passiveSuffix))
+                            val ep = if (o.port > 0) "${o.ip}:${o.port}" else stringResource(R.string.transfers_reply_port_waiting)
+                            Text(stringResource(R.string.transfers_size_bytes_format, ep, o.size), style = MaterialTheme.typography.bodySmall)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { onAccept(o) }, enabled = state.settings.dccEnabled) { Text("Accept") }
-                                OutlinedButton(onClick = { onReject(o) }) { Text("Reject") }
+                                Button(onClick = { onAccept(o) }, enabled = state.settings.dccEnabled) { Text(stringResource(R.string.action_accept)) }
+                                OutlinedButton(onClick = { onReject(o) }) { Text(stringResource(R.string.action_reject)) }
                             }
                         }
                     }
@@ -207,36 +214,36 @@ fun TransfersScreen(
 
             item { HorizontalDivider() }
 
-            item { Text("Transfers", style = MaterialTheme.typography.titleMedium) }
+            item { Text(stringResource(R.string.transfers_section_title), style = MaterialTheme.typography.titleMedium) }
 
             if (state.dccTransfers.isEmpty()) {
-                item { Text("No transfers in progress.") }
+                item { Text(stringResource(R.string.transfers_no_transfers)) }
             } else {
                 items(state.dccTransfers) { t ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             when (t) {
                                 is DccTransferState.Incoming -> {
-                                    Text("Incoming: ${t.offer.filename} from ${t.offer.from}")
+                                    Text(stringResource(R.string.transfers_incoming_format, t.offer.filename, t.offer.from))
                                     val pct =
                                         if (t.offer.size > 0) (t.received.toDouble() / t.offer.size.toDouble() * 100.0)
                                             .coerceIn(0.0, 100.0) else 0.0
                                     LinearProgressIndicator(progress = { (pct / 100.0).toFloat() })
                                     Text(
-                                        "${t.received}/${t.offer.size} bytes • ${"%.1f".format(pct)}%",
+                                        stringResource(R.string.transfers_progress_format, t.received, t.offer.size, "%.1f".format(pct)),
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                     if (t.done && t.savedPath != null) {
-                                        Button(onClick = { onShareFile(t.savedPath) }) { Text("Share file") }
+                                        Button(onClick = { onShareFile(t.savedPath) }) { Text(stringResource(R.string.transfers_share_file)) }
                                     }
-                                    if (t.error != null) Text("Error: ${t.error}", color = MaterialTheme.colorScheme.error)
+                                    if (t.error != null) Text(stringResource(R.string.transfers_error_format, t.error), color = MaterialTheme.colorScheme.error)
                                 }
 
                                 is DccTransferState.Outgoing -> {
-                                    Text("Outgoing: ${t.filename} to ${t.target}")
-                                    Text("${t.bytesSent} bytes sent", style = MaterialTheme.typography.bodySmall)
-                                    if (t.done) Text("Done")
-                                    if (t.error != null) Text("Error: ${t.error}", color = MaterialTheme.colorScheme.error)
+                                    Text(stringResource(R.string.transfers_outgoing_format, t.filename, t.target))
+                                    Text(stringResource(R.string.transfers_bytes_sent_format, t.bytesSent), style = MaterialTheme.typography.bodySmall)
+                                    if (t.done) Text(stringResource(R.string.done))
+                                    if (t.error != null) Text(stringResource(R.string.transfers_error_format, t.error), color = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }

@@ -92,6 +92,9 @@ android {
         }
     }
 
+    lint {
+        disable.add("MissingTranslation")
+    }
 }
 
 dependencies {
