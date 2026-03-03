@@ -24,7 +24,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +81,7 @@ sealed class DccTransferState {
     data class Incoming(
         val offer: DccOffer,
         val received: Long = 0,
+        val startTimeMs: Long = System.currentTimeMillis(),
         val done: Boolean = false,
         val error: String? = null,
         val savedPath: String? = null
@@ -90,12 +90,26 @@ sealed class DccTransferState {
     data class Outgoing(
         val target: String,
         val filename: String,
+        val fileSize: Long = 0,     // Total bytes; 0 = unknown (e.g. stream source)
         val bytesSent: Long = 0,
+        val startTimeMs: Long = System.currentTimeMillis(),
         val done: Boolean = false,
         val error: String? = null
     ) : DccTransferState()
+
 }
 
+/**
+ * DCC Manager handles file send/receive and DCC CHAT socket lifecycle.
+ *
+ * Security notes:
+ *  - [bindFirstAvailable] iterates ports min..max; each failed `ServerSocket()` call cleans
+ *    up its own OS resources before throwing, so there is no leak on the error path.
+ *  - Passive DCC offers are validated: port must be 0 AND token must be present. Malformed
+ *    offers (port=0, no token) throw [IllegalArgumentException] before any socket is opened.
+ *  - Turbo DCC (TSEND) skips per-chunk ACKs; the caller is responsible for confirming file
+ *    integrity out-of-band (e.g. hash check).
+ */
 class DccManager(ctx: Context) {
 
     // Avoid leaking an Activity context.
@@ -256,10 +270,6 @@ class DccManager(ctx: Context) {
         return Pair(FileOutputStream(file), file.absolutePath)
     }
 
-    // Keep old method for compatibility but mark deprecated
-    @Deprecated("Use createDccOutputStream instead", ReplaceWith("createDccOutputStream(displayName, null)"))
-    fun dccDir(): File = internalDccDir()
-
     // local IPv4 in dotted notation
     fun localIpv4OrNull(): String? {
         return try {
@@ -298,10 +308,16 @@ class DccManager(ctx: Context) {
     ): String = withContext(Dispatchers.IO) {
         val (outputStream, savedPath) = createDccOutputStream(offer.filename, customFolderUri)
 
-        Socket(offer.ip, offer.port).use { sock ->
-            outputStream.use { out ->
-                receiveFromSocket(sock, out, offer.size, offer.turbo, onProgress)
+        val sock = Socket(offer.ip, offer.port)
+        val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
+        try {
+            sock.use { s ->
+                outputStream.use { out ->
+                    receiveFromSocket(s, out, offer.size, offer.turbo, onProgress)
+                }
             }
+        } finally {
+            cancelHandle?.dispose()
         }
 
         savedPath
@@ -324,10 +340,15 @@ class DccManager(ctx: Context) {
         onListening: suspend (ipAsInt: Long, port: Int, size: Long, token: Long) -> Unit,
         onProgress: (Long, Long) -> Unit
     ): String = withContext(Dispatchers.IO) {
-        val token = offer.token ?: throw IllegalArgumentException("Passive DCC missing token")
+        // Validate passive offer: must have a token AND port must be 0. Some misbehaving clients
+        // send port 0 without a token (malformed passive DCC) - catch this early.
+        if (offer.port != 0) throw IllegalArgumentException("Passive DCC offer has non-zero port: ${offer.port}")
+        val token = offer.token ?: throw IllegalArgumentException("Passive DCC offer is missing token (port=0 but no token)")
         val (outputStream, savedPath) = createDccOutputStream(offer.filename, customFolderUri)
 
         val ss = bindFirstAvailable(portMin, portMax)
+        // Close the ServerSocket on cancellation so accept() unblocks immediately.
+        val ssCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { ss.close() } }
         try {
             ss.soTimeout = 45_000
             val ipInt = localIpv4AsInt()
@@ -340,12 +361,18 @@ class DccManager(ctx: Context) {
                 throw RuntimeException("DCC RECEIVE timed out waiting for sender to connect")
             }
 
-            sock.use { s ->
-                outputStream.use { out ->
-                    receiveFromSocket(s, out, offer.size, offer.turbo, onProgress)
+            val sockCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
+            try {
+                sock.use { s ->
+                    outputStream.use { out ->
+                        receiveFromSocket(s, out, offer.size, offer.turbo, onProgress)
+                    }
                 }
+            } finally {
+                sockCancelHandle?.dispose()
             }
         } finally {
+            ssCancelHandle?.dispose()
             runCatching { ss.close() }
         }
 
@@ -364,6 +391,8 @@ class DccManager(ctx: Context) {
     ): Unit = withContext(Dispatchers.IO) {
         val size = file.length()
         val ss = bindFirstAvailable(portMin, portMax)
+        // Close the ServerSocket on coroutine cancellation so accept() unblocks immediately.
+        val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { ss.close() } }
         try {
             val ipInt = localIpv4AsInt()
             onClient(ipInt, ss.localPort, size)
@@ -376,9 +405,16 @@ class DccManager(ctx: Context) {
             }
 
             sock.use { s ->
-                sendOverSocket(s, file, size, onProgress)
+                // Close the connected socket on cancellation so sendOverSocket unblocks.
+                val sockHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { s.close() } }
+                try {
+                    sendOverSocket(s, file, size, onProgress)
+                } finally {
+                    sockHandle?.dispose()
+                }
             }
         } finally {
+            cancelHandle?.dispose()
             runCatching { ss.close() }
         }
     }
@@ -393,8 +429,14 @@ class DccManager(ctx: Context) {
         onProgress: (Long, Long) -> Unit
     ): Unit = withContext(Dispatchers.IO) {
         val size = file.length()
-        Socket(host, port).use { s ->
-            sendOverSocket(s, file, size, onProgress)
+        val sock = Socket(host, port)
+        val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
+        try {
+            sock.use { s ->
+                sendOverSocket(s, file, size, onProgress)
+            }
+        } finally {
+            cancelHandle?.dispose()
         }
     }
 
@@ -590,7 +632,4 @@ class DccManager(ctx: Context) {
         }
     }
 
-    @Suppress("unused")
-    fun contentUriForFile(file: File): Uri =
-        FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
 }

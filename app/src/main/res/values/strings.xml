@@ -41,6 +41,7 @@
     <string name="section_irc">IRC</string>
     <string name="section_notifications">Notifications</string>
     <string name="section_logging">Logging</string>
+    <string name="section_privacy">Privacy</string>
     <string name="section_ircv3_history">IRCv3 History</string>
     <string name="section_file_transfers">File transfers</string>
 
@@ -213,4 +214,351 @@
     <string name="lang_ja" translatable="false">日本語</string>
     <string name="lang_ko" translatable="false">한국어</string>
     <string name="lang_zh" translatable="false">中文</string>
+
+    <string name="network_edit_advanced_caps">Advanced IRCv3 caps</string>
+    <string name="network_edit_caps_hint">Basic IRCv3 features enabled by default. Switch on to see advanced options.</string>
+    <string name="network_edit_bouncer_caps">Bouncer caps (soju/pounce)</string>
+
+    <!-- Chat kick/ban (was missing from translations) -->
+
+    <!-- Font / style pickers (was missing from translations) -->
+
+    <!-- Vibration (was missing from translations) -->
+
+    <!-- DCC / Transfers Screen -->
+    <string name="transfers_enable_dcc">Enable DCC</string>
+    <string name="transfers_dcc_send_mode">DCC send mode</string>
+    <string name="transfers_send_file">Send file</string>
+    <string name="transfers_target_nick">Target nick</string>
+    <string name="transfers_pick_file">Pick file to send</string>
+    <string name="transfers_dcc_chat">DCC Chat</string>
+    <string name="transfers_start_dcc_chat">Start DCC CHAT</string>
+    <string name="transfers_incoming_chat_offers">Incoming chat offers</string>
+    <string name="transfers_incoming_offers">Incoming file offers</string>
+    <string name="transfers_no_chat_offers">No chat offers yet.</string>
+    <string name="transfers_no_offers">No file offers yet.</string>
+    <string name="transfers_accept">Accept</string>
+    <string name="transfers_reject">Reject</string>
+    <string name="transfers_accept_open">Accept &amp; Open</string>
+    <string name="transfers_active">Active transfers</string>
+    <string name="transfers_no_transfers">No transfers in progress.</string>
+    <string name="transfers_share_file">Share file</string>
+
+    <!-- Nick completion hints -->
+    <string name="nick_hint_tap_to_mention">Tap to mention</string>
+
+    <!-- Notification channel names (displayed in Android Settings) -->
+    <string name="notif_channel_connection">IRC Connection</string>
+    <string name="notif_channel_highlight_silent">IRC Highlights (Silent)</string>
+    <string name="notif_channel_highlight_sound">IRC Highlights</string>
+    <string name="notif_channel_pm">IRC Private Messages</string>
+    <string name="notif_channel_dcc">DCC Requests</string>
+
+    <!-- DCC notification strings -->
+    <string name="notif_dcc_incoming_chat_title">Incoming DCC chat from %1$s</string>
+    <string name="notif_dcc_incoming_chat_text">Tap to open — or use Transfers to accept / reject</string>
+    <string name="notif_dcc_incoming_file_title">Incoming file from %1$s</string>
+    <string name="notif_dcc_file_done_title">DCC complete</string>
+    <string name="notif_dcc_file_done_text">%1$s saved to %2$s</string>
+    <string name="notif_open_transfers">Open Transfers</string>
+
+    <!-- draft/typing indicator strings -->
+    <string name="typing_one">%1$s is typing…</string>
+    <string name="typing_two">%1$s and %2$s are typing…</string>
+    <string name="typing_several">Several people are typing…</string>
+
+    <!-- Settings: typing privacy -->
+    <string name="setting_send_typing">Send typing indicators</string>
+    <string name="setting_send_typing_desc">Let others see when you are composing a message (draft/typing). Disabled by default for privacy.</string>
+    <string name="setting_receive_typing">Show others\' typing indicators</string>
+    <string name="setting_receive_typing_desc">Display an indicator when someone else is composing a message in a channel or query.</string>
+
+    <!-- draft/channel-rename -->
+    <string name="channel_renamed">Channel renamed from %1$s to %2$s</string>
+
+    <!-- draft/message-reactions -->
+    <string name="reaction_added">%1$s reacted with %2$s</string>
+    <string name="reaction_removed">%1$s removed reaction %2$s</string>
+
+    <!-- CHATHISTORY TARGETS section title -->
+    <string name="chathistory_targets_title">History available for</string>
+
+    <!-- Network edit screen -->
+    <string name="network_name_label">Network Name</string>
+    <string name="network_host_label">Host</string>
+    <string name="network_port_label">Port</string>
+    <string name="network_nickname_label">Nickname</string>
+    <string name="network_alt_nick_label">Alternate Nick</string>
+    <string name="network_username_label">Username (ident)</string>
+    <string name="network_realname_label">Real Name</string>
+    <string name="network_use_tls_label">Use TLS</string>
+    <string name="network_allow_plaintext">Allow insecure plaintext</string>
+    <string name="network_auto_connect_label">Connect on app start</string>
+    <string name="network_auto_reconnect_label">Auto-reconnect on disconnect</string>
+    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_server_password_label">Server password (PASS)</string>
+    <string name="network_enable_sasl">Enable SASL</string>
+    <string name="network_sasl_mechanism_label">Mechanism</string>
+    <string name="network_sasl_username_label">Username (authcid)</string>
+    <string name="network_sasl_password_label">Password</string>
+    <string name="network_cert_format_label">Certificate format</string>
+    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="network_key_password_label">Key password (if encrypted)</string>
+    <string name="network_encoding_label">Encoding</string>
+    <string name="network_command_delay_label">Delay before commands (seconds)</string>
+    <string name="network_command_delay_desc">Wait this many seconds after connecting before running commands</string>
+    <string name="network_service_auth_label">Service auth command</string>
+    <string name="network_service_auth_hint">e.g., /msg NickServ IDENTIFY password</string>
+    <string name="network_commands_hint">Commands to run after connecting, e.g., /join #channel</string>
+    <string name="network_no_network_selected">No network selected</string>
+    <string name="network_undo_remove">Undo remove</string>
+
+    <!-- Networks screen -->
+    <string name="networks_selected">Selected</string>
+    <string name="networks_add_favourite">Add to favourites</string>
+    <string name="networks_remove_favourite">Remove from favourites</string>
+    <string name="networks_drag_reorder">Drag to reorder</string>
+    <string name="networks_insecure_title">Insecure connection blocked</string>
+    <string name="networks_insecure_body">Plaintext IRC connections are not encrypted and can expose your messages and password.</string>
+    <string name="networks_insecure_body2">To connect to %1$s without TLS, you must explicitly allow insecure plaintext connections for this network.</string>
+    <string name="networks_allow_connect">Allow &amp; Connect</string>
+    <string name="networks_reconnect">Reconnect</string>
+
+    <!-- Channel / List screen -->
+    <string name="list_channels_title">Channels</string>
+    <string name="list_search_hint">Search channels / topic</string>
+
+    <!-- Chat screen — channel tools -->
+    <string name="chat_fetch_modes">Fetch current modes</string>
+    <string name="chat_key_password_label">Key / password</string>
+    <string name="chat_max_users_label">Max users</string>
+    <string name="chat_message_label">Message</string>
+    <string name="chat_channel_label">Channel</string>
+    <string name="chat_nick_mask_label">Nick or host mask</string>
+    <string name="chat_bans_title">Bans</string>
+    <string name="chat_quiets_title">Quiets</string>
+    <string name="chat_except_title">Except</string>
+    <string name="chat_invex_title">Invex</string>
+    <string name="chat_text_formatting">Text formatting</string>
+    <string name="chat_send_message">Send message</string>
+    <string name="chat_user_list">User list</string>
+    <string name="chat_drag_reorder">Drag to reorder</string>
+    <string name="chat_clear_all">Clear all</string>
+
+    <!-- Chat screen — menu items -->
+    <string name="menu_channel_list">Channel list</string>
+    <string name="menu_file_transfers">File transfers</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_networks">Networks</string>
+    <string name="menu_system_info">System info</string>
+    <string name="menu_ircop_tools">IRCop tools</string>
+    <string name="menu_about">About</string>
+    <string name="menu_reconnect">Reconnect</string>
+    <string name="menu_disconnect">Disconnect</string>
+    <string name="menu_exit">Exit</string>
+
+    <!-- IRCop tools -->
+    <string name="ircop_kline">K-line</string>
+    <string name="ircop_gline">G-line</string>
+    <string name="ircop_dline">D-line</string>
+    <string name="ircop_zline">Z-line</string>
+    <string name="ircop_shun">Shun</string>
+    <string name="ircop_kill">Kill</string>
+    <string name="ircop_sajoin">SAJoin</string>
+    <string name="ircop_sapart">SAPart</string>
+    <string name="ircop_wallops">WALLOPS</string>
+    <string name="ircop_globops">GLOBOPS</string>
+    <string name="ircop_locops">LOCOPS</string>
+    <string name="ircop_admin">ADMIN</string>
+    <string name="ircop_motd">MOTD</string>
+    <string name="ircop_links">Links</string>
+    <string name="ircop_uptime">Uptime</string>
+
+    <!-- Ignore list screen -->
+    <string name="ignore_nick_label">Nick to ignore</string>
+    <string name="ignore_no_nicks">No ignored nicks.</string>
+    <string name="ignore_no_networks">No networks configured yet.</string>
+    <string name="ignore_add">Add</string>
+    <string name="ignore_remove">Remove</string>
+
+    <!-- Settings screen — extras -->
+    <string name="settings_export_backup">Export backup</string>
+    <string name="settings_restore_backup">Restore backup</string>
+    <string name="settings_restore_confirm_title">Restore backup?</string>
+    <string name="settings_restore_confirm_ok">Restore</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">System default</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">Custom font file\u2026</string>
+
+    <!-- Transfers screen — extras -->
+    <string name="transfers_share_open">Share / Open file</string>
+
+    <!-- About screen -->
+    <string name="about_open_website">Open Website</string>
+
+    <!-- DCC mode options -->
+    <string name="transfers_dcc_auto">Auto</string>
+    <string name="transfers_dcc_active">Active</string>
+    <string name="transfers_dcc_passive">Passive</string>
+
+    <!-- Channel tools -->
+    <string name="chat_channel_lists">Channel lists\u2026</string>
+
+    <!-- Network edit: clear certificate -->
+    <string name="network_clear">Clear</string>
+
+
+    <!-- NetworkEditScreen: section headers -->
+    <string name="network_section_connection">Connection</string>
+    <string name="network_section_identity">Identity</string>
+    <string name="network_section_autoconnect">Auto-connect &amp; Password</string>
+    <string name="network_section_sasl">SASL Authentication</string>
+    <string name="network_section_tls_cert">TLS Client Certificate</string>
+    <string name="network_section_autojoin">Auto-join Channels</string>
+    <string name="network_section_postcmds">Post-connect Commands</string>
+    <string name="network_section_encoding">Character Encoding</string>
+    <string name="network_section_ircv3">IRCv3.x Capabilities</string>
+    <!-- NetworkEditScreen: misc -->
+    <string name="network_default_name">Network</string>
+    <string name="network_bouncer_desc">Skips auto-join, requests playback of missed messages</string>
+    <string name="network_sasl_external_desc">Uses TLS client certificate for authentication</string>
+    <string name="network_cert_selected">Selected: %1$s</string>
+    <string name="network_cert_none">No certificate selected.</string>
+    <string name="network_cert_pem_hint">The .pem should include both your certificate and private key.</string>
+    <string name="network_cert_choose_pem">Choose .pem</string>
+    <string name="network_cert_replace_pem">Replace .pem</string>
+    <string name="network_cert_choose_crt">Choose .crt</string>
+    <string name="network_cert_replace_crt">Replace .crt</string>
+    <string name="network_cert_choose_key">Choose .key</string>
+    <string name="network_cert_replace_key">Replace .key</string>
+    <string name="network_cert_label">Certificate: %1$s</string>
+    <string name="network_key_label">Key: %1$s</string>
+    <string name="network_autojoin_hint">One per line. Format: #channel [key]</string>
+    <string name="network_postcmds_hint">Additional commands (one per line):</string>
+    <string name="network_encoding_auto_desc">Recommended. Starts with UTF-8 and auto-detects other encodings.</string>
+    <string name="network_encoding_cyrillic_desc">Use for Bulgarian, Russian, Serbian, and other Cyrillic networks.</string>
+    <string name="network_encoding_utf8_desc">Standard Unicode. Works with most modern IRC networks.</string>
+    <string name="network_encoding_manual_desc">Manual encoding selection for legacy networks.</string>
+    <string name="network_cert_error">Please select both a certificate and a key</string>
+    <!-- SettingsScreen -->
+    <string name="setting_intro_tour">Intro tour</string>
+    <string name="setting_intro_tour_desc">A quick walkthrough of the main screens and shortcuts.</string>
+    <string name="setting_ui_font">UI font</string>
+    <string name="setting_chat_font">Chat font</string>
+    <string name="setting_font_size_label">Font size</string>
+    <string name="setting_log_internal">Internal storage</string>
+    <string name="setting_log_custom">Custom folder selected</string>
+    <string name="setting_dcc_downloads_default">Downloads (default)</string>
+    <string name="setting_dcc_downloads_custom">Custom folder</string>
+    <string name="section_backup_restore">Backup &amp; Restore</string>
+    <string name="setting_backup_export_desc">Export your network configurations and app settings to a JSON file. Passwords and TLS certificates are not included.</string>
+    <string name="setting_restore_desc">Restoring replaces all current networks and settings.</string>
+    <string name="setting_restore_confirm">This will replace all current networks and settings with those in the backup file. Passwords were not included in the backup and will need to be re-entered.
+
+This cannot be undone.</string>
+    <string name="setting_backup_error">Error</string>
+    <string name="setting_backup_done">Done</string>
+    <string name="setting_battery_tip">To stay connected overnight, please disable Battery Optimization for this app and allow background activity.</string>
+    <string name="setting_battery_oneplus">OnePlus tip: also lock the app in Recents (padlock) and ensure background activity / auto-launch is allowed in battery settings.</string>
+    <string name="setting_lang_system">System</string>
+    <string name="theme_matrix">Matrix</string>
+    <string name="theme_system_default">System default</string>
+    <!-- TransfersScreen -->
+    <string name="transfers_send_file_section">Send file</string>
+    <string name="transfers_dcc_chat_section">DCC CHAT</string>
+    <string name="transfers_dcc_disabled">DCC is currently disabled. Turn it on to send/accept files.</string>
+    <string name="transfers_dcc_auto_desc">Auto: try Passive DCC or fall back to Active if there is no reply.</string>
+    <string name="transfers_dcc_active_desc">Active: classic DCC SEND (the receiver connects to you).</string>
+    <string name="transfers_dcc_passive_desc">Passive: request the receiver to open a port, then you connect to them.</string>
+    <string name="transfers_chat_offers_section">Incoming chat offers</string>
+    <string name="transfers_offers_section">Incoming offers</string>
+    <string name="transfers_in_progress_section">Transfers</string>
+    <string name="transfers_unknown_size">unknown size</string>
+    <string name="transfers_passive_port">passive (waiting for port)</string>
+    <string name="transfers_error">Error: %1$s</string>
+    <!-- ChatScreen: channel mode panel -->
+    <string name="chat_topic_panel">Topic</string>
+    <string name="chat_modes_panel">Channel modes</string>
+    <string name="chat_mode_no_external">No external messages</string>
+    <string name="chat_mode_no_external_desc">Block messages from users not in the channel</string>
+    <string name="chat_mode_ops_topic">Ops-only topic</string>
+    <string name="chat_mode_ops_topic_desc">Only ops can change the topic</string>
+    <string name="chat_mode_moderated">Moderated</string>
+    <string name="chat_mode_moderated_desc">Only voiced users and ops can speak</string>
+    <string name="chat_mode_invite_only">Invite only</string>
+    <string name="chat_mode_invite_only_desc">Users must be invited to join</string>
+    <string name="chat_mode_secret">Secret</string>
+    <string name="chat_mode_secret_desc">Channel hidden from /LIST and /WHOIS</string>
+    <string name="chat_mode_private">Private</string>
+    <string name="chat_mode_private_desc">Channel shown as private in /LIST</string>
+    <string name="chat_mode_registered">Registered only</string>
+    <string name="chat_mode_registered_desc">Only registered nicks can join</string>
+    <string name="chat_mode_no_colour">No colour</string>
+    <string name="chat_mode_no_colour_desc">Strip mIRC colour codes from messages</string>
+    <string name="chat_mode_no_ctcp">No CTCPs</string>
+    <string name="chat_mode_no_ctcp_desc">Block CTCP messages to the channel</string>
+    <string name="chat_mode_key_label">Channel key (+k)</string>
+    <string name="chat_mode_limit_label">User limit (+l)</string>
+    <string name="chat_mode_kick_ban">Kick / Ban</string>
+    <string name="chat_current_modes">Current modes: %1$s</string>
+    <string name="chat_ircop_tools">IRCop tools</string>
+    <string name="chat_target_label">Target</string>
+    <string name="chat_punishments">Punishments</string>
+    <string name="chat_no_reason">No reason</string>
+    <string name="chat_force_joinpart">Force join / part</string>
+    <string name="chat_broadcast">Broadcast</string>
+    <string name="chat_server_queries">Server queries</string>
+    <string name="chat_text_colour">Text colour</string>
+    <string name="chat_bg_colour">Background</string>
+    <string name="chat_colour_code">Code %1$s  %2$s</string>
+    <string name="chat_no_entries">No entries.</string>
+    <string name="chat_set_by">set by %1$s</string>
+    <string name="chat_refresh">Refresh</string>
+    <string name="chat_no_quiet_support">Quiet lists not supported on this server</string>
+    <string name="chat_no_except_support">Exception lists not supported on this server</string>
+    <string name="chat_no_invex_support">Invex lists not supported on this server</string>
+    <string name="chat_no_quiet_server">This server doesn\'t advertise a +q quiet list.</string>
+    <string name="chat_no_except_server">This server doesn\'t advertise a +e exception list.</string>
+    <string name="chat_no_invex_server">This server doesn\'t advertise a +I invite-exemption list.</string>
+    <string name="chat_ban_list">Ban list (+b)</string>
+    <string name="chat_quiet_list">Quiet list (+q)</string>
+    <string name="chat_except_list">Except list (+e)</string>
+    <string name="chat_invex_list">Invex list (+I)</string>
+    <string name="chat_unban">Unban</string>
+    <string name="chat_unquiet">Unquiet</string>
+    <string name="chat_remove">Remove</string>
+    <string name="chat_irc_colour_title">IRC Colour</string>
+    <!-- ChatScreen: nick action sheet -->
+    <string name="nick_open_query">Open query</string>
+    <string name="nick_open_query_desc">Start a private message conversation</string>
+    <string name="nick_whois">Whois</string>
+    <string name="nick_whois_desc">Show user info, channels, idle time</string>
+    <string name="nick_mention">Mention</string>
+    <string name="nick_mention_desc">Insert @%1$s into your message</string>
+    <string name="nick_dcc_section">Direct connection (DCC)</string>
+    <string name="nick_send_file">Send file</string>
+    <string name="nick_send_file_desc">Send a file via DCC SEND</string>
+    <string name="nick_dcc_disabled">DCC is disabled in settings</string>
+    <string name="nick_dcc_chat">DCC Chat</string>
+    <string name="nick_dcc_chat_desc">Open a direct encrypted chat session</string>
+    <string name="nick_ignore">Ignore</string>
+    <string name="nick_unignore">Unignore</string>
+    <string name="nick_ignore_desc">Hide all messages from this user</string>
+    <string name="nick_unignore_desc">Show messages from this user again</string>
+    <string name="nick_moderation">Moderation</string>
+    <string name="nick_kick_ban">Kick / Ban…</string>
+    <string name="nick_kick_ban_desc">Remove or ban %1$s from this channel</string>
+    <!-- IgnoreListScreen -->
+    <string name="ignore_network_label">Network</string>
+    <string name="ignore_list_desc">Ignored nicks are matched case-insensitively and apply to chat + notices + incoming DCC offers on this network.</string>
+    <string name="ignore_list_tip">Tip: you can also ignore someone from the nick list or by tapping their name in chat.</string>
+    <!-- ListScreen -->
+    <string name="list_loading">Loading… (%1$d)</string>
+    <string name="list_join_button">Join</string>
+    <!-- AboutScreen -->
+    <string name="about_tagline">IRC Client for Android</string>
+    <string name="about_support_title">Documentation &amp; Support</string>
+    <string name="about_support_desc">Visit the website for guides, FAQs, and to report issues.</string>
 </resources>

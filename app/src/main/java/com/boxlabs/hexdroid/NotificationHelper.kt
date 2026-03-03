@@ -48,6 +48,7 @@ class NotificationHelper(private val ctx: Context) {
         const val ACTION_QUIT = "action_quit"
         const val ACTION_EXIT = "action_exit"
         const val ACTION_OPEN_TRANSFERS = "action_open_transfers"
+        const val ACTION_OPEN_DCC_CHAT = "action_open_dcc_chat"
 
         fun cancelAll(ctx: Context) {
             NotificationManagerCompat.from(ctx).cancelAll()
@@ -227,14 +228,30 @@ class NotificationHelper(private val ctx: Context) {
         NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
-    fun notifyDccIncomingChat(networkId: String, from: String) {
+    /**
+     * Notify the user of an incoming DCC CHAT offer.
+     *
+     * Tapping the notification navigates straight to the DCC chat buffer (which has
+     * Accept / Reject buttons inline), instead of taking them to the generic Transfers screen.
+     * An "Open Transfers" action button is still provided as a secondary option.
+     *
+     * @param dccBufferKey The full buffer key for the DCCCHAT buffer (e.g. "netId::DCCCHAT:peer")
+     */
+    fun notifyDccIncomingChat(networkId: String, from: String, dccBufferKey: String? = null) {
         ensureChannels()
+        // If we know the buffer key, deep-link straight to it so the user lands in the chat.
+        val contentIntent = if (dccBufferKey != null)
+            openBufferPendingIntent(networkId, dccBufferKey)
+        else
+            openTransfersPendingIntent(networkId)
+
         val n = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle("Incoming DCC chat from $from")
-            .setContentText("Tap to view and accept")
+            .setContentText("Tap to open — or use Transfers to accept / reject")
             .setAutoCancel(true)
-            .setContentIntent(openTransfersPendingIntent(networkId))
+            .setContentIntent(contentIntent)
+            .addAction(0, "Open Transfers", openTransfersPendingIntent(networkId))
             .build()
         NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
     }

@@ -44,6 +44,20 @@ fun stripIrcFormatting(input: String): String {
                 }
                 continue
             }
+            '\u0004' -> { // 24-bit hex colour: \x04RRGGBB[,RRGGBB]
+                i++
+                // Skip up to 6 hex digits for foreground colour
+                var n = 0
+                while (i < input.length && n < 6 &&
+                       (input[i].isDigit() || input[i].lowercaseChar() in 'a'..'f')) { i++; n++ }
+                if (i < input.length && input[i] == ',') {
+                    i++
+                    n = 0
+                    while (i < input.length && n < 6 &&
+                           (input[i].isDigit() || input[i].lowercaseChar() in 'a'..'f')) { i++; n++ }
+                }
+                continue
+            }
             '\u0002', // bold
             '\u001D', // italic
             '\u001F', // underline

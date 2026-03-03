@@ -94,6 +94,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -124,7 +125,7 @@ fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("About") },
+                title = { Text(stringResource(R.string.about_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF111111)
@@ -192,7 +193,7 @@ fun AboutScreen(onBack: () -> Unit) {
 @Composable
 private fun AboutContent(ctx: Context, website: String) {
     Text(
-        "IRC Client for Android",
+        stringResource(R.string.about_tagline),
         style = MaterialTheme.typography.headlineSmall,
         fontWeight = FontWeight.SemiBold,
         color = Color.White
@@ -218,12 +219,12 @@ private fun AboutContent(ctx: Context, website: String) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Documentation & Support",
+                stringResource(R.string.about_support_title),
                 style = MaterialTheme.typography.titleSmall,
                 color = Color.White
             )
             Text(
-                "Visit the website for guides, FAQs, and to report issues.",
+                stringResource(R.string.about_support_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.7f)
             )
@@ -236,7 +237,7 @@ private fun AboutContent(ctx: Context, website: String) {
                         )
                     }
                 }
-            ) { Text("Open Website") }
+            ) { Text(stringResource(R.string.about_open_website)) }
         }
     }
 }

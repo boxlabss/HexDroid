@@ -70,6 +70,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.UiState
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 
 @Composable
 fun NetworksScreen(
@@ -99,7 +101,7 @@ fun NetworksScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Networks") },
+                title = { Text(stringResource(R.string.networks_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
                 actions = {
                     IconButton(
@@ -118,7 +120,7 @@ fun NetworksScreen(
     ) { padding ->
         val listState = rememberLazyListState()
 
-        // Drag state keyed by netId — avoids index/favourites mapping issues
+        // Drag state keyed by netId - avoids index/favourites mapping issues
         var dragFromId  by remember { mutableStateOf<String?>(null) }
         var dragToId    by remember { mutableStateOf<String?>(null) }
         var dragOffsetY by remember { mutableFloatStateOf(0f) }
@@ -159,7 +161,7 @@ fun NetworksScreen(
                     val conn = state.connections[n.id]
                     val isConn = conn?.connected == true
                     val isConnecting = conn?.connecting == true
-                    val status = conn?.status ?: "Disconnected"
+                    val status = conn?.status ?: stringResource(R.string.networks_disconnect)
 
                     val isAfterNet = n.id.equals("AfterNET", ignoreCase = true) ||
                                      n.name.equals("AfterNET", ignoreCase = true)
@@ -220,14 +222,14 @@ fun NetworksScreen(
                                         if (n.isFavourite) {
                                             Icon(
                                                 Icons.Filled.Star,
-                                                contentDescription = "Remove from favourites",
+                                                contentDescription = stringResource(R.string.networks_remove_favourite),
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         } else {
                                             Icon(
                                                 Icons.Outlined.StarOutline,
-                                                contentDescription = "Add to favourites",
+                                                contentDescription = stringResource(R.string.networks_add_favourite),
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(20.dp)
                                             )
@@ -239,7 +241,7 @@ fun NetworksScreen(
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.weight(1f)
                                     )
-                                    if (n.id == active) Badge { Text("Selected") }
+                                    if (n.id == active) Badge { Text(stringResource(R.string.networks_selected)) }
 
                                     // Drag handle with long-press detection
                                     Box(
@@ -288,7 +290,7 @@ fun NetworksScreen(
                                     ) {
                                         Icon(
                                             Icons.Default.DragHandle,
-                                            contentDescription = "Drag to reorder",
+                                            contentDescription = stringResource(R.string.networks_drag_reorder),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(20.dp)
                                         )
@@ -306,7 +308,7 @@ fun NetworksScreen(
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        "Auto-connect",
+                                        stringResource(R.string.networks_auto_connect),
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -335,8 +337,8 @@ fun NetworksScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    OutlinedButton(onClick = { onEdit(n.id) }) { Text("Edit") }
-                                    OutlinedButton(onClick = { onDelete(n.id) }) { Text("Delete") }
+                                    OutlinedButton(onClick = { onEdit(n.id) }) { Text(stringResource(R.string.networks_edit)) }
+                                    OutlinedButton(onClick = { onDelete(n.id) }) { Text(stringResource(R.string.delete)) }
                                     Spacer(Modifier.weight(1f))
 
                                     val connectMod = if (n.id == active) {
@@ -347,12 +349,12 @@ fun NetworksScreen(
                                         Button(
                                             onClick = { onSelect(n.id); onDisconnect(n.id) },
                                             modifier = connectMod
-                                        ) { Text("Disconnect") }
+                                        ) { Text(stringResource(R.string.networks_disconnect)) }
                                     } else {
                                         Button(
                                             onClick = { onSelect(n.id); onConnect(n.id) },
                                             modifier = connectMod
-                                        ) { Text("Connect") }
+                                        ) { Text(stringResource(R.string.networks_connect)) }
                                     }
                                 }
                             }
@@ -378,23 +380,23 @@ fun NetworksScreen(
         val hostPort = if (prof != null) "${prof.host}:${prof.port}" else "this network"
         AlertDialog(
             onDismissRequest = onDismissPlaintextWarning,
-            title = { Text("Insecure connection blocked") },
+            title = { Text(stringResource(R.string.networks_insecure_title)) },
             text = {
                 Column {
-                    Text("Plaintext IRC connections are not encrypted and can expose your messages and password.")
+                    Text(stringResource(R.string.networks_insecure_body))
                     Spacer(Modifier.height(8.dp))
-                    Text("To connect to $hostPort without TLS, you must explicitly allow insecure plaintext connections for this network.")
+                    Text(stringResource(R.string.networks_insecure_body2, hostPort))
                 }
             },
             confirmButton = {
                 TextButton(onClick = { onAllowPlaintextConnect(warnNetId) }) {
-                    Text("Allow & Connect")
+                    Text(stringResource(R.string.networks_allow_connect))
                 }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { onEdit(warnNetId); onDismissPlaintextWarning() }) { Text("Edit network") }
-                    TextButton(onClick = onDismissPlaintextWarning) { Text("Cancel") }
+                    TextButton(onClick = { onEdit(warnNetId); onDismissPlaintextWarning() }) { Text(stringResource(R.string.network_edit_title)) }
+                    TextButton(onClick = onDismissPlaintextWarning) { Text(stringResource(R.string.cancel)) }
                 }
             }
         )

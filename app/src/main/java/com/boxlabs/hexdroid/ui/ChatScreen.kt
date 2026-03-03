@@ -71,11 +71,14 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -91,6 +94,14 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.PersonSearch
+import androidx.compose.material.icons.automirrored.filled.SendToMobile
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -131,7 +142,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -141,6 +154,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -173,6 +192,7 @@ import com.boxlabs.hexdroid.ui.theme.fontFamilyForChoice
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
@@ -181,6 +201,8 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 
 /** Commands with a short description shown in the hint popup. */
 private data class IrcCommand(val name: String, val usage: String, val description: String)
@@ -290,7 +312,7 @@ private val IRC_COMMANDS = listOf(
  */
 @Composable
 private fun CommandHints(
-    query: String,           // text after the leading '/' — must be non-empty
+    query: String,           // text after the leading '/' - must be non-empty
     onPick: (String) -> Unit // called with "/command " ready to type args
 ) {
     val matches = remember(query) {
@@ -391,6 +413,121 @@ private fun CommandHints(
     }
 }
 
+/**
+ * Nick-mention completion bar shown above the input field when the user types @prefix
+ * (or just a word prefix in a channel that matches a nick in the nicklist).
+ *
+ * Trigger: user types "@" followed by ≥1 characters in a channel buffer.
+ * On tap, replaces the @prefix token at the cursor with "@nick " (or "nick: " if at start).
+ *
+ * Layout mirrors CommandHints for a consistent look.
+ */
+@Composable
+private fun NickHints(
+    prefix: String,          // characters typed after "@" - must be non-empty
+    nicks: List<String>,     // full nicklist for this buffer (may include mode prefixes like @/+)
+    inputText: String,       // current raw input text (to decide "nick: " vs "@nick ")
+    onPick: (String) -> Unit // called with the replacement text (already stripped of @-prefix)
+) {
+    // Strip mode-prefix characters for matching; preserve original for display.
+    fun base(n: String) = n.trimStart('~', '&', '@', '%', '+')
+
+    val matches = remember(prefix, nicks) {
+        nicks.filter { base(it).startsWith(prefix, ignoreCase = true) }
+             .sortedWith(compareBy { base(it).lowercase() })
+             .take(16)
+    }
+
+    var highlighted by remember(matches) { mutableStateOf(matches.firstOrNull()) }
+
+    AnimatedVisibility(
+        visible = matches.isNotEmpty(),
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit  = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+    ) {
+        Surface(
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp,
+            shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(matches, key = { it }) { nick ->
+                        val isHighlighted = highlighted == nick
+                        val baseNickText = base(nick)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isHighlighted)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable {
+                                highlighted = nick
+                                // "nick: " if cursor is at start of blank input, "@nick " otherwise
+                                val completion = if (inputText.trimStart().startsWith("@$prefix", ignoreCase = true) &&
+                                                     inputText.trimStart().length <= prefix.length + 1)
+                                    "$baseNickText: "
+                                else
+                                    "@$baseNickText "
+                                onPick(completion)
+                            }
+                        ) {
+                            Text(
+                                text = nick, // show with mode prefix (e.g. "@admin")
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isHighlighted)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+                highlighted?.let { nick ->
+                    HorizontalDivider(thickness = 0.5.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val baseNickText = base(nick)
+                                val completion = if (inputText.trimStart().startsWith("@$prefix", ignoreCase = true) &&
+                                                     inputText.trimStart().length <= prefix.length + 1)
+                                    "$baseNickText: "
+                                else
+                                    "@$baseNickText "
+                                onPick(completion)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "@${base(nick)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = "Tap to mention",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 private sealed class SidebarItem(val stableKey: String) {
     data class Header(val netId: String, val title: String, val expanded: Boolean = true) : SidebarItem("h:$netId")
     data class Buffer(
@@ -433,7 +570,7 @@ private fun SidebarDragHandle(
     ) {
         Icon(
             Icons.Default.DragHandle,
-            contentDescription = "Drag to reorder",
+            contentDescription = stringResource(R.string.chat_drag_reorder),
             modifier = Modifier.size(14.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
         )
@@ -441,6 +578,39 @@ private fun SidebarDragHandle(
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * Horizontal divider shown above the first unread message in a buffer.
+ * Driven by the server's draft/read-marker or soju.im/read timestamp.
+ */
+@Composable
+private fun UnreadSeparator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+            thickness = 1.dp
+        )
+        Text(
+            text = "  unread  ",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+            thickness = 1.dp
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     state: UiState,
@@ -456,6 +626,10 @@ fun ChatScreen(
     onIgnoreNick: (String, String) -> Unit,
     onUnignoreNick: (String, String) -> Unit,
     onRefreshNicklist: () -> Unit,
+    /** Called when user taps "DCC Send File" in nick actions. Opens file picker then calls /dcc send. */
+    onDccSendFile: ((targetNick: String) -> Unit)? = null,
+    /** Called when user taps "DCC Chat" in nick actions. */
+    onDccChat: ((targetNick: String) -> Unit)? = null,
     onOpenList: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenNetworks: () -> Unit,
@@ -465,23 +639,26 @@ fun ChatScreen(
     onUpdateSettings: (UiSettings.() -> UiSettings) -> Unit,
     onReorderNetworks: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onToggleNetworkExpanded: (netId: String) -> Unit = {},
+    /** Called on every input text change so the ViewModel can send draft/typing TAGMSGs. */
+    onTypingChanged: (String) -> Unit = {},
+    /**
+     * Called when the user has read up to the latest message in a buffer (at bottom or buffer switch).
+     * The ViewModel forwards this as MARKREAD / READ to the server when the cap is active.
+     */
+    onMarkRead: (bufferKey: String) -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
     val cfg = LocalConfiguration.current
-    // Use a split-pane layout in landscape, but keep side panes proportionate so they don't dominate on phones.
-    // On very large screens we also keep split panes in portrait.
     val isWide = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE || cfg.screenWidthDp >= 840
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
-    // Intro tour
     val tourWantsBuffers =
         tourActive && (tourTarget == TourTarget.CHAT_BUFFER_DRAWER || tourTarget == TourTarget.CHAT_DRAWER_BUTTON)
 
-    // When the tour is on the "Switch buffers" step, ensure the buffer list is actually visible.
-    // On narrow layouts that means opening the drawer; on wide layouts we temporarily force the split pane to show.
     LaunchedEffect(tourWantsBuffers, tourActive, isWide) {
         if (!tourActive) return@LaunchedEffect
         if (!isWide) {
@@ -502,7 +679,6 @@ fun ChatScreen(
     fun netName(netId: String): String =
         state.networks.firstOrNull { it.id == netId }?.name ?: netId
 
-    // Pre-group buffer keys by network to avoid expensive per-network filtering on every recomposition.
     data class NetBuffers(val serverKey: String, val others: List<String>)
 
     val buffersByNet = remember(state.buffers, state.channelsOnly) {
@@ -551,7 +727,6 @@ fun ChatScreen(
             Modifier
                 .fillMaxWidth()
                 .clickable {
-                    // Close the drawer on phones/tablets in portrait before switching buffers.
                     scope.launch { if (!isWide) drawerState.close() }
                     onSelectBuffer(key)
                 }
@@ -612,9 +787,31 @@ fun ChatScreen(
     val buf = state.buffers[selected]
     val messages = buf?.messages ?: emptyList()
     val topic = buf?.topic
+    val typingNicks = if (state.settings.receiveTypingIndicator) buf?.typingNicks.orEmpty() else emptySet()
+
+    // Separator position. Advances with each message on the active buffer; cleared by the scroll-to-bottom button.
+    val firstUnreadIndex = remember(messages, buf?.lastReadTimestamp, buf?.unread) {
+        val lastReadTs = buf?.lastReadTimestamp
+        if (lastReadTs != null) {
+            val lastReadMs = runCatching {
+                java.time.Instant.parse(lastReadTs).toEpochMilli()
+            }.getOrNull() ?: return@remember -1
+            val idx = messages.indexOfFirst { it.timeMs > lastReadMs }
+            if (idx < 0 || idx >= messages.size) -1 else idx
+        } else {
+            val unread = buf?.unread ?: 0
+            if (unread <= 0 || messages.size < unread) -1
+            else messages.size - unread
+        }
+    }
 
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var inputHasFocus by remember { mutableStateOf(false) }
+
+    // Per-buffer input history. -1 = fresh message; inputSnapshot holds the draft for restoring.
+    val inputHistory = remember(selected) { mutableListOf<String>() }
+    var historyIndex by remember(selected) { mutableStateOf(-1) }
+    var inputSnapshot by remember(selected) { mutableStateOf("") }
 
     var showColorPicker by remember { mutableStateOf(false) }
     var selectedFgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
@@ -747,16 +944,13 @@ fun ChatScreen(
             append(t)
         }
 
+        if (inputHistory.lastOrNull() != t) inputHistory.add(t)
+        if (inputHistory.size > 50) inputHistory.removeAt(0)
+        historyIndex = -1
+        inputSnapshot = ""
+
         input = TextFieldValue("")
         onSend(formattedText)
-
-        // Optionally reset formatting after sending (comment out to keep it persistent)
-        // selectedFgColor = null
-        // selectedBgColor = null
-        // boldActive = false
-        // italicActive = false
-        // underlineActive = false
-        // reverseActive = false
     }
 
     fun openNickActions(nickDisplay: String) {
@@ -781,7 +975,7 @@ fun ChatScreen(
 			val naturalOrder = state.networks
 				.sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
 			val sortedNets = if (dragNetworkOrder != null) {
-				// Reorder according to live drag state — nets not in the drag list fall back to end
+				// Reorder according to live drag state - nets not in the drag list fall back to end
 				val map = naturalOrder.associateBy { it.id }
 				dragNetworkOrder!!.mapNotNull { map[it] } +
 					naturalOrder.filter { it.id !in dragNetworkOrder!! }
@@ -840,7 +1034,7 @@ fun ChatScreen(
 		) {
 			val listState = rememberLazyListState()
 
-			// Current display order of root netIds — kept in sync with sidebarItems
+			// Current display order of root netIds - kept in sync with sidebarItems
 			val netOrder = remember(sidebarItems) {
 				sidebarItems.mapNotNull { item ->
 					when {
@@ -850,7 +1044,7 @@ fun ChatScreen(
 					}
 				}
 			}
-			// Drag state — index-based swap approach:
+			// Drag state - index-based swap approach:
 			// We track the dragged item's current index in netOrder and how far it has moved.
 			// When the cumulative offset exceeds half the height of the next/previous slot,
 			// we swap it one position and reset the offset accumulator.
@@ -870,7 +1064,7 @@ fun ChatScreen(
 				contentPadding = PaddingValues(vertical = 6.dp)
 			) {
 				items(sidebarItems, key = { it.stableKey }) { item ->
-					// Derive root netId directly from item properties — no index lookup needed
+					// Derive root netId directly from item properties - no index lookup needed
 					val rootNetId: String? = when {
 						item is SidebarItem.Header -> item.netId
 						item is SidebarItem.Buffer && item.isNetworkHeader -> item.netId
@@ -1115,6 +1309,7 @@ fun ChatScreen(
 		}
 	}
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun NicklistContent(mod: Modifier = Modifier) {
         Column(mod.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -1146,7 +1341,7 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
 
-    // Kick a tail-follow scroll when returning to the app.
+
     var resumeTick by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -1157,86 +1352,72 @@ fun ChatScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    // Only auto-scroll when the user is at the bottom AND they are not currently interacting
-    // with the messages list (e.g. scrolling/holding for selection).
     var isTouchingMessages by remember(selected) { mutableStateOf(false) }
 
-    // Much more reliable than inspecting visibleItemsInfo (which can lag a frame behind during fast updates).
     val isAtBottom by remember(selected) {
         derivedStateOf { !listState.canScrollForward }
     }
 
     var followTail by remember(selected) { mutableStateOf(true) }
 
-    // When switching buffers, listState may still reflect the previous channel for a moment.
-    // Suppress followTail updates until we've had a chance to scroll-to-bottom once.
-    var suppressFollowUpdate by remember(selected) { mutableStateOf(true) }
-
-    // If the user scrolls up, stop following. If they scroll back to the bottom, resume following.
-    LaunchedEffect(
-        selected,
-        isAtBottom,
-        listState.isScrollInProgress,
-        isTouchingMessages,
-        suppressFollowUpdate,
-        inputHasFocus,
-        imeBottomPx
-    ) {
-        if (suppressFollowUpdate) return@LaunchedEffect
-        // When the IME opens, the viewport shrinks and isAtBottom can briefly flip false.
-        // Don't drop followTail during that resize while the input is focused.
-        if (inputHasFocus && imeBottomPx > 0) return@LaunchedEffect
-        if (!isTouchingMessages && !listState.isScrollInProgress) {
-            followTail = isAtBottom
-        } else if (!isAtBottom) {
-            followTail = false
-        }
+    // Track whether the IME is currently animating so we don't flip followTail mid-animation.
+    var imeAnimating by remember(selected) { mutableStateOf(false) }
+    LaunchedEffect(selected, imeBottomPx) {
+        imeAnimating = true
+        // Give the keyboard animation time to settle before re-evaluating isAtBottom.
+        delay(350)
+        imeAnimating = false
     }
 
-    LaunchedEffect(resumeTick, selected) {
-        if (messages.isNotEmpty() && followTail) {
-            // Let layout settle after resume.
-            delay(30)
-            runCatching { listState.scrollToItem(messages.size - 1) }
-            delay(30)
-            runCatching { listState.scrollToItem(messages.size - 1) }
-        }
+    // Stop following when the user manually scrolls up; resume when they reach the bottom.
+    // Never flip followTail while the keyboard is animating or the user is touching the list.
+    LaunchedEffect(selected) {
+        snapshotFlow { isAtBottom }
+            .collect { atBottom ->
+                if (!isTouchingMessages && !listState.isScrollInProgress && !imeAnimating) {
+                    followTail = atBottom
+                }
+            }
+    }
+
+    // Disable tail-follow immediately when the user touches and scrolls up.
+    LaunchedEffect(selected) {
+        snapshotFlow { isTouchingMessages to isAtBottom }
+            .collect { (touching, atBottom) ->
+                if (touching && !atBottom) followTail = false
+            }
     }
 
     val lastMsgId = messages.lastOrNull()?.id
 
+    // Scroll to bottom when a new message arrives and we are following the tail.
     LaunchedEffect(selected, lastMsgId, messages.size) {
-        // Tail-follow new messages (only if we're already following).
         if (lastMsgId == null) return@LaunchedEffect
-        if (followTail && !isTouchingMessages && !listState.isScrollInProgress) {
-            // Give the LazyColumn a moment to measure the new content (especially important for long wrapped lines).
-            delay(20)
+        if (followTail && !isTouchingMessages) {
             runCatching { listState.scrollToItem(messages.lastIndex) }
-            delay(20)
-            runCatching { listState.scrollToItem(messages.lastIndex) }
-            suppressFollowUpdate = false
         }
     }
 
-    LaunchedEffect(inputHasFocus, selected, imeBottomPx) {
-        if (inputHasFocus && imeBottomPx > 0 && messages.isNotEmpty() && !isTouchingMessages) {
-            // When keyboard opens, the viewport shrinks; keep the tail in view if we were following.
+    // Scroll to bottom on resume (e.g. app comes back to foreground).
+    LaunchedEffect(resumeTick, selected) {
+        if (messages.isNotEmpty() && followTail) {
+            runCatching { listState.scrollToItem(messages.size - 1) }
+        }
+    }
+
+    // When the keyboard opens, scroll to bottom once the animation settles.
+    // Keyed only on inputHasFocus (stable bool) not imeBottomPx (changes every animation frame).
+    LaunchedEffect(inputHasFocus, selected) {
+        if (inputHasFocus && messages.isNotEmpty()) {
             if (followTail || isAtBottom) {
-                suppressFollowUpdate = true
                 followTail = true
-                // The IME animates; scroll a few times as insets settle.
-                repeat(3) {
-                    delay(120)
-                    runCatching { listState.scrollToItem(messages.lastIndex) }
-                }
-                suppressFollowUpdate = false
+                // Wait for keyboard animation to finish before scrolling.
+                delay(350)
+                runCatching { listState.scrollToItem(messages.lastIndex) }
             }
         }
     }
 
-    LaunchedEffect(selected, isTouchingMessages) {
-        if (isTouchingMessages) suppressFollowUpdate = false
-    }
 
     val uriHandler = LocalUriHandler.current
     val (baseWeight, baseStyle) = when (state.settings.chatFontStyle) {
@@ -1404,7 +1585,7 @@ fun ChatScreen(
                             } else {
                                 Icon(
                                     imageVector = Icons.Filled.FormatColorText,
-                                    contentDescription = "Text formatting",
+                                    contentDescription = stringResource(R.string.chat_text_formatting),
                                     tint = Color.White.copy(alpha = if (colorPressed) 0.7f else 0.9f),
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -1452,7 +1633,7 @@ fun ChatScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.People,
-                                contentDescription = "User list",
+                                contentDescription = stringResource(R.string.chat_user_list),
                                 tint = Color.White.copy(alpha = if (nicklistPressed) 0.7f else 0.9f),
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1469,48 +1650,48 @@ fun ChatScreen(
                             onDismissRequest = { overflowExpanded = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Channel list") },
+                                text = { Text(stringResource(R.string.menu_channel_list)) },
                                 onClick = { overflowExpanded = false; onOpenList() }
                             )
                             DropdownMenuItem(
-                                text = { Text("File transfers") },
+                                text = { Text(stringResource(R.string.menu_file_transfers)) },
                                 onClick = { overflowExpanded = false; onOpenTransfers() }
                             )
                             DropdownMenuItem(
-                                text = { Text("Settings") },
+                                text = { Text(stringResource(R.string.menu_settings)) },
                                 onClick = { overflowExpanded = false; onOpenSettings() }
                             )
                             DropdownMenuItem(
-                                text = { Text("Networks") },
+                                text = { Text(stringResource(R.string.menu_networks)) },
                                 onClick = { overflowExpanded = false; onOpenNetworks() }
                             )
                             DropdownMenuItem(
-                                text = { Text("System info") },
+                                text = { Text(stringResource(R.string.menu_system_info)) },
                                 onClick = { overflowExpanded = false; onSysInfo() }
                             )
                             if (isIrcOper) {
                                 DropdownMenuItem(
-                                    text = { Text("IRCop tools") },
+                                    text = { Text(stringResource(R.string.menu_ircop_tools)) },
                                     onClick = { overflowExpanded = false; showIrcOpTools = true }
                                 )
                             }
                             DropdownMenuItem(
-                                text = { Text("About") },
+                                text = { Text(stringResource(R.string.menu_about)) },
                                 onClick = { overflowExpanded = false; onAbout() }
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("Reconnect") },
+                                text = { Text(stringResource(R.string.menu_reconnect)) },
                                 enabled = state.networks.isNotEmpty() && !state.connecting,
                                 onClick = { overflowExpanded = false; onReconnect() }
                             )
                             DropdownMenuItem(
-                                text = { Text("Disconnect") },
+                                text = { Text(stringResource(R.string.menu_disconnect)) },
                                 onClick = { overflowExpanded = false; onDisconnect() }
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("Exit") },
+                                text = { Text(stringResource(R.string.menu_exit)) },
                                 onClick = { overflowExpanded = false; onExit() }
                             )
                         }
@@ -1520,6 +1701,7 @@ fun ChatScreen(
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun MessagesPane(mod: Modifier = Modifier) {
         Column(mod) {
@@ -1556,10 +1738,14 @@ fun ChatScreen(
                 HorizontalDivider()
             }
 
-            SelectionContainer(
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+            ) {
+            SelectionContainer(
+                modifier = Modifier
+                    .fillMaxSize()
                     .padding(8.dp)
             ) {
                 LazyColumn(
@@ -1567,28 +1753,55 @@ fun ChatScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(selected) {
-                            // Mark that the user is touching/gesturing on the messages list so we don't auto-jump to bottom.
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 isTouchingMessages = true
                                 waitForUpOrCancellation()
                                 isTouchingMessages = false
+                                // User scrolled up - disable tail-follow.
+                                if (!isAtBottom) {
+                                    followTail = false
+                                }
                             }
                         },
 
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
-                    items(items = messages, key = { it.id }) { m ->
+                    itemsIndexed(items = messages, key = { _, m -> m.id }) { msgIndex, m ->
+                        // Unread separator: shown above the first unread message.
+                        if (msgIndex == firstUnreadIndex) {
+                            UnreadSeparator()
+                        }
                         val ts =
                             if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
+
+                        val plainLine = buildString {
+                            append(ts)
+                            val from = m.from
+                            when {
+                                from == null -> append(m.text)
+                                m.isAction  -> append("* $from ${m.text}")
+                                else        -> append("<$from> ${m.text}")
+                            }
+                        }
                         val fromNick = m.from
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = {
+                                        clipboardManager.setText(AnnotatedString(plainLine))
+                                    }
+                                )
+                        ) {
                         if (fromNick == null) {
                             if (m.isMotd && selBufName == "*server*") {
                                 // MOTD lines: auto-shrink font so they always fit on one line,
                                 // preserving ASCII art that depends on monospace column alignment.
                                 // lineHeight = fontSize so there's no extra internal leading.
                                 AutoSizedMotdLine(
-                                    text = m.text,  // timestamps omitted — would skew auto-sizing and look odd
+                                    text = m.text,  // timestamps omitted - would skew auto-sizing and look odd
                                     style = chatTextStyle.copy(lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified),
                                     mircColorsEnabled = state.settings.mircColorsEnabled,
                                     linkStyle = linkStyle,
@@ -1654,13 +1867,50 @@ fun ChatScreen(
                                 style = chatTextStyle
                             )
                         }
-                        // No spacing between MOTD lines — preserves ASCII art layout.
+                        } // end Box
+                        // No spacing between MOTD lines - preserves ASCII art layout.
                         if (!m.isMotd || selBufName != "*server*") {
                             Spacer(Modifier.height(4.dp))
                         }
                     }
                 }
             }
+
+            // Scroll-to-bottom button: shown when user has scrolled up (not at tail).
+            // Plain if-visibility avoids AnimatedVisibility scope-receiver ambiguity in BoxScope.
+            if (!isAtBottom) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 8.dp)
+                        .zIndex(1f)
+                        .size(40.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = false)
+                        ) {
+                            followTail = true
+                            onMarkRead(selected)
+                            scope.launch {
+                                if (messages.isNotEmpty())
+                                    listState.animateScrollToItem(messages.lastIndex)
+                            }
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Scroll to bottom",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
+            } // end Box
         }
     }
 
@@ -1680,14 +1930,42 @@ fun ChatScreen(
         }
 
         // Command-hint query: non-null only when user has typed at least one letter after /
-        // (bare "/" alone doesn't trigger — it would show all 68 commands at once)
+        // (bare "/" alone doesn't trigger - it would show all 68 commands at once)
         val cmdQuery = remember(input.text) {
             val t = input.text
             if (t.length >= 2 && t.startsWith("/") && !t.contains(" ")) t.drop(1) else null
         }
 
+        // Nick-hint query: non-null when the word at cursor starts with "@" and has ≥1 char after it.
+        // Only active in channel buffers (not server buffers or DCC chat).
+        val nickQuery = remember(input.text, isChannel) {
+            if (!isChannel) return@remember null
+            val t = input.text
+            // Find the last "@" that starts a word token before the cursor
+            val atIdx = t.lastIndexOf('@')
+            if (atIdx < 0) return@remember null
+            val token = t.substring(atIdx + 1)
+            // Only trigger if the token after "@" is non-empty and contains no spaces (still typing)
+            if (token.isNotEmpty() && !token.contains(' ')) token else null
+        }
+
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Command hints popup — rendered above the input row inside a Column
+            // Nick hints - shown when user types @prefix in a channel; takes priority over command hints
+            if (nickQuery != null && cmdQuery == null) {
+                NickHints(
+                    prefix = nickQuery,
+                    nicks = nicklist,
+                    inputText = input.text,
+                    onPick = { completion ->
+                        // Replace the @prefix token at the end of input with the chosen completion
+                        val t = input.text
+                        val atIdx = t.lastIndexOf('@')
+                        val newText = if (atIdx >= 0) t.substring(0, atIdx) + completion else completion
+                        input = TextFieldValue(newText, TextRange(newText.length))
+                    }
+                )
+            }
+            // Command hints popup - rendered above the input row inside a Column
             if (cmdQuery != null) {
                 CommandHints(
                     query = cmdQuery,
@@ -1697,6 +1975,25 @@ fun ChatScreen(
                 )
             }
 
+        // draft/typing: show who is currently typing, if any.
+        if (typingNicks.isNotEmpty()) {
+            val typingText = when (typingNicks.size) {
+                1 -> "${typingNicks.first()} is typing…"
+                2 -> {
+                    val (a, b) = typingNicks.toList()
+                    "$a and $b are typing…"
+                }
+                else -> "Several people are typing…"
+            }
+            Text(
+                text = typingText,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+        }
+
         Surface(
             tonalElevation = 2.dp,
             color = Color.Transparent,
@@ -1704,6 +2001,7 @@ fun ChatScreen(
                 .fillMaxWidth()
                 .background(bottomBarBrush)
         ) {
+            Column(Modifier.fillMaxWidth()) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -1732,12 +2030,52 @@ fun ChatScreen(
 				)
 				BasicTextField(
 					value = input,
-					onValueChange = { input = it },
+					onValueChange = { new ->
+                        input = new
+                        onTypingChanged(new.text)
+                    },
 					modifier = Modifier
 						.weight(1f)
 						.heightIn(min = 40.dp)
 						.tourTarget(TourTarget.CHAT_INPUT)
-						.onFocusChanged { inputHasFocus = it.isFocused },
+						.onFocusChanged { inputHasFocus = it.isFocused }
+						.onKeyEvent { ev ->
+                            if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+                            when (ev.key) {
+                                Key.Enter, Key.NumPadEnter -> {
+
+                                    sendNow()
+                                    true
+                                }
+                                Key.DirectionUp -> {
+
+                                    if (inputHistory.isEmpty()) return@onKeyEvent false
+                                    if (historyIndex == -1) inputSnapshot = input.text
+                                    val next = (if (historyIndex == -1) inputHistory.lastIndex
+                                                else (historyIndex - 1).coerceAtLeast(0))
+                                    historyIndex = next
+                                    val recalled = inputHistory[next]
+                                    input = TextFieldValue(recalled, androidx.compose.ui.text.TextRange(recalled.length))
+                                    true
+                                }
+                                Key.DirectionDown -> {
+
+                                    if (historyIndex == -1) return@onKeyEvent false
+                                    val next = historyIndex + 1
+                                    if (next > inputHistory.lastIndex) {
+                                        historyIndex = -1
+                                        val snap = inputSnapshot
+                                        input = TextFieldValue(snap, androidx.compose.ui.text.TextRange(snap.length))
+                                    } else {
+                                        historyIndex = next
+                                        val recalled = inputHistory[next]
+                                        input = TextFieldValue(recalled, androidx.compose.ui.text.TextRange(recalled.length))
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
+                        },
 					textStyle = inputTextStyle,
 					keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
 					keyboardActions = KeyboardActions(onSend = { sendNow() }),
@@ -1775,7 +2113,7 @@ fun ChatScreen(
 					}
 				)
 
-                // Channel ops button - only shown when user has permissions
+
                 if (isChannel && (canKick || canBan || canTopic)) {
                     val opsInteraction = remember { MutableInteractionSource() }
                     val opsPressed by opsInteraction.collectIsPressedAsState()
@@ -1803,14 +2141,14 @@ fun ChatScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Build,
-                            contentDescription = "Channel tools",
+                            contentDescription = stringResource(R.string.chat_channel_tools),
                             tint = Color.White.copy(alpha = if (opsPressed) 0.7f else 1f),
                             modifier = Modifier.size(20.dp)
                         )
                     }
                 }
 
-                // Send button - gradient with arrow icon
+
                 run {
                     val sendInteraction = remember { MutableInteractionSource() }
                     val sendPressed by sendInteraction.collectIsPressedAsState()
@@ -1838,16 +2176,17 @@ fun ChatScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send message",
+                            contentDescription = stringResource(R.string.chat_send_message),
                             tint = Color.White.copy(alpha = if (sendPressed) 0.7f else 1f),
                             modifier = Modifier.size(20.dp)
                         )
                     }
                 }
             }
-        }
+        } // closes Row
+        } // closes Column(Modifier.fillMaxWidth) wrapping typing indicator + Row
+        } // closes Surface
         } // closes Column wrapper for CommandHints + Surface
-    }
 	
     val scaffoldContent: @Composable (PaddingValues) -> Unit = { padding ->
         if (!isWide) {
@@ -2117,11 +2456,11 @@ fun ChatScreen(
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text("Channel tools", style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.chat_channel_tools), style = MaterialTheme.typography.titleLarge)
                 Text("$selNetName • $selBufName", style = MaterialTheme.typography.bodySmall)
                 if (currentModeString != null) {
                     Text(
-                        text = "Current modes: $currentModeString",
+                        text = stringResource(R.string.chat_current_modes, currentModeString),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2129,34 +2468,34 @@ fun ChatScreen(
                     OutlinedButton(
                         onClick = { onSend("/mode $selBufName") },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Fetch current modes") }
+                    ) { Text(stringResource(R.string.chat_fetch_modes)) }
                 }
                 HorizontalDivider()
 
                 // Topic
                 if (canTopic) {
-                    Text("Topic", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.chat_topic_panel), fontWeight = FontWeight.Bold)
                     OutlinedTextField(
                         value = opsTopic,
                         onValueChange = { opsTopic = it },
                         modifier = Modifier.fillMaxWidth(),
                         maxLines = 4,
-                        label = { Text("New topic") }
+                        label = { Text(stringResource(R.string.chat_new_topic)) }
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             val t = opsTopic.trim()
                             onSend(if (t.isBlank()) "/topic $selBufName" else "/topic $selBufName $t")
                             showChanOps = false
-                        }) { Text("Set") }
-                        OutlinedButton(onClick = { opsTopic = topic ?: "" }) { Text("Reset") }
+                        }) { Text(stringResource(R.string.set)) }
+                        OutlinedButton(onClick = { opsTopic = topic ?: "" }) { Text(stringResource(R.string.reset)) }
                     }
                     HorizontalDivider()
                 }
 
                 // Channel mode toggles
                 if (canMode) {
-                    Text("Channel modes", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.chat_modes_panel), fontWeight = FontWeight.Bold)
 
                     // Parse active simple modes from currentModeString for toggle state
                     val activeModes = currentModeString?.removePrefix("+") ?: ""
@@ -2194,19 +2533,19 @@ fun ChatScreen(
                         }
                     }
 
-                    ModeToggle('n', "No external messages", "Block messages from users not in the channel")
-                    ModeToggle('t', "Ops-only topic", "Only ops can change the topic")
-                    ModeToggle('m', "Moderated", "Only voiced users and ops can speak")
-                    ModeToggle('i', "Invite only", "Users must be invited to join")
-                    ModeToggle('s', "Secret", "Channel hidden from /LIST and /WHOIS")
-                    ModeToggle('p', "Private", "Channel shown as private in /LIST")
-                    ModeToggle('r', "Registered only", "Only registered nicks can join")
-                    ModeToggle('c', "No colour", "Strip mIRC colour codes from messages")
-                    ModeToggle('C', "No CTCPs", "Block CTCP messages to the channel")
+                    ModeToggle('n', stringResource(R.string.chat_mode_no_external), stringResource(R.string.chat_mode_no_external_desc))
+                    ModeToggle('t', stringResource(R.string.chat_mode_ops_topic), stringResource(R.string.chat_mode_ops_topic_desc))
+                    ModeToggle('m', stringResource(R.string.chat_mode_moderated), stringResource(R.string.chat_mode_moderated_desc))
+                    ModeToggle('i', stringResource(R.string.chat_mode_invite_only), stringResource(R.string.chat_mode_invite_only_desc))
+                    ModeToggle('s', stringResource(R.string.chat_mode_secret), stringResource(R.string.chat_mode_secret_desc))
+                    ModeToggle('p', stringResource(R.string.chat_mode_private), stringResource(R.string.chat_mode_private_desc))
+                    ModeToggle('r', stringResource(R.string.chat_mode_registered), stringResource(R.string.chat_mode_registered_desc))
+                    ModeToggle('c', stringResource(R.string.chat_mode_no_colour), stringResource(R.string.chat_mode_no_colour_desc))
+                    ModeToggle('C', stringResource(R.string.chat_mode_no_ctcp), stringResource(R.string.chat_mode_no_ctcp_desc))
 
                     // Key (password)
                     Spacer(Modifier.height(4.dp))
-                    Text("Channel key (+k)", fontWeight = FontWeight.SemiBold,
+                    Text(stringResource(R.string.chat_mode_key_label), fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyMedium)
                     var keyInput by remember { mutableStateOf("") }
                     Row(
@@ -2219,18 +2558,18 @@ fun ChatScreen(
                             onValueChange = { keyInput = it },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
-                            label = { Text("Key / password") }
+                            label = { Text(stringResource(R.string.chat_key_password_label)) }
                         )
                         Button(onClick = {
                             val k = keyInput.trim()
                             if (k.isNotBlank()) onSend("/mode $selBufName +k $k")
-                        }, enabled = keyInput.isNotBlank()) { Text("Set") }
-                        OutlinedButton(onClick = { onSend("/mode $selBufName -k *") }) { Text("Remove") }
+                        }, enabled = keyInput.isNotBlank()) { Text(stringResource(R.string.set)) }
+                        OutlinedButton(onClick = { onSend("/mode $selBufName -k *") }) { Text(stringResource(R.string.ignore_remove)) }
                     }
 
                     // Limit
                     Spacer(Modifier.height(4.dp))
-                    Text("User limit (+l)", fontWeight = FontWeight.SemiBold,
+                    Text(stringResource(R.string.chat_mode_limit_label), fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyMedium)
                     var limitInput by remember { mutableStateOf("") }
                     Row(
@@ -2243,13 +2582,13 @@ fun ChatScreen(
                             onValueChange = { if (it.all { c -> c.isDigit() }) limitInput = it },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
-                            label = { Text("Max users") }
+                            label = { Text(stringResource(R.string.chat_max_users_label)) }
                         )
                         Button(onClick = {
                             val l = limitInput.trim()
                             if (l.isNotBlank()) onSend("/mode $selBufName +l $l")
-                        }, enabled = limitInput.isNotBlank()) { Text("Set") }
-                        OutlinedButton(onClick = { onSend("/mode $selBufName -l"); limitInput = "" }) { Text("Remove") }
+                        }, enabled = limitInput.isNotBlank()) { Text(stringResource(R.string.set)) }
+                        OutlinedButton(onClick = { onSend("/mode $selBufName -l"); limitInput = "" }) { Text(stringResource(R.string.ignore_remove)) }
                     }
 
                     HorizontalDivider()
@@ -2257,20 +2596,20 @@ fun ChatScreen(
 
                 // Kick / Ban
                 if (canKick || canBan) {
-                    Text("Kick / Ban", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.chat_mode_kick_ban), fontWeight = FontWeight.Bold)
                     OutlinedTextField(
                         value = opsNick,
                         onValueChange = { opsNick = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        label = { Text("Nick") }
+                        label = { Text(stringResource(R.string.chat_nick)) }
                     )
                     OutlinedTextField(
                         value = opsReason,
                         onValueChange = { opsReason = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        label = { Text("Reason") }
+                        label = { Text(stringResource(R.string.chat_reason)) }
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (canKick) {
@@ -2283,7 +2622,7 @@ fun ChatScreen(
                                         showChanOps = false
                                     }
                                 }
-                            ) { Text("Kick") }
+                            ) { Text(stringResource(R.string.chat_kick)) }
                         }
                         if (canBan) {
                             OutlinedButton(
@@ -2294,7 +2633,7 @@ fun ChatScreen(
                                         showChanOps = false
                                     }
                                 }
-                            ) { Text("Ban") }
+                            ) { Text(stringResource(R.string.chat_ban)) }
                             OutlinedButton(
                                 onClick = {
                                     val n = opsNick.trim()
@@ -2304,7 +2643,7 @@ fun ChatScreen(
                                         showChanOps = false
                                     }
                                 }
-                            ) { Text("Kick+Ban") }
+                            ) { Text(stringResource(R.string.chat_kick_ban_btn)) }
                         }
                     }
                     if (canBan) {
@@ -2315,7 +2654,7 @@ fun ChatScreen(
                                 chanListTab = 0
                                 showChanListSheet = true
                             }
-                        ) { Text("Channel lists…") }
+                        ) { Text(stringResource(R.string.chat_channel_lists)) }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -2342,7 +2681,7 @@ fun ChatScreen(
                     Icon(Icons.Default.AdminPanelSettings,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary)
-                    Text("IRCop tools", style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.chat_ircop_tools), style = MaterialTheme.typography.titleLarge)
                 }
                 Text("$selNetName", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -2355,93 +2694,94 @@ fun ChatScreen(
                 var opMessage by remember { mutableStateOf("") }
 
                 // Target / Reason fields
-                Text("Target", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.chat_target_label), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = opTarget, onValueChange = { opTarget = it },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("Nick or host mask") }
+                    label = { Text(stringResource(R.string.chat_nick_mask_label)) }
                 )
                 OutlinedTextField(
                     value = opReason, onValueChange = { opReason = it },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("Reason") }
+                    label = { Text(stringResource(R.string.chat_reason)) }
                 )
 
                 // Kill / K-line / Z-line
-                Text("Punishments", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.chat_punishments), fontWeight = FontWeight.Bold)
+                val noReasonStr = stringResource(R.string.chat_no_reason)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
                             val t = opTarget.trim()
                             if (t.isNotBlank()) {
-                                val r = opReason.trim().ifBlank { "No reason" }
+                                val r = opReason.trim().ifBlank { noReasonStr }
                                 onSend("/kill $t $r")
                                 showIrcOpTools = false
                             }
                         },
                         enabled = opTarget.isNotBlank()
-                    ) { Text("Kill") }
+                    ) { Text(stringResource(R.string.ircop_kill)) }
                     OutlinedButton(
                         onClick = {
                             val t = opTarget.trim()
                             if (t.isNotBlank()) {
-                                val r = opReason.trim().ifBlank { "No reason" }
+                                val r = opReason.trim().ifBlank { noReasonStr }
                                 onSend("/kline $t $r")
                                 showIrcOpTools = false
                             }
                         },
                         enabled = opTarget.isNotBlank()
-                    ) { Text("K-line") }
+                    ) { Text(stringResource(R.string.ircop_kline)) }
                     OutlinedButton(
                         onClick = {
                             val t = opMask.trim().ifBlank { opTarget.trim() }
                             if (t.isNotBlank()) {
-                                val r = opReason.trim().ifBlank { "No reason" }
+                                val r = opReason.trim().ifBlank { noReasonStr }
                                 onSend("/zline $t $r")
                                 showIrcOpTools = false
                             }
                         },
                         enabled = opTarget.isNotBlank()
-                    ) { Text("Z-line") }
+                    ) { Text(stringResource(R.string.ircop_zline)) }
                     OutlinedButton(
                         onClick = {
                             val t = opTarget.trim()
                             if (t.isNotBlank()) {
-                                val r = opReason.trim().ifBlank { "No reason" }
+                                val r = opReason.trim().ifBlank { noReasonStr }
                                 onSend("/gline $t $r")
                                 showIrcOpTools = false
                             }
                         },
                         enabled = opTarget.isNotBlank()
-                    ) { Text("G-line") }
+                    ) { Text(stringResource(R.string.ircop_gline)) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
                             val t = opTarget.trim()
                             if (t.isNotBlank()) {
-                                val r = opReason.trim().ifBlank { "No reason" }
+                                val r = opReason.trim().ifBlank { noReasonStr }
                                 onSend("/shun $t $r")
                             }
                         },
                         enabled = opTarget.isNotBlank()
-                    ) { Text("Shun") }
+                    ) { Text(stringResource(R.string.ircop_shun)) }
                     OutlinedButton(
                         onClick = {
                             val t = opTarget.trim()
                             if (t.isNotBlank()) {
-                                val r = opReason.trim().ifBlank { "No reason" }
+                                val r = opReason.trim().ifBlank { noReasonStr }
                                 onSend("/dline $t $r")
                             }
                         },
                         enabled = opTarget.isNotBlank()
-                    ) { Text("D-line") }
+                    ) { Text(stringResource(R.string.ircop_dline)) }
                 }
 
                 HorizontalDivider()
 
                 // Force join/part
-                Text("Force join / part", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.chat_force_joinpart), fontWeight = FontWeight.Bold)
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2450,7 +2790,7 @@ fun ChatScreen(
                     OutlinedTextField(
                         value = opServer, onValueChange = { opServer = it },
                         modifier = Modifier.weight(1f), singleLine = true,
-                        label = { Text("Channel") }
+                        label = { Text(stringResource(R.string.chat_channel_label)) }
                     )
                     Button(
                         onClick = {
@@ -2458,49 +2798,49 @@ fun ChatScreen(
                             if (t.isNotBlank() && ch.isNotBlank()) onSend("/sajoin $t $ch")
                         },
                         enabled = opTarget.isNotBlank() && opServer.isNotBlank()
-                    ) { Text("SAJoin") }
+                    ) { Text(stringResource(R.string.ircop_sajoin)) }
                     OutlinedButton(
                         onClick = {
                             val t = opTarget.trim(); val ch = opServer.trim()
                             if (t.isNotBlank() && ch.isNotBlank()) onSend("/sapart $t $ch")
                         },
                         enabled = opTarget.isNotBlank() && opServer.isNotBlank()
-                    ) { Text("SAPart") }
+                    ) { Text(stringResource(R.string.ircop_sapart)) }
                 }
 
                 HorizontalDivider()
 
                 // Broadcast messages
-                Text("Broadcast", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.chat_broadcast), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = opMessage, onValueChange = { opMessage = it },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("Message") }
+                    label = { Text(stringResource(R.string.chat_message_label)) }
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { if (opMessage.isNotBlank()) onSend("/wallops ${opMessage.trim()}") },
                         enabled = opMessage.isNotBlank()
-                    ) { Text("WALLOPS") }
+                    ) { Text(stringResource(R.string.ircop_wallops)) }
                     OutlinedButton(
                         onClick = { if (opMessage.isNotBlank()) onSend("/globops ${opMessage.trim()}") },
                         enabled = opMessage.isNotBlank()
-                    ) { Text("GLOBOPS") }
+                    ) { Text(stringResource(R.string.ircop_globops)) }
                     OutlinedButton(
                         onClick = { if (opMessage.isNotBlank()) onSend("/locops ${opMessage.trim()}") },
                         enabled = opMessage.isNotBlank()
-                    ) { Text("LOCOPS") }
+                    ) { Text(stringResource(R.string.ircop_locops)) }
                 }
 
                 HorizontalDivider()
 
                 // Server queries
-                Text("Server queries", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.chat_server_queries), fontWeight = FontWeight.Bold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onSend("/motd"); showIrcOpTools = false }) { Text("MOTD") }
-                    OutlinedButton(onClick = { onSend("/admin"); showIrcOpTools = false }) { Text("ADMIN") }
-                    OutlinedButton(onClick = { onSend("/stats u"); showIrcOpTools = false }) { Text("Uptime") }
-                    OutlinedButton(onClick = { onSend("/stats l"); showIrcOpTools = false }) { Text("Links") }
+                    OutlinedButton(onClick = { onSend("/motd"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_motd)) }
+                    OutlinedButton(onClick = { onSend("/admin"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_admin)) }
+                    OutlinedButton(onClick = { onSend("/stats u"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_uptime)) }
+                    OutlinedButton(onClick = { onSend("/stats l"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_links)) }
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -2510,19 +2850,35 @@ fun ChatScreen(
 
     // mIRC colour/style picker sheet
     if (showColorPicker) {
-        ModalBottomSheet(onDismissRequest = { showColorPicker = false }) {
+        // ── IRC Text Formatting - full 99-colour mIRC grid picker ─────────────────────
+        // Layout: live preview -> style chips -> colour mode tab -> 99-colour grid -> hex label
+        //
+        // The grid renders all 99 mIRC colour codes in the standard layout:
+        //   Row 0 (cols 0-15):  legacy 16 colours
+        //   Rows 1-5 (cols 16-98): extended colours, 16 per row (last row partial)
+        // Selecting a swatch in "FG" mode sets the text colour; "BG" sets the highlight.
+        // Tapping an active swatch deselects it.
+
+        var colorMode by remember { mutableStateOf(0) } // 0 = FG, 1 = BG
+
+        ModalBottomSheet(
+            onDismissRequest = { showColorPicker = false },
+            sheetMaxWidth = 600.dp,
+        ) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
                     .navigationBarsPadding()
                     .imePadding()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Text Formatting", style = MaterialTheme.typography.titleLarge)
 
-                // Live preview
+                // ── Header ────────────────────────────────────────────────────
+                Text(stringResource(R.string.chat_text_formatting), style = MaterialTheme.typography.titleMedium)
+
+                // ── Live preview ──────────────────────────────────────────────
                 val previewText = buildAnnotatedString {
                     val styleState = MircStyleState(
                         fg = selectedFgColor,
@@ -2533,101 +2889,280 @@ fun ChatScreen(
                         reverse = reverseActive
                     )
                     withStyle(styleState.toSpanStyle()) {
-                        append("Preview: The quick brown fox jumps over the lazy dog")
+                        append("The quick brown fox jumps over the lazy dog")
                     }
                 }
                 Surface(
                     tonalElevation = 1.dp,
                     shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = previewText,
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(12.dp),
                         style = chatTextStyle
                     )
                 }
 
-                // Foreground colours
-                Text("Text Colour", fontWeight = FontWeight.SemiBold)
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(count = 16) { code ->
-                        val col = mircColor(code) ?: Color.Gray
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(col, MaterialTheme.shapes.small)
-                                .border(
-                                    width = 3.dp,
-                                    color = if (selectedFgColor == code) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    shape = MaterialTheme.shapes.small
-                                )
-                                .clickable {
-                                    selectedFgColor = if (selectedFgColor == code) null else code
-                                }
-                        )
-                    }
-                }
-
-                // Background colours
-                Text("Background Colour", fontWeight = FontWeight.SemiBold)
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(count = 16) { code ->
-                        val col = mircColor(code) ?: Color.Gray
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(col, MaterialTheme.shapes.small)
-                                .border(
-                                    width = 3.dp,
-                                    color = if (selectedBgColor == code) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    shape = MaterialTheme.shapes.small
-                                )
-                                .clickable {
-                                    selectedBgColor = if (selectedBgColor == code) null else code
-                                }
-                        )
-                    }
-                }
-
-                // Style toggles
+                // ── Style chips (B / I / U / Rev) ─────────────────────────────
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
                         selected = boldActive,
                         onClick = { boldActive = !boldActive },
-                        label = { Text("Bold") }
+                        label = { Text("B", fontWeight = FontWeight.Bold) }
                     )
                     FilterChip(
                         selected = italicActive,
                         onClick = { italicActive = !italicActive },
-                        label = { Text("Italic") }
+                        label = { Text("I", fontStyle = FontStyle.Italic) }
                     )
                     FilterChip(
                         selected = underlineActive,
                         onClick = { underlineActive = !underlineActive },
-                        label = { Text("Underline") }
+                        label = { Text("U", textDecoration = TextDecoration.Underline) }
                     )
                     FilterChip(
                         selected = reverseActive,
                         onClick = { reverseActive = !reverseActive },
-                        label = { Text("Reverse") }
+                        label = { Text("Rev") }
                     )
+                    Spacer(Modifier.weight(1f))
+                    // Active colour chips showing current selection
+                    if (selectedFgColor != null) {
+                        val fgCol = mircColor(selectedFgColor!!) ?: Color.Gray
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = fgCol,
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable { selectedFgColor = null }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("A", style = MaterialTheme.typography.labelSmall,
+                                    color = if (fgCol.luminance() > 0.4f) Color.Black else Color.White)
+                            }
+                        }
+                    }
+                    if (selectedBgColor != null) {
+                        val bgCol = mircColor(selectedBgColor!!) ?: Color.Gray
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = bgCol,
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable { selectedBgColor = null }
+                        ) {}
+                    }
                 }
 
-                // Action buttons: Clear All | Done
+                // ── FG / BG mode selector ─────────────────────────────────────
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // FG tab
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (colorMode == 0) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { colorMode = 0 }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(16.dp)
+                                    .background(
+                                        selectedFgColor?.let { mircColor(it) } ?: Color(0xFF888888),
+                                        CircleShape
+                                    )
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            )
+                            Text(stringResource(R.string.chat_text_colour),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (colorMode == 0) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (selectedFgColor != null) {
+                                Text("#${"%06X".format(MIRC_PALETTE.getOrNull(selectedFgColor!!)?.and(0xFFFFFF) ?: 0)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    // BG tab
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (colorMode == 1) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { colorMode = 1 }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(16.dp)
+                                    .background(
+                                        selectedBgColor?.let { mircColor(it) } ?: Color(0xFF888888),
+                                        CircleShape
+                                    )
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            )
+                            Text(stringResource(R.string.chat_bg_colour),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (colorMode == 1) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (selectedBgColor != null) {
+                                Text("#${"%06X".format(MIRC_PALETTE.getOrNull(selectedBgColor!!)?.and(0xFFFFFF) ?: 0)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+
+                // ── Colour grid ───────────────────────────────────────────────
+                //
+                // Layout matches the standard mIRC / HexChat / WeeChat colour picker:
+                //
+                //  ┌────────────────────────────────────────────────────────┐
+                //  │  0–15  │ original 16-colour row (full width)           │
+                //  ├────────────────────────────────────────────────────────┤
+                //  │ 16–87  │ 6 rows × 12 columns colour-spectrum gradient  │
+                //  ├────────────────────────────────────────────────────────┤
+                //  │ 88–98  │ greyscale ramp row (11 swatches)              │
+                //  └────────────────────────────────────────────────────────┘
+                //
+                // The 6×12 block reads top-to-bottom as darkest->lightest and
+                // left-to-right as red->orange->yellow->green->cyan->blue->purple->pink,
+                // producing the gradient effect familiar from desktop IRC clients.
+
+                val activeSel = if (colorMode == 0) selectedFgColor else selectedBgColor
+
+                @Composable
+                fun ColorSwatch(code: Int, modifier: Modifier = Modifier) {
+                    val col = mircColor(code) ?: return
+                    val isSelected = activeSel == code
+                    Box(
+                        modifier = modifier
+                            .background(col)
+                            .then(
+                                if (isSelected) Modifier.border(2.dp, Color.White)
+                                else Modifier
+                            )
+                            .clickable {
+                                if (colorMode == 0)
+                                    selectedFgColor = if (selectedFgColor == code) null else code
+                                else
+                                    selectedBgColor = if (selectedBgColor == code) null else code
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            // Filled circle marker - visible on both light and dark swatches
+                            Box(
+                                Modifier
+                                    .size(7.dp)
+                                    .background(
+                                        if (col.luminance() > 0.45f) Color(0xB3000000)
+                                        else Color(0xCCFFFFFF),
+                                        CircleShape
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                // Row 0: legacy 16 colours - square swatches, full width
+                Row(Modifier.fillMaxWidth()) {
+                    for (code in 0 until 16) {
+                        ColorSwatch(
+                            code = code,
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(2.dp))
+
+                // Rows 1–6: extended colour spectrum, 12 columns × 6 rows (codes 16–87).
+                // The column axis maps to hue; the row axis maps to lightness (dark->light).
+                // This creates the gradient grid that looks like a mini HTML colour picker.
+                val spectrumCols = 12
+                for (row in 0 until 6) {
+                    Row(Modifier.fillMaxWidth()) {
+                        for (col in 0 until spectrumCols) {
+                            val code = 16 + row * spectrumCols + col
+                            ColorSwatch(
+                                code = code,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(0.85f) // slightly taller than wide - better touch target
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(2.dp))
+
+                // Greyscale ramp: codes 88–98 (11 swatches - black to silver)
+                Row(Modifier.fillMaxWidth()) {
+                    for (code in 88 until MIRC_COLOR_COUNT) {
+                        ColorSwatch(
+                            code = code,
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                        )
+                    }
+                    // Pad to full width (16 cols) with transparent spacer so swatches aren't oversized
+                    val greyPad = 16 - (MIRC_COLOR_COUNT - 88)
+                    if (greyPad > 0) Spacer(Modifier.weight(greyPad.toFloat()))
+                }
+
+                // ── Hex label for hovered/selected colour ─────────────────────
+                val labelCode = activeSel
+                if (labelCode != null) {
+                    val labelColor = mircColor(labelCode) ?: Color.Gray
+                    val hexStr = "#%06X".format(MIRC_PALETTE.getOrNull(labelCode)?.and(0xFFFFFF) ?: 0)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(Modifier.size(18.dp).background(labelColor, RoundedCornerShape(4.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)))
+                        Text(
+                            "Code $labelCode  $hexStr",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // ── Bottom buttons ─────────────────────────────────────────────
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedButton(
@@ -2640,26 +3175,13 @@ fun ChatScreen(
                             reverseActive = false
                         },
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Clear All")
-                    }
+                    ) { Text(stringResource(R.string.chat_clear_all)) }
 
                     Button(
                         onClick = { showColorPicker = false },
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Done")
-                    }
+                    ) { Text(stringResource(R.string.done)) }
                 }
-
-                Text(
-                    "Formatting will be applied when you send your message",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-
-                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -2705,37 +3227,37 @@ fun ChatScreen(
 
         val ui = when (chanListTab) {
             0 -> ListUi(
-                "Ban list (+b)",
+                stringResource(R.string.chat_ban_list),
                 state.banlists[selected].orEmpty(),
                 state.banlistLoading[selected] == true,
-                "Unban",
+                stringResource(R.string.chat_unban),
                 "b",
                 "/banlist"
             )
 
             1 -> ListUi(
-                "Quiet list (+q)",
+                stringResource(R.string.chat_quiet_list),
                 state.quietlists[selected].orEmpty(),
                 state.quietlistLoading[selected] == true,
-                "Unquiet",
+                stringResource(R.string.chat_unquiet),
                 "q",
                 "/quietlist"
             )
 
             2 -> ListUi(
-                "Except list (+e)",
+                stringResource(R.string.chat_except_list),
                 state.exceptlists[selected].orEmpty(),
                 state.exceptlistLoading[selected] == true,
-                "Remove",
+                stringResource(R.string.chat_remove),
                 "e",
                 "/exceptlist"
             )
 
             else -> ListUi(
-                "Invex list (+I)",
+                stringResource(R.string.chat_invex_list),
                 state.invexlists[selected].orEmpty(),
                 state.invexlistLoading[selected] == true,
-                "Remove",
+                stringResource(R.string.chat_remove),
                 "I",
                 "/invexlist"
             )
@@ -2769,11 +3291,16 @@ fun ChatScreen(
                 // Get context once, safely inside the composable scope
                 val context = LocalContext.current
 
+                val noQuietSupportStr = stringResource(R.string.chat_no_quiet_support)
+                val noExceptSupportStr = stringResource(R.string.chat_no_except_support)
+                val noInvexSupportStr = stringResource(R.string.chat_no_invex_support)
+
+
                 TabRow(selectedTabIndex = chanListTab) {
                     Tab(
                         selected = chanListTab == 0,
                         onClick = { chanListTab = 0 }
-                    ) { Text("Bans") }
+                    ) { Text(stringResource(R.string.chat_bans_title)) }
 
                     Tab(
                         selected = chanListTab == 1,
@@ -2783,13 +3310,13 @@ fun ChatScreen(
                             } else {
                                 Toast.makeText(
                                     context,  // ← use the captured context here
-                                    "Quiet lists not supported on this server",
+                                    noQuietSupportStr,
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 chanListTab = 0
                             }
                         }
-                    ) { Text("Quiets") }
+                    ) { Text(stringResource(R.string.chat_quiets_title)) }
 
                     Tab(
                         selected = chanListTab == 2,
@@ -2799,13 +3326,13 @@ fun ChatScreen(
                             } else {
                                 Toast.makeText(
                                     context,
-                                    "Exception lists not supported on this server",
+                                    noExceptSupportStr,
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 chanListTab = 0
                             }
                         }
-                    ) { Text("Except") }
+                    ) { Text(stringResource(R.string.chat_except_title)) }
 
                     Tab(
                         selected = chanListTab == 3,
@@ -2815,13 +3342,13 @@ fun ChatScreen(
                             } else {
                                 Toast.makeText(
                                     context,
-                                    "Invex lists not supported on this server",
+                                    noInvexSupportStr,
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 chanListTab = 0
                             }
                         }
-                    ) { Text("Invex") }
+                    ) { Text(stringResource(R.string.chat_invex_title)) }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2832,23 +3359,21 @@ fun ChatScreen(
                         else -> supportsInvex
                     }
                     OutlinedButton(enabled = canRefresh, onClick = { refreshCurrentList() }) {
-                        Text(
-                            "Refresh"
-                        )
+                        Text(stringResource(R.string.chat_refresh))
                     }
-                    OutlinedButton(onClick = { showChanListSheet = false }) { Text("Close") }
+                    OutlinedButton(onClick = { showChanListSheet = false }) { Text(stringResource(R.string.close)) }
                 }
 
                 HorizontalDivider()
 
                 if (!ui.loading && ui.entries.isEmpty()) {
                     val unsupportedMsg = when (chanListTab) {
-                        1 -> if (!supportsQuiet) "This server doesn't advertise a +q quiet list." else null
-                        2 -> if (!supportsExcept) "This server doesn't advertise a +e exception list." else null
-                        3 -> if (!supportsInvex) "This server doesn't advertise a +I invite-exemption list." else null
+                        1 -> if (!supportsQuiet) stringResource(R.string.chat_no_quiet_server) else null
+                        2 -> if (!supportsExcept) stringResource(R.string.chat_no_except_server) else null
+                        3 -> if (!supportsInvex) stringResource(R.string.chat_no_invex_server) else null
                         else -> null
                     }
-                    Text(unsupportedMsg ?: "No entries.", style = chatTextStyle)
+                    Text(unsupportedMsg ?: stringResource(R.string.chat_no_entries), style = chatTextStyle)
                 } else {
                     LazyColumn(
                         modifier = Modifier
@@ -2874,7 +3399,7 @@ fun ChatScreen(
                                         val by = e.setBy?.takeIf { it.isNotBlank() }
                                         val at = e.setAtMs?.let { banTimeFmt.format(Date(it)) }
                                         val meta = buildList {
-                                            if (by != null) add("set by $by")
+                                            if (by != null) add(stringResource(R.string.chat_set_by, by))
                                             if (at != null) add("at $at")
                                         }.joinToString(" ")
                                         if (meta.isNotBlank()) {
@@ -2903,63 +3428,164 @@ fun ChatScreen(
     }
 
     if (showNickActions && selectedNick.isNotBlank()) {
+        val dccEnabled = state.settings.dccEnabled
         ModalBottomSheet(onDismissRequest = { showNickActions = false }) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                Text(selectedNick, style = MaterialTheme.typography.titleLarge)
+                // Header
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(selectedNick, style = MaterialTheme.typography.titleLarge)
+                    // Show mode badge if nick has a prefix (e.g. @, +)
+                    val dispNick = nickDisplayByBase[selectedNick.lowercase()]
+                    val prefix = dispNick?.let { nickPrefix(it) }
+                    if (prefix != null) {
+                        val (badgeColor, badgeLabel) = when (prefix) {
+                            '~' -> Pair(Color(0xFFFF6B35), "owner")
+                            '&' -> Pair(Color(0xFFE63946), "admin")
+                            '@' -> Pair(Color(0xFF2196F3), "op")
+                            '%' -> Pair(Color(0xFF4CAF50), "halfop")
+                            '+' -> Pair(Color(0xFF9E9E9E), "voice")
+                            else -> Pair(MaterialTheme.colorScheme.surfaceVariant, prefix.toString())
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = badgeColor
+                        ) {
+                            Text(
+                                badgeLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 HorizontalDivider()
-                Button(
+
+                // ── Communication ───────────────────────────────────────────
+                @Composable
+                fun ActionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, subtitle: String? = null, enabled: Boolean = true, tint: Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .let { if (enabled) it.clickable(onClick = onClick) else it }
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .alpha(if (enabled) 1f else 0.38f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(label, style = MaterialTheme.typography.bodyLarge)
+                            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                ActionRow(
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    label = stringResource(R.string.nick_open_query),
+                    subtitle = stringResource(R.string.nick_open_query_desc),
+                    onClick = { onSelectBuffer("$selNetId::$selectedNick"); showNickActions = false }
+                )
+                ActionRow(
+                    icon = Icons.Default.PersonSearch,
+                    label = stringResource(R.string.nick_whois),
+                    subtitle = stringResource(R.string.nick_whois_desc),
+                    onClick = { onWhois(selectedNick); showNickActions = false }
+                )
+                ActionRow(
+                    icon = Icons.Default.AlternateEmail,
+                    label = stringResource(R.string.nick_mention),
+                    subtitle = stringResource(R.string.nick_mention_desc, selectedNick),
+                    onClick = { mention(selectedNick); showNickActions = false }
+                )
+
+                // ── DCC ─────────────────────────────────────────────────────
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    stringResource(R.string.nick_dcc_section),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+
+                ActionRow(
+                    icon = Icons.AutoMirrored.Filled.SendToMobile,
+                    label = stringResource(R.string.nick_send_file),
+                    subtitle = if (dccEnabled) stringResource(R.string.nick_send_file_desc) else stringResource(R.string.nick_dcc_disabled),
+                    enabled = dccEnabled && onDccSendFile != null,
+                    tint = if (dccEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     onClick = {
-                        onSelectBuffer("$selNetId::$selectedNick")
                         showNickActions = false
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Open query") }
-                Button(
-                    onClick = { onWhois(selectedNick); showNickActions = false },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Whois") }
-                Button(
-                    onClick = { mention(selectedNick); showNickActions = false },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Mention") }
-                val ignored =
-                    state.networks.firstOrNull { it.id == selNetId }?.ignoredNicks.orEmpty()
+                        onDccSendFile?.invoke(selectedNick)
+                    }
+                )
+                ActionRow(
+                    icon = Icons.Default.Terminal,
+                    label = stringResource(R.string.nick_dcc_chat),
+                    subtitle = if (dccEnabled) stringResource(R.string.nick_dcc_chat_desc) else stringResource(R.string.nick_dcc_disabled),
+                    enabled = dccEnabled && onDccChat != null,
+                    tint = if (dccEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        showNickActions = false
+                        onDccChat?.invoke(selectedNick)
+                    }
+                )
+
+                // ── User management ─────────────────────────────────────────
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                val ignored = state.networks.firstOrNull { it.id == selNetId }?.ignoredNicks.orEmpty()
                 val isIgnored = ignored.any { it.equals(selectedNick, ignoreCase = true) }
                 val canIgnore = !selectedNick.equals(myNick, ignoreCase = true)
-                Button(
+
+                ActionRow(
+                    icon = if (isIgnored) Icons.Default.VisibilityOff else Icons.Default.Block,
+                    label = if (isIgnored) stringResource(R.string.nick_unignore) else stringResource(R.string.nick_ignore),
+                    subtitle = if (isIgnored) stringResource(R.string.nick_unignore_desc) else stringResource(R.string.nick_ignore_desc),
                     enabled = canIgnore,
+                    tint = if (isIgnored) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface,
                     onClick = {
-                        if (isIgnored) onUnignoreNick(selNetId, selectedNick) else onIgnoreNick(
-                            selNetId,
-                            selectedNick
-                        )
+                        if (isIgnored) onUnignoreNick(selNetId, selectedNick)
+                        else onIgnoreNick(selNetId, selectedNick)
                         showNickActions = false
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(if (isIgnored) "Unignore" else "Ignore") }
-                if (isChannel && (canKick || canBan) && !selectedNick.equals(
-                        myNick,
-                        ignoreCase = true
+                    }
+                )
+
+                // ── Moderation (ops only) ────────────────────────────────────
+                if (isChannel && (canKick || canBan) && !selectedNick.equals(myNick, ignoreCase = true)) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        stringResource(R.string.nick_moderation),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
-                ) {
-                    HorizontalDivider()
-                    Text("Moderation", fontWeight = FontWeight.Bold)
-                    Button(
+                    ActionRow(
+                        icon = Icons.Default.Gavel,
+                        label = stringResource(R.string.nick_kick_ban),
+                        subtitle = stringResource(R.string.nick_kick_ban_desc, selectedNick),
+                        tint = MaterialTheme.colorScheme.error,
                         onClick = {
                             opsNick = selectedNick
                             opsReason = ""
                             showNickActions = false
                             showChanOps = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Kick / Ban…") }
+                        }
+                    )
                 }
-                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -3080,28 +3706,149 @@ private data class MircStyleState(
 
 private data class MircRun(val text: String, val style: MircStyleState)
 
-private fun mircColor(code: Int): Color? {
-    // Standard 0-15 mIRC palette.
-    return when (code) {
-        0 -> Color(0xFFFFFFFF)
-        1 -> Color(0xFF000000)
-        2 -> Color(0xFF00007F)
-        3 -> Color(0xFF009300)
-        4 -> Color(0xFFFF0000)
-        5 -> Color(0xFF7F0000)
-        6 -> Color(0xFF9C009C)
-        7 -> Color(0xFFFC7F00)
-        8 -> Color(0xFFFFFF00)
-        9 -> Color(0xFF00FC00)
-        10 -> Color(0xFF009393)
-        11 -> Color(0xFF00FFFF)
-        12 -> Color(0xFF0000FC)
-        13 -> Color(0xFFFF00FF)
-        14 -> Color(0xFF7F7F7F)
-        15 -> Color(0xFFD2D2D2)
-        else -> null
-    }
-}
+/**
+ * Full mIRC/IRCv3 colour table: 0-15 legacy + 16-98 extended (99 total).
+ *
+ * Codes 0-15 are the original mIRC palette used by essentially all IRC clients.
+ * Codes 16-98 are the modern IRCv3 extension published at
+ * https://modern.ircdocs.horse/formatting.html#color - supported by mIRC 7+,
+ * WeeChat, HexChat, and most modern clients.
+ *
+ * Each entry is a 0xAARRGGBB value.
+ */
+/**
+ * Canonical mIRC / IRCv3 colour palette — 99 entries (codes 0–98).
+ *
+ * Source: https://modern.ircdocs.horse/formatting.html#color (the "IRC Colour" specification).
+ * These are the exact RGB hex values that mIRC 7+, HexChat, WeeChat, and other modern
+ * clients use. Codes 0–15 are the original mIRC palette; codes 16–97 are the extended
+ * IRCv3 block (6 rows of 16, laid out as a gradient grid); code 98 is the spec-defined
+ * "transparent/default" entry which maps to white for rendering purposes.
+ *
+ * Layout of codes 16–97 in the grid (each row = 16 entries, darkest → lightest):
+ *   Row 1 (16–27):  greys darkening right → pure blacks at left
+ *   Row 2 (28–39):  dark shades — red, orange, yellow, green, cyan, blue, purple, pink
+ *   Row 3 (40–51):  mid shades
+ *   Row 4 (52–63):  bright / saturated
+ *   Row 5 (64–75):  light / pastel
+ *   Row 6 (76–87):  very light / near-white pastels
+ *   Row 7 (88–98):  greyscale ramp (black → white), code 98 = white alias
+ */
+private val MIRC_PALETTE: IntArray = intArrayOf(
+    // ── 0–15: classic mIRC palette ────────────────────────────────────────────
+    0xFFFFFFFF.toInt(), //  0  White
+    0xFF000000.toInt(), //  1  Black
+    0xFF00007F.toInt(), //  2  Blue (navy)
+    0xFF009300.toInt(), //  3  Green
+    0xFFFF0000.toInt(), //  4  Red
+    0xFF7F0000.toInt(), //  5  Brown (maroon)
+    0xFF9C009C.toInt(), //  6  Purple
+    0xFFFC7F00.toInt(), //  7  Orange
+    0xFFFFFF00.toInt(), //  8  Yellow
+    0xFF00FC00.toInt(), //  9  Light green (lime)
+    0xFF009393.toInt(), // 10  Teal
+    0xFF00FFFF.toInt(), // 11  Light cyan (aqua)
+    0xFF0000FC.toInt(), // 12  Light blue (royal)
+    0xFFFF00FF.toInt(), // 13  Pink (magenta / fuchsia)
+    0xFF7F7F7F.toInt(), // 14  Grey
+    0xFFD2D2D2.toInt(), // 15  Light grey
+    // ── 16–27: darkest shades (row 1 of extended block) ──────────────────────
+    0xFF470000.toInt(), // 16  Dark maroon
+    0xFF472100.toInt(), // 17  Very dark orange
+    0xFF474700.toInt(), // 18  Dark olive
+    0xFF324700.toInt(), // 19  Very dark green
+    0xFF004732.toInt(), // 20  Very dark teal-green
+    0xFF00472C.toInt(), // 21  Very dark teal (alt)
+    0xFF004747.toInt(), // 22  Very dark teal
+    0xFF002747.toInt(), // 23  Very dark slate blue
+    0xFF000047.toInt(), // 24  Very dark navy
+    0xFF2E0047.toInt(), // 25  Very dark violet
+    0xFF470047.toInt(), // 26  Very dark purple-magenta
+    0xFF47002A.toInt(), // 27  Very dark crimson
+    // ── 28–39: dark shades (row 2) ───────────────────────────────────────────
+    0xFF740000.toInt(), // 28  Dark red
+    0xFF743A00.toInt(), // 29  Dark brown-orange
+    0xFF747400.toInt(), // 30  Dark yellow-olive
+    0xFF517400.toInt(), // 31  Dark chartreuse
+    0xFF007400.toInt(), // 32  Dark green
+    0xFF007449.toInt(), // 33  Dark sea-green
+    0xFF007474.toInt(), // 34  Dark teal
+    0xFF004074.toInt(), // 35  Dark dodger blue
+    0xFF000074.toInt(), // 36  Dark blue
+    0xFF4B0074.toInt(), // 37  Dark purple-blue
+    0xFF740074.toInt(), // 38  Dark magenta
+    0xFF740045.toInt(), // 39  Dark hot pink
+    // ── 40–51: mid shades (row 3) ────────────────────────────────────────────
+    0xFFB50000.toInt(), // 40  Medium red
+    0xFFB56300.toInt(), // 41  Medium orange
+    0xFFB5B500.toInt(), // 42  Medium yellow-green
+    0xFF7DB500.toInt(), // 43  Chartreuse
+    0xFF00B500.toInt(), // 44  Medium green
+    0xFF00B573.toInt(), // 45  Medium mint
+    0xFF00B5B5.toInt(), // 46  Medium teal
+    0xFF0063B5.toInt(), // 47  Medium dodger blue
+    0xFF0000B5.toInt(), // 48  Medium blue
+    0xFF7500B5.toInt(), // 49  Medium violet
+    0xFFB500B5.toInt(), // 50  Medium magenta
+    0xFFB5006B.toInt(), // 51  Medium hot pink
+    // ── 52–63: bright / saturated (row 4) ────────────────────────────────────
+    0xFFFF0000.toInt(), // 52  Bright red
+    0xFFFF9200.toInt(), // 53  Bright orange / gold
+    0xFFFFFF00.toInt(), // 54  Bright yellow
+    0xFFB9FF00.toInt(), // 55  Bright yellow-green
+    0xFF00FF00.toInt(), // 56  Bright lime green
+    0xFF00FFA8.toInt(), // 57  Bright spring green
+    0xFF00FFFF.toInt(), // 58  Bright cyan / aqua
+    0xFF009BFF.toInt(), // 59  Bright azure / sky blue
+    0xFF0000FF.toInt(), // 60  Bright blue
+    0xFFAD00FF.toInt(), // 61  Bright electric purple
+    0xFFFF00FF.toInt(), // 62  Bright magenta / fuchsia
+    0xFFFF0092.toInt(), // 63  Bright rose / hot pink
+    // ── 64–75: light / pastel (row 5) ────────────────────────────────────────
+    0xFFFF6666.toInt(), // 64  Light red
+    0xFFFFB466.toInt(), // 65  Light orange / peach
+    0xFFFFFF66.toInt(), // 66  Light yellow
+    0xFFCCFF66.toInt(), // 67  Light chartreuse
+    0xFF66FF66.toInt(), // 68  Light green
+    0xFF66FFB4.toInt(), // 69  Light mint
+    0xFF66FFFF.toInt(), // 70  Light cyan
+    0xFF66B4FF.toInt(), // 71  Light sky blue
+    0xFF6666FF.toInt(), // 72  Light blue-purple
+    0xFFCC66FF.toInt(), // 73  Light violet
+    0xFFFF66FF.toInt(), // 74  Light magenta / orchid
+    0xFFFF66B4.toInt(), // 75  Light pink
+    // ── 76–87: very light / near-white pastels (row 6) ───────────────────────
+    0xFFFFB4B4.toInt(), // 76  Very light red / salmon
+    0xFFFFDEB4.toInt(), // 77  Very light orange / bisque
+    0xFFFFFFB4.toInt(), // 78  Very light yellow / cream
+    0xFFE6FFB4.toInt(), // 79  Very light chartreuse / honeydew
+    0xFFB4FFB4.toInt(), // 80  Very light green / mint cream
+    0xFFB4FFE6.toInt(), // 81  Very light mint / azure-mint
+    0xFFB4FFFF.toInt(), // 82  Very light cyan / azure
+    0xFFB4DEFF.toInt(), // 83  Very light sky blue / alice blue
+    0xFFB4B4FF.toInt(), // 84  Very light lavender
+    0xFFDEB4FF.toInt(), // 85  Very light violet / lavender blush
+    0xFFFFB4FF.toInt(), // 86  Very light magenta / thistle
+    0xFFFFB4DE.toInt(), // 87  Very light pink / lavender rose
+    // ── 88–98: greyscale ramp (row 7) ────────────────────────────────────────
+    0xFF000000.toInt(), // 88  Black
+    0xFF141414.toInt(), // 89  Near-black
+    0xFF282828.toInt(), // 90  Very dark grey
+    0xFF3C3C3C.toInt(), // 91  Dark grey
+    0xFF505050.toInt(), // 92  Dark-mid grey
+    0xFF646464.toInt(), // 93  Mid grey
+    0xFF787878.toInt(), // 94  Mid-light grey
+    0xFF8C8C8C.toInt(), // 95  Light-mid grey
+    0xFFA0A0A0.toInt(), // 96  Light grey
+    0xFFB4B4B4.toInt(), // 97  Pale grey
+    0xFFC8C8C8.toInt(), // 98  Silver / near-white (spec "default" alias)
+)
+
+private fun mircColor(code: Int): Color? =
+    MIRC_PALETTE.getOrNull(code)?.let { Color(it.toLong() and 0xFFFFFFFFL) }
+
+/** How many mIRC colour codes are defined (0-based, inclusive of 0). */
+private const val MIRC_COLOR_COUNT = 99
 
 private fun MircStyleState.toSpanStyle(): SpanStyle {
     val fgCode = if (reverse) bg else fg
@@ -3340,7 +4087,7 @@ private fun AutoSizedMotdLine(
             // Binary search between minFontSp and naturalSizeSp.
             var lo = minFontSp
             var hi = naturalSizeSp
-            repeat(8) {  // 8 iterations → ~0.4% precision, plenty for font sizes
+            repeat(8) {  // 8 iterations -> ~0.4% precision, plenty for font sizes
                 val mid = (lo + hi) / 2f
                 val m = textMeasurer.measure(
                     text = plainText,

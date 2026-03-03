@@ -20,11 +20,16 @@ package com.boxlabs.hexdroid.ui
 
 import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -199,6 +204,20 @@ fun AppRoot(
             }
 
 
+            // ── DCC "Send file from nick actions" flow ───────────────────────────────
+            // Hoisted here (above the `when`) so that rememberLauncherForActivityResult
+            // is called unconditionally in composable scope. Placing it inside a `when`
+            // branch would violate the rules of hooks and cause a crash.
+            var dccPendingNick by remember { mutableStateOf("") }
+            val dccFilePicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null && dccPendingNick.isNotBlank()) {
+                    vm.sendDccFileFlow(uri, dccPendingNick)
+                    dccPendingNick = ""
+                }
+            }
+
             Box(modifier = Modifier.fillMaxSize()) {
 
             when (state.screen) {
@@ -216,6 +235,11 @@ fun AppRoot(
                     onIgnoreNick = vm::ignoreNick,
                     onUnignoreNick = vm::unignoreNick,
 					onRefreshNicklist = vm::refreshNicklistForSelectedBuffer,
+                    onDccSendFile = { nick ->
+                        dccPendingNick = nick
+                        dccFilePicker.launch(arrayOf("*/*"))
+                    },
+                    onDccChat = vm::startDccChat,
                     onOpenList = { vm.goTo(AppScreen.LIST) },
                     onOpenSettings = { vm.goTo(AppScreen.SETTINGS) },
                     onOpenNetworks = { vm.goTo(AppScreen.NETWORKS) },
@@ -225,6 +249,8 @@ fun AppRoot(
                     onUpdateSettings = vm::updateSettings,
                     onReorderNetworks = vm::reorderNetworks,
                     onToggleNetworkExpanded = vm::toggleNetworkExpanded,
+                    onTypingChanged = vm::notifyTypingChanged,
+                    onMarkRead = vm::markBufferRead,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )
@@ -290,7 +316,8 @@ fun AppRoot(
                     onStartChat = vm::startDccChat,
                     onShareFile = vm::shareFile,
                     onSetDccEnabled = vm::setDccEnabled,
-                    onSetDccSendMode = vm::setDccSendMode
+                    onSetDccSendMode = vm::setDccSendMode,
+                    onCancelOutgoing = vm::cancelOutgoingDcc
                 )
 
                 AppScreen.ABOUT -> AboutScreen(

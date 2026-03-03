@@ -36,6 +36,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -209,9 +211,9 @@ fun IntroTourOverlay(
                                     if (action != null && onAction != null && (!action.fallbackOnly || usingFallback)) {
                                         OutlinedButton(onClick = { onAction(action.id) }) { Text(action.label) }
                                     }
-                                    TextButton(onClick = onSkip) { Text("Skip") }
+                                    TextButton(onClick = onSkip) { Text(stringResource(R.string.skip)) }
                                     if (onBack != null) {
-                                        OutlinedButton(onClick = onBack) { Text("Back") }
+                                        OutlinedButton(onClick = onBack) { Text(stringResource(R.string.back)) }
                                     }
                                     Button(onClick = onNext) { Text(if (stepIndex + 1 == stepCount) "Done" else "Next") }
                                 }

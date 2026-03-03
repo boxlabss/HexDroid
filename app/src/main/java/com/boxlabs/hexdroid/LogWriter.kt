@@ -43,8 +43,6 @@ class LogWriter(private val ctx: Context) {
 
     private fun internalRoot(): File = File(ctx.filesDir, "logs").apply { mkdirs() }
 
-    fun logsRoot(): File = internalRoot()
-
     /**
      * Preferred log path:
      *   <root>/<network>/<buffer>

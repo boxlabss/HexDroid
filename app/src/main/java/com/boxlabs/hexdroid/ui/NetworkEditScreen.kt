@@ -42,6 +42,8 @@ import com.boxlabs.hexdroid.SaslMechanism
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.data.AutoJoinChannel
 import com.boxlabs.hexdroid.data.NetworkProfile
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +53,7 @@ fun NetworkEditScreen(
     onSave: (NetworkProfile, ClientCertDraft?, Boolean) -> Unit
 ) {
     val n0 = state.editingNetwork ?: run {
-        Text("No network selected")
+        Text(stringResource(R.string.network_no_network_selected))
         return
     }
 
@@ -171,6 +173,17 @@ fun NetworkEditScreen(
     var capUserhostInNames by remember(n0.id) { mutableStateOf(n0.caps.userhostInNames) }
     var capDraftRelaymsg by remember(n0.id) { mutableStateOf(n0.caps.draftRelaymsg) }
     var capDraftReadMarker by remember(n0.id) { mutableStateOf(n0.caps.draftReadMarker) }
+    // IRCv3 modern caps - were missing from UI and always silently reset to defaults on save
+    var capMonitor by remember(n0.id) { mutableStateOf(n0.caps.monitor) }
+    var capAccountTag by remember(n0.id) { mutableStateOf(n0.caps.accountTag) }
+    var capTypingIndicator by remember(n0.id) { mutableStateOf(n0.caps.typingIndicator) }
+    var capStandardReplies by remember(n0.id) { mutableStateOf(n0.caps.standardReplies) }
+    var capPreAway by remember(n0.id) { mutableStateOf(n0.caps.preAway) }
+    var capMessageIds by remember(n0.id) { mutableStateOf(n0.caps.messageIds) }
+    var capWhox by remember(n0.id) { mutableStateOf(n0.caps.whox) }
+    // Bouncer-specific caps
+    var capSojuRead by remember(n0.id) { mutableStateOf(n0.caps.sojuRead) }
+    var capSojuNoImplicitNames by remember(n0.id) { mutableStateOf(n0.caps.sojuNoImplicitNames) }
 
     var autoJoinText by remember(n0.id) {
         mutableStateOf(n0.autoJoin.joinToString("\n") { it.toLine() })
@@ -190,10 +203,10 @@ fun NetworkEditScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Edit Network") },
+                title = { Text(stringResource(R.string.network_edit_title)) },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cancel))
                     }
                 },
                 actions = {
@@ -230,7 +243,16 @@ fun NetworkEditScreen(
                             setname = capSetname,
                             userhostInNames = capUserhostInNames,
                             draftRelaymsg = capDraftRelaymsg,
-                            draftReadMarker = capDraftReadMarker
+                            draftReadMarker = capDraftReadMarker,
+                            monitor = capMonitor,
+                            accountTag = capAccountTag,
+                            typingIndicator = capTypingIndicator,
+                            standardReplies = capStandardReplies,
+                            preAway = capPreAway,
+                            messageIds = capMessageIds,
+                            whox = capWhox,
+                            sojuRead = capSojuRead,
+                            sojuNoImplicitNames = capSojuNoImplicitNames
                         )
 
                         clientCertUiError = null
@@ -255,7 +277,7 @@ fun NetworkEditScreen(
                                     keyDisplayName = pendingKeyLabel
                                 )
                                 pendingCertUri != null || pendingKeyUri != null -> {
-                                    clientCertUiError = "Please select both a certificate and a key"
+                                    clientCertUiError = ctx.getString(R.string.network_cert_error)
                                     return@Button
                                 }
                                 else -> null
@@ -272,7 +294,7 @@ fun NetworkEditScreen(
 
                         onSave(
                             n0.copy(
-                                name = name.trim().ifBlank { "Network" },
+                                name = name.trim().ifBlank { ctx.getString(R.string.network_default_name) },
                                 host = host.trim(),
                                 port = p,
                                 useTls = tls,
@@ -303,7 +325,7 @@ fun NetworkEditScreen(
                             removeClientCert
                         )
                     }) {
-                        Text("Save")
+                        Text(stringResource(R.string.save))
                     }
                 }
             )
@@ -321,23 +343,23 @@ fun NetworkEditScreen(
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
 
-            CardSection("Connection") {
+            CardSection(stringResource(R.string.network_section_connection)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Network Name") },
+                    label = { Text(stringResource(R.string.network_name_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
-                    label = { Text("Host") },
+                    label = { Text(stringResource(R.string.network_host_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = port,
                     onValueChange = { port = it.filter { c -> c.isDigit() } },
-                    label = { Text("Port") },
+                    label = { Text(stringResource(R.string.network_port_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -348,7 +370,7 @@ fun NetworkEditScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Use TLS")
+                    Text(stringResource(R.string.network_use_tls_label))
                     Switch(checked = tls, onCheckedChange = { tls = it })
                 }
 
@@ -358,7 +380,7 @@ fun NetworkEditScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Allow insecure plaintext")
+                        Text(stringResource(R.string.network_allow_plaintext))
                         Switch(checked = allowInsecurePlaintext, onCheckedChange = { allowInsecurePlaintext = it })
                     }
                 }
@@ -369,46 +391,46 @@ fun NetworkEditScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Allow invalid certificates")
+                        Text(stringResource(R.string.network_allow_invalid_certs))
                         Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it })
                     }
                 }
             }
 
-            CardSection("Identity") {
+            CardSection(stringResource(R.string.network_section_identity)) {
                 OutlinedTextField(
                     value = nick,
                     onValueChange = { nick = it },
-                    label = { Text("Nickname") },
+                    label = { Text(stringResource(R.string.network_nickname_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = altNick,
                     onValueChange = { altNick = it },
-                    label = { Text("Alternate Nick") },
+                    label = { Text(stringResource(R.string.network_alt_nick_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    label = { Text("Username (ident)") },
+                    label = { Text(stringResource(R.string.network_username_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = realname,
                     onValueChange = { realname = it },
-                    label = { Text("Real Name") },
+                    label = { Text(stringResource(R.string.network_realname_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            CardSection("Auto-connect & Password") {
+            CardSection(stringResource(R.string.network_section_autoconnect)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Connect on app start")
+                    Text(stringResource(R.string.network_auto_connect_label))
                     Switch(checked = autoConnect, onCheckedChange = { autoConnect = it })
                 }
                 Row(
@@ -416,7 +438,7 @@ fun NetworkEditScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Auto-reconnect on disconnect")
+                    Text(stringResource(R.string.network_auto_reconnect_label))
                     Switch(checked = autoReconnect, onCheckedChange = { autoReconnect = it })
                 }
                 Row(
@@ -425,9 +447,9 @@ fun NetworkEditScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Bouncer (ZNC / soju)")
+                        Text(stringResource(R.string.network_bouncer_label))
                         Text(
-                            "Skips auto-join, requests playback of missed messages",
+                            stringResource(R.string.network_bouncer_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -440,19 +462,19 @@ fun NetworkEditScreen(
                 OutlinedTextField(
                     value = serverPassword,
                     onValueChange = { serverPassword = it },
-                    label = { Text("Server password (PASS)") },
+                    label = { Text(stringResource(R.string.network_server_password_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            CardSection("SASL Authentication") {
+            CardSection(stringResource(R.string.network_section_sasl)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Enable SASL")
+                    Text(stringResource(R.string.network_enable_sasl))
                     Switch(checked = saslEnabled, onCheckedChange = { saslEnabled = it })
                 }
 
@@ -464,7 +486,7 @@ fun NetworkEditScreen(
                                 value = mechLabels[saslMechanism] ?: saslMechanism.name,
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Mechanism") },
+                                label = { Text(stringResource(R.string.network_sasl_mechanism_label)) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = mechExpanded) },
                                 modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                             )
@@ -482,20 +504,20 @@ fun NetworkEditScreen(
                             OutlinedTextField(
                                 value = saslAuthcid,
                                 onValueChange = { saslAuthcid = it },
-                                label = { Text("Username (authcid)") },
+                                label = { Text(stringResource(R.string.network_sasl_username_label)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             OutlinedTextField(
                                 value = saslPassword,
                                 onValueChange = { saslPassword = it },
-                                label = { Text("Password") },
+                                label = { Text(stringResource(R.string.network_sasl_password_label)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         } else {
                             Text(
-                                "Uses TLS client certificate for authentication",
+                                stringResource(R.string.network_sasl_external_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -505,7 +527,7 @@ fun NetworkEditScreen(
             }
 
             AnimatedVisibility(visible = tls) {
-                CardSection("TLS Client Certificate") {
+                CardSection(stringResource(R.string.network_section_tls_cert)) {
                     val activeLabel = when {
                         pendingPemLabel != null -> pendingPemLabel
                         pendingCertLabel != null -> pendingCertLabel
@@ -514,9 +536,9 @@ fun NetworkEditScreen(
                     }
 
                     if (activeLabel != null) {
-                        Text("Selected: $activeLabel", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.network_cert_selected, activeLabel), style = MaterialTheme.typography.bodySmall)
                     } else {
-                        Text("No certificate selected.", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.network_cert_none), style = MaterialTheme.typography.bodySmall)
                     }
 
                     if (clientCertUiError != null) {
@@ -537,7 +559,7 @@ fun NetworkEditScreen(
                             value = label,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Certificate format") },
+                            label = { Text(stringResource(R.string.network_cert_format_label)) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = certFormatExpanded) },
                             modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
@@ -546,7 +568,7 @@ fun NetworkEditScreen(
                             onDismissRequest = { certFormatExpanded = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("PEM (.pem)") },
+                                text = { Text(stringResource(R.string.network_cert_format_pem)) },
                                 onClick = {
                                     certFormat = ClientCertFormat.PEM_BUNDLE
                                     clearPendingCertSelection()
@@ -554,7 +576,7 @@ fun NetworkEditScreen(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("CRT + KEY (.crt/.key)") },
+                                text = { Text(stringResource(R.string.network_cert_format_crt_key)) },
                                 onClick = {
                                     certFormat = ClientCertFormat.CERT_AND_KEY
                                     clearPendingCertSelection()
@@ -568,7 +590,7 @@ fun NetworkEditScreen(
                         ClientCertFormat.PEM_BUNDLE -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { pickPem.launch(arrayOf("*/*")) }) {
-                                    Text(if (pendingPemUri == null) "Choose .pem" else "Replace .pem")
+                                    Text(if (pendingPemUri == null) stringResource(R.string.network_cert_choose_pem) else stringResource(R.string.network_cert_replace_pem))
                                 }
                                 OutlinedButton(
                                     enabled = pendingPemUri != null,
@@ -578,21 +600,21 @@ fun NetworkEditScreen(
                                         pendingKeyPassword = ""
                                         clientCertUiError = null
                                     }
-                                ) { Text("Clear") }
+                                ) { Text(stringResource(R.string.network_clear)) }
                             }
-                            Text("The .pem should include both your certificate and private key.", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.network_cert_pem_hint), style = MaterialTheme.typography.bodySmall)
                         }
                         ClientCertFormat.CERT_AND_KEY -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { pickCrt.launch(arrayOf("*/*")) }) {
-                                    Text(if (pendingCertUri == null) "Choose .crt" else "Replace .crt")
+                                    Text(if (pendingCertUri == null) stringResource(R.string.network_cert_choose_crt) else stringResource(R.string.network_cert_replace_crt))
                                 }
                                 Button(onClick = { pickKey.launch(arrayOf("*/*")) }) {
-                                    Text(if (pendingKeyUri == null) "Choose .key" else "Replace .key")
+                                    Text(if (pendingKeyUri == null) stringResource(R.string.network_cert_choose_key) else stringResource(R.string.network_cert_replace_key))
                                 }
                             }
-                            val certName = pendingCertLabel?.let { "Certificate: $it" }
-                            val keyName = pendingKeyLabel?.let { "Key: $it" }
+                            val certName = pendingCertLabel?.let { stringResource(R.string.network_cert_label, it) }
+                            val keyName = pendingKeyLabel?.let { stringResource(R.string.network_key_label, it) }
                             if (certName != null) Text(certName, style = MaterialTheme.typography.bodySmall)
                             if (keyName != null) Text(keyName, style = MaterialTheme.typography.bodySmall)
                         }
@@ -604,7 +626,7 @@ fun NetworkEditScreen(
                         onValueChange = { pendingKeyPassword = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        label = { Text("Key password (if encrypted)") }
+                        label = { Text(stringResource(R.string.network_key_password_label)) }
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -615,21 +637,21 @@ fun NetworkEditScreen(
                                 tlsClientCertLabel = ""
                                 removeClientCert = true
                             }
-                        ) { Text("Remove") }
+                        ) { Text(stringResource(R.string.ignore_remove)) }
                         OutlinedButton(
                             enabled = removeClientCert,
                             onClick = {
                                 removeClientCert = false
                                 clientCertUiError = null
                             }
-                        ) { Text("Undo remove") }
+                        ) { Text(stringResource(R.string.network_undo_remove)) }
                     }
                 }
             }
 			
-            CardSection("Auto-join Channels") {
+            CardSection(stringResource(R.string.network_section_autojoin)) {
                 Text(
-                    "One per line. Format: #channel [key]",
+                    stringResource(R.string.network_autojoin_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -641,29 +663,29 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection("Post-connect Commands") {
+            CardSection(stringResource(R.string.network_section_postcmds)) {
                 OutlinedTextField(
                     value = postDelayText,
                     onValueChange = { postDelayText = it.filter { c -> c.isDigit() } },
-                    label = { Text("Delay before commands (seconds)") },
+                    label = { Text(stringResource(R.string.network_command_delay_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     supportingText = {
-                        Text("Wait this many seconds after connecting before running commands")
+                        Text(stringResource(R.string.network_command_delay_desc))
                     }
                 )
 
                 OutlinedTextField(
                     value = serviceAuthCommand,
                     onValueChange = { serviceAuthCommand = it },
-                    label = { Text("Service auth command") },
+                    label = { Text(stringResource(R.string.network_service_auth_label)) },
                     modifier = Modifier.fillMaxWidth(),
                     supportingText = {
-                        Text("e.g., /msg NickServ IDENTIFY password")
+                        Text(stringResource(R.string.network_service_auth_hint))
                     }
                 )
 
                 Text(
-                    "Additional commands (one per line):",
+                    stringResource(R.string.network_postcmds_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -673,12 +695,12 @@ fun NetworkEditScreen(
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                     supportingText = {
-                        Text("Commands to run after connecting, e.g., /join #channel")
+                        Text(stringResource(R.string.network_commands_hint))
                     }
                 )
             }
 
-            CardSection("Character Encoding") {
+            CardSection(stringResource(R.string.network_section_encoding)) {
                 ExposedDropdownMenuBox(
                     expanded = encodingExpanded,
                     onExpandedChange = { encodingExpanded = it }
@@ -690,7 +712,7 @@ fun NetworkEditScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                        label = { Text("Encoding") },
+                        label = { Text(stringResource(R.string.network_encoding_label)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = encodingExpanded) }
                     )
                     ExposedDropdownMenu(
@@ -710,23 +732,23 @@ fun NetworkEditScreen(
                 }
                 Text(
                     when (encoding) {
-                        "auto" -> "Recommended. Starts with UTF-8 and auto-detects other encodings."
-                        "windows-1251" -> "Use for Bulgarian, Russian, Serbian, and other Cyrillic networks."
-                        "UTF-8" -> "Standard Unicode. Works with most modern IRC networks."
-                        else -> "Manual encoding selection for legacy networks."
+                        "auto" -> stringResource(R.string.network_encoding_auto_desc)
+                        "windows-1251" -> stringResource(R.string.network_encoding_cyrillic_desc)
+                        "UTF-8" -> stringResource(R.string.network_encoding_utf8_desc)
+                        else -> stringResource(R.string.network_encoding_manual_desc)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            CardSection("IRCv3.x Capabilities") {
+            CardSection(stringResource(R.string.network_section_ircv3)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Show advanced options")
+                    Text(stringResource(R.string.network_edit_advanced_caps))
                     Switch(
                         checked = showAdvancedCaps,
                         onCheckedChange = { showAdvancedCaps = it }
@@ -759,12 +781,33 @@ fun NetworkEditScreen(
                         CapSwitch("draft/event-playback", capDraftPlayback) { capDraftPlayback = it }
                         CapSwitch("draft/relaymsg", capDraftRelaymsg) { capDraftRelaymsg = it }
                         CapSwitch("draft/read-marker", capDraftReadMarker) { capDraftReadMarker = it }
+
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+                        CapSwitch("monitor", capMonitor) { capMonitor = it }
+                        CapSwitch("account-tag", capAccountTag) { capAccountTag = it }
+                        CapSwitch("draft/typing", capTypingIndicator) { capTypingIndicator = it }
+                        CapSwitch("standard-replies", capStandardReplies) { capStandardReplies = it }
+                        CapSwitch("pre-away", capPreAway) { capPreAway = it }
+                        CapSwitch("message-ids", capMessageIds) { capMessageIds = it }
+                        CapSwitch("WHOX (005)", capWhox) { capWhox = it }
+
+                        if (isBouncer) {
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text(
+                                stringResource(R.string.network_edit_bouncer_caps),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            CapSwitch("soju.im/read", capSojuRead) { capSojuRead = it }
+                            CapSwitch("soju.im/no-implicit-names", capSojuNoImplicitNames) { capSojuNoImplicitNames = it }
+                        }
                     }
                 }
 
                 if (!showAdvancedCaps) {
                     Text(
-                        "Basic IRCv3 features enabled by default. Switch on to see advanced options.",
+                        stringResource(R.string.network_edit_caps_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

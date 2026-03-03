@@ -25,11 +25,19 @@ sealed class IrcAction {
     data class Send(val line: String) : IrcAction()
     data class EmitStatus(val text: String) : IrcAction()
     data class EmitError(val text: String) : IrcAction()
+    /** CAP NEW: server dynamically advertised new capabilities after registration. */
+    data class EmitCapNew(val caps: List<String>) : IrcAction()
+    /** CAP DEL: server withdrew previously negotiated capabilities. */
+    data class EmitCapDel(val caps: List<String>) : IrcAction()
 }
 
 class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     private var capLsDone = false
     private var capEnded = false
+
+    // Track how many CAP REQ chunks are still awaiting ACK/NAK so we do not send
+    // CAP END prematurely when the initial request was split across multiple lines.
+    private var pendingCapReqs = 0
 
     private val wantSasl = config.sasl is SaslConfig.Enabled
     private var saslInProgress = false
@@ -55,16 +63,51 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 .map { it.substringBefore('=') }
                 .map { it.lowercase() })
 
-            // CAP LS can be multi-line. Servers indicate continuation using a "*" parameter
-            // *after* the subcommand (or after the "302" version token). The first parameter is
-            // often "*" during registration (unregistered), so we must not treat that as continuation.
-            val continuation = m.params.drop(2).any { it == "*" }
-            val isFinal = !continuation
-            if (isFinal && !capLsDone) {
+            // CAP LS multi-line: the continuation marker "*" is params[2] (after client-nick and "LS").
+            // Using drop(2).any{} would match the client-nick "*" during pre-registration and
+            // stall cap negotiation forever on some servers.
+            val isContinuation = m.params.getOrNull(2) == "*"
+            if (!isContinuation && !capLsDone) {
                 capLsDone = true
                 out += IrcAction.EmitStatus("Server CAP LS complete")
-                out += IrcAction.Send(buildCapReq())
+                val chunks = buildCapReqChunks()
+                if (chunks.isEmpty()) {
+                    // Nothing to request - end cap negotiation immediately.
+                    capEnded = true
+                    out += IrcAction.Send("CAP END")
+                } else {
+                    pendingCapReqs = chunks.size
+                    chunks.forEach { out += IrcAction.Send(it) }
+                }
             }
+            return out
+        }
+
+        // CAP NEW: server advertises new capabilities dynamically after registration (IRCv3.2).
+        // Request any that we want and don't already have.
+        if (m.command == "CAP" && m.params.getOrNull(1) == "NEW") {
+            val newCaps = (m.trailing ?: "").split(' ')
+                .map { it.trim().substringBefore('=').lowercase() }
+                .filter { it.isNotBlank() }
+            serverCaps.addAll(newCaps)
+            out += IrcAction.EmitStatus("CAP NEW: ${newCaps.joinToString(" ")}")
+            out += IrcAction.EmitCapNew(newCaps)
+            val want = buildCapReqList().filter { newCaps.contains(it) && !enabledCaps.contains(it) }
+            // CAP NEW is post-registration; we don't send CAP END and the list is small enough
+            // that we don't need to chunk it in practice.
+            if (want.isNotEmpty()) out += IrcAction.Send("CAP REQ :${want.joinToString(" ")}")
+            return out
+        }
+
+        // CAP DEL: server withdraws a capability (e.g., after services link-break).
+        if (m.command == "CAP" && m.params.getOrNull(1) == "DEL") {
+            val delCaps = (m.trailing ?: "").split(' ')
+                .map { it.trim().substringBefore('=').lowercase() }
+                .filter { it.isNotBlank() }
+            serverCaps.removeAll(delCaps.toSet())
+            enabledCaps.removeAll(delCaps.toSet())
+            out += IrcAction.EmitStatus("CAP DEL: ${delCaps.joinToString(" ")}")
+            out += IrcAction.EmitCapDel(delCaps)
             return out
         }
 
@@ -77,6 +120,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             enabledCaps.addAll(ack)
             out += IrcAction.EmitStatus("CAP ACK: ${ack.joinToString(" ")}")
 
+            // Decrement pending count; only proceed when all chunks are resolved.
+            if (pendingCapReqs > 0) pendingCapReqs--
+
             if (wantSasl && enabledCaps.contains("sasl") && !saslInProgress && !saslDone) {
                 saslInProgress = true
                 out += IrcAction.EmitStatus("Starting SASL…")
@@ -84,7 +130,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 return out
             }
 
-            if (!capEnded && (!wantSasl || saslDone || !enabledCaps.contains("sasl"))) {
+            if (!capEnded && pendingCapReqs == 0 && (!wantSasl || saslDone || !enabledCaps.contains("sasl"))) {
                 capEnded = true
                 out += IrcAction.Send("CAP END")
             }
@@ -93,7 +139,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 
         if (m.command == "CAP" && m.params.getOrNull(1) == "NAK") {
             out += IrcAction.EmitError("CAP NAK: ${m.trailing ?: ""}")
-            if (!capEnded) { capEnded = true; out += IrcAction.Send("CAP END") }
+            if (pendingCapReqs > 0) pendingCapReqs--
+            if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
             return out
         }
 
@@ -101,13 +148,13 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             "903" -> {
                 saslDone = true; saslInProgress = false
                 out += IrcAction.EmitStatus("SASL authentication succeeded")
-                if (!capEnded) { capEnded = true; out += IrcAction.Send("CAP END") }
+                if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
                 return out
             }
             "904", "905", "906", "907" -> {
                 saslDone = true; saslInProgress = false
                 out += IrcAction.EmitError("SASL failed (${m.command}): ${m.trailing ?: ""}")
-                if (!capEnded) { capEnded = true; out += IrcAction.Send("CAP END") }
+                if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
                 return out
             }
         }
@@ -121,61 +168,130 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         return emptyList()
     }
 
-	private fun buildCapReq(): String {
-		val req = mutableListOf<String>()
+    /**
+     * The full set of capabilities we *want* to request (unfiltered by what the server supports).
+     * Used both by buildCapReqChunks (initial negotiation) and CAP NEW (dynamic re-request).
+     */
+    private fun buildCapReqList(): List<String> {
+        val req = mutableListOf<String>()
 
-		// Core IRCv3 capabilities
-		if (config.capPrefs.messageTags) req += "message-tags"
-		if (config.capPrefs.serverTime) req += "server-time"
-		if (config.capPrefs.echoMessage) req += "echo-message"
-		if (config.capPrefs.labeledResponse) req += "labeled-response"
-		if (config.capPrefs.batch) req += "batch"
-		if (config.capPrefs.utf8Only) req += "utf8only"
+        // Core IRCv3 capabilities
+        if (config.capPrefs.messageTags) req += "message-tags"
+        if (config.capPrefs.serverTime) req += "server-time"
+        if (config.capPrefs.echoMessage) req += "echo-message"
+        if (config.capPrefs.labeledResponse) req += "labeled-response"
+        if (config.capPrefs.batch) req += "batch"
+        if (config.capPrefs.utf8Only) req += "utf8only"
 
-		// History / playback
-		if (config.capPrefs.draftChathistory) req += "draft/chathistory"
-		if (config.capPrefs.draftEventPlayback) req += "draft/event-playback"
+        // History / playback: request both the graduated cap and the legacy draft/ alias so we
+        // interoperate with older (draft/chathistory) and modern (chathistory) servers.
+        if (config.capPrefs.draftChathistory) {
+            req += "draft/chathistory"
+            req += "chathistory"         // graduated (Ergo 2.11+, soju 0.7+)
+        }
+        if (config.capPrefs.draftEventPlayback) req += "draft/event-playback"
 
-		// User state notifications
-		if (config.capPrefs.accountNotify) req += "account-notify"
-		if (config.capPrefs.awayNotify) req += "away-notify"
-		if (config.capPrefs.chghost) req += "chghost"
+        // User state notifications
+        if (config.capPrefs.accountNotify) req += "account-notify"
+        if (config.capPrefs.awayNotify) req += "away-notify"
+        if (config.capPrefs.chghost) req += "chghost"
 
-		// Enhanced JOIN / NAMES
-		if (config.capPrefs.extendedJoin) req += "extended-join"
-		if (config.capPrefs.multiPrefix) req += "multi-prefix"
-		if (config.capPrefs.userhostInNames) req += "userhost-in-names"
+        // Enhanced JOIN / NAMES
+        if (config.capPrefs.extendedJoin) req += "extended-join"
+        if (config.capPrefs.multiPrefix) req += "multi-prefix"
+        if (config.capPrefs.userhostInNames) req += "userhost-in-names"
 
-		// Invite / name changes
-		if (config.capPrefs.inviteNotify) req += "invite-notify"
-		if (config.capPrefs.setname) req += "setname"
+        // Invite / name changes
+        if (config.capPrefs.inviteNotify) req += "invite-notify"
+        if (config.capPrefs.setname) req += "setname"
 
-		// SASL (only if configured)
-		if (config.capPrefs.sasl && wantSasl) req += "sasl"
+        // SASL (only if configured)
+        if (config.capPrefs.sasl && wantSasl) req += "sasl"
 
-		// Optional / draft
-		if (config.capPrefs.draftRelaymsg) req += "draft/relaymsg"
-		if (config.capPrefs.draftReadMarker) req += "draft/read-marker"
+        // Optional / draft
+        if (config.capPrefs.draftRelaymsg) req += "draft/relaymsg"
+        if (config.capPrefs.draftReadMarker) req += "draft/read-marker"
 
-		// Bouncer-specific CAPs
-		if (config.isBouncer) {
-			// Legacy ZNC (< 1.7) uses znc.in/server-time-iso instead of server-time.
-			// Requesting both ensures replayed messages get correct timestamps on all ZNC versions.
-			req += "znc.in/server-time-iso"
-			// ZNC native playback: lets us request only messages since we were last seen,
-			// rather than receiving a fixed replay window every connect.
-			req += "znc.in/playback"
-		}
+        // MONITOR: online/offline status tracking for target nicks
+        if (config.capPrefs.monitor) req += "monitor"
 
-		// Filter to only request what the server supports
-		val filtered = req.filter { serverCaps.contains(it.lowercase()) }
+        // account-tag: include services account name in PRIVMSG/NOTICE message tags
+        if (config.capPrefs.accountTag) req += "account-tag"
 
-		return if (filtered.isEmpty()) {
-			"CAP END"
-		} else {
-			"CAP REQ :${filtered.joinToString(" ")}"
-		}
-	}
+        // draft/typing: typing status indicators (send/receive)
+        if (config.capPrefs.typingIndicator) req += "draft/typing"
+
+        // IRCv3 standard-replies (FAIL/WARN/NOTE): structured errors from Ergo, Soju, InspIRCd 4+
+        if (config.capPrefs.standardReplies) req += "standard-replies"
+
+        // pre-away: allows AWAY before 001 welcome
+        if (config.capPrefs.preAway) req += "pre-away"
+
+        // message-ids (msgid tag): unique message IDs for deduplication
+        if (config.capPrefs.messageIds) req += "message-ids"
+
+        // Bouncer-specific CAPs
+        if (config.isBouncer) {
+            // Legacy ZNC (< 1.7) uses znc.in/server-time-iso instead of server-time.
+            // Requesting both ensures replayed messages get correct timestamps on all ZNC versions.
+            req += "znc.in/server-time-iso"
+            // ZNC native playback: lets us request only messages since we were last seen,
+            // rather than receiving a fixed replay window every connect.
+            req += "znc.in/playback"
+            // soju/pounce: multi-upstream network context (lets us show per-upstream trees).
+            req += "soju.im/bouncer-networks"
+            req += "soju.im/bouncer-networks-notify"
+            // soju.im/no-implicit-names: suppress automatic NAMES list on JOIN.
+            // With this cap, soju does NOT send 353/366 on join unless we explicitly ask.
+            // This avoids a full names re-download on every bouncer reconnect.
+            if (config.capPrefs.sojuNoImplicitNames) req += "soju.im/no-implicit-names"
+            // soju.im/read: proprietary read markers (parallel to draft/read-marker)
+            if (config.capPrefs.sojuRead) req += "soju.im/read"
+        }
+
+        // draft/channel-rename: handle RENAME commands without a re-join cycle.
+        if (config.capPrefs.channelRename) req += "draft/channel-rename"
+
+        // draft/extended-monitor: richer MONONLINE replies with account + realname.
+        if (config.capPrefs.extendedMonitor) req += "draft/extended-monitor"
+
+        // draft/message-reactions: TAGMSG +draft/react emoji reactions.
+        if (config.capPrefs.messageReactions) req += "draft/message-reactions"
+
+        // draft/no-implicit-names: generic graduated form (not just soju).
+        if (config.capPrefs.noImplicitNames) req += "draft/no-implicit-names"
+
+        return req
+    }
+
+    /**
+     * Build one or more "CAP REQ :..." lines for the capabilities the server supports.
+     *
+     * IRC lines are limited to 512 bytes.  A CAP REQ with many caps can easily exceed this.
+     * We split the list into chunks so that each line's cap payload stays under 400 bytes,
+     * leaving room for the command prefix and CRLF.
+     *
+     * Returns an empty list when there are no matching caps (caller should send "CAP END").
+     */
+    private fun buildCapReqChunks(): List<String> {
+        val filtered = buildCapReqList().filter { serverCaps.contains(it.lowercase()) }
+        if (filtered.isEmpty()) return emptyList()
+
+        val lines = mutableListOf<String>()
+        val chunk = StringBuilder()
+        for (cap in filtered) {
+            val toAdd = if (chunk.isEmpty()) cap else " $cap"
+            if (chunk.length + toAdd.length > 400) {
+                lines += "CAP REQ :$chunk"
+                chunk.clear()
+                chunk.append(cap)
+            } else {
+                chunk.append(toAdd)
+            }
+        }
+        if (chunk.isNotEmpty()) lines += "CAP REQ :$chunk"
+        return lines
+    }
 
     private fun startSasl(): String {
         val s = config.sasl as SaslConfig.Enabled

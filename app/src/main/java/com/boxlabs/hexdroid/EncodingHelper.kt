@@ -43,14 +43,19 @@ object EncodingHelper {
     
     /**
      * Common IRC encodings to try during auto-detection.
-     * Ordered roughly by global popularity on IRC.
+     * Order matters for tie-breaking: earlier = higher priority when scores are equal.
+     * windows-1251 is listed before windows-1256 because Cyrillic IRC networks are far
+     * more common globally, and the byte ranges overlap significantly (both map 0xC0-0xFF
+     * to standard Cyrillic А-я under windows-1251, which windows-1256 also uses for Arabic
+     * letters in the same byte range — so the per-character script bonus does the
+     * discrimination, but order provides a safe tie-break).
      */
     val COMMON_ENCODINGS = listOf(
         "UTF-8",
+        "windows-1251",   // Cyrillic (Russian, Bulgarian, Serbian, Ukrainian, etc.) - most common legacy IRC encoding
         "windows-1256",   // Arabic
         "ISO-8859-9",     // Turkish (Latin-5)
         "windows-1254",   // Turkish (Windows)
-        "windows-1251",   // Cyrillic (Russian, Bulgarian, Serbian, etc.)
         "windows-1252",   // Western European (Latin)
         "ISO-8859-1",     // Latin-1
         "ISO-8859-15",    // Latin-9 (Latin-1 with Euro sign)
@@ -182,12 +187,31 @@ object EncodingHelper {
      * Score an encoding based on how well it decodes the bytes.
      * Higher score = better match.
      *
-     * Improvements over naive letter-counting:
-     * - Byte-range analysis to detect CJK multi-byte sequences
-     * - Specific character class bonuses for Cyrillic/Arabic/Turkish/Greek/Hebrew ranges
-     * - Penalizes lone high-byte surrogates and C1 control chars that indicate a wrong decode
+     * Key design for Cyrillic vs Arabic discrimination:
+     *
+     * windows-1251 and windows-1256 both map bytes 0xC0–0xFF to standard Cyrillic А–я,
+     * so text with only those bytes scores identically under both codepages.
+     * The discriminating range is 0x80–0xBF:
+     *
+     *   windows-1251  0x80–0xBF → Cyrillic supplement letters (Ђ, Ѓ, Ё, Є, Ї…) → U+0400–U+040F (extra +2 bonus)
+     *   windows-1256  0x80–0xBF → Arabic letters / presentation forms → U+0600–U+06FF (Arabic bonus)
+     *   KOI8-R        0x80–0x9F → C1 control chars → penalised −15
+     *
+     * So on a line with only 0xC0–0xFF (common Cyrillic words), the scores tie and
+     * list order (windows-1251 first) breaks the tie correctly.
+     * On a line with 0x80–0xBF Cyrillic supplement bytes, windows-1251 pulls ahead.
+     * On a line with Arabic letters, windows-1256 pulls ahead.
+     *
+     * Key design for Cyrillic vs Latin-family (ISO-8859-9, ISO-8859-1, windows-1252):
+     *
+     * The bytes 0xC0–0xFF decoded as ISO-8859-9 / ISO-8859-1 produce Latin Extended
+     * characters (À–ÿ, with a few Turkish substitutions).  These land in U+00C0–U+00FF,
+     * which is penalised below as "dense Latin Extended" — plausible in a French/German
+     * MOTD line but statistically rare in IRC traffic compared to Cyrillic.  The penalty
+     * widens the scoring gap so that corpus-level scoring cleanly picks windows-1251
+     * over ISO-8859-9 once a few Cyrillic lines have been accumulated.
      */
-    private fun scoreEncoding(bytes: ByteArray, charset: Charset): Int {
+    internal fun scoreEncoding(bytes: ByteArray, charset: Charset): Int {
         val decoder = charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPLACE)
             .onUnmappableCharacter(CodingErrorAction.REPLACE)
@@ -215,34 +239,26 @@ object EncodingHelper {
                 // Standard line endings
                 ch == '\n' || ch == '\r' -> { /* neutral */ }
 
-			   /** 
-				* Script-specific ranges: give heavier bonus
-				* Cyrillic tiebreaker - windows-1251 vs KOI8-R:
-				*
-				* Both encodings map 0xC0-0xFF to standard Cyrillic А-я, so those bytes
-				* score equally under either charset.  The discriminating bytes are in
-				* the 0x80-0xBF range:
-				*
-				* windows-1251 0x80-0x9F - Cyrillic supplement letters (Ђ,Ѓ,Љ,Њ…)
-				* windows-1251 0xA0-0xBF - more Cyrillic letters (Ё,Є,Ї…)
-				* KOI8-R       0x80-0x9F - C1 control characters (penalised −15 below)
-				* KOI8-R       0xA0-0xBF - box-drawing symbols (cat So, +2 below)
-				*
-				* The supplement block U+0400-U+040F gets an extra +2 bump (+6 total)
-				* because windows-1251 maps 14 of its 0x80-0xBF bytes into this range
-				* while KOI8-R maps only one (0xB3 > Ё, U+0401).  Any line with
-				* Bulgarian/Ukrainian letters (Ё, Ї, Ђ…) therefore scores noticeably
-				* higher for windows-1251 than for KOI8-R.
-				*/
-                ch.code in 0x0400..0x040F -> score += 6  // Cyrillic supplement (windows-1251 advantage)
-                ch.code in 0x0410..0x04FF -> score += 4  // Main Cyrillic А-я block
+                // Cyrillic supplement block U+0400–U+040F (Ё, Ђ, Ѓ, Є, Ї, Ј, Љ, Њ...).
+                // windows-1251 maps 14 of its 0x80–0xBF bytes here; KOI8-R maps only one;
+                // windows-1256 maps none (maps 0x80–0xBF to Arabic). So this range is the
+                // primary discriminator between windows-1251 and windows-1256 on Cyrillic text.
+                ch.code in 0x0400..0x040F -> score += 6  // Strong Cyrillic supplement bonus
+
+                // Main Cyrillic block А–я U+0410–U+04FF.
+                // Both windows-1251 (0xC0–0xFF) and windows-1256 (0xC0–0xD0) can produce
+                // letters in this range, so the bonus is equal. Tie broken by list order
+                // (windows-1251 listed first in COMMON_ENCODINGS).
+                ch.code in 0x0410..0x04FF -> score += 4
+
                 // Arabic (windows-1256, ISO-8859-6)
                 ch.code in 0x0600..0x06FF -> score += 4
-                // Arabic supplementary
-                ch.code in 0x0750..0x077F -> score += 4
-                // Turkish/Latin-extended specific (İ ı Ğ ğ Ş ş)
+                ch.code in 0x0750..0x077F -> score += 4  // Arabic supplementary
+
+                // Turkish-specific letters (İ ı Ğ ğ Ş ş) - unambiguous
                 ch == '\u0130' || ch == '\u0131' || ch == '\u011E' || ch == '\u011F'
                     || ch == '\u015E' || ch == '\u015F' -> score += 6
+
                 // Greek
                 ch.code in 0x0370..0x03FF -> score += 4
                 // Hebrew
@@ -258,47 +274,68 @@ object EncodingHelper {
                 // Other printable non-ASCII that decoded cleanly
                 ch.code > 0x7F && !ch.isISOControl() -> score += 2
 
-                // C1 control characters (0x80-0x9F) that show up as characters often
-                // mean the wrong single-byte codepage was picked
+                // C1 control characters (0x80–0x9F as bare code points) are almost always
+                // the result of decoding with the wrong single-byte codepage.
                 ch.code in 0x80..0x9F -> score -= 15
                 // Other control characters (suspicious)
                 ch.isISOControl() -> score -= 10
             }
         }
+
+        // Latin Extended penalty: U+00C0–U+00FF (À–ÿ) decoded densely is a strong signal
+        // that the encoding is Latin-based (ISO-8859-1/9/15, windows-1252/1254).  On a
+        // Cyrillic server those same bytes (0xC0–0xFF) decode to Cyrillic А–я under
+        // windows-1251 and score +4 each.  Penalising dense Latin Extended output widens
+        // the gap so windows-1251 beats ISO-8859-9 on any corpus with Cyrillic content.
+        // We only apply this when Latin Extended is the *dominant* non-ASCII script
+        // (≥ 60% of non-ASCII chars), to avoid penalising legitimate Western European text.
+        val nonAsciiChars = text.filter { it.code > 0x7F && !it.isISOControl() }
+        if (nonAsciiChars.isNotEmpty()) {
+            val latinExtCount = nonAsciiChars.count { it.code in 0x00C0..0x00FF }
+            if (latinExtCount.toFloat() / nonAsciiChars.length >= 0.60f) {
+                score -= latinExtCount * 2
+            }
+        }
         
-        // Bonus for longer text without issues — but ONLY when the decoded text actually
-        // contains non-ASCII characters.  Every single-byte codepage (windows-1251, 1252,
-        // ISO-8859-1 …) can decode any byte without producing a replacement character, so a
-        // pure-ASCII line always has 0 replacements regardless of which codepage is tried.
-        // Awarding text.length/5 in that case makes windows-1251 win the scoring race for
-        // long ASCII MOTD lines simply because it is listed before 1252/ISO-8859-1 in
-        // COMMON_ENCODINGS — the root cause of the spurious CP-1251 auto-detection bug.
+        // Length bonus: only applies when there are actual non-ASCII printable chars,
+        // to avoid spuriously rewarding any codepage for pure-ASCII lines.
         if (replacements == 0 && text.length > 10) {
             val nonAsciiCount = text.count { it.code > 0x7F && !it.isISOControl() }
             if (nonAsciiCount > 0) {
-                // Scale bonus to non-ASCII density rather than raw length.
                 score += (nonAsciiCount * 2).coerceAtMost(text.length / 5)
             }
-            // Pure-ASCII clean decode: no bonus — every single-byte codec ties here
         }
 
-        // Bonus: if the raw byte stream has common multi-byte lead-byte patterns
-        // for CJK encodings, reward the encoding that claims to be CJK
+        // CJK/multibyte-specific density bonus: high-byte-density text is much more
+        // likely CJK than Latin or Cyrillic, so reward CJK codepages when > 30% of bytes
+        // are ≥ 0x80. Restricted to true multibyte / CJK codepages only.
+        // Single-byte Latin-family encodings (ISO-8859-9, windows-1254, windows-1256, etc.)
+        // are intentionally excluded: giving them a density bonus caused false-positive wins
+        // over windows-1251 on Cyrillic text, where 0xC0–0xFF bytes are common (high density)
+        // but should score as Cyrillic (+4/+6) not as Latin (+2 + density bonus).
         val csName = charset.name().uppercase()
         val highByteCount = bytes.count { it.toInt() and 0xFF > 0x7F }
         if (highByteCount > 0) {
             val highRatio = highByteCount.toFloat() / bytes.size
-            // Dense high bytes suggest CJK or Arabic, not western
-            if (highRatio > 0.3f && (csName.contains("GB") || csName.contains("BIG5") ||
-                csName.contains("SHIFT") || csName.contains("EUC") || csName.contains("1256") ||
-                csName.contains("8859-6") || csName.contains("1254") || csName.contains("8859-9"))) {
+            val isCjkDense = highRatio > 0.3f && (
+                csName.contains("GB") || csName.contains("BIG5") ||
+                csName.contains("SHIFT") || csName.contains("EUC")
+            )
+            if (isCjkDense) {
                 score += (highByteCount * 2)
             }
         }
         
         return score
     }
-    
+
+    /**
+     * Public alias for [scoreEncoding] so [EncodingLineReader] (same package) can call it
+     * for corpus-level scoring without duplicating the logic.
+     */
+    internal fun scoreEncodingPublic(bytes: ByteArray, charset: java.nio.charset.Charset): Int =
+        scoreEncoding(bytes, charset)
+
     /**
      * Decode bytes with auto-detection or specified encoding.
      * 
@@ -394,27 +431,43 @@ object EncodingHelper {
  * ## Detection strategy
  *
  * 1. Start assuming UTF-8 (overwhelmingly the most common modern encoding).
- * 2. On every line that contains at least one byte ≥ 0x80 (i.e. non-ASCII content),
- *    run [EncodingHelper.detectEncoding] on the raw bytes.
- * 3. If the same non-UTF-8 encoding wins on [LOCK_THRESHOLD] such lines in a row,
- *    commit to it and stop running detection (saves CPU per line).
+ * 2. On every line that contains at least one byte ≥ 0x80 (non-ASCII content):
+ *    a. Append the raw bytes to a growing corpus buffer.
+ *    b. Score all candidate encodings against the *entire corpus so far* (not just the
+ *       current line). More data = better discrimination between ambiguous encodings.
+ *    c. Cast a "vote" for the best-scoring encoding on this line and increment its
+ *       per-encoding vote counter.
+ * 3. Lock once one encoding leads by [LEAD_THRESHOLD] votes over the second-place
+ *    encoding, with at least [MIN_EVIDENCE_LINES] non-ASCII lines seen.
  *
- * ## Key design invariants
+ * ## Why corpus scoring beats per-line scoring
  *
- * **Speculative-update prevention:** [currentEncoding] is NOT changed until the streak
- * reaches [LOCK_THRESHOLD].  Each line during the streak is decoded with a fresh
- * auto-detect pass, not with a half-committed encoding.
+ * A single IRC line (e.g. "*** Welcome to the network") may have only 2–3 non-ASCII
+ * bytes — too few to distinguish windows-1251 from ISO-8859-9 reliably.  Combining
+ * bytes across lines builds up a byte-frequency distribution that is statistically
+ * distinct per script family, allowing the scorer to tell Cyrillic from Turkish from
+ * Latin with high confidence after just a handful of lines.
  *
- * **ASCII neutrality:** Pure ASCII lines (no bytes ≥ 0x80) are always valid UTF-8,
- * but they carry zero information about the server's legacy encoding.  On a Bulgarian
- * windows-1251 server, `NICK`, `PING`, `JOIN`, and many MOTD lines are pure ASCII and
- * arrive interleaved with Cyrillic chat lines.  Treating those ASCII lines as evidence
- * for UTF-8 would perpetually reset the streak and prevent the encoding from ever
- * locking.  Instead, pure-ASCII lines are skipped in streak accounting entirely.
+ * ## Vote tolerance
  *
- * **Streak reset:** The streak is only reset when a line with actual non-ASCII content
- * is detected as a *different* encoding from the current candidate — i.e. genuinely
- * contradicting evidence.
+ * A single "wrong" per-line winner (e.g. a server NOTICE whose few non-ASCII bytes
+ * happen to score slightly better under the wrong encoding) no longer blows away all
+ * accumulated evidence.  Only when UTF-8 wins on a line does it reset everything,
+ * since that is genuine contradicting evidence (valid UTF-8 multi-byte sequences cannot
+ * be misidentified as a legacy 8-bit encoding by the scorer).
+ *
+ * ## Pre-lock decoding
+ *
+ * Lines arriving during the detection window are decoded with the *current leading
+ * candidate* (highest-vote encoding), not with whatever each individual line votes for.
+ * This means even the first few lines of a legacy-encoding channel render correctly
+ * rather than showing garbled characters until the lock commits.
+ *
+ * ## ASCII neutrality
+ *
+ * Pure ASCII lines (no bytes ≥ 0x80) carry zero information about the server's legacy
+ * encoding and are skipped in vote accounting.  This prevents MOTD/command lines from
+ * diluting the evidence from actual non-ASCII content.
  */
 class EncodingLineReader(
     private val input: InputStream,
@@ -431,15 +484,33 @@ class EncodingLineReader(
     private var encodingLocked: Boolean = !autoDetect
 
     /**
-     * How many consecutive non-ASCII lines must agree on a non-UTF-8 encoding before
-     * we commit to it.  2 is enough: on a real legacy server the first two non-ASCII
-     * lines almost always agree, and ASCII lines in between no longer cause false resets.
+     * Minimum number of non-ASCII lines that must be seen before we consider locking.
+     * Prevents locking on a single ambiguous registration line.
      */
-    private val LOCK_THRESHOLD = 2
+    private val MIN_EVIDENCE_LINES = 2
 
-    /** The candidate non-UTF-8 encoding currently accumulating streak count. */
-    private var streakEncoding: String? = null
-    private var streakCount: Int = 0
+    /**
+     * The leading encoding's vote count must exceed second-place by at least this margin
+     * before we commit.  A lead of 2 means one disagreeing line is tolerated as noise
+     * but two in a row would delay the lock until more evidence accumulates.
+     */
+    private val LEAD_THRESHOLD = 2
+
+    /**
+     * Hard cap on the corpus size (bytes).  We stop appending once this is reached to
+     * bound memory use on chatty servers; the corpus is usually sufficient well before
+     * this limit is hit.
+     */
+    private val MAX_CORPUS_BYTES = 8192
+
+    /** Accumulated raw bytes from all non-ASCII lines seen so far during detection. */
+    private val corpus = ByteArrayOutputStream(512)
+
+    /** Per-encoding vote counts (number of non-ASCII lines on which each encoding won). */
+    private val votes = mutableMapOf<String, Int>()
+
+    /** Total non-ASCII lines seen (used for MIN_EVIDENCE_LINES guard). */
+    private var evidenceLines = 0
 
     /** The currently committed/used encoding. */
     val encoding: String get() = currentEncoding
@@ -450,7 +521,7 @@ class EncodingLineReader(
      */
     fun readLine(): String? {
         if (!autoDetect || encodingLocked) {
-            // Fast path: locked or explicit encoding — read and decode directly.
+            // Fast path: locked or explicit encoding - read and decode directly.
             val (line, _) = EncodingHelper.readLine(input, currentEncoding, autoDetect = false)
             return line
         }
@@ -461,7 +532,7 @@ class EncodingLineReader(
         while (true) {
             b = input.read()
             if (b == -1) {
-                // EOF — decode whatever we have and return.
+                // EOF - decode whatever we have and return.
                 if (buffer.size() == 0) return null
                 break
             }
@@ -475,44 +546,66 @@ class EncodingLineReader(
 
         val bytes = buffer.toByteArray()
 
-        // Check whether the line has any non-ASCII bytes at all.
+        // Pure ASCII: encoding-neutral, skip vote accounting, decode as UTF-8.
         val hasHighBytes = bytes.any { it.toInt() and 0xFF >= 0x80 }
-
         if (!hasHighBytes) {
-            // Pure ASCII encoding-neutral. Don't touch the streak; just decode as UTF-8.
             return String(bytes, Charsets.UTF_8)
         }
 
-        // Non-ASCII content: run detection to get evidence about the encoding.
-        val detected = EncodingHelper.detectEncoding(bytes)
-        val decodedLine = String(bytes, EncodingHelper.getCharset(detected))
+        // Valid UTF-8 non-ASCII: genuine contradicting evidence - reset everything.
+        if (EncodingHelper.isValidUtf8(bytes)) {
+            corpus.reset()
+            votes.clear()
+            evidenceLines = 0
+            return String(bytes, Charsets.UTF_8)
+        }
 
-        when {
-            detected == "UTF-8" -> {
-                // Genuine UTF-8 non-ASCII content — this is real contradicting evidence.
-                // Reset the streak; this server is probably UTF-8.
-                streakEncoding = null
-                streakCount = 0
-            }
-            detected == streakEncoding -> {
-                // Same candidate as before — advance the streak.
-                streakCount++
-                if (streakCount >= LOCK_THRESHOLD) {
-                    currentEncoding = detected
-                    encodingLocked = true
-                    streakEncoding = null
-                    streakCount = 0
-                }
-            }
-            else -> {
-                // Different non-UTF-8 candidate; restart streak with the new candidate.
-                streakEncoding = detected
-                streakCount = 1
-                // (currentEncoding stays "UTF-8" - no update)
+        // Non-ASCII, non-UTF-8: add to corpus and score.
+        if (corpus.size() < MAX_CORPUS_BYTES) {
+            corpus.write(bytes)
+        }
+        evidenceLines++
+
+        // Score the full corpus against all candidate encodings and find the winner.
+        val corpusBytes = corpus.toByteArray()
+        var bestEncoding = "windows-1251"   // safe non-UTF-8 default if all scores tie at 0
+        var bestScore = Int.MIN_VALUE
+        var secondScore = Int.MIN_VALUE
+
+        for (enc in EncodingHelper.COMMON_ENCODINGS.drop(1)) {   // skip UTF-8
+            val charset = runCatching { java.nio.charset.Charset.forName(enc) }.getOrNull() ?: continue
+            val score = EncodingHelper.scoreEncodingPublic(corpusBytes, charset)
+            if (score > bestScore) {
+                secondScore = bestScore
+                bestScore = score
+                bestEncoding = enc
+            } else if (score > secondScore) {
+                secondScore = score
             }
         }
 
-        return decodedLine
+        // Cast the vote for the corpus winner on this line.
+        votes[bestEncoding] = (votes[bestEncoding] ?: 0) + 1
+
+        // Determine the leading encoding by total votes.
+        val leader = votes.maxByOrNull { it.value }?.key ?: bestEncoding
+        val leaderVotes = votes[leader] ?: 0
+        val secondVotes = votes.entries
+            .filter { it.key != leader }
+            .maxOfOrNull { it.value } ?: 0
+
+        // Lock if we have enough evidence and a clear leader.
+        if (evidenceLines >= MIN_EVIDENCE_LINES && leaderVotes - secondVotes >= LEAD_THRESHOLD) {
+            currentEncoding = leader
+            encodingLocked = true
+            corpus.reset()
+            votes.clear()
+        }
+
+        // Decode the current line with the leading candidate so it renders correctly
+        // even before the lock commits.
+        val decodeWith = if (votes.isNotEmpty()) leader else bestEncoding
+        return String(bytes, EncodingHelper.getCharset(decodeWith))
     }
 
     /**
@@ -529,7 +622,8 @@ class EncodingLineReader(
     fun setEncoding(encoding: String) {
         currentEncoding = if (encoding.equals("auto", ignoreCase = true)) "UTF-8" else encoding
         encodingLocked = true
-        streakEncoding = null
-        streakCount = 0
+        corpus.reset()
+        votes.clear()
+        evidenceLines = 0
     }
 }

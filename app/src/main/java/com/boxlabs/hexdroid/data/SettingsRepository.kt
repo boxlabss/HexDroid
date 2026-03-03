@@ -80,7 +80,11 @@ class SettingsRepository(private val ctx: Context) {
 
         val raw = prefs[Keys.NETWORKS_JSON]
         if (!raw.isNullOrBlank()) {
-            try {
+            // Wrap migration in runCatching so that any unexpected exception (from SecretStore,
+            // JSON serialization, etc.) is logged but never prevents the migration flags from
+            // being set. Without this, a mid-migration crash would cause infinite retry on every
+            // app launch because the flags are set after the try block.
+            runCatching {
                 val arr = JSONArray(raw)
                 var changed = false
                 for (i in 0 until arr.length()) {
@@ -110,11 +114,16 @@ class SettingsRepository(private val ctx: Context) {
                 if (changed) {
                     prefs[Keys.NETWORKS_JSON] = arr.toString()
                 }
-            } catch (_: Throwable) {
-                // If parsing fails, don't block app start. We'll try again next launch.
+            }.onFailure { e ->
+                android.util.Log.e("SettingsRepo", "Secret migration failed — marking done to prevent infinite retry", e)
+                // We intentionally mark migration as done even on failure: corrupt/unreadable data
+                // won't be fixed by retrying, and retrying on every launch creates startup lag
+                // without benefit. Users who lost passwords can re-enter them manually.
             }
         }
 
+        // Always mark migration flags; the runCatching above ensures we reach this line even
+        // if the migration body threw an exception.
         if (!v1Done) prefs[Keys.SECRETS_MIGRATED_V1] = true
         if (!v2Done) prefs[Keys.SECRETS_MIGRATED_V2] = true
     }
@@ -143,6 +152,22 @@ class SettingsRepository(private val ctx: Context) {
             val idx = list.indexOfFirst { it.id == profile.id }
             if (idx >= 0) list[idx] = profile else list.add(profile)
             prefs[Keys.NETWORKS_JSON] = toNetworksJson(list).toString()
+        }
+    }
+
+    /**
+     * Apply a transformation to a single network profile identified by [id].
+     * A no-op if the network does not exist. Used by TOFU fingerprint persistence and other
+     * targeted single-field updates that don't require a full profile replace.
+     */
+    suspend fun updateNetworkProfile(id: String, transform: (NetworkProfile) -> NetworkProfile) {
+        ctx.dataStore.edit { prefs ->
+            val list = parseNetworks(prefs[Keys.NETWORKS_JSON]).toMutableList()
+            val idx = list.indexOfFirst { it.id == id }
+            if (idx >= 0) {
+                list[idx] = transform(list[idx])
+                prefs[Keys.NETWORKS_JSON] = toNetworksJson(list).toString()
+            }
         }
     }
 
@@ -260,7 +285,8 @@ class SettingsRepository(private val ctx: Context) {
                 dccIncomingPortMax = o.optInt("dccIncomingPortMax", 5010),
                 dccDownloadFolderUri = o.optString("dccDownloadFolderUri", "").takeIf { it.isNotBlank() },
 
-                ctcpVersionReply = o.optString("ctcpVersionReply", UiSettings().ctcpVersionReply),
+                // ctcpVersionReply was removed - always derived from BuildConfig at runtime.
+                // Key silently ignored when loading legacy settings files that still contain it.
                 quitMessage = o.optString("quitMessage", UiSettings().quitMessage),
                 partMessage = o.optString("partMessage", UiSettings().partMessage),
                 colorizeNicks = o.optBoolean("colorizeNicks", true),
@@ -329,7 +355,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("dccIncomingPortMax", s.dccIncomingPortMax)
         o.put("dccDownloadFolderUri", s.dccDownloadFolderUri ?: "")
 
-        o.put("ctcpVersionReply", s.ctcpVersionReply)
+        // ctcpVersionReply intentionally not saved - always derived from BuildConfig at runtime.
         o.put("quitMessage", s.quitMessage)
         o.put("partMessage", s.partMessage)
         o.put("colorizeNicks", s.colorizeNicks)
@@ -420,6 +446,7 @@ class SettingsRepository(private val ctx: Context) {
                     sortOrder = o.optInt("sortOrder", 0),
                     isFavourite = o.optBoolean("isFavourite", false),
                     isBouncer = o.optBoolean("isBouncer", false),
+                    tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
                 )
             }
             out
@@ -483,6 +510,7 @@ class SettingsRepository(private val ctx: Context) {
             o.put("sortOrder", n.sortOrder)
             o.put("isFavourite", n.isFavourite)
             o.put("isBouncer", n.isBouncer)
+            if (n.tlsTofuFingerprint != null) o.put("tlsTofuFingerprint", n.tlsTofuFingerprint)
             arr.put(o)
         }
         return arr
@@ -691,7 +719,7 @@ class SettingsRepository(private val ctx: Context) {
         }
         // version > appBackupVersion but minCompat <= appBackupVersion:
         // The backup has newer optional fields we don't know about yet.  Import proceeds
-        // normally — unknown fields are silently ignored by all the optXxx() parse calls.
+        // normally - unknown fields are silently ignored by all the optXxx() parse calls.
 
         val settingsJson = root.optJSONObject("settings")
         val networksJson = root.optJSONArray("networks")
@@ -778,6 +806,16 @@ data class NetworkProfile(
      * - znc.in/server-time-iso and znc.in/playback CAPs are requested
      */
     val isBouncer: Boolean = false,
+    /**
+     * Stored TOFU (Trust On First Use) TLS certificate fingerprint (SHA-256, colon-separated hex).
+     *
+     * - null: no fingerprint stored yet.
+     *   On first connect with [allowInvalidCerts] = true the fingerprint is learned from the
+     *   server's certificate and this field should be persisted ([IrcEvent.TlsFingerprintLearned]).
+     * - non-null: fingerprint is pinned. Connection is aborted if the server presents a different
+     *   certificate ([IrcEvent.TlsFingerprintChanged]), protecting against MITM / cert replacement.
+     */
+    val tlsTofuFingerprint: String? = null,
 ) {
     fun toIrcConfig(
         saslPasswordOverride: String? = null,
@@ -805,7 +843,8 @@ data class NetworkProfile(
             capPrefs = caps,
             autoJoin = autoJoin,
             encoding = encoding,
-            isBouncer = isBouncer
+            isBouncer = isBouncer,
+            tlsTofuFingerprint = tlsTofuFingerprint
         )
     }
 }
