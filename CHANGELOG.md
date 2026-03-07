@@ -4,39 +4,47 @@ All notable changes to HexDroid are documented here.
 
 ---
 
-## [Unreleased]
+## [1.5.5] - 2026-03-07
 
-### IRCv3 Compliance
+### UI
+- **Nicklist font scales with panel width** - Dragging the nicklist divider now also adjusts the nick font size so nicks stay on one line across the full drag range.
+- **Better colour code support** - Added more control codes and improved the font style picker
+- **DCC Chat notifications** - Incoming DCC CHAT offers show a notification that deep-links directly to the `DCCCHAT:peer` buffer, with an "Open Transfers" action button for accept/reject.
+- **Transfers screen DCC chat cards** - Pending offers show a badge count, stand-out colouring, and an "Accept & Open" one-tap button.
 
-- **away-notify fully implemented** — `AWAY` messages from other users now drive live status lines (`* nick is now away (message)` / `* nick is back`) in every channel where the nick is present. State transitions are tracked precisely: only the first away event prints a line; subsequent away-message updates (same nick, different message) are silently absorbed. Away state is seeded from WHOX flags (`H`/`G`) on channel join so the client has correct initial state before any `AWAY` messages arrive. State is cleaned up on `QUIT`, `NICK`, and `Disconnected`.
-
-- **extended-join account display** — JOIN lines now include `[logged in as account]` when `extended-join` is active and the joining user is authenticated with services.
-
-- **WHOX away flags parsed** — The `WHO %uhsnfar,42` query sent on join now reads the flags field (`H` = here, `G` = gone/away) from 354 replies and uses it to seed initial away state for all channel members.
-
-- **draft/relaymsg receive handler added** — When `draft/relaymsg` is enabled (off by default), `RELAYMSG` commands from relay bots are now parsed and displayed as chat messages attributed to the relayed nick, including ACTION support and reply-tag forwarding.
-
-- **draft/channel-rename race condition fixed** — The `ChannelRenamed` handler mutated `chanNickCase` and `chanNickStatus` inside a `StateFlow.update {}` lambda; since `update` retries on CAS collision, those mutations could execute twice and corrupt the maps. Fixed by moving the map mutations to a single `_state.value =` assignment.
-
-- **CAP NEW / CAP DEL events now emitted** — `IrcEvent.CapNew` and `IrcEvent.CapDel` were defined and had ViewModel handlers, but `IrcAction` had no corresponding action types and `IrcSession` never fired them. Added `EmitCapNew` / `EmitCapDel` action types; the CAP NEW and CAP DEL handlers now emit them, and `IrcCore`'s dispatcher forwards them to the event flow. Server buffer now shows `*** Server added capabilities: …` and `*** Server removed capabilities: …`.
-
-- **ChannelRenamed, MessageReaction, ChannelModeChanged handlers added** — Three event types were defined and emitted by `IrcCore` but had no ViewModel handlers. `ChannelRenamed` now migrates buffer keys, nicklists, `chanNickCase`, `chanNickStatus`, and the selected buffer pointer. `MessageReaction` prints `* nick reacted with 👍` / `* nick removed reaction 👍` in the target buffer. `ChannelModeChanged` is an explicit no-op (already handled by the `ChannelModeLine` path).
-
-- **WhoxReply handler was a no-op** — The handler called `_state.update { st -> st }` (returned state unchanged). Replaced with proper away-state seeding from the WHOX `isAway` field.
-
-### New Command
-
-- **`/setname`** — Change your own realname via `SETNAME` (requires `setname` CAP). Prints a usage hint or a "cap not available" message if the server doesn't support it.
+### IRCv3
+- **caps** - added several, including typing indicators (disabled by default)
+- `away-notify` fully implemented - `AWAY` messages drive live status lines in every channel where the nick is present. Away state is seeded from WHOX flags on join and cleaned up on `QUIT`, `NICK`, and disconnect.
+- `extended-join` account display - JOIN lines show `[logged in as account]` when the user is authenticated with services.
+- WHOX away flags parsed from 354 replies to seed initial away state for all channel members.
+- `draft/relaymsg` receive handler - relay bot messages are attributed to the relayed nick, including ACTION and reply-tag support.
+- `draft/channel-rename` race condition fixed - map mutations no longer execute twice on CAS retry inside `StateFlow.update {}`.
+- `CAP NEW` / `CAP DEL` events now emitted and displayed in the server buffer.
+- `ChannelRenamed`, `MessageReaction`, `ChannelModeChanged` event handlers added.
+- `WhoxReply` handler now correctly seeds away state from the WHOX `isAway` field.
 
 ### Translations
+- All translations are complete. Arabic, Chinese, Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish
 
-- **140 strings added to all 13 locales** — The following screens were previously untranslated (showing English in all locales): network edit sections, TLS certificate fields, encoding descriptions, chat modes panel, channel ban/quiet/except/invex lists, nick action sheet (Whois, Ignore, DCC, Kick/Ban), ignore list descriptions, transfers screen sections and status strings, settings appearance/backup/battery options, About screen, and theme names. All 140 strings are now fully translated in Arabic, Chinese, Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, and Turkish.
+### Commands
+- **`/setname`** - Change your realname via `SETNAME` (requires `setname` CAP).
+- **`/query` command** - `/query <nick>` opens a PM buffer and switches to it immediately. `/query <nick> <message>` also sends the message.
+- **Command completion additions** - `query`, `ns`, `cs`, `as`, `hs`, `ms`, `bs` are now listed in the `/`-completion bar above the input field.
+- **Nick `@` mention completion** - Type `@` followed by characters in a channel buffer to get a nick completion popup. Tapping inserts `nick: ` at the start of a line or `@nick ` mid-sentence.
 
-- **Duplicate `network_edit_title` key removed** from base `strings.xml` (appeared on lines 154 and 219).
+### Bug Fixes
+- **Auto scroll** - Tapping a buffer while it is still loading no longer disables auto-scroll.
+- **Font size slider** - Tapping the slider caused the settings screen to jump to the top. Also improved font size range.
+- Post-connect commands with leading/trailing whitespace are now trimmed before dispatch.
+- Passive DCC offers with `port == 0` but no token no longer crash; a readable error is shown.
+
+### Security
+- **TOFU certificate pinning** - Replaced the all-or-nothing `allowInvalidCerts` toggle with Trust On First Use fingerprint pinning. First connect learns and persists the SHA-256 fingerprint; subsequent connects verify it. A fingerprint change aborts the connection with a clear warning.
+- **Secret migration reliability** - SASL password migration flags are now always written regardless of errors, preventing indefinite retry on each launch.
 
 ---
 
-## [1.5.4] — 2026-02-22
+## [1.5.4] - 2026-02-22
 
 ### App
 

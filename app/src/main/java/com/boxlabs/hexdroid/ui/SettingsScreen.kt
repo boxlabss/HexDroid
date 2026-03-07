@@ -41,7 +41,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.IconButton
@@ -77,6 +77,18 @@ import com.boxlabs.hexdroid.ui.tour.tourTarget
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+
+// Find index of element minimising the selector
+private fun <T> List<T>.indexOfMinBy(selector: (T) -> Float): Int {
+    if (isEmpty()) return -1
+    var minIdx = 0
+    var minVal = selector(this[0])
+    for (i in 1..lastIndex) {
+        val v = selector(this[i])
+        if (v < minVal) { minVal = v; minIdx = i }
+    }
+    return minIdx
+}
 
 // Copy a font file from a content URI to internal storage
 private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: String): String? {
@@ -199,6 +211,8 @@ fun SettingsScreen(
         }
     }
 
+    val listState = rememberLazyListState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -208,7 +222,6 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
-        val listState = rememberLazyListState()
 
         // Tour: scroll so the highlighted element is actually on-screen.
         LaunchedEffect(tourActive, tourTarget) {
@@ -312,13 +325,59 @@ fun SettingsScreen(
             }
 
             item {
-                Text(stringResource(R.string.setting_font_size_label), style = MaterialTheme.typography.titleSmall)
-                Slider(
-                    value = s.fontScale,
-                    onValueChange = { v -> onUpdate { copy(fontScale = v.coerceIn(0.85f, 1.35f)) } },
-                    valueRange = 0.85f..1.35f
-                )
-                Text("${(s.fontScale * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                val fontSteps = listOf(0.60f, 0.70f, 0.75f, 0.80f, 0.85f, 0.90f, 0.95f, 1.00f,
+                                       1.05f, 1.10f, 1.15f, 1.20f, 1.30f, 1.40f, 1.50f)
+                val currentIdx = fontSteps.indexOfMinBy { kotlin.math.abs(it - s.fontScale) }
+                    .coerceIn(0, fontSteps.lastIndex)
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.setting_font_size_label),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = { if (currentIdx > 0) onUpdate { copy(fontScale = fontSteps[currentIdx - 1]) } },
+                            enabled = currentIdx > 0,
+                            modifier = Modifier.widthIn(min = 40.dp)
+                        ) { Text("−") }
+                        Text(
+                            "${(s.fontScale * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+                        OutlinedButton(
+                            onClick = { if (currentIdx < fontSteps.lastIndex) onUpdate { copy(fontScale = fontSteps[currentIdx + 1]) } },
+                            enabled = currentIdx < fontSteps.lastIndex,
+                            modifier = Modifier.widthIn(min = 40.dp)
+                        ) { Text("+") }
+                    }
+                    Slider(
+                        value = currentIdx.toFloat(),
+                        onValueChange = { v ->
+                            val idx = v.toInt().coerceIn(0, fontSteps.lastIndex)
+                            onUpdate { copy(fontScale = fontSteps[idx]) }
+                        },
+                        valueRange = 0f..(fontSteps.lastIndex.toFloat()),
+                        steps = fontSteps.lastIndex - 1,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("60%", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(
+                            onClick = { onUpdate { copy(fontScale = 1.0f) } },
+                            enabled = s.fontScale != 1.0f,
+                        ) {
+                            Text("Reset to 100%", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Text("150%", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
 
             item { HorizontalDivider() }
@@ -491,7 +550,7 @@ fun SettingsScreen(
                     Text(stringResource(R.string.setting_log_folder), style = MaterialTheme.typography.titleSmall)
                     Text(label, style = MaterialTheme.typography.bodySmall)
                     if (!s.logFolderUri.isNullOrBlank()) {
-                        Text(s.logFolderUri!!, style = MaterialTheme.typography.bodySmall)
+                        Text(s.logFolderUri, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -595,7 +654,7 @@ fun SettingsScreen(
                     Text(stringResource(R.string.setting_download_folder), style = MaterialTheme.typography.titleSmall)
                     Text(dccFolderLabel, style = MaterialTheme.typography.bodySmall)
                     if (!s.dccDownloadFolderUri.isNullOrBlank()) {
-                        Text(s.dccDownloadFolderUri!!, style = MaterialTheme.typography.bodySmall)
+                        Text(s.dccDownloadFolderUri, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -806,7 +865,7 @@ private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
             label = { Text(stringResource(R.string.welcome_language_label)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for (lang in languages) {
@@ -850,7 +909,7 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
             label = { Text(stringResource(R.string.theme_label)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.theme_dark)) }, onClick = { onPick(ThemeMode.DARK); expanded = false })
@@ -886,7 +945,7 @@ private fun FontPicker(
             label = { Text(fieldLabel) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             // Open Sans is the default UI font.
@@ -925,7 +984,7 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
             label = { Text(stringResource(R.string.chat_font_style)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.style_regular)) }, onClick = { onPick(ChatFontStyle.REGULAR); expanded = false })
@@ -954,7 +1013,7 @@ private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIn
             label = { Text(stringResource(R.string.vibration_intensity)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.vibration_low)) }, onClick = { onPick(VibrateIntensity.LOW); expanded = false })

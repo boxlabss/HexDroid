@@ -786,7 +786,7 @@ fun NetworkEditScreen(
 
                         CapSwitch("monitor", capMonitor) { capMonitor = it }
                         CapSwitch("account-tag", capAccountTag) { capAccountTag = it }
-                        CapSwitch("draft/typing", capTypingIndicator) { capTypingIndicator = it }
+                        CapSwitch("typing", capTypingIndicator) { capTypingIndicator = it }
                         CapSwitch("standard-replies", capStandardReplies) { capStandardReplies = it }
                         CapSwitch("pre-away", capPreAway) { capPreAway = it }
                         CapSwitch("message-ids", capMessageIds) { capMessageIds = it }

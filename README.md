@@ -5,10 +5,6 @@
 [![GitHub release](https://img.shields.io/github/v/release/boxlabss/HexDroid)](https://github.com/boxlabss/HexDroid/releases)
 [![GitHub stars](https://img.shields.io/github/stars/boxlabss/HexDroid)](https://github.com/boxlabss/HexDroid/stargazers)
 [![Build](https://github.com/boxlabss/HexDroid/actions/workflows/build.yml/badge.svg)](https://github.com/boxlabss/HexDroid/actions)
-<<<<<<< HEAD
-[![RB Status](https://shields.rbtlog.dev/simple/com.boxlabs.hexdroid)](https://shields.rbtlog.dev/com.boxlabs.hexdroid)
-=======
->>>>>>> 93f897c (much needed bug fixes)
 
 A fast, modern IRC client for Android.
 
@@ -18,27 +14,33 @@ A fast, modern IRC client for Android.
 
 ## About
 
-HexDroid is a free and open source IRC client for Android, built in Kotlin with Jetpack Compose. It aims for feature parity with desktop clients: full IRCv3 capability negotiation, SASL authentication (PLAIN, SCRAM-SHA-256, EXTERNAL), TOFU TLS certificate pinning, bouncer support (ZNC and soju), DCC file transfers and chat, a complete channel operator toolkit, and IRCop tools.
+HexDroid is a free and open source IRC client for Android devices. It provides a clean, modern interface while supporting the features users expect from a desktop client, including IRCv3 capabilities, SASL authentication, TLS encryption, Bouncer support, DCC file transfers and an array of commands.
 
-**Requirements:** Android 8.0 (API 26) or higher  
-**License:** GNU General Public License v3.0
+**Requirements:** Android 8.0 (API 26) or higher · **License:** GPLv3
 
 ---
 
 ## Features
 
-### Multi-Network
+- **Multi-network** — connect to multiple servers simultaneously, each with independent nick, SASL, TLS, autojoin, and encoding settings
+- **IRCv3** — 40+ capabilities including `chathistory`, `away-notify`, `server-time`, `echo-message`, `draft/typing`, MONITOR, bouncer-specific caps, and more
+- **Security** — TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates, Android Keystore credential storage
+- **Localisation** — Arabic, Chinese, Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish
 
-Connect to multiple IRC networks simultaneously. Each network has its own profile with independent settings for nickname, auto-connect, auto-join channels, post-connect commands (with configurable pre-join delay), character encoding, SASL credentials, and TLS certificate. Networks can be reordered by drag-and-drop and marked as favourites.
+### User Interface
 
-### Security
-
-- TLS/SSL on by default (port 6697); plaintext requires an explicit opt-in dialog
-- **TOFU certificate pinning** — the server's SHA-256 fingerprint is stored on first connect and verified on every subsequent connection; a prominent warning names both fingerprints if it ever changes
-- SASL: PLAIN, SCRAM-SHA-256, EXTERNAL (client certificate)
-- Client certificate import: PEM (combined cert+key), CRT+KEY, or PKCS#12 formats
-- SASL passwords and TLS private keys stored in Android Keystore via `EncryptedSharedPreferences`
-- Server passwords supported
+- Material Design 3 with light, dark, and Matrix (green-on-black) themes
+- Adjustable font family (Open Sans, Inter, Monospace, custom TTF/OTF) and size, separately for UI and chat
+- mIRC colour rendering with 99-colour picker and gradient picker
+- Nick `@` autocomplete and `/command` completion with inline hint chips
+- Channel op panel: topic, key, user limit; ban/quiet/except/invex list management
+- IRCop tools panel (visible when umode +o): K/G/D/Z-line, Shun, Kill, SAJoin/SAPart, WALLOPS/GLOBOPS/LOCOPS, MOTD, Links, Uptime
+- Per-network ignore list (case-insensitive; covers chat, notices, and DCC offers)
+- Channel list with live search
+- Typing indicators displayed per-buffer
+- Lag indicator, swipe gestures, compact mode
+- Intro tour for new users
+- Backup/restore: network profiles and settings exported as JSON
 
 ### IRCv3
 
@@ -83,7 +85,7 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 | Cap | Notes |
 |---|---|
 | `account-tag` | Sender account exposed on every PRIVMSG/NOTICE |
-| `draft/typing` | Composing indicators; sending opt-in (off by default), receiving opt-out |
+| `draft/typing - typing` | Composing indicators; sending opt-in (off by default), receiving opt-out |
 | `draft/message-reactions` | Emoji reactions via TAGMSG `+draft/react`; displayed as status lines |
 | `+draft/reply` | Reply-to msgid threading; forwarded on PRIVMSG and RELAYMSG |
 | `draft/relaymsg` | Relay bot messages attributed to the relayed nick (off by default) |
@@ -117,39 +119,17 @@ Automatic detection starting from UTF-8, with fallback to windows-1251, KOI8-R, 
 - Incoming DCC CHAT offers create a buffer immediately and deep-link from notification
 - Configurable download folder
 
-### User Interface
-
-- Material Design 3 with light, dark, and Matrix (green-on-black) themes
-- Adjustable font family (Open Sans, Inter, Monospace, custom TTF/OTF) and size, separately for UI and chat
-- mIRC colour rendering with 99-colour picker and gradient picker
-- Nick `@` autocomplete and `/command` completion with inline hint chips
-- Channel op panel: topic, key, user limit; ban/quiet/except/invex list management
-- IRCop tools panel (visible when umode +o): K/G/D/Z-line, Shun, Kill, SAJoin/SAPart, WALLOPS/GLOBOPS/LOCOPS, MOTD, Links, Uptime
-- Per-network ignore list (case-insensitive; covers chat, notices, and DCC offers)
-- Channel list with live search
-- Typing indicators displayed per-buffer
-- Lag indicator, swipe gestures, compact mode
-- Intro tour for new users
-- Backup/restore: network profiles and settings exported as JSON
-
-### Localisation
-
-Full UI translation for 13 languages — Arabic, Chinese (Simplified), Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish — switchable inside the app.
-
 ---
 
 ## Installation
 
 **Google Play (recommended)**
 
-[Get it on Google Play](https://play.google.com/store/apps/details?id=com.boxlabs.hexdroid)
+[<img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" height="60">](https://play.google.com/store/apps/details?id=com.boxlabs.hexdroid)
 
-**Direct APK**
+**Direct APK:** [hexdroid-latest.apk](https://hexdroid.boxlabs.uk/releases/hexdroid-latest.apk)
 
-[Download HexDroid Latest](https://hexdroid.boxlabs.uk/releases/hexdroid-latest.apk)
-
-**Build from source**
-
+**Build from source:**
 ```bash
 git clone https://github.com/boxlabss/hexdroid.git
 cd hexdroid
@@ -160,178 +140,32 @@ cd hexdroid
 
 ## Quick Start
 
-1. Open the app — the intro tour walks through the main screens
-2. Tap **Networks → +** and enter a server hostname and port (6697 for TLS)
-3. Set your nickname; optionally configure SASL credentials
-4. Save and tap **Connect**
-5. Use `/join #channel` or tap **Channel list** to browse
+1. Tap **Networks → +** and enter a server hostname and port (6697 for TLS)
+2. Set your nickname; optionally configure SASL credentials
+3. Save and tap **Connect**
+4. Use `/join #channel` or tap **Channel list** to browse
 
----
-
-## Commands
-
-Commands are case-insensitive. Most accept the current channel as the default target where one is not specified.
-
-### Messaging
-
-| Command | Description |
-|---------|-------------|
-| `/join #channel [key]` | Join a channel |
-| `/part [#channel] [reason]` | Leave a channel |
-| `/cycle [#channel]` | Part and immediately rejoin |
-| `/close [target]` | Part and close a buffer |
-| `/msg <target> <text>` | Send a private message |
-| `/notice <target> <text>` | Send a NOTICE |
-| `/me <action>` | Send a CTCP ACTION |
-| `/amsg <text>` | Message all open channels |
-| `/ame <action>` | Action to all open channels |
-| `/away [message]` | Set away; no argument clears it |
-| `/setname <realname>` | Change your realname (requires `setname` CAP) |
-| `/quit [reason]` | Disconnect from the network |
-
-### Channel Operator
-
-| Command | Description |
-|---------|-------------|
-| `/topic [text]` | View or set the channel topic |
-| `/mode [target] <modes>` | Set channel or user modes |
-| `/kick [#channel] <nick> [reason]` | Kick a user |
-| `/ban [#channel] <nick>` | Ban a user (+b) |
-| `/unban [#channel] <nick>` | Unban a user |
-| `/kickban [#channel] <nick> [reason]` | Kick and ban |
-| `/op <nick>` | Grant operator (+o) |
-| `/deop <nick>` | Remove operator (-o) |
-| `/voice <nick>` | Grant voice (+v) |
-| `/devoice <nick>` | Remove voice (-v) |
-| `/invite <nick> [#channel]` | Invite a user |
-| `/banlist` | Show the ban list (+b) |
-| `/quietlist` | Show the quiet list (+q) |
-| `/exceptlist` | Show the ban exception list (+e) |
-| `/invexlist` | Show the invite exemption list (+I) |
-
-### User / Server
-
-| Command | Description |
-|---------|-------------|
-| `/nick <newnick>` | Change nickname |
-| `/whois <nick>` | User info, channels, idle time |
-| `/who <target>` | Extended WHO query |
-| `/ignore <nick>` | Add to ignore list |
-| `/unignore <nick>` | Remove from ignore list |
-| `/monitor +nick[,nick]` | Add nicks to watch list |
-| `/monitor -nick[,nick]` | Remove nicks from watch list |
-| `/monitor C` | Clear the watch list |
-| `/monitor L` | List watched nicks |
-| `/monitor S` | Request status of all watched nicks |
-| `/markread [target]` | Mark a buffer as read |
-| `/oper <user> <password>` | Authenticate as IRC operator |
-
-### Utility
-
-| Command | Description |
-|---------|-------------|
-| `/ctcp <target> <command>` | Send a CTCP request |
-| `/ctcpping <nick>` | CTCP PING round-trip time |
-| `/dns <host/ip>` | DNS lookup |
-| `/find <keyword> [limit]` | Search the current buffer's scrollback |
-| `/grep <keyword>` | Alias for `/find` |
-| `/names [#channel]` | List users in a channel |
-| `/list` | Open the channel list |
-| `/motd [server]` | Fetch the server MOTD |
-| `/admin [server]` | Server administrator info |
-| `/info [server]` | Server software info |
-| `/version [nick]` | CTCP VERSION query |
-| `/time` | Request server time |
-| `/sysinfo` | Share device/platform info in chat |
-| `/raw <line>` | Send a raw IRC line |
-
-### DCC
-
-| Command | Description |
-|---------|-------------|
-| `/dcc send <nick>` | Offer a file to a user |
-| `/dcc chat <nick>` | Open a DCC CHAT session |
-| `/dcc accept <nick>` | Accept a pending offer |
-| `/dcc reject <nick>` | Reject a pending offer |
-
----
-
-## Configuration
-
-### Network Profile
-
-Each network profile stores: hostname · port · TLS on/off · TOFU fingerprint (auto-managed) · allow invalid certs · nickname · alternate nick · username (ident) · realname · server password · SASL (PLAIN/SCRAM-SHA-256/EXTERNAL + credentials) · client certificate (PEM, CRT+KEY) · bouncer toggle + network ID · auto-connect on startup · auto-reconnect · autojoin channels (with per-channel keys) · post-connect command delay · service auth command · arbitrary post-connect commands · character encoding.
-
-The **Advanced IRCv3 caps** section exposes individual capability toggles. **Bouncer caps** (soju/ZNC-specific) appear only when the bouncer toggle is enabled.
-
-### App Settings
-
-| Section | Options |
-|---------|---------|
-| **Appearance** | Theme (light/dark/matrix/system), UI font, chat font, font size, timestamp format, compact mode, topic bar, nicklist defaults |
-| **Highlights** | Highlight on own nick, custom keyword list |
-| **Notifications** | Per-type enable/disable, sound, vibration intensity |
-| **Privacy** | Send typing indicators (off by default), receive typing indicators |
-| **IRC** | Hide JOIN/PART/QUIT spam, hide MOTD on connect, reconnect interval, keep-alive |
-| **History** | Max scrollback per buffer, chathistory limit |
-| **Logging** | Enable, storage location, retention period |
-| **File Transfers** | Enable DCC, transfer mode (auto/active/passive), incoming port range, download folder |
-| **Backup & Restore** | Export all profiles and settings as JSON; import from a JSON file |
-
----
-
-## Troubleshooting
-
-**Connection fails immediately**  
-Verify hostname, port, and TLS setting. Most servers use port 6697 with TLS. Port 6667 requires explicitly allowing plaintext in the network dialog.
-
-**Certificate warning on reconnect**  
-HexDroid pins the server's TLS fingerprint on first connect (TOFU). If the server rotated its certificate, enable *Allow invalid certificates* in the network profile, reconnect once to learn the new fingerprint, then disable it again.
-
-**SASL authentication fails**  
-Verify credentials and that the server supports your chosen mechanism. SCRAM-SHA-256 is preferred. For EXTERNAL, a valid client certificate must be imported under TLS Client Certificate in the network profile.
-
-**Garbled text / wrong characters**  
-The server uses a non-UTF-8 encoding. Open the network profile → Advanced → Character Encoding and select the correct charset (e.g. windows-1251 for Russian/Cyrillic networks).
-
-**Disconnects when the screen is off**  
-Disable battery optimisation for HexDroid: Settings → Apps → HexDroid → Battery → Unrestricted. Keep the persistent notification visible. See [dontkillmyapp.com](https://dontkillmyapp.com/) for manufacturer-specific steps (OnePlus, Xiaomi, Huawei, Samsung).
-
-**Chat history not loading**  
-The server must advertise `chathistory` or `draft/chathistory`. Ergo 2.11+ and soju 0.7+ both support it. Scroll to the very top of a buffer to trigger a page load.
-
-**Bouncer shows wrong channel list or no messages**  
-Enable the bouncer toggle in the network profile. This activates `BOUNCER BIND` (soju), suppresses autojoin, and requests playback of messages received while offline.
+Full documentation at [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/).
 
 ---
 
 ## Privacy
 
-HexDroid contains no ads, analytics, crash reporters, or third-party tracking SDKs. The app communicates only with the IRC servers you configure. All data is stored locally on-device and deleted with the app.
-
-Typing indicators are **disabled by default**. Enable *Send typing indicators* in Settings → Privacy only if you are comfortable with others knowing when you are composing.
-
-Full [Privacy Policy](https://hexdroid.boxlabs.uk/privacy-policy.html).
-
----
-
-## Contributing
-
-Open an issue before submitting a pull request for non-trivial changes. Bug reports should include: device model, Android version, HexDroid version, steps to reproduce, and relevant logcat output.
+No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app.
 
 ---
 
 ## Support
 
-- **Documentation:** [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/)
+- **Docs:** [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/)
 - **Email:** android@boxlabs.co.uk
 - **IRC:** `#HexDroid` on `irc.afternet.org`
 
 ---
 
-## License
+## Contributing
 
-GNU General Public License v3.0 — see [LICENSE](LICENSE).
+Open an issue before submitting a pull request for non-trivial changes. Bug reports should include device model, Android version, HexDroid version, steps to reproduce, and relevant logcat output.
 
 ---
 

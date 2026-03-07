@@ -161,10 +161,10 @@ fun AppRoot(
     }
 
     val baseDensity = LocalDensity.current
-    val fontScale = state.settings.fontScale.coerceIn(0.8f, 2.0f)
+    val fontScale = state.settings.fontScale.coerceIn(0.60f, 1.50f)
     val scaledDensity = Density(density = baseDensity.density, fontScale = baseDensity.fontScale * fontScale)
 
-    key(themeMode, state.settings.fontChoice, state.settings.fontScale, state.settings.customFontPath) {
+    key(themeMode, state.settings.fontChoice, state.settings.customFontPath) {
         HexDroidIRCTheme(
             themeMode = themeMode,
             fontChoice = state.settings.fontChoice,

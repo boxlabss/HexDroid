@@ -218,14 +218,28 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         // account-tag: include services account name in PRIVMSG/NOTICE message tags
         if (config.capPrefs.accountTag) req += "account-tag"
 
-        // draft/typing: typing status indicators (send/receive)
-        if (config.capPrefs.typingIndicator) req += "draft/typing"
+        // draft/typing / typing: typing status indicators (send/receive).
+        // "draft/typing" is the legacy name; Libera and modern servers advertise the
+        // graduated "typing" cap. Request both so we negotiate whichever the server offers.
+        if (config.capPrefs.typingIndicator) {
+            req += "draft/typing"
+            req += "typing"          // graduated (Libera, Ergo 2.14+, InspIRCd 4+)
+        }
 
-        // IRCv3 standard-replies (FAIL/WARN/NOTE): structured errors from Ergo, Soju, InspIRCd 4+
-        if (config.capPrefs.standardReplies) req += "standard-replies"
+        // IRCv3 standard-replies (FAIL/WARN/NOTE): structured errors from Ergo, Soju, InspIRCd 4+.
+        // Request both the graduated name and its draft alias for compatibility with older servers.
+        if (config.capPrefs.standardReplies) {
+            req += "draft/standard-replies"
+            req += "standard-replies"
+        }
 
-        // pre-away: allows AWAY before 001 welcome
-        if (config.capPrefs.preAway) req += "pre-away"
+        // pre-away: allows AWAY before 001 welcome.
+        // Request both the graduated name and its draft alias so we negotiate the cap on
+        // older Ergo (< 2.9) and soju versions that still advertise "draft/pre-away".
+        if (config.capPrefs.preAway) {
+            req += "draft/pre-away"
+            req += "pre-away"
+        }
 
         // message-ids (msgid tag): unique message IDs for deduplication
         if (config.capPrefs.messageIds) req += "message-ids"
@@ -377,7 +391,10 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     val b64 = Base64.encodeToString(next.clientFinal.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                     out += chunkAuthenticate(b64)
                 } else if (next is ScramNext.Done && !next.verified) {
+                    // Server signature verification failed (or server sent an "e=" error attribute).
+                    // Abort the exchange so the server doesn't hang waiting for our client-final.
                     out += IrcAction.EmitError("SCRAM server signature verification failed")
+                    out += IrcAction.Send("AUTHENTICATE *")
                 }
             }
         }

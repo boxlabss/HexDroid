@@ -296,6 +296,8 @@ class SettingsRepository(private val ctx: Context) {
                 appLanguage = o.optString("appLanguage", "").takeIf { it.isNotBlank() },
                 portraitNicklistOverlay = o.optBoolean("portraitNicklistOverlay", true),
                 portraitNickPaneFrac = o.optDouble("portraitNickPaneFrac", 0.35).toFloat(),
+                sendTypingIndicator = o.optBoolean("sendTypingIndicator", false),
+                receiveTypingIndicator = o.optBoolean("receiveTypingIndicator", true),
             )
         } catch (_: Throwable) {
             UiSettings()
@@ -365,6 +367,8 @@ class SettingsRepository(private val ctx: Context) {
         o.put("appLanguage", s.appLanguage ?: "")
         o.put("portraitNicklistOverlay", s.portraitNicklistOverlay)
         o.put("portraitNickPaneFrac", s.portraitNickPaneFrac.toDouble())
+        o.put("sendTypingIndicator", s.sendTypingIndicator)
+        o.put("receiveTypingIndicator", s.receiveTypingIndicator)
 
         return o
     }

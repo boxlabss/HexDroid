@@ -19,22 +19,20 @@
 package com.boxlabs.hexdroid.ui
 
 import androidx.compose.ui.graphics.Color
-import kotlin.math.abs
 
 /**
  * nick colour mapping
  *
- * Generates a large palette where every entry has a visually distinct
- * hue *and* lightness, so even nicks that hash to nearby hues end up
- * with clearly different shades.
+ * Generates a large palette where every entry is perceptually distinct.
  *
  * Approach:
  * 1. Use golden-angle hue stepping (≈137.5°) for maximal hue spread.
- * 2. Alternate lightness across 3 bands so consecutive palette entries
- *    differ in both hue AND lightness.
- * 3. Vary saturation slightly per band for extra differentiation.
- * 4. Linear probing with a coprime step avoids clustering when the
- *    channel has many users.
+ * 2. Cycle through 6 lightness/saturation bands (instead of 3) so that
+ *    nicks with nearby hues land in very different shade bands.
+ * 3. Bands alternate between vivid, dark, pastel, deep, airy and punchy
+ *    extremes — consecutive entries differ in both hue AND brightness.
+ * 4. Linear probing with a coprime step avoids clustering when a channel
+ *    has many users.
  */
 object NickColors {
     private const val PALETTE_SIZE = 192
@@ -48,15 +46,26 @@ object NickColors {
      */
     private data class Band(val lightness: Float, val saturation: Float)
 
+    // Six bands with strongly varying lightness and saturation so that even nicks
+    // whose hues are close look clearly different from each other.
+    // Bands deliberately alternate between bright/dark/pastel extremes so that
+    // consecutive palette entries (which differ by ~137.5° in hue) also differ
+    // strongly in perceived brightness — avoiding the "all same shade" look.
     private val darkBgBands = listOf(
-        Band(0.72f, 0.90f),   // vivid
-        Band(0.58f, 0.78f),   // deeper / richer
-        Band(0.82f, 0.65f),   // pastel / light
+        Band(0.72f, 0.92f),   // vivid & bright
+        Band(0.48f, 0.88f),   // deep / dark & punchy
+        Band(0.87f, 0.58f),   // very light pastel
+        Band(0.60f, 0.78f),   // medium saturated
+        Band(0.92f, 0.45f),   // near-white / airy
+        Band(0.38f, 0.95f),   // dark & high-saturation
     )
     private val lightBgBands = listOf(
-        Band(0.38f, 0.75f),   // dark & saturated
-        Band(0.28f, 0.60f),   // very dark
-        Band(0.48f, 0.55f),   // medium, muted
+        Band(0.28f, 0.82f),   // dark & vivid
+        Band(0.18f, 0.68f),   // very dark
+        Band(0.44f, 0.58f),   // medium muted
+        Band(0.22f, 0.92f),   // dark & saturated
+        Band(0.36f, 0.48f),   // dark muted / smoky
+        Band(0.13f, 0.78f),   // near-black vivid
     )
 
     fun buildPalette(bgLum: Float): List<Color> {
@@ -65,12 +74,13 @@ object NickColors {
         return List(PALETTE_SIZE) { i ->
             val hue = (i * GOLDEN_ANGLE_DEG) % 360f
             val band = bands[i % bands.size]
-            // Small per-index saturation jitter to break up any residual patterns
-            val satJitter = ((i * 7) % 5 - 2) * 0.02f
+            // Small per-index jitter so nicks in the same band still differ subtly
+            val satJitter = ((i * 11) % 7 - 3) * 0.015f
+            val lumJitter = ((i * 13) % 5 - 2) * 0.015f
             Color.hsl(
                 hue,
-                (band.saturation + satJitter).coerceIn(0.35f, 0.95f),
-                band.lightness
+                (band.saturation + satJitter).coerceIn(0.30f, 0.98f),
+                (band.lightness + lumJitter).coerceIn(0.10f, 0.93f)
             )
         }
     }

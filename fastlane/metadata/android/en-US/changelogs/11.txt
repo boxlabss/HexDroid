@@ -1,0 +1,12 @@
+Nick @mention completion in channels
+All 13 translations complete
+DCC Chat notifications
+All 13 translations complete
+expanded colour codes
+
+away-notify, extended-join, relaymsg cap improvements
+Typing indicators
+
+TOFU certificate pinning replaces allow-invalid certs toggle for SSL
+
+Bug fixes and stability improvements

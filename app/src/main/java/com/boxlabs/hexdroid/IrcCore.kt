@@ -582,6 +582,12 @@ sealed class IrcEvent {
         val adding: Boolean,
         val timeMs: Long? = null
     ) : IrcEvent()
+
+    /**
+     * Emitted by /query to ask the ViewModel to open/focus a PM buffer without
+     * necessarily sending a message. The ViewModel handles ensureBuffer + selectBuffer.
+     */
+    data class OpenQueryBuffer(val nick: String) : IrcEvent()
 }
 
 class IrcClient(val config: IrcConfig) {
@@ -639,8 +645,15 @@ class IrcClient(val config: IrcConfig) {
     /** True if either the soju.im/read or draft/read-marker cap is enabled. */
     private fun hasReadMarkerCap(): Boolean = hasCap("draft/read-marker") || hasCap("soju.im/read")
 
-    /** True if the draft/typing cap is enabled. */
-    private fun hasTypingCap(): Boolean = hasCap("draft/typing")
+    /** True if the draft/typing or graduated typing cap is enabled. */
+    private fun hasTypingCap(): Boolean = hasCap("draft/typing") || hasCap("typing")
+
+    /** True if either the graduated or draft pre-away cap is enabled. */
+    private fun hasPreAwayCap(): Boolean = hasCap("pre-away") || hasCap("draft/pre-away")
+
+    /** True if either the graduated or draft standard-replies cap is enabled. */
+    @Suppress("unused")
+    private fun hasStandardRepliesCap(): Boolean = hasCap("standard-replies") || hasCap("draft/standard-replies")
 
     /**
      * Generate a unique label for labeled-response correlation.
@@ -865,7 +878,10 @@ class IrcClient(val config: IrcConfig) {
      */
     suspend fun sendTypingStatus(target: String, state: String) {
         if (!hasTypingCap()) return
-        sendRaw("@+typing=$state TAGMSG $target")
+        // Graduated "typing" cap uses the standard tag name (no "+" prefix).
+        // Draft "draft/typing" cap uses the vendor tag "+typing".
+        val tag = if (hasCap("typing")) "typing=$state" else "+typing=$state"
+        sendRaw("@$tag TAGMSG $target")
     }
 
     /**
@@ -937,6 +953,40 @@ class IrcClient(val config: IrcConfig) {
                 val target = parts.getOrNull(1) ?: return
                 val msg = parts.drop(2).joinToString(" ")
                 privmsg(target, msg)
+            }
+            // /query <nick> [message] - open a PM buffer with a user (buffer switching handled in ViewModel)
+            // /query with no message just opens the buffer; with a message it sends it too.
+            "query" -> {
+                val target = parts.getOrNull(1) ?: return
+                val msg = parts.drop(2).joinToString(" ").trim()
+                if (msg.isNotBlank()) privmsg(target, msg)
+                // Signal the ViewModel to open/focus the query buffer via a fake incoming event.
+                commandEvents.trySend(IrcEvent.OpenQueryBuffer(target))
+            }
+            // Services shorthands: /ns, /cs, /as, /hs, /ms, /bs
+            "ns" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("NickServ", rest)
+            }
+            "cs" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("ChanServ", rest)
+            }
+            "as" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("AuthServ", rest)
+            }
+            "hs" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("HostServ", rest)
+            }
+            "ms" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("MemoServ", rest)
+            }
+            "bs" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("BotServ", rest)
             }
             "me" -> {
                 val msg = parts.drop(1).joinToString(" ")
@@ -1546,8 +1596,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         val chan = msg.params.getOrNull(2) ?: return@handler
         val names = (msg.trailing ?: "").split(Regex("\\s+")).filter { it.isNotBlank() }
             .map { raw ->
-                // Find where prefixes end and the nick!user@host begins
-                val prefixEnd = raw.indexOfFirst { it !in "~&@%+" }
+                // Find where prefixes end and the nick!user@host begins.
+                // Use server-negotiated prefixSymbols (updated from 005 PREFIX) so non-standard
+                // rank symbols (e.g. '!' or '~' on custom IRCd configs) are stripped correctly.
+                val validPrefixes = prefixSymbols
+                val prefixEnd = raw.indexOfFirst { it !in validPrefixes }
                 if (prefixEnd < 0) return@map raw  // only prefixes? keep as-is
                 val prefixes = raw.substring(0, prefixEnd)
                 val rest = raw.substring(prefixEnd)
@@ -1693,11 +1746,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			send(IrcEvent.Connected("${config.host}:${config.port}"))
 			// IRCv3 pre-away: if the user has a stored away message, send AWAY before 001
 			// so the server marks us as away from the start of the session (no window where
-			// we appear "here"). Only sent when the pre-away CAP was negotiated.
-			// We send it right after registration commands; IrcSession.onMessage will
-			// handle the CAP negotiation and emit Send(CAP END) - by that point the server
-			// already knows our nick so the AWAY is valid. Servers that don't support
-			// pre-away simply ignore the AWAY received before 001.
+			// we appear "here"). Sent unconditionally when the pref is on — servers that
+			// don't understand AWAY before 001 simply ignore it (RFC 2812 allows AWAY at any
+			// time, but some strict IRCds may return ERR_NOTREGISTERED). The cap merely
+			// advertises *guaranteed* support; we err on the side of sending it regardless
+			// because the worst case is a harmless unknown-command error.
 			if (config.capPrefs.preAway && !config.initialAwayMessage.isNullOrBlank()) {
 				writeLine("AWAY :${config.initialAwayMessage}")
 			}
@@ -2385,10 +2438,20 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						// :inviter INVITE targetNick #channel
 						val from = msg.prefixNick() ?: continue
 						val targetNick = msg.params.getOrNull(0) ?: continue
-						// Only surface invites addressed to us
-						if (!nickEquals(targetNick, currentNick)) continue
 						val channel = msg.trailing ?: msg.params.getOrNull(1) ?: continue
-						send(IrcEvent.InviteReceived(from, channel, timeMs = serverTimeMs))
+						if (nickEquals(targetNick, currentNick)) {
+							// This invite is for us.
+							send(IrcEvent.InviteReceived(from, channel, timeMs = serverTimeMs))
+						} else if (irc.hasCap("invite-notify")) {
+							// IRCv3 invite-notify: server broadcasts invites to others in shared channels.
+							// Surface as a status line in the channel buffer (and server buffer as fallback).
+							val bufTarget = if (isChannelName(channel)) channel else "*server*"
+							send(IrcEvent.ServerText(
+								"*** $from invited $targetNick to $channel",
+								code = "INVITE",
+								bufferName = bufTarget
+							))
+						}
 					}
 
 					// ERROR: fatal server message, always followed by connection close
@@ -2423,7 +2486,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 							from          = relayNick,
 							target        = target,
 							text          = body,
-							isPrivate     = !target.startsWith("#") && !target.startsWith("&"),
+							isPrivate     = !isChannelName(target),
 							isAction      = isAction,
 							timeMs        = serverTimeMs,
 							isHistory     = false,
@@ -2442,7 +2505,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						// draft/typing: +typing tag indicates composing status.
 						// Values: "active" (typing), "paused" (stopped briefly), "done" (cleared/sent).
 						val typingState = msg.tags["+typing"] ?: msg.tags["typing"]
-						if (typingState != null && irc.hasCap("draft/typing")) {
+						if (typingState != null && (irc.hasCap("draft/typing") || irc.hasCap("typing"))) {
 							send(IrcEvent.TypingStatus(
 								target = target,
 								nick = fromNick,
@@ -2451,14 +2514,16 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 							))
 						}
 						// draft/message-reactions: +draft/react tag carries the emoji.
-						// Format: TAGMSG <target> with tags +draft/react=<emoji> [msgid=<id>]
+						// Format: TAGMSG <target> with tags +draft/react=<emoji> +draft/reply=<msgid-of-original>
 						// Removal uses +draft/react-removed=<emoji>.
 						val reactEmoji = msg.tags["+draft/react"]
 						val reactRemoved = msg.tags["+draft/react-removed"]
 						if ((reactEmoji != null || reactRemoved != null) && irc.hasCap("draft/message-reactions")) {
 							val emoji = reactEmoji ?: reactRemoved!!
 							val adding = reactEmoji != null
-							val replyMsgId = msg.tags["msgid"] ?: msg.tags["+draft/reply"]
+							// The target message's msgid is in "+draft/reply" (or "+reply" for the
+							// graduated tag name), NOT in "msgid" which is the TAGMSG's own ID.
+							val replyMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
 							send(IrcEvent.MessageReaction(
 								fromNick = fromNick,
 								target = target,

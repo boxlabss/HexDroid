@@ -1759,7 +1759,7 @@ fun startAddNetwork() {
         if (currentKey.isBlank()) return
         val (netId, bufferName) = splitKey(currentKey)
         val rt = runtimes[netId] ?: return
-        if (!rt.client.hasCap("draft/typing")) return
+        if (!rt.client.hasCap("draft/typing") && !rt.client.hasCap("typing")) return
         if (bufferName == "*server*") return
 
         typingDoneJob?.cancel()
@@ -3696,6 +3696,13 @@ if (affectLive) {
                 // Already handled as a ChannelModeLine via the MODE command handler in IrcCore.
                 // This event exists for UI components that want a structured mode-change signal.
                 Unit
+            }
+
+            is IrcEvent.OpenQueryBuffer -> {
+                // /query <nick> - open a PM buffer and switch to it.
+                val key = bufKey(netId, ev.nick)
+                ensureBuffer(key)
+                openBuffer(key)
             }
 
             else -> Unit

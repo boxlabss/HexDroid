@@ -9,7 +9,7 @@ android {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
+        versionCode = 11
         versionName = "1.5.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

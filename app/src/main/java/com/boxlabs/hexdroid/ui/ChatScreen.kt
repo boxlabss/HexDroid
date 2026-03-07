@@ -76,6 +76,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -125,7 +126,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -133,7 +134,6 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.ripple
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -144,7 +144,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -159,7 +158,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -180,9 +180,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
@@ -297,6 +294,15 @@ private val IRC_COMMANDS = listOf(
     // Misc
     IrcCommand("raw",        "/raw <command>",                 "Send a raw IRC line to the server"),
     IrcCommand("sysinfo",    "/sysinfo",                       "Post device system info to chat"),
+
+    // Query / services shorthands
+    IrcCommand("query",      "/query <nick> [message]",        "Open a PM buffer with a user"),
+    IrcCommand("ns",         "/ns <command>",                  "Alias for /msg NickServ"),
+    IrcCommand("cs",         "/cs <command>",                  "Alias for /msg ChanServ"),
+    IrcCommand("as",         "/as <command>",                  "Alias for /msg AuthServ"),
+    IrcCommand("hs",         "/hs <command>",                  "Alias for /msg HostServ"),
+    IrcCommand("ms",         "/ms <command>",                  "Alias for /msg MemoServ"),
+    IrcCommand("bs",         "/bs <command>",                  "Alias for /msg BotServ"),
 )
 
 /**
@@ -581,6 +587,7 @@ private fun SidebarDragHandle(
 /**
  * Horizontal divider shown above the first unread message in a buffer.
  * Driven by the server's draft/read-marker or soju.im/read timestamp.
+ * Also integrated into the app.
  */
 @Composable
 private fun UnreadSeparator() {
@@ -650,7 +657,7 @@ fun ChatScreen(
     tourTarget: TourTarget? = null,
 ) {
     val scope = rememberCoroutineScope()
-    val clipboardManager = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val cfg = LocalConfiguration.current
     val isWide = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE || cfg.screenWidthDp >= 840
 
@@ -808,7 +815,7 @@ fun ChatScreen(
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var inputHasFocus by remember { mutableStateOf(false) }
 
-    // Per-buffer input history. -1 = fresh message; inputSnapshot holds the draft for restoring.
+
     val inputHistory = remember(selected) { mutableListOf<String>() }
     var historyIndex by remember(selected) { mutableStateOf(-1) }
     var inputSnapshot by remember(selected) { mutableStateOf("") }
@@ -822,10 +829,6 @@ fun ChatScreen(
     var reverseActive by remember { mutableStateOf(false) }
 
 
-    // Tracks IME bottom inset (keyboard) in pixels so we can avoid disabling tail-follow during IME resize.
-    val imeBottomPx = with(LocalDensity.current) {
-        WindowInsets.ime.asPaddingValues().calculateBottomPadding().toPx().toInt()
-    }
     val timeFmt = remember(state.settings.timestampFormat) {
         try {
             SimpleDateFormat(state.settings.timestampFormat, Locale.getDefault())
@@ -1120,7 +1123,7 @@ fun ChatScreen(
 										if (rootNetId != null) {
 											SidebarDragHandle(
 												onStart = {
-													val id = rootNetId ?: return@SidebarDragHandle
+													val id = rootNetId
 													val idx = netOrder.indexOf(id)
 													if (idx < 0) return@SidebarDragHandle
 													dragNetId       = id
@@ -1232,7 +1235,7 @@ fun ChatScreen(
 									if (isRoot) {
 										SidebarDragHandle(
 											onStart = {
-												val id = rootNetId ?: return@SidebarDragHandle
+												val id = rootNetId
 												val idx = netOrder.indexOf(id)
 												if (idx < 0) return@SidebarDragHandle
 												dragNetId       = id
@@ -1311,17 +1314,24 @@ fun ChatScreen(
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun NicklistContent(mod: Modifier = Modifier) {
-        Column(mod.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "${nicklist.size} users",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
+    fun NicklistContent(mod: Modifier = Modifier, nickPaneDp: Dp = Dp.Unspecified) {
+        // Font size is simply paneWidth / 9, clamped to 10–18 sp.
+        // This gives a strong, proportional change across the full drag range:
+        //   70 dp  → 10 sp (portrait narrow)
+        //  130 dp  → 14 sp (landscape min)
+        //  180 dp  → 16 sp
+        //  280 dp  → 18 sp (landscape max)
+        val nickFontSp = if (nickPaneDp == Dp.Unspecified) 14f
+                         else (nickPaneDp.value / 9f).coerceIn(10f, 18f)
+        Column(mod.padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            Text(
+                text = "${nicklist.size} users",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
             HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
                 items(nicklist) { n ->
@@ -1329,95 +1339,52 @@ fun ChatScreen(
                     Text(
                         n,
                         color = if (state.settings.colorizeNicks) nickColor(cleaned) else Color.Unspecified,
+                        fontSize = nickFontSp.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { openNickActions(n) }
-                            .padding(vertical = 5.dp)
+                            .padding(vertical = 2.dp)
                     )
                 }
             }
         }
     }
 
-    val listState = rememberLazyListState()
+    // Fresh listState per buffer — each buffer independently remembers its scroll position.
+    val listState = remember(selected) { LazyListState() }
 
-
-    var resumeTick by remember { mutableIntStateOf(0) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val obs = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
-        }
-        lifecycleOwner.lifecycle.addObserver(obs)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
-    }
-
-    var isTouchingMessages by remember(selected) { mutableStateOf(false) }
-
+    // With reverseLayout = true, index 0 = newest message = visual bottom.
+    // A fresh LazyListState starts at index 0 so keyboard open/close is handled automatically.
     val isAtBottom by remember(selected) {
-        derivedStateOf { !listState.canScrollForward }
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        }
     }
 
-    var followTail by remember(selected) { mutableStateOf(true) }
-
-    // Track whether the IME is currently animating so we don't flip followTail mid-animation.
-    var imeAnimating by remember(selected) { mutableStateOf(false) }
-    LaunchedEffect(selected, imeBottomPx) {
-        imeAnimating = true
-        // Give the keyboard animation time to settle before re-evaluating isAtBottom.
-        delay(350)
-        imeAnimating = false
-    }
-
-    // Stop following when the user manually scrolls up; resume when they reach the bottom.
-    // Never flip followTail while the keyboard is animating or the user is touching the list.
+    // On buffer switch: land at the unread separator near the top of the viewport,
+    // or snap to newest if there are no unreads.
+    // In reverseLayout, scrollToItem(n, Int.MAX_VALUE) pushes item n to the top of the viewport.
     LaunchedEffect(selected) {
-        snapshotFlow { isAtBottom }
-            .collect { atBottom ->
-                if (!isTouchingMessages && !listState.isScrollInProgress && !imeAnimating) {
-                    followTail = atBottom
-                }
-            }
+        if (firstUnreadIndex >= 0 && messages.isNotEmpty()) {
+            val reversedIdx = messages.size - 1 - firstUnreadIndex
+            listState.scrollToItem(reversedIdx, Int.MAX_VALUE)
+        } else {
+            listState.scrollToItem(0)
+        }
     }
 
-    // Disable tail-follow immediately when the user touches and scrolls up.
-    LaunchedEffect(selected) {
-        snapshotFlow { isTouchingMessages to isAtBottom }
-            .collect { (touching, atBottom) ->
-                if (touching && !atBottom) followTail = false
-            }
-    }
-
+    // Always scroll to newest message when one arrives.
     val lastMsgId = messages.lastOrNull()?.id
-
-    // Scroll to bottom when a new message arrives and we are following the tail.
-    LaunchedEffect(selected, lastMsgId, messages.size) {
-        if (lastMsgId == null) return@LaunchedEffect
-        if (followTail && !isTouchingMessages) {
-            runCatching { listState.scrollToItem(messages.lastIndex) }
-        }
+    LaunchedEffect(selected, lastMsgId) {
+        listState.scrollToItem(0)
     }
 
-    // Scroll to bottom on resume (e.g. app comes back to foreground).
-    LaunchedEffect(resumeTick, selected) {
-        if (messages.isNotEmpty() && followTail) {
-            runCatching { listState.scrollToItem(messages.size - 1) }
-        }
-    }
+    val reversedMessages = remember(messages) { messages.reversed() }
+    val reversedUnreadIndex = if (firstUnreadIndex >= 0) messages.size - 1 - firstUnreadIndex else -1
 
-    // When the keyboard opens, scroll to bottom once the animation settles.
-    // Keyed only on inputHasFocus (stable bool) not imeBottomPx (changes every animation frame).
-    LaunchedEffect(inputHasFocus, selected) {
-        if (inputHasFocus && messages.isNotEmpty()) {
-            if (followTail || isAtBottom) {
-                followTail = true
-                // Wait for keyboard animation to finish before scrolling.
-                delay(350)
-                runCatching { listState.scrollToItem(messages.lastIndex) }
-            }
-        }
-    }
-
+    val density = LocalDensity.current
 
     val uriHandler = LocalUriHandler.current
     val (baseWeight, baseStyle) = when (state.settings.chatFontStyle) {
@@ -1743,33 +1710,36 @@ fun ChatScreen(
                     .weight(1f)
                     .fillMaxWidth()
             ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                // Compute a single shared font size for all MOTD lines so that every line
+                // renders at the same size. ASCII art depends on all columns being equal-width —
+                // if each line were sized independently, short lines would be large and long
+                // lines small, breaking the grid alignment.
+                val motdAvailableWidthPx = constraints.maxWidth.toFloat() - with(LocalDensity.current) { 16.dp.toPx() } // subtract 8.dp padding each side
+                val motdStyle = chatTextStyle.copy(lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified)
+                val motdLines = remember(messages, selBufName) {
+                    if (selBufName == "*server*") messages.filter { it.isMotd }.map { it.text }
+                    else emptyList()
+                }
+                val motdFontSizeSp = rememberMotdFontSizeSp(
+                    motdLines = motdLines,
+                    style = motdStyle,
+                    availableWidthPx = motdAvailableWidthPx,
+                )
+
             SelectionContainer(
                 modifier = Modifier
-                    .fillMaxSize()
                     .padding(8.dp)
+                    .fillMaxSize()
             ) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(selected) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                isTouchingMessages = true
-                                waitForUpOrCancellation()
-                                isTouchingMessages = false
-                                // User scrolled up - disable tail-follow.
-                                if (!isAtBottom) {
-                                    followTail = false
-                                }
-                            }
-                        },
-
-                    contentPadding = PaddingValues(vertical = 8.dp)
+                    reverseLayout = true,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp)
                 ) {
-                    itemsIndexed(items = messages, key = { _, m -> m.id }) { msgIndex, m ->
-                        // Unread separator: shown above the first unread message.
-                        if (msgIndex == firstUnreadIndex) {
+                    itemsIndexed(items = reversedMessages, key = { _, m -> m.id }) { msgIndex, m ->
+                        if (msgIndex == reversedUnreadIndex) {
                             UnreadSeparator()
                         }
                         val ts =
@@ -1791,18 +1761,19 @@ fun ChatScreen(
                                 .combinedClickable(
                                     onClick = {},
                                     onLongClick = {
-                                        clipboardManager.setText(AnnotatedString(plainLine))
+                                        scope.launch { clipboard.setClipEntry(android.content.ClipData.newPlainText("", plainLine).toClipEntry()) }
                                     }
                                 )
                         ) {
                         if (fromNick == null) {
                             if (m.isMotd && selBufName == "*server*") {
-                                // MOTD lines: auto-shrink font so they always fit on one line,
-                                // preserving ASCII art that depends on monospace column alignment.
-                                // lineHeight = fontSize so there's no extra internal leading.
-                                AutoSizedMotdLine(
+                                // MOTD lines: render at the shared font size computed from the
+                                // widest line, so all lines use the same size and ASCII art
+                                // column alignment is preserved.
+                                MotdLine(
                                     text = m.text,  // timestamps omitted - would skew auto-sizing and look odd
-                                    style = chatTextStyle.copy(lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified),
+                                    fontSizeSp = motdFontSizeSp,
+                                    style = motdStyle,
                                     mircColorsEnabled = state.settings.mircColorsEnabled,
                                     linkStyle = linkStyle,
                                     onAnnotationClick = onAnnotationClick,
@@ -1875,9 +1846,10 @@ fun ChatScreen(
                     }
                 }
             }
+            } // end BoxWithConstraints
 
             // Scroll-to-bottom button: shown when user has scrolled up (not at tail).
-            // Plain if-visibility avoids AnimatedVisibility scope-receiver ambiguity in BoxScope.
+            // Must be a direct child of the outer Box to use .align(Alignment.BottomEnd).
             if (!isAtBottom) {
                 Surface(
                     shape = CircleShape,
@@ -1892,12 +1864,8 @@ fun ChatScreen(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = ripple(bounded = false)
                         ) {
-                            followTail = true
                             onMarkRead(selected)
-                            scope.launch {
-                                if (messages.isNotEmpty())
-                                    listState.animateScrollToItem(messages.lastIndex)
-                            }
+                            scope.launch { listState.scrollToItem(0) }
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -1915,10 +1883,6 @@ fun ChatScreen(
     }
 
 	val bottomBar: @Composable () -> Unit = {
-        val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
-        val bottomInset = maxOf(navBottom, imeBottom)
-
         val cs = MaterialTheme.colorScheme
         val bottomBarBrush = remember(cs) {
             Brush.verticalGradient(
@@ -1949,7 +1913,11 @@ fun ChatScreen(
             if (token.isNotEmpty() && !token.contains(' ')) token else null
         }
 
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .imePadding()
+        ) {
             // Nick hints - shown when user types @prefix in a channel; takes priority over command hints
             if (nickQuery != null && cmdQuery == null) {
                 NickHints(
@@ -1975,25 +1943,6 @@ fun ChatScreen(
                 )
             }
 
-        // draft/typing: show who is currently typing, if any.
-        if (typingNicks.isNotEmpty()) {
-            val typingText = when (typingNicks.size) {
-                1 -> "${typingNicks.first()} is typing…"
-                2 -> {
-                    val (a, b) = typingNicks.toList()
-                    "$a and $b are typing…"
-                }
-                else -> "Several people are typing…"
-            }
-            Text(
-                text = typingText,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 2.dp)
-            )
-        }
-
         Surface(
             tonalElevation = 2.dp,
             color = Color.Transparent,
@@ -2005,8 +1954,7 @@ fun ChatScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-                    .padding(bottom = bottomInset),
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2092,9 +2040,21 @@ fun ChatScreen(
 							visualTransformation = VisualTransformation.None,
 							interactionSource = interactionSource,
 							placeholder = {
+								val placeholderText = when {
+									typingNicks.isEmpty() -> "Message"
+									typingNicks.size == 1 -> "${typingNicks.first()} is typing…"
+									typingNicks.size == 2 -> {
+										val (a, b) = typingNicks.toList()
+										"$a and $b are typing…"
+									}
+									else -> "Several people are typing…"
+								}
 								Text(
-									text = "Message",
-									color = MaterialTheme.colorScheme.onSurfaceVariant,
+									text = placeholderText,
+									color = if (typingNicks.isEmpty())
+										MaterialTheme.colorScheme.onSurfaceVariant
+									else
+										MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
 									style = inputTextStyle
 								)
 							},
@@ -2259,9 +2219,10 @@ fun ChatScreen(
                         )
                     }
 
-                    NicklistContent(Modifier
-                        .width(nickPaneW)
-                        .fillMaxHeight())
+                    NicklistContent(
+                        mod = Modifier.width(nickPaneW).fillMaxHeight(),
+                        nickPaneDp = nickPaneW
+                    )
                 }
             } else {
                 MessagesPane(Modifier
@@ -2397,9 +2358,10 @@ fun ChatScreen(
                         }
                     )
                     Surface(tonalElevation = 1.dp) {
-                        NicklistContent(Modifier
-                            .width(nickPaneW)
-                            .fillMaxHeight())
+                        NicklistContent(
+                            mod = Modifier.width(nickPaneW).fillMaxHeight(),
+                            nickPaneDp = nickPaneW
+                        )
                     }
                 }
             }
@@ -2415,6 +2377,7 @@ fun ChatScreen(
             ),
             topBar = topBar,
             bottomBar = bottomBar,
+            contentWindowInsets = WindowInsets(0),
             content = scaffoldContent,
         )
     }
@@ -3296,7 +3259,7 @@ fun ChatScreen(
                 val noInvexSupportStr = stringResource(R.string.chat_no_invex_support)
 
 
-                TabRow(selectedTabIndex = chanListTab) {
+                PrimaryTabRow(selectedTabIndex = chanListTab) {
                     Tab(
                         selected = chanListTab == 0,
                         onClick = { chanListTab = 0 }
@@ -4045,70 +4008,81 @@ private fun IrcLinkifiedText(
 }
 
 /**
- * Renders a MOTD line (IRC 372) using the largest font size that fits the text in a
- * single line within the available width. Falls back to [minFontSp] if still too wide.
+ * Computes the single font size (in sp) that makes the widest MOTD line fit within
+ * [availableWidthPx] at the given [style]. Every MOTD line must be rendered at this
+ * same size so that monospace ASCII art columns stay aligned.
  *
- * Strategy: binary search between [minFontSp] and the style's natural size, using
- * TextMeasurer to check whether the text fits in the available pixel width at each size.
- * This avoids recomposition loops — the size is computed once in the measure phase.
+ * Returns [style]'s natural size when all lines already fit, or [minFontSp] as a floor.
  */
 @Composable
-private fun AutoSizedMotdLine(
-    text: String,
+private fun rememberMotdFontSizeSp(
+    motdLines: List<String>,
     style: androidx.compose.ui.text.TextStyle,
-    mircColorsEnabled: Boolean,
-    linkStyle: SpanStyle,
-    onAnnotationClick: (String, String) -> Unit,
+    availableWidthPx: Float,
     minFontSp: Float = 6f,
-) {
+): Float {
     val textMeasurer = rememberTextMeasurer()
-    // Strip IRC formatting for the size measurement pass (formatting chars have no width).
-    val plainText = remember(text) { stripIrcFormatting(text) }
+    val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
 
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val availableWidthPx = constraints.maxWidth.toFloat()
-        val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
+    // Strip IRC formatting from every line for measurement (formatting chars have no width).
+    val plainLines = remember(motdLines) { motdLines.map { stripIrcFormatting(it) } }
 
-        // Binary-search for the largest font size (in sp) where the plain text fits
-        // in one line within availableWidthPx.
-        val fittedSp = remember(plainText, availableWidthPx, naturalSizeSp) {
-            if (availableWidthPx <= 0f) return@remember naturalSizeSp
-            // Quick check: does it fit at the natural size?
-            val naturalMeasure = textMeasurer.measure(
-                text = plainText,
+    return remember(plainLines, availableWidthPx, naturalSizeSp) {
+        if (availableWidthPx <= 0f || plainLines.isEmpty()) return@remember naturalSizeSp
+
+        // Find the widest line at the natural font size.
+        val widestAtNatural = plainLines.maxOf { line ->
+            textMeasurer.measure(
+                text = line,
                 style = style.copy(fontSize = naturalSizeSp.sp),
                 constraints = Constraints(maxWidth = Int.MAX_VALUE),
                 maxLines = 1,
                 softWrap = false,
-            )
-            if (naturalMeasure.size.width <= availableWidthPx) {
-                return@remember naturalSizeSp  // No shrinking needed.
-            }
-            // Binary search between minFontSp and naturalSizeSp.
-            var lo = minFontSp
-            var hi = naturalSizeSp
-            repeat(8) {  // 8 iterations -> ~0.4% precision, plenty for font sizes
-                val mid = (lo + hi) / 2f
-                val m = textMeasurer.measure(
-                    text = plainText,
+            ).size.width
+        }
+        if (widestAtNatural <= availableWidthPx) return@remember naturalSizeSp
+
+        // Binary-search a single shared size that fits even the widest line.
+        var lo = minFontSp
+        var hi = naturalSizeSp
+        repeat(8) {
+            val mid = (lo + hi) / 2f
+            val widest = plainLines.maxOf { line ->
+                textMeasurer.measure(
+                    text = line,
                     style = style.copy(fontSize = mid.sp),
                     constraints = Constraints(maxWidth = Int.MAX_VALUE),
                     maxLines = 1,
                     softWrap = false,
-                )
-                if (m.size.width <= availableWidthPx) lo = mid else hi = mid
+                ).size.width
             }
-            lo
+            if (widest <= availableWidthPx) lo = mid else hi = mid
         }
-
-        IrcLinkifiedText(
-            text = text,
-            mircColorsEnabled = mircColorsEnabled,
-            linkStyle = linkStyle,
-            onAnnotationClick = onAnnotationClick,
-            style = style.copy(fontSize = fittedSp.sp),
-            maxLines = 1,
-            overflow = TextOverflow.Clip,
-        )
+        lo
     }
+}
+
+/**
+ * Renders a single MOTD line at [fontSizeSp]. The caller is responsible for computing
+ * a shared font size across all MOTD lines (via [rememberMotdFontSizeSp]) so that
+ * monospace ASCII art columns remain aligned across lines of different lengths.
+ */
+@Composable
+private fun MotdLine(
+    text: String,
+    fontSizeSp: Float,
+    style: androidx.compose.ui.text.TextStyle,
+    mircColorsEnabled: Boolean,
+    linkStyle: SpanStyle,
+    onAnnotationClick: (String, String) -> Unit,
+) {
+    IrcLinkifiedText(
+        text = text,
+        mircColorsEnabled = mircColorsEnabled,
+        linkStyle = linkStyle,
+        onAnnotationClick = onAnnotationClick,
+        style = style.copy(fontSize = fontSizeSp.sp),
+        maxLines = 1,
+        overflow = TextOverflow.Clip,
+    )
 }
