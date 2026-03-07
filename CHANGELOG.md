@@ -11,6 +11,7 @@ All notable changes to HexDroid are documented here.
 - **Better colour code support** - Added more control codes and improved the font style picker
 - **DCC Chat notifications** - Incoming DCC CHAT offers show a notification that deep-links directly to the `DCCCHAT:peer` buffer, with an "Open Transfers" action button for accept/reject.
 - **Transfers screen DCC chat cards** - Pending offers show a badge count, stand-out colouring, and an "Accept & Open" one-tap button.
+- Added readline marker
 
 ### IRCv3
 - **caps** - added several, including typing indicators (disabled by default)
