@@ -488,7 +488,7 @@ fun NetworkEditScreen(
                                 readOnly = true,
                                 label = { Text(stringResource(R.string.network_sasl_mechanism_label)) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = mechExpanded) },
-                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                             )
                             ExposedDropdownMenu(mechExpanded, { mechExpanded = false }) {
                                 SaslMechanism.entries.forEach { mech ->
@@ -553,7 +553,7 @@ fun NetworkEditScreen(
                         val label = when (certFormat) {
                             ClientCertFormat.PEM_BUNDLE -> "PEM (.pem)"
                             ClientCertFormat.CERT_AND_KEY -> "CRT + KEY (.crt/.key)"
-                            ClientCertFormat.PKCS12 -> "PKCS#12 (.p12)"
+                            ClientCertFormat.PKCS12 -> "PKCS#12 (.p12/.pfx)"
                         }
                         OutlinedTextField(
                             value = label,
@@ -561,7 +561,7 @@ fun NetworkEditScreen(
                             readOnly = true,
                             label = { Text(stringResource(R.string.network_cert_format_label)) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = certFormatExpanded) },
-                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                         )
                         ExposedDropdownMenu(
                             expanded = certFormatExpanded,
@@ -579,6 +579,14 @@ fun NetworkEditScreen(
                                 text = { Text(stringResource(R.string.network_cert_format_crt_key)) },
                                 onClick = {
                                     certFormat = ClientCertFormat.CERT_AND_KEY
+                                    clearPendingCertSelection()
+                                    certFormatExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.network_cert_format_p12)) },
+                                onClick = {
+                                    certFormat = ClientCertFormat.PKCS12
                                     clearPendingCertSelection()
                                     certFormatExpanded = false
                                 }
@@ -618,7 +626,27 @@ fun NetworkEditScreen(
                             if (certName != null) Text(certName, style = MaterialTheme.typography.bodySmall)
                             if (keyName != null) Text(keyName, style = MaterialTheme.typography.bodySmall)
                         }
-                        ClientCertFormat.PKCS12 -> Unit
+                        ClientCertFormat.PKCS12 -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { pickPem.launch(arrayOf("*/*")) }) {
+                                    Text(if (pendingPemUri == null) stringResource(R.string.network_cert_choose_p12) else stringResource(R.string.network_cert_replace_p12))
+                                }
+                                OutlinedButton(
+                                    enabled = pendingPemUri != null,
+                                    onClick = {
+                                        pendingPemUri = null
+                                        pendingPemLabel = null
+                                        pendingKeyPassword = ""
+                                        clientCertUiError = null
+                                    }
+                                ) { Text(stringResource(R.string.network_clear)) }
+                            }
+                            if (pendingPemLabel != null) Text(
+                                stringResource(R.string.network_cert_label, pendingPemLabel!!),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(stringResource(R.string.network_cert_p12_hint), style = MaterialTheme.typography.bodySmall)
+                        }
                     }
 
                     OutlinedTextField(
@@ -711,7 +739,7 @@ fun NetworkEditScreen(
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                         label = { Text(stringResource(R.string.network_encoding_label)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = encodingExpanded) }
                     )

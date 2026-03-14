@@ -49,3 +49,12 @@ val MatrixBackground     = Color(0xFF000000)   // true black - optimal on OLED
 val MatrixSurface        = Color(0xFF030D03)   // near-black with faint green tint
 val MatrixSurfaceVariant = Color(0xFF0A1A0A)   // slightly lighter surface for cards
 val MatrixOutline        = Color(0xFF0F2B0F)   // dark green border
+
+// Terminal / amber phosphor theme palette
+val TerminalAmber          = Color(0xFFFFB300)   // warm amber phosphor glow
+val TerminalAmberDim       = Color(0xFFB37A00)   // dimmer amber for secondary elements
+val TerminalAmberMuted     = Color(0xFF7A5200)   // subtle amber for outlines / containers
+val TerminalBackground     = Color(0xFF000000)   // true black - OLED optimal
+val TerminalSurface        = Color(0xFF0D0900)   // near-black with faint amber tint
+val TerminalSurfaceVariant = Color(0xFF1A1100)   // slightly lighter surface for sidebars / cards
+val TerminalOutline        = Color(0xFF2B1E00)   // dark amber border

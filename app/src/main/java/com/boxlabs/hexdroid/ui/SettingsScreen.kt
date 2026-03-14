@@ -381,7 +381,29 @@ fun SettingsScreen(
             }
 
             item { HorizontalDivider() }
+            item { SectionTitle(stringResource(R.string.section_media_previews)) }
 
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_image_previews), s.imagePreviewsEnabled) {
+                        onUpdate { copy(imagePreviewsEnabled = !imagePreviewsEnabled) }
+                    }
+                    Text(stringResource(R.string.setting_image_previews_desc), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                }
+            }
+
+            if (s.imagePreviewsEnabled) {
+                item {
+                    Column(Modifier.fillMaxWidth()) {
+                        SettingToggle(stringResource(R.string.setting_previews_wifi_only), s.imagePreviewsWifiOnly) {
+                            onUpdate { copy(imagePreviewsWifiOnly = !imagePreviewsWifiOnly) }
+                        }
+                        Text(stringResource(R.string.setting_previews_wifi_only_desc), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                    }
+                }
+            }
+
+            item { HorizontalDivider() }
             item { SectionTitle(stringResource(R.string.section_ui)) }
             item {
                 SettingToggle(stringResource(R.string.setting_colorise_nicks), s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
@@ -389,6 +411,10 @@ fun SettingsScreen(
 
             item {
                 SettingToggle(stringResource(R.string.setting_mirc_colours), s.mircColorsEnabled) { onUpdate { copy(mircColorsEnabled = !mircColorsEnabled) } }
+            }
+
+            item {
+                SettingToggle(stringResource(R.string.setting_ansi_colours), s.ansiColorsEnabled) { onUpdate { copy(ansiColorsEnabled = !ansiColorsEnabled) } }
             }
 
             item { SettingToggle(stringResource(R.string.setting_show_topic_bar), s.showTopicBar) { onUpdate { copy(showTopicBar = !showTopicBar) } } }
@@ -898,6 +924,7 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
         ThemeMode.DARK -> stringResource(R.string.theme_dark)
         ThemeMode.LIGHT -> stringResource(R.string.theme_light)
         ThemeMode.MATRIX -> stringResource(R.string.theme_matrix)
+        ThemeMode.TERMINAL -> stringResource(R.string.theme_terminal)
         ThemeMode.SYSTEM -> stringResource(R.string.theme_system_default)
     }
 
@@ -915,6 +942,7 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
             DropdownMenuItem(text = { Text(stringResource(R.string.theme_dark)) }, onClick = { onPick(ThemeMode.DARK); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.theme_light)) }, onClick = { onPick(ThemeMode.LIGHT); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.settings_matrix_theme)) }, onClick = { onPick(ThemeMode.MATRIX); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.theme_terminal)) }, onClick = { onPick(ThemeMode.TERMINAL); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.settings_system_default)) }, onClick = { onPick(ThemeMode.SYSTEM); expanded = false })
         }
     }

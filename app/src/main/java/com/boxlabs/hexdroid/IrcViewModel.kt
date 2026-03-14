@@ -17,17 +17,17 @@
 */
 
 package com.boxlabs.hexdroid
-import android.opengl.EGL14
-import android.opengl.EGLConfig
-import android.opengl.GLES20
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.os.StatFs
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.GLES20
 import android.os.Build
+import android.os.StatFs
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -38,40 +38,40 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.boxlabs.hexdroid.connection.ConnectionConstants
-import com.boxlabs.hexdroid.data.ChannelListEntry
 import com.boxlabs.hexdroid.data.AutoJoinChannel
+import com.boxlabs.hexdroid.data.ChannelListEntry
 import com.boxlabs.hexdroid.data.NetworkProfile
 import com.boxlabs.hexdroid.data.SettingsRepository
 import com.boxlabs.hexdroid.data.ThemeMode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.File
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.io.IOException
 import java.net.Socket
-import java.util.Locale
-import java.util.concurrent.atomic.AtomicLong
+import java.text.SimpleDateFormat
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.LocalDateTime
-import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE }
@@ -189,6 +189,7 @@ data class UiSettings(
 
     val introTourSeenVersion: Int = 0,
     val mircColorsEnabled: Boolean = true,
+    val ansiColorsEnabled: Boolean = true,
 
     val welcomeCompleted: Boolean = false,
     val appLanguage: String? = null,
@@ -199,6 +200,11 @@ data class UiSettings(
     val sendTypingIndicator: Boolean = false,
     /** Show typing indicators from others. Independent of sendTypingIndicator. */
     val receiveTypingIndicator: Boolean = true,
+
+    /** Show inline image and YouTube thumbnail previews in chat. */
+    val imagePreviewsEnabled: Boolean = false,
+    /** When true, only load previews on Wi-Fi to save mobile data. */
+    val imagePreviewsWifiOnly: Boolean = true,
 )
 
 data class NetConnState(
@@ -1452,7 +1458,11 @@ fun startAddNetwork() {
         }
 		
         // If the collector exits without emitting Disconnected, clean up and maybe reconnect.
-        rt.job?.invokeOnCompletion {
+        // Guard: if the job was *cancelled* (intentional teardown — force-close, manual
+        // disconnect, reconnect replacing this runtime) we must not treat it as an unexpected
+        // drop. CancellationException means someone called job.cancel() on purpose.
+        rt.job?.invokeOnCompletion { cause ->
+            if (cause is kotlinx.coroutines.CancellationException) return@invokeOnCompletion
             viewModelScope.launch {
                 if (runtimes[netId]?.client !== thisClient) return@launch
 
@@ -1655,48 +1665,64 @@ fun startAddNetwork() {
      * (E.g. if a lifecycle event caused UI state to reset while the socket is still alive.)
      * Also triggers reconnection for networks that should be connected but aren't.
      */
+    /**
+     * When the app returns to the foreground, re-check the socket state so the UI doesn't drift.
+     * (E.g. if a lifecycle event caused UI state to reset while the socket is still alive.)
+     * Also triggers reconnection for networks that should be connected but went down while backgrounded.
+     *
+     * Important: we skip any network that is actively connecting or already has a reconnect job
+     * queued — isConnectedNow() can transiently return false during the handshake window, and
+     * interfering with an in-flight attempt would cause a duplicate reconnect race.
+     */
     fun resyncConnectionsOnResume() {
         val st = _state.value
         var changed = false
         val newMap = st.connections.toMutableMap()
         val networksToReconnect = mutableListOf<String>()
-        
+
         for (net in st.networks) {
             val rt = runtimes[net.id]
-            val actual = rt?.client?.isConnectedNow() == true
             val cur = newMap[net.id] ?: NetConnState()
-            // If we're actually connected, ensure state reflects it.
+
+            // Don't touch anything that is already mid-connect or has a reconnect scheduled —
+            // isConnectedNow() is unreliable during the handshake and we'd create a double-reconnect.
+            if (cur.connecting) continue
+            if (autoReconnectJobs.containsKey(net.id)) continue
+
+            val actual = rt?.client?.isConnectedNow() == true
+
+            // Socket is alive but UI thinks we're disconnected — correct the UI.
             if (actual && !cur.connected) {
                 newMap[net.id] = cur.copy(connected = true, connecting = false, status = "Connected")
                 changed = true
             }
-            // If we're not actually connected but UI thinks we are, correct it.
+
+            // Socket is gone but UI thinks we're connected — correct the UI and maybe reconnect.
             if (!actual && cur.connected) {
                 newMap[net.id] = cur.copy(connected = false, connecting = false, status = "Disconnected")
                 changed = true
-                // If this network should be connected (in desiredConnected), queue reconnect
-                if (desiredConnected.contains(net.id)) {
-                    networksToReconnect.add(net.id)
-                }
+                if (desiredConnected.contains(net.id)) networksToReconnect.add(net.id)
             }
-            // Also check: if network should be connected but isn't and isn't connecting, reconnect
-            if (!actual && !cur.connecting && desiredConnected.contains(net.id)) {
-                if (!networksToReconnect.contains(net.id)) {
-                    networksToReconnect.add(net.id)
-                }
+
+            // Not connected, not connecting, but should be — reconnect.
+            if (!actual && !cur.connected && desiredConnected.contains(net.id)) {
+                if (!networksToReconnect.contains(net.id)) networksToReconnect.add(net.id)
             }
         }
+
         if (changed) {
             _state.value = syncActiveNetworkSummary(st.copy(connections = newMap))
         }
-        
-        // Trigger reconnection for networks that dropped while backgrounded
+
         if (networksToReconnect.isNotEmpty() && hasInternetConnection()) {
             viewModelScope.launch {
                 delay(500) // Brief delay to let UI settle
                 for (netId in networksToReconnect) {
-                    val serverKey = bufKey(netId, "*server*")
-                    append(serverKey, from = null, text = "*** Resuming connection…", doNotify = false)
+                    // Re-check: a reconnect job may have been scheduled in the meantime.
+                    if (autoReconnectJobs.containsKey(netId)) continue
+                    val cur = _state.value.connections[netId]
+                    if (cur?.connecting == true || cur?.connected == true) continue
+                    append(bufKey(netId, "*server*"), from = null, text = "*** Resuming connection…", doNotify = false)
                     connectNetwork(netId, force = true)
                 }
             }
@@ -1940,7 +1966,7 @@ fun startAddNetwork() {
                         }
 
                         // Track this request so we can print a clean consolidated list.
-                        rt?.namesRequests?.set(namesKeyFold(target), NamesRequest(replyBufferKey = currentKey))
+                        rt.namesRequests[namesKeyFold(target)] = NamesRequest(replyBufferKey = currentKey)
                         c.sendRaw("NAMES $target")
                         return@launch
                     }
@@ -2980,7 +3006,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                         // If the sender is in exactly one channel we're in, route there.
                         // This handles bots that send a notice to our nick on join (e.g. ChanServ
                         // greeting), which arrive before or just after the buffer is selected.
-                        val senderFold = casefoldText(netId, ev.from ?: "")
+                        val senderFold = casefoldText(netId, ev.from)
                         val sharedChannels = st.nicklists.entries
                             .filter { (key, list) ->
                                 key.startsWith("$netId::") &&
@@ -3610,7 +3636,10 @@ if (affectLive) {
                 // draft/typing: update per-buffer typing indicator set.
                 // Silently ignore if user has opted out of receiving typing indicators.
                 if (!_state.value.settings.receiveTypingIndicator) return
-                val targetKey = resolveBufferKey(netId, ev.target)
+                // For channel TAGMSGs, ev.target is the channel name → route there.
+                // For PM TAGMSGs, ev.target is our own nick; the buffer is keyed by the sender.
+                val bufferName = if (isChannelOnNet(netId, ev.target)) ev.target else ev.nick
+                val targetKey = resolveBufferKey(netId, bufferName)
                 _state.update { st ->
                     val buf = st.buffers[targetKey] ?: return@update st
                     val updatedTyping = when (ev.state) {
@@ -3704,8 +3733,6 @@ if (affectLive) {
                 ensureBuffer(key)
                 openBuffer(key)
             }
-
-            else -> Unit
         }
     }
 
@@ -4085,13 +4112,17 @@ if (affectLive) {
                 isAction -> "* $from $cleanText"
                 else -> "<$from> $cleanText"
             }
+            // Use the human-readable network name instead of the internal "*server*" sentinel.
+            val notifTitle = if (bufferName == "*server*") {
+                st.networks.firstOrNull { it.id == netId }?.name ?: "Server"
+            } else bufferName
             if (isPrivate && st.settings.notifyOnPrivateMessages) {
-                runCatching { notifier.notifyPm(netId, bufferName, preview) }
+                runCatching { notifier.notifyPm(netId, notifTitle, preview) }
                 if (st.settings.vibrateOnHighlight) {
                     runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                 }
             } else if (isHighlight && st.settings.notifyOnHighlights) {
-                runCatching { notifier.notifyHighlight(netId, bufferName, preview, st.settings.playSoundOnHighlight) }
+                runCatching { notifier.notifyHighlight(netId, notifTitle, preview, st.settings.playSoundOnHighlight) }
                 if (st.settings.vibrateOnHighlight) {
                     runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                 }
@@ -4784,7 +4815,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     )
                 }
 
-                suspend fun doPassiveSend(timeoutMs: Long = 8000L) {
+                suspend fun doPassiveSend(timeoutMs: Long = 120_000L) {
                     val token = Random.nextLong(1L, 0x7FFFFFFFL)
                     val def = CompletableDeferred<DccOffer>()
                     pendingPassiveDccSends[token] = PendingPassiveDccSend(target, offerName.substringAfterLast('/').substringAfterLast('\\'), fileSize, def)

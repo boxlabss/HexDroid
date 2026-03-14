@@ -21,6 +21,8 @@ package com.boxlabs.hexdroid
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import com.boxlabs.hexdroid.data.SettingsRepository
 
 /**
@@ -46,18 +48,44 @@ class HexDroidApp : Application() {
         super.onCreate()
         repo = SettingsRepository(applicationContext)
 
-        // Lightweight foreground/background detection without extra lifecycle dependencies
+        // Foreground/background detection via activity lifecycle callbacks.
+        //
+        // Two defensive measures for OEM devices (OnePlus/OxygenOS, OPPO, Xiaomi):
+        //
+        // 1. Floor `started` at 0. On some OEM ROMs, system overlays (app-lock auth screen,
+        //    notification shade, volume panel) inject onActivityStopped calls that aren't
+        //    matched by a prior onActivityStarted, causing `started` to go negative and
+        //    permanently locking `isForeground` to false for the session.
+        //
+        // 2. Debounce the isForeground > false transition by 500 ms. OEM overlays such as
+        //    volume controls and the quick-settings panel fire a rapid onStop / onStart pair
+        //    (often < 100 ms apart). Without the debounce, `isForeground` flips false during
+        //    that gap and any service-start attempt either races with startForeground() or is
+        //    skipped entirely. With debounce, transient blips are ignored.
+        //    OEM app-lock screens typically put the Activity in onPause (not onStop) while
+        //    the lock UI is showing, so they are unaffected by this debounce.
+        val mainHandler = Handler(Looper.getMainLooper())
+        val goBackgroundRunnable = Runnable {
+            AppVisibility.isForeground = false
+        }
+
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             private var started = 0
 
             override fun onActivityStarted(activity: Activity) {
-                started += 1
+                mainHandler.removeCallbacks(goBackgroundRunnable)
+                started = (started + 1).coerceAtLeast(1)
                 AppVisibility.isForeground = true
             }
 
             override fun onActivityStopped(activity: Activity) {
-                started -= 1
-                if (started <= 0) AppVisibility.isForeground = false
+                started = (started - 1).coerceAtLeast(0)
+                if (started <= 0) {
+                    // Debounce: don't flip to background immediately. OEM overlays can fire
+                    // a stop/start pair within milliseconds; we only go background if nothing
+                    // restarts the activity within the debounce window.
+                    mainHandler.postDelayed(goBackgroundRunnable, 500)
+                }
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit

@@ -135,6 +135,7 @@ import androidx.compose.material3.ripple
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -150,6 +151,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
@@ -184,6 +186,8 @@ import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.stripIrcFormatting
+import com.boxlabs.hexdroid.parseAnsiRuns
+import com.boxlabs.hexdroid.toSpanStyle as ansiToSpanStyle
 import com.boxlabs.hexdroid.ui.components.LagBar
 import com.boxlabs.hexdroid.ui.theme.fontFamilyForChoice
 import com.boxlabs.hexdroid.ui.tour.TourTarget
@@ -1202,7 +1206,7 @@ fun ChatScreen(
 								val lag = if (name == "*server*") lagInfoByNet[netId] else null
 								val rowMod = if (isRoot) {
 									Modifier.onGloballyPositioned { coords ->
-										val id = rootNetId ?: return@onGloballyPositioned
+										val id = rootNetId
 										slotHeights[id] = coords.size.height.toFloat()
 									}
 								} else Modifier
@@ -1355,34 +1359,50 @@ fun ChatScreen(
     // Fresh listState per buffer — each buffer independently remembers its scroll position.
     val listState = remember(selected) { LazyListState() }
 
-    // With reverseLayout = true, index 0 = newest message = visual bottom.
-    // A fresh LazyListState starts at index 0 so keyboard open/close is handled automatically.
+    // Track whether the user has deliberately scrolled up to read history.
+    // Reset to false on every buffer switch so new buffers start in auto-scroll mode.
+    // Set to true when the list is scrolling AND the user is the one driving it
+    // (isScrollInProgress catches both flings and active drags).
+    // We detect "scrolled away from bottom" by watching firstVisibleItemIndex: once it
+    // goes above 0 during a user-initiated scroll, we latch userScrolledUp = true.
+    // Pressing the scroll-to-bottom button resets it.
+    var userScrolledUp by remember(selected) { mutableStateOf(false) }
+
+    // isAtBottom is still needed to drive the scroll-to-bottom button visibility.
     val isAtBottom by remember(selected) {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
         }
     }
 
-    // On buffer switch: land at the unread separator near the top of the viewport,
-    // or snap to newest if there are no unreads.
-    // In reverseLayout, scrollToItem(n, Int.MAX_VALUE) pushes item n to the top of the viewport.
+    // Watch for user-driven scrolls away from the bottom.
     LaunchedEffect(selected) {
-        if (firstUnreadIndex >= 0 && messages.isNotEmpty()) {
-            val reversedIdx = messages.size - 1 - firstUnreadIndex
-            listState.scrollToItem(reversedIdx, Int.MAX_VALUE)
-        } else {
-            listState.scrollToItem(0)
-        }
+        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
+            .collect { (scrolling, idx) ->
+                if (scrolling && idx > 0) userScrolledUp = true
+                if (idx == 0) userScrolledUp = false  // back at bottom, re-enable auto-scroll
+            }
     }
 
-    // Always scroll to newest message when one arrives.
-    val lastMsgId = messages.lastOrNull()?.id
-    LaunchedEffect(selected, lastMsgId) {
+    // On buffer switch: always land at the newest message (visual bottom).
+    LaunchedEffect(selected) {
         listState.scrollToItem(0)
     }
 
+    // Auto-scroll to newest when a new message arrives, unless the user has scrolled up.
+    // baselineMsgId is captured at buffer-switch time so the first LaunchedEffect execution
+    // (same buffer, same lastMsgId) is always a no-op and never races with the switch above.
+    val lastMsgId = messages.lastOrNull()?.id
+    val baselineMsgId = remember(selected) { lastMsgId }
+    LaunchedEffect(selected, lastMsgId) {
+        if (lastMsgId != baselineMsgId && !userScrolledUp) listState.scrollToItem(0)
+    }
+
     val reversedMessages = remember(messages) { messages.reversed() }
-    val reversedUnreadIndex = if (firstUnreadIndex >= 0) messages.size - 1 - firstUnreadIndex else -1
+    // Only show the separator when the user has scrolled up to read history.
+    // At the bottom they can already see new messages, so rendering it there is just noise
+    // (and it always appears at the very bottom when there's only one new message).
+    val reversedUnreadIndex = if (firstUnreadIndex >= 0 && userScrolledUp) messages.size - 1 - firstUnreadIndex else -1
 
     val density = LocalDensity.current
 
@@ -1684,6 +1704,7 @@ fun ChatScreen(
                         IrcLinkifiedText(
                             text = topic,
                             mircColorsEnabled = state.settings.mircColorsEnabled,
+                            ansiColorsEnabled = state.settings.ansiColorsEnabled,
                             linkStyle = linkStyle,
                             onAnnotationClick = onAnnotationClick,
                             maxLines = if (topicExpanded) Int.MAX_VALUE else 2,
@@ -1755,6 +1776,9 @@ fun ChatScreen(
                             }
                         }
                         val fromNick = m.from
+                        // Column so the inline preview is always visually below the message text,
+                        // not detached as a sibling that reverseLayout can misplace.
+                        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1775,6 +1799,7 @@ fun ChatScreen(
                                     fontSizeSp = motdFontSizeSp,
                                     style = motdStyle,
                                     mircColorsEnabled = state.settings.mircColorsEnabled,
+                                    ansiColorsEnabled = state.settings.ansiColorsEnabled,
                                     linkStyle = linkStyle,
                                     onAnnotationClick = onAnnotationClick,
                                 )
@@ -1782,6 +1807,7 @@ fun ChatScreen(
                                 IrcLinkifiedText(
                                     text = ts + m.text,
                                     mircColorsEnabled = state.settings.mircColorsEnabled,
+                                    ansiColorsEnabled = state.settings.ansiColorsEnabled,
                                     linkStyle = linkStyle,
                                     onAnnotationClick = onAnnotationClick,
                                     style = chatTextStyle
@@ -1804,7 +1830,8 @@ fun ChatScreen(
                                 appendIrcStyledLinkified(
                                     m.text,
                                     linkStyle,
-                                    state.settings.mircColorsEnabled
+                                    state.settings.mircColorsEnabled,
+                                    state.settings.ansiColorsEnabled
                                 )
                             }
                             AnnotatedClickableText(
@@ -1829,7 +1856,8 @@ fun ChatScreen(
                                 appendIrcStyledLinkified(
                                     m.text,
                                     linkStyle,
-                                    state.settings.mircColorsEnabled
+                                    state.settings.mircColorsEnabled,
+                                    state.settings.ansiColorsEnabled
                                 )
                             }
                             AnnotatedClickableText(
@@ -1839,10 +1867,24 @@ fun ChatScreen(
                             )
                         }
                         } // end Box
+                        // Inline image / YouTube preview for URLs in this message.
+                        if (state.settings.imagePreviewsEnabled) {
+                            val msgUrls = remember(m.id) {
+                                urlRegex.findAll(m.text).map { it.value }.take(3).toList()
+                            }
+                            for (previewUrl in msgUrls) {
+                                InlinePreview(
+                                    url = previewUrl,
+                                    previewsEnabled = true,
+                                    wifiOnly = state.settings.imagePreviewsWifiOnly,
+                                )
+                            }
+                        }
                         // No spacing between MOTD lines - preserves ASCII art layout.
                         if (!m.isMotd || selBufName != "*server*") {
                             Spacer(Modifier.height(4.dp))
                         }
+                        } // end Column
                     }
                 }
             }
@@ -1865,6 +1907,7 @@ fun ChatScreen(
                             indication = ripple(bounded = false)
                         ) {
                             onMarkRead(selected)
+                            userScrolledUp = false
                             scope.launch { listState.scrollToItem(0) }
                         }
                 ) {
@@ -1951,6 +1994,30 @@ fun ChatScreen(
                 .background(bottomBarBrush)
         ) {
             Column(Modifier.fillMaxWidth()) {
+            // Typing indicator: shown above the input row whenever someone is composing.
+            // Visible even while the user is typing their own message.
+            AnimatedVisibility(
+                visible = typingNicks.isNotEmpty(),
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it })
+            ) {
+                val typingText = when (typingNicks.size) {
+                    1 -> "${typingNicks.first()} is typing…"
+                    2 -> {
+                        val (a, b) = typingNicks.toList()
+                        "$a and $b are typing…"
+                    }
+                    else -> "Several people are typing…"
+                }
+                Text(
+                    text = typingText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                )
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -1982,6 +2049,7 @@ fun ChatScreen(
                         input = new
                         onTypingChanged(new.text)
                     },
+					cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
 					modifier = Modifier
 						.weight(1f)
 						.heightIn(min = 40.dp)
@@ -2040,21 +2108,9 @@ fun ChatScreen(
 							visualTransformation = VisualTransformation.None,
 							interactionSource = interactionSource,
 							placeholder = {
-								val placeholderText = when {
-									typingNicks.isEmpty() -> "Message"
-									typingNicks.size == 1 -> "${typingNicks.first()} is typing…"
-									typingNicks.size == 2 -> {
-										val (a, b) = typingNicks.toList()
-										"$a and $b are typing…"
-									}
-									else -> "Several people are typing…"
-								}
 								Text(
-									text = placeholderText,
-									color = if (typingNicks.isEmpty())
-										MaterialTheme.colorScheme.onSurfaceVariant
-									else
-										MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+									text = "Message",
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
 									style = inputTextStyle
 								)
 							},
@@ -3920,20 +3976,37 @@ private fun AnnotatedString.Builder.appendIrcStyledLinkified(
     text: String,
     linkStyle: SpanStyle,
     mircColorsEnabled: Boolean,
+    ansiColorsEnabled: Boolean = false,
 ) {
-    if (!mircColorsEnabled) {
-        appendLinkified(this, stripIrcFormatting(text), linkStyle)
-        return
-    }
+    val hasAnsi = ansiColorsEnabled && text.contains('\u001b')
+    val hasMirc = mircColorsEnabled && !hasAnsi &&
+        (text.contains('\u0003') || text.contains('\u0004') || text.contains('\u0002') ||
+         text.contains('\u001D') || text.contains('\u001F') || text.contains('\u0016'))
 
-    val runs = parseMircRuns(text)
-    if (runs.isEmpty()) return
-    for (r in runs) {
-        if (r.style.hasAnyStyle()) {
-            withStyle(r.style.toSpanStyle()) { appendLinkified(this, r.text, linkStyle) }
-        } else {
-            appendLinkified(this, r.text, linkStyle)
+    when {
+        hasAnsi -> {
+            val runs = parseAnsiRuns(text)
+            if (runs.isEmpty()) return
+            for (r in runs) {
+                if (r.style.hasAnyStyle()) {
+                    withStyle(r.style.ansiToSpanStyle()) { appendLinkified(this, r.text, linkStyle) }
+                } else {
+                    appendLinkified(this, r.text, linkStyle)
+                }
+            }
         }
+        hasMirc -> {
+            val runs = parseMircRuns(text)
+            if (runs.isEmpty()) return
+            for (r in runs) {
+                if (r.style.hasAnyStyle()) {
+                    withStyle(r.style.toSpanStyle()) { appendLinkified(this, r.text, linkStyle) }
+                } else {
+                    appendLinkified(this, r.text, linkStyle)
+                }
+            }
+        }
+        else -> appendLinkified(this, stripIrcFormatting(text), linkStyle)
     }
 }
 
@@ -3985,6 +4058,7 @@ private fun AnnotatedClickableText(
 private fun IrcLinkifiedText(
     text: String,
     mircColorsEnabled: Boolean,
+    ansiColorsEnabled: Boolean = false,
     linkStyle: SpanStyle,
     onAnnotationClick: (String, String) -> Unit,
     modifier: Modifier = Modifier,
@@ -3993,8 +4067,8 @@ private fun IrcLinkifiedText(
     overflow: TextOverflow = TextOverflow.Clip,
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
-    val annotated = remember(text, linkStyle, mircColorsEnabled) {
-        buildAnnotatedString { appendIrcStyledLinkified(text, linkStyle, mircColorsEnabled) }
+    val annotated = remember(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) {
+        buildAnnotatedString { appendIrcStyledLinkified(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) }
     }
     AnnotatedClickableText(
         text = annotated,
@@ -4073,12 +4147,14 @@ private fun MotdLine(
     fontSizeSp: Float,
     style: androidx.compose.ui.text.TextStyle,
     mircColorsEnabled: Boolean,
+    ansiColorsEnabled: Boolean = false,
     linkStyle: SpanStyle,
     onAnnotationClick: (String, String) -> Unit,
 ) {
     IrcLinkifiedText(
         text = text,
         mircColorsEnabled = mircColorsEnabled,
+        ansiColorsEnabled = ansiColorsEnabled,
         linkStyle = linkStyle,
         onAnnotationClick = onAnnotationClick,
         style = style.copy(fontSize = fontSizeSp.sp),

@@ -48,6 +48,7 @@
     <string name="setting_font_size">Font size</string>
     <string name="setting_colorise_nicks">Colourise nicks</string>
     <string name="setting_mirc_colours">Enable mIRC colours</string>
+    <string name="setting_ansi_colours">Enable ANSI colours</string>
     <string name="setting_show_topic_bar">Show topic bar</string>
     <string name="setting_show_timestamps">Show timestamps</string>
     <string name="setting_timestamp_format">Timestamp format (Java)</string>
@@ -302,8 +303,9 @@
     <string name="network_sasl_username_label">Username (authcid)</string>
     <string name="network_sasl_password_label">Password</string>
     <string name="network_cert_format_label">Certificate format</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">Key password (if encrypted)</string>
     <string name="network_encoding_label">Encoding</string>
     <string name="network_command_delay_label">Delay before commands (seconds)</string>
@@ -427,12 +429,15 @@
     <string name="network_cert_selected">Selected: %1$s</string>
     <string name="network_cert_none">No certificate selected.</string>
     <string name="network_cert_pem_hint">The .pem should include both your certificate and private key.</string>
-    <string name="network_cert_choose_pem">Choose .pem</string>
-    <string name="network_cert_replace_pem">Replace .pem</string>
+    <string name="network_cert_choose_pem">Choose PEM</string>
+    <string name="network_cert_replace_pem">Replace PEM</string>
     <string name="network_cert_choose_crt">Choose .crt</string>
     <string name="network_cert_replace_crt">Replace .crt</string>
     <string name="network_cert_choose_key">Choose .key</string>
     <string name="network_cert_replace_key">Replace .key</string>
+    <string name="network_cert_choose_p12">Choose .p12/.pfx</string>
+    <string name="network_cert_replace_p12">Replace .p12/.pfx</string>
+    <string name="network_cert_p12_hint">If the file is password protected, enter the password below.</string>
     <string name="network_cert_label">Certificate: %1$s</string>
     <string name="network_key_label">Key: %1$s</string>
     <string name="network_autojoin_hint">One per line. Format: #channel [key]</string>
@@ -455,15 +460,19 @@
     <string name="section_backup_restore">Backup &amp; Restore</string>
     <string name="setting_backup_export_desc">Export your network configurations and app settings to a JSON file. Passwords and TLS certificates are not included.</string>
     <string name="setting_restore_desc">Restoring replaces all current networks and settings.</string>
-    <string name="setting_restore_confirm">This will replace all current networks and settings with those in the backup file. Passwords were not included in the backup and will need to be re-entered.
-
-This cannot be undone.</string>
+    <string name="setting_restore_confirm">This will replace all current networks and settings with those in the backup file. Passwords were not included in the backup and will need to be re-entered. This cannot be undone.</string>
     <string name="setting_backup_error">Error</string>
     <string name="setting_backup_done">Done</string>
     <string name="setting_battery_tip">To stay connected overnight, please disable Battery Optimization for this app and allow background activity.</string>
     <string name="setting_battery_oneplus">OnePlus tip: also lock the app in Recents (padlock) and ensure background activity / auto-launch is allowed in battery settings.</string>
     <string name="setting_lang_system">System</string>
     <string name="theme_matrix">Matrix</string>
+    <string name="theme_terminal">Terminal</string>
+    <string name="section_media_previews">Media Previews</string>
+    <string name="setting_image_previews">Enable image &amp; video previews</string>
+    <string name="setting_image_previews_desc">Show inline previews for images and YouTube links posted in chat.</string>
+    <string name="setting_previews_wifi_only">Wi-Fi only</string>
+    <string name="setting_previews_wifi_only_desc">Only load previews when connected to Wi-Fi to avoid using mobile data.</string>
     <string name="theme_system_default">System default</string>
     <!-- TransfersScreen -->
     <string name="transfers_send_file_section">Send file</string>

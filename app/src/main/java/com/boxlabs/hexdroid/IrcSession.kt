@@ -354,6 +354,11 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 
         when (s.mechanism) {
             SaslMechanism.PLAIN -> if (serverPayload == "+") {
+                if (!config.useTls) {
+                    out += IrcAction.EmitError("SASL PLAIN aborted: refusing to send password over an unencrypted connection. Enable TLS or switch to SCRAM-SHA-256.")
+                    out += IrcAction.Send("AUTHENTICATE *")
+                    return out
+                }
                 val authcid = s.authcid ?: ""
                 val pass = s.password ?: ""
                 val msg = "\u0000$authcid\u0000$pass"

@@ -291,6 +291,7 @@ class SettingsRepository(private val ctx: Context) {
                 partMessage = o.optString("partMessage", UiSettings().partMessage),
                 colorizeNicks = o.optBoolean("colorizeNicks", true),
                 mircColorsEnabled = o.optBoolean("mircColorsEnabled", true),
+                ansiColorsEnabled = o.optBoolean("ansiColorsEnabled", true),
                 introTourSeenVersion = o.optInt("introTourSeenVersion", 0),
                 welcomeCompleted = o.optBoolean("welcomeCompleted", false),
                 appLanguage = o.optString("appLanguage", "").takeIf { it.isNotBlank() },
@@ -298,6 +299,8 @@ class SettingsRepository(private val ctx: Context) {
                 portraitNickPaneFrac = o.optDouble("portraitNickPaneFrac", 0.35).toFloat(),
                 sendTypingIndicator = o.optBoolean("sendTypingIndicator", false),
                 receiveTypingIndicator = o.optBoolean("receiveTypingIndicator", true),
+                imagePreviewsEnabled = o.optBoolean("imagePreviewsEnabled", false),
+                imagePreviewsWifiOnly = o.optBoolean("imagePreviewsWifiOnly", true),
             )
         } catch (_: Throwable) {
             UiSettings()
@@ -362,6 +365,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("partMessage", s.partMessage)
         o.put("colorizeNicks", s.colorizeNicks)
         o.put("mircColorsEnabled", s.mircColorsEnabled)
+        o.put("ansiColorsEnabled", s.ansiColorsEnabled)
         o.put("introTourSeenVersion", s.introTourSeenVersion)
         o.put("welcomeCompleted", s.welcomeCompleted)
         o.put("appLanguage", s.appLanguage ?: "")
@@ -369,6 +373,8 @@ class SettingsRepository(private val ctx: Context) {
         o.put("portraitNickPaneFrac", s.portraitNickPaneFrac.toDouble())
         o.put("sendTypingIndicator", s.sendTypingIndicator)
         o.put("receiveTypingIndicator", s.receiveTypingIndicator)
+        o.put("imagePreviewsEnabled", s.imagePreviewsEnabled)
+        o.put("imagePreviewsWifiOnly", s.imagePreviewsWifiOnly)
 
         return o
     }
@@ -741,7 +747,7 @@ class SettingsRepository(private val ctx: Context) {
     }
 }
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK, MATRIX }
+enum class ThemeMode { SYSTEM, LIGHT, DARK, MATRIX, TERMINAL }
 
 data class AutoJoinChannel(val channel: String, val key: String? = null) {
     fun toLine(): String = if (key.isNullOrBlank()) channel else "$channel $key"

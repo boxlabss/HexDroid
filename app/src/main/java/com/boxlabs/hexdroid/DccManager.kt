@@ -109,11 +109,45 @@ sealed class DccTransferState {
  *    offers (port=0, no token) throw [IllegalArgumentException] before any socket is opened.
  *  - Turbo DCC (TSEND) skips per-chunk ACKs; the caller is responsible for confirming file
  *    integrity out-of-band (e.g. hash check).
+ *  - Remote IPs are validated before connecting: loopback, link-local, wildcard, and multicast
+ *    addresses are rejected. RFC-1918 private addresses are intentionally allowed to support
+ *    LAN DCC between devices on the same network.
  */
 class DccManager(ctx: Context) {
 
     // Avoid leaking an Activity context.
     private val ctx: Context = ctx.applicationContext
+
+    /**
+     * Rejects IPs that are structurally invalid targets for a DCC connection.
+     *
+     * RFC-1918 private addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) are intentionally
+     * allowed here — LAN DCC between devices on the same network is a normal and common use
+     * case (e.g. sharing files with someone on the same Wi-Fi). The SSRF risk for these
+     * addresses is low because DCC is a raw TCP connection, not an HTTP request, so it cannot
+     * be easily weaponised to exfiltrate data from a local HTTP service.
+     *
+     * We still block:
+     *  - Loopback (127.x.x.x / ::1): no legitimate DCC offer uses localhost.
+     *  - Link-local (169.254.x.x / fe80::): APIPA / router-link addresses; not routable.
+     *  - Wildcard (0.0.0.0 / ::): meaningless as a connect target.
+     *  - Multicast: not a unicast endpoint.
+     */
+    private fun validateRemoteIp(ip: String) {
+        val addr = try {
+            java.net.InetAddress.getByName(ip)
+        } catch (_: Throwable) {
+            throw IllegalArgumentException("DCC: invalid IP address: $ip")
+        }
+        if (addr.isLoopbackAddress)
+            throw IllegalArgumentException("DCC: refusing connection to loopback address $ip")
+        if (addr.isLinkLocalAddress)
+            throw IllegalArgumentException("DCC: refusing connection to link-local address $ip")
+        if (addr.isAnyLocalAddress)
+            throw IllegalArgumentException("DCC: refusing connection to wildcard address $ip")
+        if (addr.isMulticastAddress)
+            throw IllegalArgumentException("DCC: refusing connection to multicast address $ip")
+    }
 
     /**
      * Internal fallback directory for DCC files (used when external storage is unavailable).
@@ -308,6 +342,7 @@ class DccManager(ctx: Context) {
     ): String = withContext(Dispatchers.IO) {
         val (outputStream, savedPath) = createDccOutputStream(offer.filename, customFolderUri)
 
+        validateRemoteIp(offer.ip)
         val sock = Socket(offer.ip, offer.port)
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
         try {
@@ -429,6 +464,7 @@ class DccManager(ctx: Context) {
         onProgress: (Long, Long) -> Unit
     ): Unit = withContext(Dispatchers.IO) {
         val size = file.length()
+        validateRemoteIp(host)
         val sock = Socket(host, port)
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
         try {

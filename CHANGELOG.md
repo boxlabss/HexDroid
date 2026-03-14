@@ -3,6 +3,12 @@
 All notable changes to HexDroid are documented here.
 
 ---
+## [1.5.6] - 2026-03-13
+- **Inline Media** - Added inline image previews with a "Load preview" button and inline YouTube videos (using https://github.com/PierfrancescoSoffritti/android-youtube-player)
+- Images are capped to 5MB. Two options added to Settings (Enable, Wifi only) - disabled by default
+- **Labels for SASL certs** - Make clear you can either select .crt/.pem bundles, crt + key OR PKCS12 .p12/.pfx
+- **Unread marker** - Bug fix: unread marker would display too often, now it only displays if you scroll up past the visible messages
+- **Fixes** - Improved scrolling, ANSI colour support, alerts in the notification drawer, and input cursor
 
 ## [1.5.5] - 2026-03-07
 

@@ -110,6 +110,34 @@ private val MatrixColorScheme = darkColorScheme(
     scrim               = Color(0xCC000000),
 )
 
+private val TerminalColorScheme = darkColorScheme(
+    primary             = TerminalAmber,
+    onPrimary           = TerminalBackground,
+    primaryContainer    = Color(0xFF2A1A00),
+    onPrimaryContainer  = TerminalAmber,
+    secondary           = TerminalAmberDim,
+    onSecondary         = TerminalBackground,
+    secondaryContainer  = Color(0xFF1A0F00),
+    onSecondaryContainer = TerminalAmberDim,
+    tertiary            = Color(0xFFFFD966),
+    onTertiary          = TerminalBackground,
+    tertiaryContainer   = Color(0xFF332500),
+    onTertiaryContainer = Color(0xFFFFD966),
+    background          = TerminalBackground,
+    onBackground        = TerminalAmber,
+    surface             = TerminalSurface,
+    onSurface           = TerminalAmber,
+    surfaceVariant      = TerminalSurfaceVariant,
+    onSurfaceVariant    = TerminalAmberDim,
+    outline             = TerminalOutline,
+    outlineVariant      = TerminalAmberMuted,
+    error               = Color(0xFFFF4040),
+    onError             = Color.Black,
+    errorContainer      = Color(0xFF3D0000),
+    onErrorContainer    = Color(0xFFFF4040),
+    scrim               = Color(0xCC000000),
+)
+
 @Composable
 fun HexDroidIRCTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
@@ -123,14 +151,16 @@ fun HexDroidIRCTheme(
     content: @Composable () -> Unit
 ) {
     val isMatrix = themeMode == ThemeMode.MATRIX
+    val isTerminal = themeMode == ThemeMode.TERMINAL
     val resolvedDark = darkTheme ?: when (themeMode) {
-        ThemeMode.DARK, ThemeMode.MATRIX -> true
+        ThemeMode.DARK, ThemeMode.MATRIX, ThemeMode.TERMINAL -> true
         ThemeMode.LIGHT -> false
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
 
     val colorScheme = when {
-        isMatrix -> MatrixColorScheme   // Matrix always uses its own palette, never dynamic
+        isMatrix   -> MatrixColorScheme    // Matrix always uses its own palette, never dynamic
+        isTerminal -> TerminalColorScheme  // Terminal always uses its own palette, never dynamic
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (resolvedDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -139,8 +169,8 @@ fun HexDroidIRCTheme(
         else -> LightColorScheme
     }
 
-    // Matrix theme uses monospace font to reinforce the terminal aesthetic.
-    val effectiveFont = if (isMatrix && fontChoice == FontChoice.OPEN_SANS) FontChoice.MONOSPACE else fontChoice
+    // Matrix and Terminal themes use monospace font to reinforce the terminal aesthetic.
+    val effectiveFont = if ((isMatrix || isTerminal) && fontChoice == FontChoice.OPEN_SANS) FontChoice.MONOSPACE else fontChoice
 
     MaterialTheme(
         colorScheme = colorScheme,

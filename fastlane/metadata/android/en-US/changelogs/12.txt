@@ -1,0 +1,2 @@
+Inline previews for image and video links (Settings > Enable media previews)
+Fixes for scrolling, input cursor and read marker. Added ANSI colour support.

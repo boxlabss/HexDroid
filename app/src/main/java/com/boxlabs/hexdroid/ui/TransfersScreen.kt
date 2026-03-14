@@ -699,7 +699,7 @@ fun TransfersScreen(
                                         )
                                     }
                                     if (t.error != null) {
-                                        Text(stringResource(R.string.transfers_error, t.error ?: ""), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                        Text(stringResource(R.string.transfers_error, t.error), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }

@@ -254,8 +254,15 @@ class SecretStore(private val ctx: Context) {
     }
 
     private fun readBytesFromUri(uri: Uri): ByteArray {
-        return ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        val maxBytes = 2 * 1024 * 1024 // 2 MB — no real certificate is larger than this
+        val stream = ctx.contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("Unable to open file")
+        return stream.use { input ->
+            val bytes = input.readBytes()
+            if (bytes.size > maxBytes)
+                throw IllegalArgumentException("File is too large (max 2 MB for a client certificate)")
+            bytes
+        }
     }
 
     private data class PemBlock(val type: String, val der: ByteArray)
