@@ -1714,10 +1714,6 @@ fun ChatScreen(
                                 text = { Text(stringResource(R.string.menu_networks)) },
                                 onClick = { overflowExpanded = false; onOpenNetworks() }
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_system_info)) },
-                                onClick = { overflowExpanded = false; onSysInfo() }
-                            )
                             if (isIrcOper) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_ircop_tools)) },
