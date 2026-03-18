@@ -9,6 +9,8 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">Używaj TLS (SSL)</string>
     <string name="network_allow_invalid_certs">Zezwalaj na nieważne certyfikaty</string>
+    <string name="network_pinned_cert_label">Odcisk palca przypiętego certyfikatu (TOFU)</string>
+    <string name="network_reset_pinned_cert">Zresetuj przypięty certyfikat</string>
     <string name="network_nick">Nick</string>
     <string name="network_alt_nick">Alternatywny nick</string>
     <string name="network_username">Nazwa użytkownika</string>

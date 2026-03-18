@@ -9,6 +9,8 @@
     <string name="network_port">Porta</string>
     <string name="network_use_tls">Usar TLS (SSL)</string>
     <string name="network_allow_invalid_certs">Permitir certificados inválidos</string>
+    <string name="network_pinned_cert_label">Impressão digital do certificado fixado (TOFU)</string>
+    <string name="network_reset_pinned_cert">Redefinir certificado fixado</string>
     <string name="network_nick">Apelido</string>
     <string name="network_alt_nick">Apelido alternativo</string>
     <string name="network_username">Nome de utilizador</string>

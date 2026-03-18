@@ -28,6 +28,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -183,6 +184,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.ChatFontStyle
+import com.boxlabs.hexdroid.UiMessage
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.stripIrcFormatting
@@ -657,6 +659,7 @@ fun ChatScreen(
      * The ViewModel forwards this as MARKREAD / READ to the server when the cap is active.
      */
     onMarkRead: (bufferKey: String) -> Unit = {},
+    onHighlightConsumed: () -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
@@ -882,22 +885,13 @@ fun ChatScreen(
 
     val bgLum = MaterialTheme.colorScheme.background.luminance()
 
-    // Precompute a perceptually-separated palette and assign unique colours within this buffer.
-    val nickPalette = remember(bgLum) { NickColors.buildPalette(bgLum) }
-    val nickColorMap = remember(selected, nicklist, messages, bgLum, state.settings.colorizeNicks) {
-        if (!state.settings.colorizeNicks) emptyMap()
-        else {
-            val bases = LinkedHashSet<String>()
-            for (n in nicklist) bases.add(baseNick(n).lowercase())
-            for (m in messages) m.from?.let { bases.add(baseNick(it).lowercase()) }
-            NickColors.assignColors(bases.toList(), nickPalette)
-        }
-    }
-
-    fun nickColor(nick: String): Color {
-        val base = baseNick(nick).lowercase()
-        return nickColorMap[base] ?: NickColors.colorFromHash(base, nickPalette)
-    }
+    // Nick colour is a pure function of nick name + theme brightness — no map needed.
+    // Stable across joins/parts; recomputed only when the theme changes.
+    fun nickColor(nick: String): Color =
+        if (state.settings.colorizeNicks)
+            NickColors.colorForNick(baseNick(nick).lowercase(), bgLum)
+        else
+            Color.Unspecified
 
     var showNickSheet by remember { mutableStateOf(false) }
 
@@ -1380,13 +1374,22 @@ fun ChatScreen(
         snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
             .collect { (scrolling, idx) ->
                 if (scrolling && idx > 0) userScrolledUp = true
-                if (idx == 0) userScrolledUp = false  // back at bottom, re-enable auto-scroll
+                // Only clear the flag once the fling/scroll has fully come to rest at index 0.
+                // Checking !scrolling prevents a mid-fling transit through index 0 from
+                // prematurely resetting the flag and causing the separator to flash.
+                if (!scrolling && idx == 0) userScrolledUp = false
             }
     }
 
-    // On buffer switch: always land at the newest message (visual bottom).
+    // On buffer switch: always land at the newest message (visual bottom) and
+    // advance the read marker past all currently visible messages.  Without the
+    // onMarkRead call, lastReadTimestamp stays anchored before the first unread
+    // message that the ViewModel set on open, so the separator immediately reappears
+    // the moment the user scrolls up even one item — showing "unread" for messages
+    // they could already see at the bottom.
     LaunchedEffect(selected) {
         listState.scrollToItem(0)
+        onMarkRead(selected)
     }
 
     // Auto-scroll to newest when a new message arrives, unless the user has scrolled up.
@@ -1399,6 +1402,65 @@ fun ChatScreen(
     }
 
     val reversedMessages = remember(messages) { messages.reversed() }
+
+    // ── Highlight scroll & flicker ────────────────────────────────────────────
+    // When the user taps a notification, state.pendingHighlightMsgId is set to the
+    // internal ID of the triggering message.  We scroll to it and pulse its background
+    // 3 times so the eye is drawn directly to the relevant line.
+    var flickerMsgId by remember { mutableStateOf<Long?>(null) }
+    val flickerAlpha = remember { Animatable(0f) }
+
+    // Clear any pending highlight when the user switches to a different buffer —
+    // it belongs to the buffer that was active when the notification fired.
+    LaunchedEffect(selected) {
+        if (state.pendingHighlightMsgId != null) {
+            flickerMsgId = null
+            flickerAlpha.snapTo(0f)
+            onHighlightConsumed()
+        }
+    }
+
+    // Drive the scroll + flicker.  Keyed only on the message ID so that a buffer
+    // switch (handled above) doesn't re-trigger it.
+    LaunchedEffect(state.pendingHighlightMsgId) {
+        val targetId = state.pendingHighlightMsgId ?: return@LaunchedEffect
+
+        val revIdx = reversedMessages.indexOfFirst { it.id == targetId }
+        if (revIdx < 0) {
+            onHighlightConsumed()
+            return@LaunchedEffect
+        }
+
+        // If the message is already visible at the bottom (index 0 in the reversed
+        // list), the user can see it right now — skip scrolling and flickering and
+        // just consume the pending ID so it doesn't linger.
+        if (revIdx == 0 && isAtBottom) {
+            onHighlightConsumed()
+            return@LaunchedEffect
+        }
+
+        // Scroll to the message (reverseLayout=true: 0 = visual bottom).
+        listState.animateScrollToItem(revIdx)
+
+        // Pulse: 3 flashes — bright → fade → bright → fade → bright → fade
+        flickerMsgId = targetId
+        repeat(3) {
+            flickerAlpha.animateTo(0.38f, animationSpec = tween(durationMillis = 130))
+            flickerAlpha.animateTo(0f,    animationSpec = tween(durationMillis = 220))
+        }
+        flickerMsgId = null
+        onHighlightConsumed()
+    }
+
+    // Once the user scrolls back to the bottom after viewing the highlighted message,
+    // clear any still-pending highlight so it doesn't fire again later.
+    LaunchedEffect(isAtBottom) {
+        if (isAtBottom && state.pendingHighlightMsgId != null) {
+            flickerMsgId = null
+            flickerAlpha.snapTo(0f)
+            onHighlightConsumed()
+        }
+    }
     // Only show the separator when the user has scrolled up to read history.
     // At the bottom they can already see new messages, so rendering it there is just noise
     // (and it always appears at the very bottom when there's only one new message).
@@ -1748,6 +1810,30 @@ fun ChatScreen(
                     availableWidthPx = motdAvailableWidthPx,
                 )
 
+                // Build display items: each art block becomes a single LazyColumn item
+                // (all its lines in one Column) so there are zero inter-line gaps.
+                // Font sizing uses one measurement + direct scale factor instead of
+                // per-line binary search — O(1) per block instead of O(N×8).
+                val displayItems = rememberDisplayItems(
+                    reversedMessages = reversedMessages,
+                    availableWidthPx = motdAvailableWidthPx,
+                    style = motdStyle,
+                )
+                // Map message ID → display item index for unread separator placement.
+                val msgIdToDisplayIdx = remember(displayItems) {
+                    val map = HashMap<Long, Int>(displayItems.size * 2)
+                    for ((i, item) in displayItems.withIndex()) {
+                        when (item) {
+                            is DisplayItem.Single -> map[item.msg.id] = i
+                            is DisplayItem.Art    -> item.msgs.forEach { map[it.id] = i }
+                        }
+                    }
+                    map
+                }
+                val unreadDisplayIdx = if (reversedUnreadIndex in reversedMessages.indices)
+                    msgIdToDisplayIdx[reversedMessages[reversedUnreadIndex].id] ?: -1
+                else -1
+
             SelectionContainer(
                 modifier = Modifier
                     .padding(8.dp)
@@ -1759,10 +1845,82 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp)
                 ) {
-                    itemsIndexed(items = reversedMessages, key = { _, m -> m.id }) { msgIndex, m ->
-                        if (msgIndex == reversedUnreadIndex) {
+                    itemsIndexed(items = displayItems, key = { _, item -> item.key }) { displayIdx, item ->
+                        if (displayIdx == unreadDisplayIdx) {
                             UnreadSeparator()
                         }
+
+                        when (item) {
+
+                        // ── Art block ─────────────────────────────────────────────────────────
+                        // All lines of the block are rendered in one Column, so there are
+                        // zero inter-line gaps — no LazyColumn item boundaries, no font-metric
+                        // padding between rows.  Nick badges overlay each sender's first line.
+                        is DisplayItem.Art -> {
+                            val blockText = item.msgs.joinToString("\n") { "<${it.from}> ${it.text}" }
+                            // Collect the unique senders for the attribution line.
+                            // Preserve encounter order so the list reads chronologically.
+                            val senders = item.msgs.mapNotNull { it.from }
+                                .distinct()
+                            androidx.compose.foundation.layout.Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = {},
+                                        onLongClick = {
+                                            scope.launch {
+                                                clipboard.setClipEntry(
+                                                    android.content.ClipData.newPlainText("", blockText).toClipEntry()
+                                                )
+                                            }
+                                        }
+                                    )
+                            ) {
+                                // Single attribution row above the block: "▸ bort  brot  boat  snot"
+                                // One line, zero height impact on the art itself.
+                                if (senders.isNotEmpty()) {
+                                    Row(
+                                        modifier = Modifier.padding(bottom = 1.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = "▸",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        )
+                                        for (sender in senders) {
+                                            Text(
+                                                text = sender,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (state.settings.colorizeNicks)
+                                                    nickColor(sender)
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                }
+                                // Art lines: tightly packed, no gaps between rows.
+                                for (msg in item.msgs) {
+                                    MotdLine(
+                                        text = msg.text,
+                                        fontSizeSp = item.fontSizeSp,
+                                        style = motdStyle,
+                                        mircColorsEnabled = state.settings.mircColorsEnabled,
+                                        ansiColorsEnabled = state.settings.ansiColorsEnabled,
+                                        linkStyle = linkStyle,
+                                        onAnnotationClick = onAnnotationClick,
+                                    )
+                                }
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
+
+                        // ── Normal / single message ───────────────────────────────────────────
+                        is DisplayItem.Single -> {
+                        val m = item.msg
                         val ts =
                             if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
 
@@ -1776,12 +1934,22 @@ fun ChatScreen(
                             }
                         }
                         val fromNick = m.from
+                        val isFlickering = flickerMsgId == m.id
                         // Column so the inline preview is always visually below the message text,
                         // not detached as a sibling that reverseLayout can misplace.
                         androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .then(
+                                    if (isFlickering)
+                                        Modifier.background(
+                                            MaterialTheme.colorScheme.primary.copy(
+                                                alpha = flickerAlpha.value
+                                            )
+                                        )
+                                    else Modifier
+                                )
                                 .combinedClickable(
                                     onClick = {},
                                     onLongClick = {
@@ -1885,6 +2053,9 @@ fun ChatScreen(
                             Spacer(Modifier.height(4.dp))
                         }
                         } // end Column
+                        } // end DisplayItem.Single
+
+                        } // end when
                     }
                 }
             }
@@ -4079,6 +4250,219 @@ private fun IrcLinkifiedText(
         overflow = overflow,
         onTextLayout = onTextLayout,
     )
+}
+
+/**
+ * Returns true when a chat message line looks like it belongs to a bot-generated
+ * ASCII/ANSI art block rather than normal coloured conversation.
+ */
+private fun looksLikeArt(text: String): Boolean {
+    // Examine stripped content for structural shape, plus ANSI SGR and mIRC colour
+    // codes as additional signals.  Colour detection is intentionally kept loose
+    // here because the block-size gate (≥2 consecutive lines) does the real false-
+    // positive filtering — a single coloured line never triggers art rendering.
+    val plain = stripIrcFormatting(text)
+    if (plain.length < 3) return false
+
+    // ANSI SGR colour sequences ([…m): almost never appear in normal IRC chat,
+    // so even one is a strong signal.  Other ANSI escapes ([3~ = Delete key,
+    // [A = cursor up) are NOT art — check explicitly for the SGR terminator 'm'.
+    var i = 0
+    while (i < text.length) {
+        if (text[i] == '' && i + 1 < text.length && text[i + 1] == '[') {
+            var j = i + 2
+            while (j < text.length && (text[j].isDigit() || text[j] == ';')) j++
+            if (j < text.length && text[j] == 'm') return true
+            i = j + 1
+        } else i++
+    }
+
+    // mIRC colour codes (): common in normal chat, so require ≥4 to reduce noise.
+    // False positives at this per-line level are acceptable because the ≥2 consecutive
+    // lines requirement in the block builder will catch them before rendering.
+    if (text.count { it == '' } >= 4) return true
+
+    // Signal 1: ≥2 leading spaces AND first non-space char is structural.
+    // Art bots indent for column alignment and their content opens with box/drawing
+    // characters.  Prose continuation lines (word-wrapped bot output like weather
+    // forecasts) also indent but start with a letter or digit after the spaces.
+    if (plain.length >= 3 && plain[0] == ' ' && plain[1] == ' ') {
+        val firstNs = plain.trimStart()
+        if (firstNs.isNotEmpty() && !firstNs[0].isLetterOrDigit()) return true
+    }
+
+    // Signal 2: high structural-symbol density — ≥30 % of non-space chars are
+    // drawing characters, on a line long enough to rule out typos/emoji.
+    var artCount = 0
+    var alphaCount = 0
+    for (ch in plain) {
+        if (ch == ' ') continue
+        if (ch.isLetterOrDigit()) alphaCount++ else artCount++
+    }
+    val nonSpace = artCount + alphaCount
+    if (nonSpace >= 16 && artCount.toFloat() / nonSpace >= 0.30f) return true
+
+    // Signal 3: single-space indent + border character patterns.
+    if (plain.length >= 4 && plain[0] == ' ' && plain[1] != ' ') {
+        val c1 = plain[1]; val c2 = plain[2]
+        // 3a: border char followed immediately by space or another border char.
+        if (c1 in "|/\\_-=+[]" && (c2 == ' ' || c2 in "|/\\_-=+[]")) return true
+        // 3b: framed label — first AND last non-space chars are both border chars.
+        val lastNs = plain.trimEnd().lastOrNull()
+        if (lastNs != null && c1 in "|/\\_-=+[]" && lastNs in "|/\\_-=+[]") return true
+    }
+
+    return false
+}
+
+/**
+ * A heterogeneous list item for the chat LazyColumn.
+ *
+ * [Single] wraps one normal message.
+ * [Art] wraps an entire run of consecutive art lines as one item, so all
+ * lines are rendered inside a single [Column] with zero inter-line gaps.
+ * Keys use even/odd Long split to avoid collisions between the two types.
+ */
+private sealed class RawItem {
+    data class Single(val msg: UiMessage) : RawItem()
+    data class Art(val msgs: List<UiMessage>) : RawItem()  // chronological
+}
+
+private sealed class DisplayItem {
+    abstract val key: Long
+    data class Single(val msg: UiMessage) : DisplayItem() {
+        override val key: Long = msg.id * 2L
+    }
+    data class Art(
+        val msgs: List<UiMessage>,  // chronological: oldest first
+        val fontSizeSp: Float,
+    ) : DisplayItem() {
+        override val key: Long = msgs.first().id * 2L + 1L
+    }
+}
+
+/**
+ * Builds the [DisplayItem] list consumed by the chat [LazyColumn].
+ *
+ * Consecutive art-like messages (from any sender) are merged into a single
+ * [DisplayItem.Art] item so they render gap-free inside one [Column].
+ *
+ * Performance — two-phase approach:
+ *
+ * Phase 1 (block detection): scans [reversedMessages] with [looksLikeArt] and
+ * groups consecutive art lines into [RawArt] blocks.  Pure string ops, no
+ * allocation beyond the result list.  Cached by (n, newestId) so it only
+ * re-runs when a message is added or removed.
+ *
+ * Phase 2 (font sizing): measures each [RawArt] block to find the font size
+ * that fits the widest line.  Results are stored in a [HashMap] keyed by
+ * (firstMsgId, blockSize) so that:
+ *   - A new non-art message arriving → Phase 1 re-runs (fast), Phase 2
+ *     re-iterates but every art block is a cache hit → zero [TextMeasurer]
+ *     calls.
+ *   - A new art message extending a block → cache key changes (blockSize++)
+ *     → only that block is re-measured, all others are hits.
+ *   - Layout width or font size changes → cache is cleared and all blocks
+ *     are re-measured once.
+ */
+@Composable
+private fun rememberDisplayItems(
+    reversedMessages: List<UiMessage>,
+    availableWidthPx: Float,
+    style: androidx.compose.ui.text.TextStyle,
+    minFontSp: Float = 6f,
+): List<DisplayItem> {
+    val textMeasurer = rememberTextMeasurer()
+    val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
+
+    // ── Phase 1: block detection — O(n) string ops, no measurement ───────────
+    val n        = reversedMessages.size
+    val newestId = reversedMessages.firstOrNull()?.id ?: -1L
+
+    val rawItems: List<RawItem> = remember(n, newestId) {
+        if (reversedMessages.isEmpty()) return@remember emptyList()
+        val result  = mutableListOf<RawItem>()
+        val artRun  = mutableListOf<UiMessage>()  // accumulated in reversed order
+
+        fun flushArtRun() {
+            if (artRun.size >= 2) result.add(RawItem.Art(artRun.asReversed().toList()))
+            else artRun.forEach { result.add(RawItem.Single(it)) }
+            artRun.clear()
+        }
+
+        for (msg in reversedMessages) {
+            if (msg.from != null && looksLikeArt(msg.text)) artRun.add(msg)
+            else { flushArtRun(); result.add(RawItem.Single(msg)) }
+        }
+        flushArtRun()
+        result
+    }
+
+    // ── Phase 2: font sizing — only measures blocks missing from cache ────────
+    // Key: (firstMsgId * MAX_BLOCK + blockSize) — uniquely identifies a block's
+    // content since IRC message lists are append-only and blocks only grow by
+    // having newer messages added at the end of the chronological order.
+    // Cache is cleared when layout dimensions change so all blocks are re-sized.
+    val fontSizeCache = remember { HashMap<Long, Float>() }
+    val prevWidth  = remember { mutableStateOf(availableWidthPx) }
+    val prevNatSp  = remember { mutableStateOf(naturalSizeSp) }
+    if (prevWidth.value != availableWidthPx || prevNatSp.value != naturalSizeSp) {
+        fontSizeCache.clear()
+        prevWidth.value  = availableWidthPx
+        prevNatSp.value  = naturalSizeSp
+    }
+
+    fun fontSizeForBlock(msgs: List<UiMessage>): Float {
+        // (firstMsgId shifted left 17 bits) OR blockSize — collision-free for
+        // any realistic block size (<131072 lines) and message ID space.
+        val cacheKey = (msgs.first().id shl 17) or msgs.size.toLong()
+        fontSizeCache[cacheKey]?.let { return it }
+
+        // Not cached — run the binary search (same algorithm as rememberMotdFontSizeSp).
+        val plainLines = msgs.map { stripIrcFormatting(it.text) }.filter { it.isNotEmpty() }
+        val sp = if (plainLines.isEmpty() || availableWidthPx <= 0f) {
+            naturalSizeSp
+        } else {
+            val widestAtNatural = plainLines.maxOf { line ->
+                textMeasurer.measure(
+                    text = line,
+                    style = style.copy(fontSize = naturalSizeSp.sp),
+                    constraints = Constraints(maxWidth = Int.MAX_VALUE),
+                    maxLines = 1,
+                    softWrap = false,
+                ).size.width.toFloat()
+            }
+            if (widestAtNatural <= availableWidthPx) {
+                naturalSizeSp
+            } else {
+                var lo = minFontSp
+                var hi = naturalSizeSp
+                repeat(8) {
+                    val mid = (lo + hi) / 2f
+                    val widest = plainLines.maxOf { line ->
+                        textMeasurer.measure(
+                            text = line,
+                            style = style.copy(fontSize = mid.sp),
+                            constraints = Constraints(maxWidth = Int.MAX_VALUE),
+                            maxLines = 1,
+                            softWrap = false,
+                        ).size.width.toFloat()
+                    }
+                    if (widest <= availableWidthPx) lo = mid else hi = mid
+                }
+                lo
+            }
+        }
+        fontSizeCache[cacheKey] = sp
+        return sp
+    }
+
+    return rawItems.map { raw ->
+        when (raw) {
+            is RawItem.Single -> DisplayItem.Single(raw.msg)
+            is RawItem.Art    -> DisplayItem.Art(raw.msgs, fontSizeForBlock(raw.msgs))
+        }
+    }
 }
 
 /**

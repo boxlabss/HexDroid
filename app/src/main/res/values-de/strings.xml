@@ -152,6 +152,8 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">TLS (SSL) verwenden</string>
     <string name="network_allow_invalid_certs">Ungültige Zertifikate erlauben</string>
+    <string name="network_pinned_cert_label">Gespeicherter Zertifikat-Fingerabdruck (TOFU)</string>
+    <string name="network_reset_pinned_cert">Gespeichertes Zertifikat zurücksetzen</string>
     <string name="network_nick">Spitzname</string>
     <string name="network_alt_nick">Alt-Spitzname</string>
     <string name="network_username">Benutzername</string>

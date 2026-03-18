@@ -9,6 +9,8 @@
     <string name="network_port">端口</string>
     <string name="network_use_tls">使用 TLS (SSL)</string>
     <string name="network_allow_invalid_certs">允许无效证书</string>
+    <string name="network_pinned_cert_label">已固定的证书指纹 (TOFU)</string>
+    <string name="network_reset_pinned_cert">重置已固定证书</string>
     <string name="network_nick">昵称</string>
     <string name="network_alt_nick">备用昵称</string>
     <string name="network_username">用户名</string>

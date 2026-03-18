@@ -9,6 +9,8 @@
     <string name="network_port">포트</string>
     <string name="network_use_tls">TLS(SSL) 사용</string>
     <string name="network_allow_invalid_certs">잘못된 인증서 허용</string>
+    <string name="network_pinned_cert_label">고정된 인증서 지문 (TOFU)</string>
+    <string name="network_reset_pinned_cert">고정된 인증서 초기화</string>
     <string name="network_nick">닉네임</string>
     <string name="network_alt_nick">대체 닉</string>
     <string name="network_username">사용자 이름</string>

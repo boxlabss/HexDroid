@@ -23,6 +23,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.GLES20
@@ -235,6 +236,13 @@ data class UiState(
     val myNick: String = "me",
 
     val screen: AppScreen = AppScreen.NETWORKS,
+
+    /**
+     * When the user taps a highlight/PM notification, the internal [UiMessage.id] of the
+     * triggering message is stored here so [ChatScreen] can scroll to and flash it.
+     * Cleared by [clearHighlightScroll] once the animation has been consumed.
+     */
+    val pendingHighlightMsgId: Long? = null,
 
     val connections: Map<String, NetConnState> = emptyMap(),
     val buffers: Map<String, UiBuffer> = emptyMap(),
@@ -503,7 +511,10 @@ class IrcViewModel(
         val t = stripIrcFormatting(text)
         val body = when {
             from == null -> t
-            isAction -> "* $from $t"
+            // *nick* text — asterisk-wrapped nick is unambiguous: server-status lines always
+            // use "* word …" (asterisk-space) and can never produce this pattern.
+            // Old logs used "* nick text"; the parser below handles both for backward compat.
+            isAction -> "*$from* $t"
             else -> "<$from> $t"
         }
         return "$ts\t$body"
@@ -876,11 +887,156 @@ class IrcViewModel(
         viewModelScope.launch { repo.upsertNetwork(n.copy(autoConnect = enabled)) }
     }
 
+    // ── IRC URI deep-link support ─────────────────────────────────────────────────
+
+    private data class IrcUri(
+        val host: String,
+        val port: Int,
+        val useTls: Boolean,
+        val channels: List<String>,
+        val channelKey: String? = null,
+        val serverPassword: String? = null,
+    )
+
+    /**
+     * Parses irc:// and ircs:// URIs into an [IrcUri].
+     *
+     * Handles every form seen in the wild:
+     *   irc://host/channel           plain, port 6667
+     *   irc://host:+6697/channel     TLS via +port convention (mIRC/ZNC)
+     *   ircs://host:6697/channel     TLS via scheme
+     *   irc://host/#channel          # consumed as fragment by Uri; recovered
+     *   irc://host/%23channel        percent-encoded; decoded automatically
+     *   irc://host/chan?key=secret   channel key
+     */
+    private fun parseIrcUri(raw: String): IrcUri? {
+        // Detect the +port TLS flag before Uri.parse() silently drops the '+'.
+        val plusPortTls = Regex("""://[^/]*:\+\d+""").containsMatchIn(raw)
+        // Normalise +port → plain port so android.net.Uri can parse correctly.
+        val normalised = raw.replace(Regex("""(://[^/]*):(\+)(\d+)"""), "$1:$3")
+
+        val uri = Uri.parse(normalised) ?: return null
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme != "irc" && scheme != "ircs") return null
+
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
+        val useTls = scheme == "ircs" || plusPortTls
+        val port = uri.port.takeIf { it in 1..65535 } ?: if (useTls) 6697 else 6667
+
+        // Channel in path segments (irc://host/channel or irc://host/%23channel).
+        // If '#' was unencoded, android.net.Uri puts it in the fragment instead.
+        val rawChannel = uri.pathSegments.firstOrNull()?.takeIf { it.isNotBlank() }
+            ?: uri.fragment?.takeIf { it.isNotBlank() }
+
+        val channels = rawChannel
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.map { ch -> if (ch[0] in "#&+!") ch else "#$ch" }
+            ?: emptyList()
+
+        val channelKey = uri.getQueryParameter("key") ?: uri.getQueryParameter("pass")
+        val serverPassword = uri.userInfo?.split(":", limit = 2)?.getOrNull(1)
+            ?.takeIf { it.isNotEmpty() }
+
+        return IrcUri(host, port, useTls, channels, channelKey, serverPassword)
+    }
+
+    /**
+     * Opens (or creates) a network matching an IRC URI and navigates to it.
+     *
+     * Match priority:
+     *  1. Existing network whose host + port + TLS match exactly → re-use.
+     *  2. Existing network whose host matches (port/TLS differ) → re-use as-is.
+     *  3. No match → create a new [NetworkProfile] pre-filled from the URI and
+     *     open the Network Edit screen so the user can review before connecting.
+     *
+     * Channels from the URI are merged into the profile's autoJoin list if not
+     * already present.  When an existing network is matched, the app connects
+     * immediately and navigates to the first channel buffer.
+     */
+    private fun handleIrcUri(ircUri: IrcUri) {
+        viewModelScope.launch {
+            val st = _state.value
+
+            // Inherit the nick from an existing network, or fall back to app default.
+            val defaultNick = st.networks.firstOrNull()?.nick
+                ?: st.myNick.takeIf { it != "me" }
+                ?: "HexDroidUser"
+
+            val existing = st.networks.firstOrNull { n ->
+                n.host.equals(ircUri.host, ignoreCase = true) &&
+                n.port == ircUri.port &&
+                n.useTls == ircUri.useTls
+            } ?: st.networks.firstOrNull { n ->
+                n.host.equals(ircUri.host, ignoreCase = true)
+            }
+
+            val newAutoJoin = ircUri.channels.map { ch ->
+                AutoJoinChannel(ch, ircUri.channelKey)
+            }
+
+            if (existing != null) {
+                // Merge any new channels into the existing autoJoin list.
+                val mergedJoin = (existing.autoJoin + newAutoJoin)
+                    .distinctBy { it.channel.lowercase() }
+                if (mergedJoin != existing.autoJoin) {
+                    repo.updateNetworkProfile(existing.id) { it.copy(autoJoin = mergedJoin) }
+                }
+                setActiveNetwork(existing.id)
+                if (ircUri.channels.isNotEmpty()) {
+                    openBuffer(bufKey(existing.id, ircUri.channels.first()))
+                } else {
+                    _state.value = _state.value.copy(screen = AppScreen.CHAT)
+                }
+            } else {
+                // New server — pre-fill from URI and open the edit screen for review.
+                val n = NetworkProfile(
+                    id = "net_" + System.currentTimeMillis(),
+                    name = ircUri.host,
+                    host = ircUri.host,
+                    port = ircUri.port,
+                    useTls = ircUri.useTls,
+                    allowInvalidCerts = false,
+                    nick = defaultNick,
+                    altNick = "${defaultNick}_",
+                    username = defaultNick.lowercase(),
+                    realname = "HexDroid IRC",
+                    serverPassword = ircUri.serverPassword,
+                    saslEnabled = false,
+                    saslMechanism = SaslMechanism.SCRAM_SHA_256,
+                    caps = CapPrefs(),
+                    autoJoin = newAutoJoin,
+                )
+                _state.value = _state.value.copy(
+                    screen = AppScreen.NETWORK_EDIT,
+                    editingNetwork = n,
+                    networkEditError = null,
+                )
+            }
+        }
+    }
+
     fun handleIntent(intent: Intent?) {
         if (intent == null) return
+
+        // Handle irc:// and ircs:// deep links before any notification extras.
+        if (intent.action == Intent.ACTION_VIEW) {
+            val uriString = intent.dataString
+            if (!uriString.isNullOrBlank()) {
+                val scheme = Uri.parse(uriString)?.scheme?.lowercase()
+                if (scheme == "irc" || scheme == "ircs") {
+                    parseIrcUri(uriString)?.let { handleIrcUri(it) }
+                    return
+                }
+            }
+        }
+
         val netId = intent.getStringExtra(NotificationHelper.EXTRA_NETWORK_ID)
         val buf = intent.getStringExtra(NotificationHelper.EXTRA_BUFFER)
         val action = intent.getStringExtra(NotificationHelper.EXTRA_ACTION)
+        val highlightMsgId = intent.getLongExtra(NotificationHelper.EXTRA_MSG_ID, -1L)
+            .takeIf { it >= 0L }
 
         if (action == NotificationHelper.ACTION_OPEN_TRANSFERS) {
             if (!netId.isNullOrBlank()) setActiveNetwork(netId)
@@ -894,6 +1050,14 @@ class IrcViewModel(
 
         val key = if (!netId.isNullOrBlank() && !buf.isNullOrBlank()) resolveBufferKey(netId, buf) else null
         if (key != null) openBuffer(key) else _state.value = _state.value.copy(screen = AppScreen.CHAT)
+        if (highlightMsgId != null) {
+            _state.value = _state.value.copy(pendingHighlightMsgId = highlightMsgId)
+        }
+    }
+
+    /** Called by ChatScreen once the scroll-and-flash animation has run. */
+    fun clearHighlightScroll() {
+        _state.value = _state.value.copy(pendingHighlightMsgId = null)
     }
 
     fun goTo(screen: AppScreen) {
@@ -3973,23 +4137,73 @@ if (affectLive) {
         var text = body
         var isAction = false
 
-        // Common IRC log line styles:
-        //   "<nick> hello"
-        //   "* nick does something"   (/me)
-        //   "*** server text"
-        if (body.startsWith("<") && body.contains("> ")) {
+        // Common IRC log line styles — tried in priority order:
+        //
+        //   "*nick* action text"      NEW action format (unambiguous — written by this client
+        //                             going forward).  Server-status lines use "* word …"
+        //                             (asterisk-SPACE) and can never produce this pattern.
+        //
+        //   "<nick> hello"            Regular chat message.
+        //
+        //   "* nick action text"      OLD action format written by earlier versions of this
+        //                             client, and by HexChat/irssi/etc.  Treated as an action
+        //                             only when the first word passes IRC nick validation AND
+        //                             is not a known server-status sentinel word — otherwise
+        //                             the line is kept as a plain server message (from = null).
+        //
+        //   Anything else             Server/status line, rendered as plain text (from = null).
+
+        // IRC nick validation: may start with letter or _\[]{}|`^ and contain only those
+        // characters plus digits and -.  Crucially excludes <, (, #, @, !, digits as first char.
+        fun isValidNickChar(c: Char, first: Boolean): Boolean = when {
+            c.isLetter() -> true
+            c.isDigit() -> !first
+            c == '-' -> !first
+            c in "_\\[]{}|`^" -> true
+            else -> false
+        }
+        fun looksLikeNick(s: String): Boolean =
+            s.isNotEmpty() && s.length <= 32 &&
+            s[0].let { isValidNickChar(it, first = true) } &&
+            s.all { isValidNickChar(it, first = false) }
+
+        // Exact first words that HexDroid itself writes in server-status lines that start
+        // with "* " — these must never be misidentified as action nicks from old-format logs.
+        // (e.g. "* Now talking on #channel", "* Topic for #channel is: …", "* Mode #ch +n")
+        val serverStatusFirstWords = setOf("Now", "Topic", "Mode")
+
+        if (body.startsWith("*") && body.length > 2 && body[1] != ' ' && body[1] != '*') {
+            // New format: *nick* text
+            val closeAst = body.indexOf('*', 1)
+            if (closeAst > 1 && closeAst + 2 <= body.length) {
+                val nick = body.substring(1, closeAst)
+                if (looksLikeNick(nick)) {
+                    from = nick
+                    text = if (closeAst + 1 < body.length && body[closeAst + 1] == ' ')
+                        body.substring(closeAst + 2)
+                    else
+                        body.substring(closeAst + 1)
+                    isAction = true
+                }
+            }
+        } else if (body.startsWith("<") && body.contains("> ")) {
             val end = body.indexOf("> ")
             if (end > 1) {
                 from = body.substring(1, end)
                 text = body.substring(end + 2)
             }
         } else if (body.startsWith("* ") && body.length > 2) {
+            // Old action format — guard against server-status lines.
             val rest = body.substring(2)
             val sp = rest.indexOf(' ')
             if (sp > 0) {
-                from = rest.substring(0, sp)
-                text = rest.substring(sp + 1)
-                isAction = true
+                val nick = rest.substring(0, sp)
+                if (looksLikeNick(nick) && nick !in serverStatusFirstWords) {
+                    from = nick
+                    text = rest.substring(sp + 1)
+                    isAction = true
+                }
+                // else: server-status line — leave from=null, text=body (full line)
             }
         }
 
@@ -4112,17 +4326,21 @@ if (affectLive) {
                 isAction -> "* $from $cleanText"
                 else -> "<$from> $cleanText"
             }
-            // Use the human-readable network name instead of the internal "*server*" sentinel.
+            // notifTitle is what the user sees; bufferForNotif is the key used to
+            // route the tap back to the correct buffer.  Keep them separate so that
+            // the human-readable network name can be shown without being mistaken
+            // for a channel name when the intent is handled.
             val notifTitle = if (bufferName == "*server*") {
                 st.networks.firstOrNull { it.id == netId }?.name ?: "Server"
             } else bufferName
+            val bufferForNotif = bufferName  // always the real buffer key segment
             if (isPrivate && st.settings.notifyOnPrivateMessages) {
-                runCatching { notifier.notifyPm(netId, notifTitle, preview) }
+                runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle) }
                 if (st.settings.vibrateOnHighlight) {
                     runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                 }
             } else if (isHighlight && st.settings.notifyOnHighlights) {
-                runCatching { notifier.notifyHighlight(netId, notifTitle, preview, st.settings.playSoundOnHighlight) }
+                runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle) }
                 if (st.settings.vibrateOnHighlight) {
                     runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                 }

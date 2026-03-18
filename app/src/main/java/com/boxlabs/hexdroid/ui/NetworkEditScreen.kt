@@ -394,6 +394,37 @@ fun NetworkEditScreen(
                         Text(stringResource(R.string.network_allow_invalid_certs))
                         Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it })
                     }
+
+                    // Show the pinned TOFU fingerprint and a reset button if one is stored.
+                    val storedFp = n0.tlsTofuFingerprint
+                    if (storedFp != null) {
+                        HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stringResource(R.string.network_pinned_cert_label),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                storedFp,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    onSave(
+                                        n0.copy(tlsTofuFingerprint = null),
+                                        null,
+                                        false
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.network_reset_pinned_cert))
+                            }
+                        }
+                    }
                 }
             }
 

@@ -9,6 +9,8 @@
     <string name="network_port">Porta</string>
     <string name="network_use_tls">Usa TLS (SSL)</string>
     <string name="network_allow_invalid_certs">Consenti certificati non validi</string>
+    <string name="network_pinned_cert_label">Impronta del certificato bloccato (TOFU)</string>
+    <string name="network_reset_pinned_cert">Reimposta certificato bloccato</string>
     <string name="network_nick">Nickname</string>
     <string name="network_alt_nick">Nickname alternativo</string>
     <string name="network_username">Nome utente</string>

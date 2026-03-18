@@ -53,6 +53,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Handle irc:// and ircs:// deep links.
+                 Scheme-only matching catches all servers/ports/channels.
+                 CATEGORY_BROWSABLE is required for links clicked in a browser to reach this app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="irc" />
+                <data android:scheme="ircs" />
+            </intent-filter>
         </activity>
 
     </application>

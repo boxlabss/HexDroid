@@ -129,6 +129,8 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">TLS (SSL) kullan</string>
     <string name="network_allow_invalid_certs">Geçersiz sertifikalara izin ver</string>
+    <string name="network_pinned_cert_label">Sabitlenmiş sertifika parmak izi (TOFU)</string>
+    <string name="network_reset_pinned_cert">Sabitlenmiş sertifikayı sıfırla</string>
     <string name="network_nick">Takma ad</string>
     <string name="network_alt_nick">Alternatif takma ad</string>
     <string name="network_username">Kullanıcı adı</string>

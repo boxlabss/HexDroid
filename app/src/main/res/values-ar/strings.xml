@@ -129,6 +129,8 @@
     <string name="network_port">المنفذ</string>
     <string name="network_use_tls">استخدام TLS (SSL)</string>
     <string name="network_allow_invalid_certs">السماح بالشهادات غير الصالحة</string>
+    <string name="network_pinned_cert_label">بصمة الشهادة المثبتة (TOFU)</string>
+    <string name="network_reset_pinned_cert">إعادة تعيين الشهادة المثبتة</string>
     <string name="network_nick">الاسم المستعار</string>
     <string name="network_alt_nick">الاسم البديل</string>
     <string name="network_username">اسم المستخدم</string>

@@ -21,43 +21,34 @@ package com.boxlabs.hexdroid.ui
 import androidx.compose.ui.graphics.Color
 
 /**
- * nick colour mapping
+ * Nick colour assignment.
  *
- * Generates a large palette where every entry is perceptually distinct.
+ * Every nick gets a colour derived purely from its own name — two independent
+ * hash axes drive hue and band (lightness + saturation), so the result is a
+ * pure function of the nick string and the theme brightness.
  *
- * Approach:
- * 1. Use golden-angle hue stepping (≈137.5°) for maximal hue spread.
- * 2. Cycle through 6 lightness/saturation bands (instead of 3) so that
- *    nicks with nearby hues land in very different shade bands.
- * 3. Bands alternate between vivid, dark, pastel, deep, airy and punchy
- *    extremes — consecutive entries differ in both hue AND brightness.
- * 4. Linear probing with a coprime step avoids clustering when a channel
- *    has many users.
+ * This replaces an earlier van-der-Corput rank-based approach which, although
+ * it gave a guaranteed minimum hue gap across the current nicklist, changed
+ * every nick's colour whenever anyone joined or left the channel because ranks
+ * shifted.
+ *
+ * Stability beats theoretical optimality here: a nick should always look the
+ * same regardless of who else is present.  The Murmur-like finaliser gives
+ * good avalanche on short strings, so nicks with similar names (e.g. "bot1"
+ * and "bot2") still land on well-separated hues in practice.
  */
 object NickColors {
-    private const val PALETTE_SIZE = 192
-    private const val GOLDEN_ANGLE_DEG = 137.50776f
-    private const val PROBE_STEP = 37
 
-    /**
-     * Lightness/saturation bands.  Each band produces a different "shade"
-     * feel — bright & vivid, medium & rich, light & soft — so even if
-     * two nicks get the same hue region they look clearly different.
-     */
     private data class Band(val lightness: Float, val saturation: Float)
 
-    // Six bands with strongly varying lightness and saturation so that even nicks
-    // whose hues are close look clearly different from each other.
-    // Bands deliberately alternate between bright/dark/pastel extremes so that
-    // consecutive palette entries (which differ by ~137.5° in hue) also differ
-    // strongly in perceived brightness — avoiding the "all same shade" look.
+    // Dark backgrounds: L 0.57–0.80, S 0.72–0.94 (bright vivid / deep rich / bright soft).
     private val darkBgBands = listOf(
-        Band(0.72f, 0.92f),   // vivid & bright
-        Band(0.48f, 0.88f),   // deep / dark & punchy
-        Band(0.87f, 0.58f),   // very light pastel
-        Band(0.60f, 0.78f),   // medium saturated
-        Band(0.92f, 0.45f),   // near-white / airy
-        Band(0.38f, 0.95f),   // dark & high-saturation
+        Band(0.72f, 0.92f),   // bright vivid  — electric highlight
+        Band(0.60f, 0.88f),   // deep rich     — jewel / punchy
+        Band(0.80f, 0.76f),   // bright soft   — airy pastel-vivid
+        Band(0.66f, 0.86f),   // mid vivid     — warm saturated
+        Band(0.57f, 0.94f),   // deep saturated — darkest allowed, max chroma
+        Band(0.76f, 0.72f),   // soft medium   — lightest allowed, gentle S
     )
     private val lightBgBands = listOf(
         Band(0.28f, 0.82f),   // dark & vivid
@@ -68,77 +59,45 @@ object NickColors {
         Band(0.13f, 0.78f),   // near-black vivid
     )
 
-    fun buildPalette(bgLum: Float): List<Color> {
+    /**
+     * Returns a stable colour for [baseNick] that depends only on the nick name
+     * and [bgLum].  Safe to call for any nick at any time — no channel state needed.
+     */
+    fun colorForNick(baseNick: String, bgLum: Float): Color {
         val bands = if (bgLum < 0.5f) darkBgBands else lightBgBands
+        val nick  = baseNick.lowercase()
+        val h     = mixHash(nick.hashCode())
 
-        return List(PALETTE_SIZE) { i ->
-            val hue = (i * GOLDEN_ANGLE_DEG) % 360f
-            val band = bands[i % bands.size]
-            // Small per-index jitter so nicks in the same band still differ subtly
-            val satJitter = ((i * 11) % 7 - 3) * 0.015f
-            val lumJitter = ((i * 13) % 5 - 2) * 0.015f
-            Color.hsl(
-                hue,
-                (band.saturation + satJitter).coerceIn(0.30f, 0.98f),
-                (band.lightness + lumJitter).coerceIn(0.10f, 0.93f)
-            )
-        }
+        // Fibonacci/golden-ratio scramble: multiplying by 0x9e3779b9 (the 32-bit
+        // approximation of 2^32 / phi) maps the Murmur-mixed hash to a uniformly
+        // spread position on the hue wheel regardless of how similar the raw hash
+        // values are.  Without this step, nicks whose Java hashCode() values happen
+        // to cluster (e.g. short 4-letter words) land on adjacent hues.
+        val hueSeed = h * 0x9e3779b9.toInt()
+        val hue = positiveMod(hueSeed, 3600) / 10f
+
+        // Band: second independent hash derivation so hue and brightness vary
+        // orthogonally — two nicks with similar hues still differ in lightness.
+        val band      = bands[positiveMod(mixHash(h xor 0x517cc1b7), bands.size)]
+        val satJitter = (positiveMod(mixHash(h xor 0x45678901), 7) - 3) * 0.015f
+        val lumJitter = (positiveMod(mixHash(h xor 0x6b43a9b5), 5) - 2) * 0.015f
+
+        return Color.hsl(
+            hue,
+            (band.saturation + satJitter).coerceIn(0.30f, 0.98f),
+            (band.lightness  + lumJitter).coerceIn(0.10f, 0.93f),
+        )
     }
 
-    /**
-     * Assign unique colours for a set of base nicks.
-     * Deterministic (sorted input + stable probing).
-     */
-    fun assignColors(baseNicks: List<String>, palette: List<Color>): Map<String, Color> {
-        if (baseNicks.isEmpty()) return emptyMap()
-
-        val n = palette.size
-        val used = BooleanArray(n)
-        val out = LinkedHashMap<String, Color>(baseNicks.size)
-
-        val sorted = baseNicks.distinct().sortedBy { it.lowercase() }
-
-        for (nick in sorted) {
-            val idx = pickIndex(nick, used, n)
-            used[idx] = true
-            out[nick.lowercase()] = palette[idx]
-        }
-        return out
-    }
-
-    /**
-     * Fallback for nicks not in the assignment map.
-     */
-    fun colorFromHash(baseNick: String, palette: List<Color>): Color {
-        val n = palette.size
-        val mixedHash = mixHash(baseNick.lowercase().hashCode())
-        val idx = positiveMod(mixedHash, n)
-        return palette[idx]
-    }
-
-    private fun pickIndex(baseNick: String, used: BooleanArray, n: Int): Int {
-        val hash = mixHash(baseNick.lowercase().hashCode())
-        var idx = positiveMod(hash, n)
-
-        var tries = 0
-        while (tries < n && used[idx]) {
-            idx = (idx + PROBE_STEP) % n
-            tries++
-        }
-        return idx
-    }
-
-    /**
-     * Better mixing for short strings (Murmur-like finaliser)
-     */
+    /** Murmur-like finaliser — good avalanche for short strings. */
     private fun mixHash(h: Int): Int {
-        var hash = h
-        hash = hash xor (hash ushr 16)
-        hash *= 0x85ebca6b.toInt()
-        hash = hash xor (hash ushr 13)
-        hash *= 0xc2b2ae35.toInt()
-        hash = hash xor (hash ushr 16)
-        return hash
+        var x = h
+        x = x xor (x ushr 16)
+        x *= 0x85ebca6b.toInt()
+        x = x xor (x ushr 13)
+        x *= 0xc2b2ae35.toInt()
+        x = x xor (x ushr 16)
+        return x
     }
 
     private fun positiveMod(x: Int, m: Int): Int {

@@ -45,6 +45,8 @@ class NotificationHelper(private val ctx: Context) {
         const val EXTRA_NETWORK_ID = "extra_network_id"
         const val EXTRA_BUFFER = "extra_buffer"
         const val EXTRA_ACTION = "extra_action"
+        /** Internal UiMessage.id of the highlight/PM that triggered the notification. */
+        const val EXTRA_MSG_ID = "extra_msg_id"
         const val ACTION_QUIT = "action_quit"
         const val ACTION_EXIT = "action_exit"
         const val ACTION_OPEN_TRANSFERS = "action_open_transfers"
@@ -129,15 +131,16 @@ class NotificationHelper(private val ctx: Context) {
         return PendingIntent.getActivity(ctx, requestCode, i, flags)
     }
 
-    private fun openBufferPendingIntent(networkId: String, buffer: String): PendingIntent {
+    private fun openBufferPendingIntent(networkId: String, buffer: String, msgId: Long = -1L): PendingIntent {
         val i = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_NETWORK_ID, networkId)
             putExtra(EXTRA_BUFFER, buffer)
+            if (msgId >= 0L) putExtra(EXTRA_MSG_ID, msgId)
         }
         val flags = (PendingIntent.FLAG_UPDATE_CURRENT) or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        val requestCode = (networkId + "|" + buffer).hashCode()
+        val requestCode = (networkId + "|" + buffer + "|" + msgId).hashCode()
         return PendingIntent.getActivity(ctx, requestCode, i, flags)
     }
 
@@ -178,26 +181,26 @@ class NotificationHelper(private val ctx: Context) {
         NotificationManagerCompat.from(ctx).cancel(NOTIF_ID_CONNECTION)
     }
 
-    fun notifyHighlight(networkId: String, buffer: String, text: String, playSound: Boolean) {
+    fun notifyHighlight(networkId: String, buffer: String, text: String, playSound: Boolean, msgId: Long = -1L, displayTitle: String = buffer) {
         ensureChannels()
         val n = NotificationCompat.Builder(ctx, if (playSound) CH_HIGHLIGHT_SOUND else CH_HIGHLIGHT_SILENT)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle(buffer)
+            .setContentTitle(displayTitle)
             .setContentText(text)
             .setAutoCancel(true)
-            .setContentIntent(openBufferPendingIntent(networkId, buffer))
+            .setContentIntent(openBufferPendingIntent(networkId, buffer, msgId))
             .build()
         NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
     }
 
-    fun notifyPm(networkId: String, buffer: String, text: String) {
+    fun notifyPm(networkId: String, buffer: String, text: String, msgId: Long = -1L, displayTitle: String = buffer) {
         ensureChannels()
         val n = NotificationCompat.Builder(ctx, CH_PM)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle(buffer)
+            .setContentTitle(displayTitle)
             .setContentText(text)
             .setAutoCancel(true)
-            .setContentIntent(openBufferPendingIntent(networkId, buffer))
+            .setContentIntent(openBufferPendingIntent(networkId, buffer, msgId))
             .build()
         NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
     }

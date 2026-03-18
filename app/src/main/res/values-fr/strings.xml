@@ -159,6 +159,8 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">Utiliser TLS (SSL)</string>
     <string name="network_allow_invalid_certs">Autoriser les certificats invalides</string>
+    <string name="network_pinned_cert_label">Empreinte du certificat épinglé (TOFU)</string>
+    <string name="network_reset_pinned_cert">Réinitialiser le certificat épinglé</string>
     <string name="network_nick">Pseudonyme</string>
     <string name="network_alt_nick">Pseudo alternatif</string>
     <string name="network_username">Nom d\'utilisateur</string>

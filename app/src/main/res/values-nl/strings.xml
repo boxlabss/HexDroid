@@ -9,6 +9,8 @@
     <string name="network_port">Poort</string>
     <string name="network_use_tls">TLS (SSL) gebruiken</string>
     <string name="network_allow_invalid_certs">Ongeldige certificaten toestaan</string>
+    <string name="network_pinned_cert_label">Vingerafdruk vastgezet certificaat (TOFU)</string>
+    <string name="network_reset_pinned_cert">Vastgezet certificaat opnieuw instellen</string>
     <string name="network_nick">Bijnaam</string>
     <string name="network_alt_nick">Alternatieve bijnaam</string>
     <string name="network_username">Gebruikersnaam</string>

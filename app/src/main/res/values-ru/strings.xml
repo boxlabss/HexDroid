@@ -9,6 +9,8 @@
     <string name="network_port">Порт</string>
     <string name="network_use_tls">Использовать TLS (SSL)</string>
     <string name="network_allow_invalid_certs">Разрешить недействительные сертификаты</string>
+    <string name="network_pinned_cert_label">Отпечаток закреплённого сертификата (TOFU)</string>
+    <string name="network_reset_pinned_cert">Сбросить закреплённый сертификат</string>
     <string name="network_nick">Ник</string>
     <string name="network_alt_nick">Резервный ник</string>
     <string name="network_username">Имя пользователя</string>
