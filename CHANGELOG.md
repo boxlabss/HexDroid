@@ -1,8 +1,12 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
-
 ---
+## [1.5.7] - unreleased
+- **ASCII Rendering** if bots render ascii/ansii art, render this in groups with no line spaces.
+- **Nick colours** improve nick colours by splitting hues so each nick has a unique one
+- **irc:// links** IRC links eg: irc:// or ircs:// (for SSL ports)
+
 ## [1.5.6] - 2026-03-13
 - **Inline Media** - Added inline image previews with a "Load preview" button and inline YouTube videos (using https://github.com/PierfrancescoSoffritti/android-youtube-player)
 - Images are capped to 5MB. Two options added to Settings (Enable, Wifi only) - disabled by default
