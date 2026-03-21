@@ -925,15 +925,20 @@ fun ChatScreen(
 
     val bgLum = MaterialTheme.colorScheme.background.luminance()
 
-    // Nick colour is a pure function of nick name + theme brightness — no map needed.
-    // Stable across joins/parts; recomputed only when the theme changes.
-    // Own nick uses the custom colour from settings when set (non-null).
+    // Collect all own nicks across every connected network so the custom colour
+    // fires for your nick regardless of which buffer is active.
     val myNickBase = baseNick(myNick).lowercase()
+    val allMyNicks = remember(state.connections) {
+        state.connections.values
+            .mapTo(mutableSetOf()) { baseNick(it.myNick).lowercase() }
+            .also { it.add(myNickBase) }  // include the global fallback nick too
+    }
+
     fun nickColor(nick: String): Color {
         if (!state.settings.colorizeNicks) return Color.Unspecified
         val base = baseNick(nick).lowercase()
         val custom = state.settings.ownNickColorInt
-        if (custom != null && base == myNickBase) return Color(custom)
+        if (custom != null && base in allMyNicks) return Color(custom)
         return NickColors.colorForNick(base, bgLum)
     }
 
