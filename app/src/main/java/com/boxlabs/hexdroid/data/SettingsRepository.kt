@@ -291,7 +291,6 @@ class SettingsRepository(private val ctx: Context) {
                 partMessage = o.optString("partMessage", UiSettings().partMessage),
                 colorizeNicks = o.optBoolean("colorizeNicks", true),
                 ownNickColorInt = o.opt("ownNickColorInt")?.let { (it as? Int) ?: (it as? Long)?.toInt() },
-                listSort = o.optString("listSort", "size_desc"),
                 mircColorsEnabled = o.optBoolean("mircColorsEnabled", true),
                 ansiColorsEnabled = o.optBoolean("ansiColorsEnabled", true),
                 introTourSeenVersion = o.optInt("introTourSeenVersion", 0),
@@ -367,7 +366,6 @@ class SettingsRepository(private val ctx: Context) {
         o.put("partMessage", s.partMessage)
         o.put("colorizeNicks", s.colorizeNicks)
         if (s.ownNickColorInt != null) o.put("ownNickColorInt", s.ownNickColorInt) else o.remove("ownNickColorInt")
-        o.put("listSort", s.listSort)
         o.put("mircColorsEnabled", s.mircColorsEnabled)
         o.put("ansiColorsEnabled", s.ansiColorsEnabled)
         o.put("introTourSeenVersion", s.introTourSeenVersion)
