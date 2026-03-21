@@ -2,10 +2,13 @@
 
 All notable changes to HexDroid are documented here.
 ---
-## [1.5.7] - unreleased
-- **ASCII Rendering** if bots render ascii/ansii art, render this in groups with no line spaces.
-- **Nick colours** improve nick colours by splitting hues so each nick has a unique one
+## [1.5.7] - 21/03/2026
+- **ASCII Rendering** for bots that provide ascii/ansii art, render this in groups to fit the chat screen with no line spaces.
+- **Nick colours** improve nick colours by splitting hues so each nick has a unique one. Also add option to select a custom colour in Settings
 - **irc:// links** IRC links eg: irc:// or ircs:// (for SSL ports)
+- **/LIST improved** added sorting by name/users to the channel list
+- **Notifications** Tapping a highlighted message now scrolls to that message.
+- **Bug fixes** /join #channel [key] would not parse if there was a [key] - improve IntroTour
 
 ## [1.5.6] - 2026-03-13
 - **Inline Media** - Added inline image previews with a "Load preview" button and inline YouTube videos (using https://github.com/PierfrancescoSoffritti/android-youtube-player)

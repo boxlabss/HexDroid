@@ -406,7 +406,7 @@ sealed class IrcEvent {
     data class Names(val channel: String, val names: List<String>) : IrcEvent()
     data class NamesEnd(val channel: String) : IrcEvent()
 
-    data class Topic(val channel: String, val topic: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
+    data class Topic(val channel: String, val topic: String?, val setter: String? = null, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
     
     // Topic text reurned by server (RPL_TOPIC / 332) sent after JOIN or /TOPIC.
     data class TopicReply(val channel: String, val topic: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
@@ -923,7 +923,10 @@ class IrcClient(val config: IrcConfig) {
         val cmd = parts[0].lowercase()
 
         when (cmd) {
-            "join" -> parts.getOrNull(1)?.let { sendRaw("JOIN $it") }
+            "join" -> parts.getOrNull(1)?.let { chan ->
+                val key = parts.getOrNull(2)
+                sendRaw(if (key.isNullOrBlank()) "JOIN $chan" else "JOIN $chan $key")
+            }
             "part" -> {
                 val arg1 = parts.getOrNull(1)
                 val hasChan = arg1 != null && isChannelName(arg1)
@@ -2365,7 +2368,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					"TOPIC" -> {
 						val chan = msg.params.firstOrNull() ?: continue
 						val topic = msg.trailing
-						send(IrcEvent.Topic(chan, topic, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
+						val setter = msg.prefixNick()
+						send(IrcEvent.Topic(chan, topic, setter = setter, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
 					}
 
 

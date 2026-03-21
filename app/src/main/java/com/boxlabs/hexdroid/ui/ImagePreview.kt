@@ -1,21 +1,3 @@
-/*
-* HexDroidIRC - An IRC Client for Android
-* Copyright (C) 2026 boxlabs
-*
-* This program is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 package com.boxlabs.hexdroid.ui
 
 import android.content.Context
@@ -327,8 +309,10 @@ fun InlinePreview(
 
     if (youtubeId == null && twitterData == null && !isImage) return
 
-    // Auto-load for YouTube and Twitter (thumbnails are small); manual for plain images.
-    val autoLoad = youtubeId != null || twitterData != null
+    // Auto-load thumbnails for YouTube only; Twitter/X requires an explicit tap.
+    // Twitter images can be sensitive or high-bandwidth, and the fxtwitter API
+    // call leaks the URL to a third party — opt-in is the right default.
+    val autoLoad = youtubeId != null
 
     var state        by rememberSaveable(url, stateSaver = previewStateSaver) {
         mutableStateOf(if (autoLoad) PreviewState.Loading else PreviewState.Idle)

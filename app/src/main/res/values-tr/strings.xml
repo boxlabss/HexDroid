@@ -41,6 +41,11 @@
 
     <string name="setting_font_size">Yazı tipi boyutu</string>
     <string name="setting_colorise_nicks">Takma adları renklendir</string>
+    <string name="setting_own_nick_colour_title">Kendi nick rengin</string>
+    <string name="setting_own_nick_colour_auto">Otomatik</string>
+    <string name="setting_own_nick_colour_custom">Özel</string>
+    <string name="setting_own_nick_colour_pick">Renk seç</string>
+    <string name="setting_own_nick_colour_reset">Sıfırla</string>
     <string name="setting_mirc_colours">mIRC renklerini etkinleştir</string>
     <string name="setting_ansi_colours">ANSI renklerini etkinleştir</string>
     <string name="setting_show_topic_bar">Konu çubuğunu göster</string>
@@ -48,6 +53,7 @@
     <string name="setting_timestamp_format">Zaman biçimi (Java)</string>
     <string name="setting_hide_motd">Bağlantıda MOTD\'yi gizle</string>
     <string name="setting_hide_joinpartquit">Giriş/çıkış mesajlarını gizle</string>
+    <string name="setting_hide_topic_on_entry">Girişte konuyu gizle</string>
     <string name="setting_show_buffers_default">Ağları/kanalları varsayılan olarak göster</string>
     <string name="setting_show_nicklist_default">Kullanıcı listesini varsayılan olarak göster</string>
     <string name="setting_highlight_on_nick">Takma adda vurgula</string>
@@ -95,25 +101,25 @@
     <string name="networks_edit">Düzenle</string>
     <string name="networks_add">Ağ ekle</string>
 
-    <string name="tour_add_network_title">Bir ağ ekle</string>
+    <string name="tour_add_network_title">Ağlarınız</string>
     <string name="tour_add_network_body">Yeni bir ağ eklemek veya mevcut birini düzenlemek için + simgesine dokunun. HexDroid hızlı başlangıç için birkaç varsayılan ağ içerir.</string>
     <string name="tour_connect_title">Bağlan</string>
     <string name="tour_connect_body">Seçilen ağa bağlanın. Bağlandıktan sonra kanallara katılmak için sohbeti açın.</string>
-    <string name="tour_settings_title">Ayarlar</string>
+    <string name="tour_settings_title">Görünüm ve ayarlar</string>
     <string name="tour_settings_body">Görünüm, yazı tipleri ve diğer tercihleri buradan ayarlayın.</string>
-    <string name="tour_switcher_title">Değiştirici</string>
+    <string name="tour_switcher_title">Arabellek listesi</string>
     <string name="tour_switcher_body">Bu kenar çubuğu sunucunuzu, kanallarınızı ve özel mesajlarınızı gösterir. Geçiş yapmak için dokunun.</string>
     <string name="tour_more_title">Daha fazla eylem</string>
     <string name="tour_more_body">Bu menü kanal listesi, dosya aktarımları, ayarlar, ağlar ve daha fazlasını içerir.</string>
     <string name="tour_send_title">Mesaj gönder</string>
     <string name="tour_send_body">Sohbet etmek için buraya yazın. /join #kanal, /msg takmaad merhaba, /whois takmaad gibi komutlar da kullanabilirsiniz.</string>
-    <string name="tour_dcc_title">DCC\'yi etkinleştir</string>
+    <string name="tour_dcc_title">Dosya aktarımları (DCC)</string>
     <string name="tour_dcc_body">Dosya göndermek/almak için DCC\'yi açın. NAT arkasındaysanız Pasif modu yardımcı olabilir.</string>
-    <string name="tour_support_title">Desteğe mi ihtiyacınız var?</string>
+    <string name="tour_support_title">Yardıma mı ihtiyacınız var?</string>
     <string name="tour_support_body">#HexDroid\'de destek almak için buraya bağlanabilirsiniz.</string>
     <string name="tour_support_fallback">Listenizde AfterNET görmüyorsanız, tekrar eklemek için AfterNET Ekle (veya +) düğmesine dokunun.</string>
     <string name="tour_support_action">AfterNET Ekle</string>
-    <string name="tour_replay_title">Bu turu tekrarla</string>
+    <string name="tour_replay_title">Turu tekrarla</string>
     <string name="tour_replay_body">Turu istediğiniz zaman Ayarlar\'dan tekrarlayabilirsiniz.</string>
 
     <string name="about_title">Hakkında</string>

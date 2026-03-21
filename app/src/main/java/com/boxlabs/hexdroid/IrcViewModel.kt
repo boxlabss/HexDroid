@@ -96,7 +96,13 @@ data class UiMessage(
      * IRCv3 message-id (msgid tag). When non-null, used to deduplicate messages that arrive
      * both via echo-message and chathistory replay, or after a bouncer reconnect.
      */
-    val msgId: String? = null
+    val msgId: String? = null,
+    /**
+     * IRCv3 +reply / +draft/reply tag: the msgid of the message this is a reply to.
+     * When non-null, the UI shows a small quoted preview of the parent message above
+     * this one.
+     */
+    val replyToMsgId: String? = null,
 )
 data class UiBuffer(
     val name: String,
@@ -145,6 +151,7 @@ data class UiSettings(
     val showTopicBar: Boolean = true,
     val hideMotdOnConnect: Boolean = false,
     val hideJoinPartQuit: Boolean = false,
+    val hideTopicOnEntry: Boolean = false,
     val defaultShowNickList: Boolean = true,
     val defaultShowBufferList: Boolean = true,
 
@@ -187,6 +194,12 @@ data class UiSettings(
     val partMessage: String = "Leaving",
 
     val colorizeNicks: Boolean = true,
+    /**
+     * Custom colour for your own nick, stored as ARGB int (e.g. 0xFF_FF6600.toInt()).
+     * Null means "Auto" — let [NickColors.colorForNick] pick a colour from the hash,
+     * the same as any other nick.
+     */
+    val ownNickColorInt: Int? = null,
 
     val introTourSeenVersion: Int = 0,
     val mircColorsEnabled: Boolean = true,
@@ -269,6 +282,8 @@ data class UiState(
     val listInProgress: Boolean = false,
     val channelDirectory: List<ChannelListEntry> = emptyList(),
     val listFilter: String = "",
+    /** Sort order for the channel list: "size_desc", "size_asc", "name_asc", "name_desc". */
+    val listSort: String = "size_desc",
 
     val collapsedNetworkIds: Set<String> = emptySet(),
     val settings: UiSettings = UiSettings(),
@@ -1201,6 +1216,7 @@ class IrcViewModel(
 
     fun toggleChannelsOnly() { _state.value = _state.value.copy(channelsOnly = !_state.value.channelsOnly) }
     fun setListFilter(v: String) { _state.value = _state.value.copy(listFilter = v) }
+    fun setListSort(v: String)   { _state.value = _state.value.copy(listSort = v) }
     fun updateSettings(update: UiSettings.() -> UiSettings) {
         // Apply immediately; DataStore confirms shortly after.
         val st = _state.value
@@ -3150,7 +3166,8 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     isLocal = fromMe || suppressUnread,
                     timeMs = ev.timeMs,
                     doNotify = allowNotify,
-                    msgId = ev.msgId
+                    msgId = ev.msgId,
+                    replyToMsgId = ev.replyToMsgId,
                 )
             }
             is IrcEvent.Notice -> {
@@ -3565,17 +3582,19 @@ if (affectLive) {
 
                 if (!ev.isHistory) setTopic(chanKey, ev.topic)
 
-                // mIRC-style join/topic info line
-                val topicText = ev.topic ?: ""
-                val msg = "* Topic for ${ev.channel} is: $topicText"
-                append(
-                    chanKey,
-                    from = null,
-                    text = msg,
-                    isLocal = suppressUnread,
-                    timeMs = ev.timeMs,
-                    doNotify = false
-                )
+                if (!st0.settings.hideTopicOnEntry) {
+                    // mIRC-style join/topic info line
+                    val topicText = ev.topic ?: ""
+                    val msg = "* Topic for ${ev.channel} is: $topicText"
+                    append(
+                        chanKey,
+                        from = null,
+                        text = msg,
+                        isLocal = suppressUnread,
+                        timeMs = ev.timeMs,
+                        doNotify = false
+                    )
+                }
             }
             is IrcEvent.TopicWhoTime -> {
                 val st0 = _state.value
@@ -3584,28 +3603,43 @@ if (affectLive) {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
 
-                val whenStr = ev.setAtMs?.let {
-                    try {
-                        java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US).format(java.util.Date(it))
-                    } catch (_: Throwable) {
-                        java.util.Date(it).toString()
-                    }
-                } ?: "unknown time"
+                if (!st0.settings.hideTopicOnEntry) {
+                    val whenStr = ev.setAtMs?.let {
+                        try {
+                            java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US).format(java.util.Date(it))
+                        } catch (_: Throwable) {
+                            java.util.Date(it).toString()
+                        }
+                    } ?: "unknown time"
 
-                val msg = "* Topic for ${ev.channel} set by ${ev.setter} at $whenStr"
-                append(
-                    chanKey,
-                    from = null,
-                    text = msg,
-                    isLocal = suppressUnread,
-                    timeMs = ev.timeMs,
-                    doNotify = false
-                )
+                    val msg = "* Topic for ${ev.channel} set by ${ev.setter} at $whenStr"
+                    append(
+                        chanKey,
+                        from = null,
+                        text = msg,
+                        isLocal = suppressUnread,
+                        timeMs = ev.timeMs,
+                        doNotify = false
+                    )
+                }
             }
             is IrcEvent.Topic -> {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
-                if (!ev.isHistory) setTopic(chanKey, ev.topic)
+                // Always update the topic bar — isHistory only gates the chat line below.
+                // A live TOPIC command whose server-time tag is >15 s in the past (clock
+                // drift, or topic set just before you joined) was being flagged as history
+                // and setTopic was skipped, leaving the bar showing the old topic.
+                setTopic(chanKey, ev.topic)
+                if (!ev.isHistory) {
+                    // Append a status line so the change is visible in the buffer.
+                    val topicText = ev.topic?.takeIf { it.isNotBlank() } ?: "(topic cleared)"
+                    val line = if (ev.setter != null)
+                        "* ${ev.setter} changed the topic to: $topicText"
+                    else
+                        "* Topic changed to: $topicText"
+                    append(chanKey, from = null, text = line, doNotify = false, timeMs = ev.timeMs)
+                }
             }
             is IrcEvent.ChannelUserMode -> {
                 if (!ev.isHistory) {
@@ -3616,8 +3650,7 @@ if (affectLive) {
             is IrcEvent.ChannelListStart -> _state.value = _state.value.copy(listInProgress = true, channelDirectory = emptyList())
             is IrcEvent.ChannelListItem -> {
                 val st = _state.value
-                val updated = if (st.channelDirectory.size < 5000) st.channelDirectory + ChannelListEntry(ev.channel, ev.users, ev.topic) else st.channelDirectory
-                _state.value = st.copy(channelDirectory = updated)
+                _state.value = st.copy(channelDirectory = st.channelDirectory + ChannelListEntry(ev.channel, ev.users, ev.topic))
             }
             is IrcEvent.ChannelListEnd -> _state.value = _state.value.copy(listInProgress = false)
 
@@ -4259,7 +4292,8 @@ if (affectLive) {
         timeMs: Long? = null,
         doNotify: Boolean = true,
         isMotd: Boolean = false,
-        msgId: String? = null
+        msgId: String? = null,
+        replyToMsgId: String? = null,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         val msg = UiMessage(
@@ -4269,7 +4303,8 @@ if (affectLive) {
             text = text,
             isAction = isAction,
             isMotd = isMotd,
-            msgId = msgId
+            msgId = msgId,
+            replyToMsgId = replyToMsgId,
         )
 
         // Atomic update, then read the committed state for logging/notifications.

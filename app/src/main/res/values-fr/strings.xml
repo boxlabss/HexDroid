@@ -41,6 +41,11 @@
 
     <string name="setting_font_size">Taille de police</string>
     <string name="setting_colorise_nicks">Coloriser les pseudos</string>
+    <string name="setting_own_nick_colour_title">Couleur de ton pseudo</string>
+    <string name="setting_own_nick_colour_auto">Automatique</string>
+    <string name="setting_own_nick_colour_custom">Personnalisé</string>
+    <string name="setting_own_nick_colour_pick">Choisir une couleur</string>
+    <string name="setting_own_nick_colour_reset">Réinitialiser</string>
     <string name="setting_mirc_colours">Activer les couleurs mIRC</string>
     <string name="setting_ansi_colours">Activer les couleurs ANSI</string>
     <string name="setting_show_topic_bar">Afficher la barre de sujet</string>
@@ -48,6 +53,7 @@
     <string name="setting_timestamp_format">Format d\'heure (Java)</string>
     <string name="setting_hide_motd">Masquer le MOTD à la connexion</string>
     <string name="setting_hide_joinpartquit">Masquer les messages d\'entrée/sortie</string>
+    <string name="setting_hide_topic_on_entry">Masquer le sujet à l\'entrée</string>
     <string name="setting_show_buffers_default">Afficher réseaux/canaux par défaut</string>
     <string name="setting_show_nicklist_default">Afficher la liste de pseudos par défaut</string>
     <string name="setting_highlight_on_nick">Surligner sur pseudo</string>
@@ -123,28 +129,28 @@
     <string name="networks_add">Ajouter un réseau</string>
     <string name="networks_auto_connect">Auto-connexion</string>
 
-    <string name="tour_add_network_title">Ajouter un réseau</string>
-    <string name="tour_add_network_body">Appuyez sur + pour ajouter un réseau ou modifier un existant. HexDroid est livré avec quelques réseaux par défaut.</string>
-    <string name="tour_connect_title">Connecter</string>
-    <string name="tour_connect_body">Connectez-vous au réseau sélectionné. Une fois connecté, ouvrez le chat pour rejoindre des canaux.</string>
-    <string name="tour_settings_title">Paramètres</string>
-    <string name="tour_settings_body">Ajustez l\'apparence, les polices et d\'autres préférences ici.</string>
-    <string name="tour_switcher_title">Sélecteur</string>
-    <string name="tour_switcher_body">Cette barre latérale affiche votre serveur, canaux et messages privés. Appuyez pour basculer.</string>
+    <string name="tour_add_network_title">Vos réseaux</string>
+    <string name="tour_add_network_body">Appuyez sur + pour ajouter un serveur ou modifier les existants. HexDroid inclut quelques serveurs par défaut — Libera, Freenode et AfterNET.</string>
+    <string name="tour_connect_title">Connexion</string>
+    <string name="tour_connect_body">Appuyez sur Connexion pour vous connecter. Le bouton devient vert en ligne. Plusieurs réseaux simultanément sont possibles.</string>
+    <string name="tour_settings_title">Apparence et paramètres</string>
+    <string name="tour_settings_body">Choisissez un thème, ajustez la taille de la police et les notifications. Les changements s\'appliquent instantanément.</string>
+    <string name="tour_switcher_title">Liste des tampons</string>
+    <string name="tour_switcher_body">Ce panneau liste tous vos serveurs, canaux et messages privés ouverts. Balayez ou appuyez sur ☰ pour l\'afficher.</string>
     <string name="tour_more_title">Plus d\'actions</string>
-    <string name="tour_more_body">Ce menu contient la liste des canaux, les transferts, les paramètres, les réseaux et plus.</string>
+    <string name="tour_more_body">Ce menu donne accès à la liste des canaux, transferts de fichiers, liste d\'ignorés, paramètres réseau et plus.</string>
     <string name="tour_send_title">Envoyer des messages</string>
-    <string name="tour_send_body">Tapez ici pour chatter. Vous pouvez aussi utiliser des commandes comme /join #canal, /msg pseudo salut, /whois pseudo, etc.</string>
-    <string name="tour_dcc_title">Activer DCC</string>
-    <string name="tour_dcc_body">Activez DCC pour envoyer/recevoir des fichiers. Derrière un NAT, le mode Passif peut aider.</string>
+    <string name="tour_send_body">Tapez ici pour chatter. Les commandes slash fonctionnent aussi : /join #canal, /msg pseudo texte, /part, /whois pseudo.</string>
+    <string name="tour_dcc_title">Transferts de fichiers (DCC)</string>
+    <string name="tour_dcc_body">Activez DCC pour envoyer et recevoir des fichiers directement entre utilisateurs. Le DCC passif évite les problèmes NAT.</string>
     <string name="tour_send_file_title">Envoyer un fichier</string>
-    <string name="tour_send_file_body">Entrez un pseudo cible, puis choisissez un fichier. (DCC doit être activé.) Les offres entrantes apparaissent ici aussi.</string>
+    <string name="tour_send_file_body">Entrez le pseudo cible puis choisissez un fichier. Les offres DCC entrantes apparaissent également ici.</string>
     <string name="tour_support_title">Besoin d\'aide ?</string>
-    <string name="tour_support_body">Vous pouvez vous connecter ici pour obtenir du support dans #HexDroid.</string>
-    <string name="tour_support_fallback">Si vous ne voyez pas AfterNET, appuyez sur Ajouter AfterNET (ou +) pour l\'ajouter. Connectez-vous là pour du support dans #HexDroid.</string>
+    <string name="tour_support_body">Connectez-vous à AfterNET et rejoignez #HexDroid pour du support ou pour discuter avec d\'autres utilisateurs.</string>
+    <string name="tour_support_fallback">AfterNET n\'est pas dans votre liste — appuyez sur Ajouter AfterNET puis rejoignez #HexDroid.</string>
     <string name="tour_support_action">Ajouter AfterNET</string>
-    <string name="tour_replay_title">Relancer cette visite</string>
-    <string name="tour_replay_body">Vous pouvez relancer la visite à tout moment depuis les Paramètres.</string>
+    <string name="tour_replay_title">Rejouer ce tour</string>
+    <string name="tour_replay_body">Vous pouvez relancer le tutoriel depuis Paramètres → À propos. Appuyez sur Terminé pour finir.</string>
 
     <string name="about_title">À propos</string>
     <string name="transfers_title">Transferts</string>

@@ -47,6 +47,11 @@
 
     <string name="setting_font_size">Font size</string>
     <string name="setting_colorise_nicks">Colourise nicks</string>
+    <string name="setting_own_nick_colour_title">My nick colour</string>
+    <string name="setting_own_nick_colour_auto">Auto</string>
+    <string name="setting_own_nick_colour_custom">Custom</string>
+    <string name="setting_own_nick_colour_pick">Pick colour</string>
+    <string name="setting_own_nick_colour_reset">Reset</string>
     <string name="setting_mirc_colours">Enable mIRC colours</string>
     <string name="setting_ansi_colours">Enable ANSI colours</string>
     <string name="setting_show_topic_bar">Show topic bar</string>
@@ -54,6 +59,7 @@
     <string name="setting_timestamp_format">Timestamp format (Java)</string>
     <string name="setting_hide_motd">Hide MOTD on connect</string>
     <string name="setting_hide_joinpartquit">Hide join/part/quit messages</string>
+    <string name="setting_hide_topic_on_entry">Hide topic on entry</string>
     <string name="setting_show_buffers_default">Show network/chans by default</string>
     <string name="setting_show_nicklist_default">Show nicklist by default</string>
     <string name="setting_highlight_on_nick">Highlight on nick</string>
@@ -167,28 +173,28 @@
     <string name="network_realname">Real name</string>
 
     <!-- Tour steps -->
-    <string name="tour_add_network_title">Add a network</string>
-    <string name="tour_add_network_body">Tap + to add a new network, or edit an existing one. HexDroid ships with a few defaults so you can get going quickly.</string>
+    <string name="tour_add_network_title">Your networks</string>
+    <string name="tour_add_network_body">Tap + to add a server, or edit the ones already here. HexDroid ships with a few defaults — Libera, Freenode, and AfterNET — so you can connect straight away.</string>
     <string name="tour_connect_title">Connect</string>
-    <string name="tour_connect_body">Connect to the selected network. Once connected, open chat to join channels and talk.</string>
-    <string name="tour_settings_title">Settings</string>
-    <string name="tour_settings_body">Tweak settings such as appearance, fonts and other preferences here.</string>
-    <string name="tour_switcher_title">Switcher</string>
-    <string name="tour_switcher_body">This sidebar shows your server, channels, and private messages. Tap any item to switch between them.</string>
-    <string name="tour_more_title">More actions</string>
-    <string name="tour_more_body">This menu contains channel list, file transfers, settings, networks, and more.</string>
+    <string name="tour_connect_body">Tap Connect to open a connection. The button turns green when you\'re online. You can have multiple networks connected at once.</string>
+    <string name="tour_switcher_title">Buffer list</string>
+    <string name="tour_switcher_body">This panel lists every server, channel, and private message you have open. Swipe or tap the ☰ button to show it. Tap any item to switch to it — unread counts are shown here too.</string>
     <string name="tour_send_title">Send messages</string>
-    <string name="tour_send_body">Type here to chat. You can also use slash commands like /join #channel, /msg nick hi, /whois nick, etc.</string>
-    <string name="tour_dcc_title">Enable DCC</string>
-    <string name="tour_dcc_body">Turn on DCC to send/receive files. If you\'re behind NAT, Passive mode can help.</string>
+    <string name="tour_send_body">Type here to chat. Slash commands work too: /join #channel, /msg nick text, /part, /whois nick, /me action text, and more.</string>
+    <string name="tour_more_title">More actions</string>
+    <string name="tour_more_body">This menu reaches channel list, file transfers, ignore list, network settings, and more. It also shows channel mode and topic management when you\'re an op.</string>
+    <string name="tour_settings_title">Appearance &amp; settings</string>
+    <string name="tour_settings_body">Choose a theme, adjust font size, tweak notification sounds, privacy options, and much more. Changes apply instantly — no restart needed.</string>
+    <string name="tour_dcc_title">File transfers (DCC)</string>
+    <string name="tour_dcc_body">Enable DCC to send and receive files directly between users. If you\'re behind a router, Passive DCC avoids port-forwarding headaches.</string>
     <string name="tour_send_file_title">Send a file</string>
-    <string name="tour_send_file_body">Enter a target nick, then pick a file to send. (Requires DCC to be enabled.) Incoming offers appear on this screen too.</string>
-    <string name="tour_support_title">Need support?</string>
-    <string name="tour_support_body">You can connect here if you need support in #HexDroid.</string>
-    <string name="tour_support_fallback">If you don\'t see AfterNET in your list, tap Add AfterNET (or +) to add it again. You can connect there for support in #HexDroid.</string>
+    <string name="tour_send_file_body">Enter the target nick, then pick a file from storage. Incoming DCC offers also arrive here — accept or reject them from this screen.</string>
+    <string name="tour_support_title">Need help?</string>
+    <string name="tour_support_body">Connect to AfterNET and join #HexDroid for support, feature requests, or just to chat with other HexDroid users.</string>
+    <string name="tour_support_fallback">AfterNET isn\'t in your list yet — tap Add AfterNET to add it, then connect and join #HexDroid for support.</string>
     <string name="tour_support_action">Add AfterNET</string>
-    <string name="tour_replay_title">Run this tour again</string>
-    <string name="tour_replay_body">You can replay the walkthrough any time from Settings.</string>
+    <string name="tour_replay_title">Replay this tour</string>
+    <string name="tour_replay_body">You can run the walkthrough again any time from Settings → About. Tap Done to finish.</string>
 
     <!-- About -->
     <string name="about_title">About</string>
@@ -394,7 +400,7 @@
     <string name="settings_ok">OK</string>
     <string name="settings_system_default">System default</string>
     <string name="settings_matrix_theme">Matrix</string>
-    <string name="settings_custom_font">Custom font file\u2026</string>
+    <string name="settings_custom_font">Custom font file…</string>
 
     <!-- Transfers screen — extras -->
     <string name="transfers_share_open">Share / Open file</string>
@@ -408,7 +414,7 @@
     <string name="transfers_dcc_passive">Passive</string>
 
     <!-- Channel tools -->
-    <string name="chat_channel_lists">Channel lists\u2026</string>
+    <string name="chat_channel_lists">Channel lists…</string>
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Clear</string>

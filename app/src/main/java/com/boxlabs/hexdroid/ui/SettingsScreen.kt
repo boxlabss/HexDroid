@@ -25,15 +25,26 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
@@ -62,6 +73,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -120,6 +139,131 @@ private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: S
 private fun getCustomFontName(path: String?): String? {
     if (path.isNullOrBlank()) return null
     return File(path).name.removePrefix("ui_").removePrefix("chat_")
+}
+
+/**
+ * A full-colour HSV wheel + value (lightness) slider for picking a custom nick colour.
+ * Shows a preview swatch next to the current colour. Confirm saves, dismiss cancels.
+ */
+@Composable
+private fun NickColourPickerDialog(
+    initial: Color,
+    onDismiss: () -> Unit,
+    onConfirm: (Color) -> Unit,
+) {
+    // Decompose to HSV
+    val initHsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(initial.toArgb(), initHsv)
+
+    var hue   by remember { mutableStateOf(initHsv[0]) }
+    var sat   by remember { mutableStateOf(initHsv[1]) }
+    var value by remember { mutableStateOf(initHsv[2]) }
+
+    val picked = Color.hsv(hue, sat, value)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = { onConfirm(picked) }) { Text("OK") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+        },
+        title = { Text(stringResource(R.string.setting_own_nick_colour_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Colour preview swatch
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(picked)
+                )
+
+                // Hue wheel
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(CircleShape)
+                        .pointerInput(Unit) {
+                            val piF = Math.PI.toFloat()
+                            detectDragGestures(
+                                onDragStart = { offset: androidx.compose.ui.geometry.Offset ->
+                                    val cx = size.width / 2f
+                                    val cy = size.height / 2f
+                                    val dx = offset.x - cx
+                                    val dy = offset.y - cy
+                                    val r  = size.width.coerceAtMost(size.height) / 2f
+                                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                                    if (dist <= r) {
+                                        hue = ((kotlin.math.atan2(dy, dx) * 180f / piF + 360f) % 360f)
+                                        sat = (dist / r).coerceIn(0f, 1f)
+                                    }
+                                },
+                                onDrag = { change: PointerInputChange, _: androidx.compose.ui.geometry.Offset ->
+                                    val cx = size.width / 2f
+                                    val cy = size.height / 2f
+                                    val dx = change.position.x - cx
+                                    val dy = change.position.y - cy
+                                    val r  = size.width.coerceAtMost(size.height) / 2f
+                                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                                    hue = ((kotlin.math.atan2(dy, dx) * 180f / piF + 360f) % 360f)
+                                    sat = (dist / r).coerceIn(0f, 1f)
+                                }
+                            )
+                        }
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val cx = size.width / 2f
+                        val cy = size.height / 2f
+                        val r  = size.width.coerceAtMost(size.height) / 2f
+                        // Draw hue wheel: sweep + radial gradients stacked
+                        drawCircle(
+                            brush = Brush.sweepGradient(
+                                colors = listOf(
+                                    Color.Red, Color.Yellow, Color.Green,
+                                    Color.Cyan, Color.Blue, Color.Magenta, Color.Red
+                                ),
+                                center = Offset(cx, cy),
+                            ),
+                            radius = r,
+                        )
+                        // White radial fade (centre = white)
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(Color.White, Color.Transparent),
+                                center = Offset(cx, cy),
+                                radius = r,
+                            ),
+                            radius = r,
+                        )
+                        // Selection indicator
+                        val piF2 = Math.PI.toFloat()
+                        val angle = hue * piF2 / 180f
+                        val iX = cx + sat * r * kotlin.math.cos(angle.toDouble()).toFloat()
+                        val iY = cy + sat * r * kotlin.math.sin(angle.toDouble()).toFloat()
+                        drawCircle(Color.White, radius = 10f, center = Offset(iX, iY))
+                        drawCircle(Color.Black, radius = 10f, center = Offset(iX, iY), style = Stroke(2f))
+                    }
+                }
+
+                // Value (brightness) slider
+                Text(
+                    "Brightness",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = value,
+                    onValueChange = { value = it },
+                    valueRange = 0.1f..1f,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -409,6 +553,67 @@ fun SettingsScreen(
                 SettingToggle(stringResource(R.string.setting_colorise_nicks), s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
             }
 
+            // Own nick colour: Auto (hash-based) or Custom (colour wheel)
+            item {
+                var showPicker by remember { mutableStateOf(false) }
+                val customArgb = s.ownNickColorInt
+                val customColor = if (customArgb != null) Color(customArgb) else null
+
+                if (showPicker) {
+                    NickColourPickerDialog(
+                        initial = customColor ?: Color(0xFF_FF6600.toInt()),
+                        onDismiss = { showPicker = false },
+                        onConfirm = { picked ->
+                            onUpdate { copy(ownNickColorInt = picked.toArgb()) }
+                            showPicker = false
+                        },
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.setting_own_nick_colour_title))
+                        Text(
+                            if (customColor == null)
+                                stringResource(R.string.setting_own_nick_colour_auto)
+                            else
+                                stringResource(R.string.setting_own_nick_colour_custom),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (customColor != null) {
+                            // Swatch showing current colour/tap to re-pick
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(customColor)
+                                    .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                    .clickable { showPicker = true }
+                            )
+                            TextButton(onClick = { onUpdate { copy(ownNickColorInt = null) } }) {
+                                Text(stringResource(R.string.setting_own_nick_colour_reset))
+                            }
+                        } else {
+                            OutlinedButton(onClick = { showPicker = true }) {
+                                Text(stringResource(R.string.setting_own_nick_colour_pick))
+                            }
+                        }
+                    }
+                }
+            }
+
             item {
                 SettingToggle(stringResource(R.string.setting_mirc_colours), s.mircColorsEnabled) { onUpdate { copy(mircColorsEnabled = !mircColorsEnabled) } }
             }
@@ -430,6 +635,7 @@ fun SettingsScreen(
             }
             item { SettingToggle(stringResource(R.string.setting_hide_motd), s.hideMotdOnConnect) { onUpdate { copy(hideMotdOnConnect = !hideMotdOnConnect) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_joinpartquit), s.hideJoinPartQuit) { onUpdate { copy(hideJoinPartQuit = !hideJoinPartQuit) } } }
+            item { SettingToggle(stringResource(R.string.setting_hide_topic_on_entry), s.hideTopicOnEntry) { onUpdate { copy(hideTopicOnEntry = !hideTopicOnEntry) } } }
             item { SectionTitle(stringResource(R.string.section_landscape)) }
             item { SettingToggle(stringResource(R.string.setting_show_buffers_default), s.defaultShowBufferList) { onUpdate { copy(defaultShowBufferList = !defaultShowBufferList) } } }
             item { SettingToggle(stringResource(R.string.setting_show_nicklist_default), s.defaultShowNickList) { onUpdate { copy(defaultShowNickList = !defaultShowNickList) } } }

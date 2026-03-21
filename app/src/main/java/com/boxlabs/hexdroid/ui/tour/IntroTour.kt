@@ -47,72 +47,108 @@ data class IntroTourStep(
  * Falls back to English defaults when called without a context.
  */
 fun buildIntroTour(context: Context? = null): List<IntroTourStep> {
-    // Helper that resolves a string resource, or returns the English fallback.
     fun s(resId: Int, fallback: String): String = context?.getString(resId) ?: fallback
 
     return listOf(
+        // 1. Networks list — the FAB to add a server
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_ADD_FAB,
-            title = s(R.string.tour_add_network_title, "Add a network"),
-            body = s(R.string.tour_add_network_body, "Tap + to add a new network, or edit an existing one. HexDroid ships with a few defaults so you can get going quickly.")
+            title  = s(R.string.tour_add_network_title, "Your networks"),
+            body   = s(R.string.tour_add_network_body,
+                "Tap + to add a server, or edit the ones already here. " +
+                "HexDroid ships with a few defaults — Libera, Freenode, and AfterNET — " +
+                "so you can connect straight away."),
         ),
+        // 2. Networks list — the Connect button
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_CONNECT_BUTTON,
-            title = s(R.string.tour_connect_title, "Connect"),
-            body = s(R.string.tour_connect_body, "Connect to the selected network. Once connected, open chat to join channels and talk.")
+            title  = s(R.string.tour_connect_title, "Connect"),
+            body   = s(R.string.tour_connect_body,
+                "Tap Connect to open a connection. The button turns green when you're online. " +
+                "You can have multiple networks connected at once."),
         ),
-        IntroTourStep(
-            screen = AppScreen.SETTINGS,
-            target = TourTarget.SETTINGS_APPEARANCE_SECTION,
-            title = s(R.string.tour_settings_title, "Settings"),
-            body = s(R.string.tour_settings_body, "Tweak settings such as appearance, fonts and other preferences here.")
-        ),
+        // 3. Chat — buffer/channel switcher sidebar
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_BUFFER_DRAWER,
-            title = s(R.string.tour_switcher_title, "Switcher"),
-            body = s(R.string.tour_switcher_body, "This sidebar shows your server, channels, and private messages. Tap any item to switch between them.")
+            title  = s(R.string.tour_switcher_title, "Buffer list"),
+            body   = s(R.string.tour_switcher_body,
+                "This panel lists every server, channel, and private message you have open. " +
+                "Swipe or tap the ☰ button to show it. " +
+                "Tap any item to switch to it — unread counts are shown here too."),
         ),
-        IntroTourStep(
-            screen = AppScreen.CHAT,
-            target = TourTarget.CHAT_OVERFLOW_BUTTON,
-            title = s(R.string.tour_more_title, "More actions"),
-            body = s(R.string.tour_more_body, "This menu contains channel list, file transfers, settings, networks, and more.")
-        ),
+        // 4. Chat — input box
         IntroTourStep(
             screen = AppScreen.CHAT,
             target = TourTarget.CHAT_INPUT,
-            title = s(R.string.tour_send_title, "Send messages"),
-            body = s(R.string.tour_send_body, "Type here to chat. You can also use slash commands like /join #channel, /msg nick hi, /whois nick, etc.")
+            title  = s(R.string.tour_send_title, "Send messages"),
+            body   = s(R.string.tour_send_body,
+                "Type here to chat. Slash commands work too: " +
+                "/join #channel, /msg nick text, /part, /whois nick, /me action text, and more."),
         ),
+        // 5. Chat — overflow menu
+        IntroTourStep(
+            screen = AppScreen.CHAT,
+            target = TourTarget.CHAT_OVERFLOW_BUTTON,
+            title  = s(R.string.tour_more_title, "More actions"),
+            body   = s(R.string.tour_more_body,
+                "This menu reaches channel list, file transfers, ignore list, network settings, " +
+                "and more. It also shows channel mode and topic management when you're an op."),
+        ),
+        // 6. Settings — appearance section
+        IntroTourStep(
+            screen = AppScreen.SETTINGS,
+            target = TourTarget.SETTINGS_APPEARANCE_SECTION,
+            title  = s(R.string.tour_settings_title, "Appearance & settings"),
+            body   = s(R.string.tour_settings_body,
+                "Choose a theme, adjust font size, tweak notification sounds, privacy options, " +
+                "and much more. Changes apply instantly — no restart needed."),
+        ),
+        // 7. Transfers — enable DCC toggle
         IntroTourStep(
             screen = AppScreen.TRANSFERS,
             target = TourTarget.TRANSFERS_ENABLE_DCC,
-            title = s(R.string.tour_dcc_title, "Enable DCC"),
-            body = s(R.string.tour_dcc_body, "Turn on DCC to send/receive files. If you're behind NAT, Passive mode can help.")
+            title  = s(R.string.tour_dcc_title, "File transfers (DCC)"),
+            body   = s(R.string.tour_dcc_body,
+                "Enable DCC to send and receive files directly between users. " +
+                "If you're behind a router, Passive DCC avoids port-forwarding headaches."),
         ),
+        // 8. Transfers — pick file button
         IntroTourStep(
             screen = AppScreen.TRANSFERS,
             target = TourTarget.TRANSFERS_PICK_FILE,
-            title = s(R.string.tour_send_file_title, "Send a file"),
-            body = s(R.string.tour_send_file_body, "Enter a target nick, then pick a file to send. (Requires DCC to be enabled.) Incoming offers appear on this screen too.")
+            title  = s(R.string.tour_send_file_title, "Send a file"),
+            body   = s(R.string.tour_send_file_body,
+                "Enter the target nick, then pick a file from storage. " +
+                "Incoming DCC offers also arrive here — accept or reject them from this screen."),
         ),
+        // 9. Networks — AfterNET support channel
         IntroTourStep(
             screen = AppScreen.NETWORKS,
             target = TourTarget.NETWORKS_AFTERNET_ITEM,
             fallbackTarget = TourTarget.NETWORKS_ADD_FAB,
-            title = s(R.string.tour_support_title, "Need support?"),
-            body = s(R.string.tour_support_body, "You can connect here if you need support in #HexDroid."),
-            fallbackBody = s(R.string.tour_support_fallback, "If you don't see AfterNET in your list, tap Add AfterNET (or +) to add it again. You can connect there for support in #HexDroid."),
-            action = IntroTourAction(IntroTourActionId.ADD_AFTERNET, s(R.string.tour_support_action, "Add AfterNET"), fallbackOnly = true),
+            title  = s(R.string.tour_support_title, "Need help?"),
+            body   = s(R.string.tour_support_body,
+                "Connect to AfterNET and join #HexDroid for support, feature requests, " +
+                "or just to chat with other HexDroid users."),
+            fallbackBody = s(R.string.tour_support_fallback,
+                "AfterNET isn't in your list yet — tap Add AfterNET to add it, " +
+                "then connect and join #HexDroid for support."),
+            action = IntroTourAction(
+                IntroTourActionId.ADD_AFTERNET,
+                s(R.string.tour_support_action, "Add AfterNET"),
+                fallbackOnly = true,
+            ),
         ),
+        // 10. Settings — replay tour button
         IntroTourStep(
             screen = AppScreen.SETTINGS,
             target = TourTarget.SETTINGS_RUN_TOUR,
-            title = s(R.string.tour_replay_title, "Run this tour again"),
-            body = s(R.string.tour_replay_body, "You can replay the walkthrough any time from Settings.")
-        )
+            title  = s(R.string.tour_replay_title, "Replay this tour"),
+            body   = s(R.string.tour_replay_body,
+                "You can run the walkthrough again any time from Settings → About. Tap Done to finish."),
+        ),
     )
 }

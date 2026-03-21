@@ -149,6 +149,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -589,6 +590,45 @@ private fun SidebarDragHandle(
     }
 }
 
+/**
+ * Small quoted preview shown above a message that carries a +reply tag,
+ * pointing at the parent message by its msgid.
+ *
+ * Looks up the parent in [messages] by msgid.  If the parent has scrolled out
+ * of the buffer window or hasn't arrived yet, shows a neutral placeholder so
+ * the threading intent is still visible.
+ */
+@Composable
+private fun ReplyQuote(
+    replyToMsgId: String,
+    messages: List<UiMessage>,
+    onTap: () -> Unit,
+) {
+    val parent = remember(replyToMsgId, messages) {
+        messages.lastOrNull { it.msgId == replyToMsgId }
+    }
+    val label = when {
+        parent == null       -> "↩ (original message not in window)"
+        parent.from != null  -> "↩ ${parent.from}: ${stripIrcFormatting(parent.text).take(80)}"
+        else                 -> "↩ ${stripIrcFormatting(parent.text).take(80)}"
+    }
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = parent != null, onClick = onTap)
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                RoundedCornerShape(4.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 /**
  * Horizontal divider shown above the first unread message in a buffer.
@@ -887,11 +927,15 @@ fun ChatScreen(
 
     // Nick colour is a pure function of nick name + theme brightness — no map needed.
     // Stable across joins/parts; recomputed only when the theme changes.
-    fun nickColor(nick: String): Color =
-        if (state.settings.colorizeNicks)
-            NickColors.colorForNick(baseNick(nick).lowercase(), bgLum)
-        else
-            Color.Unspecified
+    // Own nick uses the custom colour from settings when set (non-null).
+    val myNickBase = baseNick(myNick).lowercase()
+    fun nickColor(nick: String): Color {
+        if (!state.settings.colorizeNicks) return Color.Unspecified
+        val base = baseNick(nick).lowercase()
+        val custom = state.settings.ownNickColorInt
+        if (custom != null && base == myNickBase) return Color(custom)
+        return NickColors.colorForNick(base, bgLum)
+    }
 
     var showNickSheet by remember { mutableStateOf(false) }
 
@@ -1714,6 +1758,10 @@ fun ChatScreen(
                                 text = { Text(stringResource(R.string.menu_networks)) },
                                 onClick = { overflowExpanded = false; onOpenNetworks() }
                             )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.menu_system_info)) },
+                                onClick = { overflowExpanded = false; onSysInfo() }
+                            )
                             if (isIrcOper) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_ircop_tools)) },
@@ -1749,7 +1797,7 @@ fun ChatScreen(
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun MessagesPane(mod: Modifier = Modifier) {
-        Column(mod) {
+        Column(mod.clipToBounds()) {
             if (state.settings.showTopicBar && isChannel && !topic.isNullOrBlank()) {
                 Surface(tonalElevation = 1.dp) {
                     Row(
@@ -1861,6 +1909,7 @@ fun ChatScreen(
                             androidx.compose.foundation.layout.Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .clipToBounds()
                                     .combinedClickable(
                                         onClick = {},
                                         onLongClick = {
@@ -1934,6 +1983,17 @@ fun ChatScreen(
                         // Column so the inline preview is always visually below the message text,
                         // not detached as a sibling that reverseLayout can misplace.
                         androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+                        // Reply quote: shown above the message when it carries a +reply tag.
+                        if (m.replyToMsgId != null) {
+                            ReplyQuote(
+                                replyToMsgId = m.replyToMsgId,
+                                messages = messages,
+                                onTap = {
+                                    val parentIdx = reversedMessages.indexOfFirst { it.msgId == m.replyToMsgId }
+                                    if (parentIdx >= 0) scope.launch { listState.animateScrollToItem(parentIdx) }
+                                },
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2630,33 +2690,61 @@ fun ChatScreen(
     }
 
     if (showChanOps && isChannel) {
-        ModalBottomSheet(onDismissRequest = { showChanOps = false }) {
+        // windowInsets = WindowInsets(0) so we control insets ourselves.
+        // imePadding() goes on the OUTER container, not inside the scroll — this prevents
+        // the "bounce" where scrolled-to-bottom content jumps when the keyboard appears,
+        // because the sheet shrinks from outside rather than padding growing inside.
+        ModalBottomSheet(
+            onDismissRequest = { showChanOps = false },
+        ) {
             val scrollState = rememberScrollState()
+            // Sticky header (title + meta) — never scrolls away
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.92f)
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 4.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(stringResource(R.string.chat_channel_tools), style = MaterialTheme.typography.titleMedium)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "$selNetName • $selBufName",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (currentModeString != null) {
+                        Text(
+                            currentModeString,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        TextButton(
+                            onClick = { onSend("/mode $selBufName") },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) { Text(stringResource(R.string.chat_fetch_modes), style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+            }
+            HorizontalDivider()
+            // Scrollable body — imePadding inside here would cause the bounce.
+            // Instead it sits on the Column wrapping the whole sheet content.
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.88f)
                     .navigationBarsPadding()
                     .imePadding()
-                    .verticalScroll(scrollState),
+                    .verticalScroll(scrollState)
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(stringResource(R.string.chat_channel_tools), style = MaterialTheme.typography.titleLarge)
-                Text("$selNetName • $selBufName", style = MaterialTheme.typography.bodySmall)
-                if (currentModeString != null) {
-                    Text(
-                        text = stringResource(R.string.chat_current_modes, currentModeString),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    OutlinedButton(
-                        onClick = { onSend("/mode $selBufName") },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text(stringResource(R.string.chat_fetch_modes)) }
-                }
-                HorizontalDivider()
 
                 // Topic
                 if (canTopic) {

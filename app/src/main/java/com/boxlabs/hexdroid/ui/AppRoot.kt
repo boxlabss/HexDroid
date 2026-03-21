@@ -122,8 +122,10 @@ fun AppRoot(
 		if (state.screen != desired) vm.goTo(desired)
 	}
 
-	// Clear stale target rects when screens change.
-	LaunchedEffect(state.screen) { tourRegistry.targets.clear() }
+	// Clear stale target rects when the tour step changes, not on every screen change.
+	// Clearing on screen change was too aggressive: lazy-column items off-screen never
+	// re-register, leaving the registry permanently empty for those steps.
+	LaunchedEffect(tourStepIndex) { tourRegistry.targets.clear() }
 
 
     // Keep connection state in sync when returning to foreground.
@@ -251,6 +253,7 @@ fun AppRoot(
                     onToggleNetworkExpanded = vm::toggleNetworkExpanded,
                     onTypingChanged = vm::notifyTypingChanged,
                     onMarkRead = vm::markBufferRead,
+                    onHighlightConsumed = vm::clearHighlightScroll,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )
@@ -285,6 +288,7 @@ fun AppRoot(
                     onBack = vm::backToChat,
                     onRefresh = vm::requestList,
                     onFilterChange = vm::setListFilter,
+                    onSortChange = vm::setListSort,
                     onJoin = vm::joinChannel,
                     onOpenSettings = { vm.goTo(AppScreen.SETTINGS) },
                 )

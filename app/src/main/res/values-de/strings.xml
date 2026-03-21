@@ -41,6 +41,11 @@
 
     <string name="setting_font_size">Schriftgröße</string>
     <string name="setting_colorise_nicks">Nicks einfärben</string>
+    <string name="setting_own_nick_colour_title">Eigene Nick-Farbe</string>
+    <string name="setting_own_nick_colour_auto">Automatisch</string>
+    <string name="setting_own_nick_colour_custom">Benutzerdefiniert</string>
+    <string name="setting_own_nick_colour_pick">Farbe wählen</string>
+    <string name="setting_own_nick_colour_reset">Zurücksetzen</string>
     <string name="setting_mirc_colours">mIRC-Farben aktivieren</string>
     <string name="setting_ansi_colours">ANSI-Farben aktivieren</string>
     <string name="setting_show_topic_bar">Themenleiste anzeigen</string>
@@ -48,6 +53,7 @@
     <string name="setting_timestamp_format">Zeitformat (Java)</string>
     <string name="setting_hide_motd">MOTD beim Verbinden ausblenden</string>
     <string name="setting_hide_joinpartquit">Join/Part/Quit-Nachrichten ausblenden</string>
+    <string name="setting_hide_topic_on_entry">Thema beim Beitreten ausblenden</string>
     <string name="setting_show_buffers_default">Netzwerke/Kanäle standardmäßig anzeigen</string>
     <string name="setting_show_nicklist_default">Nickliste standardmäßig anzeigen</string>
     <string name="setting_highlight_on_nick">Bei Nick hervorheben</string>
@@ -116,28 +122,28 @@
     <string name="networks_edit">Bearbeiten</string>
     <string name="networks_add">Netzwerk hinzufügen</string>
 
-    <string name="tour_add_network_title">Netzwerk hinzufügen</string>
-    <string name="tour_add_network_body">Tippe auf + um ein neues Netzwerk hinzuzufügen oder ein bestehendes zu bearbeiten. HexDroid hat einige Standardnetzwerke vorinstalliert.</string>
+    <string name="tour_add_network_title">Deine Netzwerke</string>
+    <string name="tour_add_network_body">Tippe auf +, um einen Server hinzuzufügen, oder bearbeite vorhandene. HexDroid wird mit einigen Standards geliefert — Libera, Freenode und AfterNET.</string>
     <string name="tour_connect_title">Verbinden</string>
-    <string name="tour_connect_body">Verbinde dich mit dem ausgewählten Netzwerk. Nach der Verbindung kannst du Kanäle beitreten und chatten.</string>
-    <string name="tour_settings_title">Einstellungen</string>
-    <string name="tour_settings_body">Passe Darstellung, Schriften und andere Einstellungen hier an.</string>
-    <string name="tour_switcher_title">Umschalter</string>
-    <string name="tour_switcher_body">Diese Seitenleiste zeigt deinen Server, Kanäle und Privatnachrichten. Tippe zum Wechseln.</string>
-    <string name="tour_more_title">Weitere Aktionen</string>
-    <string name="tour_more_body">Dieses Menü enthält Kanalliste, Dateiübertragungen, Einstellungen, Netzwerke und mehr.</string>
+    <string name="tour_connect_body">Tippe auf Verbinden, um eine Verbindung herzustellen. Der Knopf wird grün, wenn du online bist. Du kannst mehrere Netzwerke gleichzeitig verbinden.</string>
+    <string name="tour_settings_title">Erscheinungsbild &amp; Einstellungen</string>
+    <string name="tour_settings_body">Wähle ein Theme, passe Schriftgröße und Benachrichtigungen an. Änderungen werden sofort übernommen.</string>
+    <string name="tour_switcher_title">Pufferliste</string>
+    <string name="tour_switcher_body">Diese Leiste zeigt alle offenen Server, Kanäle und Privatnachrichten. Wische oder tippe ☰ zum Einblenden. Tippe ein Element an, um dorthin zu wechseln.</string>
+    <string name="tour_more_title">Mehr Aktionen</string>
+    <string name="tour_more_body">Dieses Menü öffnet Kanalliste, Dateiübertragungen, Ignorierliste, Netzwerkeinstellungen und mehr.</string>
     <string name="tour_send_title">Nachrichten senden</string>
-    <string name="tour_send_body">Hier tippen zum Chatten. Du kannst auch Befehle wie /join #kanal, /msg nick hallo, /whois nick usw. verwenden.</string>
-    <string name="tour_dcc_title">DCC aktivieren</string>
-    <string name="tour_dcc_body">Aktiviere DCC zum Senden/Empfangen von Dateien. Hinter NAT kann der Passiv-Modus helfen.</string>
+    <string name="tour_send_body">Tippe hier zum Chatten. Slash-Befehle funktionieren auch: /join #kanal, /msg nick text, /part, /whois nick, /me Aktion.</string>
+    <string name="tour_dcc_title">Dateiübertragungen (DCC)</string>
+    <string name="tour_dcc_body">Aktiviere DCC, um Dateien direkt zwischen Benutzern zu senden und zu empfangen. Passives DCC hilft bei Routern.</string>
     <string name="tour_send_file_title">Datei senden</string>
-    <string name="tour_send_file_body">Gib einen Ziel-Nick ein und wähle eine Datei. (DCC muss aktiviert sein.) Eingehende Angebote erscheinen ebenfalls hier.</string>
+    <string name="tour_send_file_body">Gib den Zielnick ein und wähle eine Datei. Eingehende DCC-Angebote erscheinen ebenfalls hier.</string>
     <string name="tour_support_title">Hilfe benötigt?</string>
-    <string name="tour_support_body">Du kannst dich hier verbinden für Support in #HexDroid.</string>
-    <string name="tour_support_fallback">Wenn du AfterNET nicht in deiner Liste siehst, tippe auf AfterNET hinzufügen (oder +). Verbinde dich dort für Support in #HexDroid.</string>
+    <string name="tour_support_body">Verbinde mit AfterNET und tritt #HexDroid für Support, Funktionswünsche oder zum Chatten bei.</string>
+    <string name="tour_support_fallback">AfterNET ist noch nicht in deiner Liste — tippe auf AfterNET hinzufügen und tritt #HexDroid bei.</string>
     <string name="tour_support_action">AfterNET hinzufügen</string>
     <string name="tour_replay_title">Tour wiederholen</string>
-    <string name="tour_replay_body">Du kannst die Tour jederzeit in den Einstellungen wiederholen.</string>
+    <string name="tour_replay_body">Du kannst die Einführung jederzeit in Einstellungen → Über erneut starten. Tippe auf Fertig zum Beenden.</string>
 
     <string name="about_title">Über</string>
     <string name="transfers_title">Übertragungen</string>

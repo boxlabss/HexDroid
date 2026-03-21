@@ -1,0 +1,3 @@
+Improved notifications, Added ASCII art rendering, custom nick colours
+Now handles irc:// and irc:// links
+Several improvements.

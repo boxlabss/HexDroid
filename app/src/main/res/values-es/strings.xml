@@ -41,6 +41,11 @@
 
     <string name="setting_font_size">Tamaño de fuente</string>
     <string name="setting_colorise_nicks">Colorear nicks</string>
+    <string name="setting_own_nick_colour_title">Color de tu nick</string>
+    <string name="setting_own_nick_colour_auto">Automático</string>
+    <string name="setting_own_nick_colour_custom">Personalizado</string>
+    <string name="setting_own_nick_colour_pick">Elegir color</string>
+    <string name="setting_own_nick_colour_reset">Restablecer</string>
     <string name="setting_mirc_colours">Habilitar colores mIRC</string>
     <string name="setting_ansi_colours">Activar colores ANSI</string>
     <string name="setting_show_topic_bar">Mostrar barra de tema</string>
@@ -48,6 +53,7 @@
     <string name="setting_timestamp_format">Formato de hora (Java)</string>
     <string name="setting_hide_motd">Ocultar MOTD al conectar</string>
     <string name="setting_hide_joinpartquit">Ocultar mensajes de entrada/salida</string>
+    <string name="setting_hide_topic_on_entry">Ocultar tema al entrar</string>
     <string name="setting_show_buffers_default">Mostrar redes/canales por defecto</string>
     <string name="setting_show_nicklist_default">Mostrar lista de nicks por defecto</string>
     <string name="setting_highlight_on_nick">Resaltar en nick</string>
@@ -123,28 +129,28 @@
     <string name="networks_add">Agregar red</string>
     <string name="networks_auto_connect">Auto-conectar</string>
 
-    <string name="tour_add_network_title">Agregar una red</string>
-    <string name="tour_add_network_body">Toca + para agregar una nueva red, o edita una existente. HexDroid incluye algunas predeterminadas para empezar rápido.</string>
+    <string name="tour_add_network_title">Tus redes</string>
+    <string name="tour_add_network_body">Toca + para añadir un servidor o edita los existentes. HexDroid incluye algunos por defecto — Libera, Freenode y AfterNET.</string>
     <string name="tour_connect_title">Conectar</string>
-    <string name="tour_connect_body">Conéctate a la red seleccionada. Una vez conectado, abre el chat para unirte a canales y hablar.</string>
-    <string name="tour_settings_title">Ajustes</string>
-    <string name="tour_settings_body">Ajusta la apariencia, fuentes y otras preferencias aquí.</string>
-    <string name="tour_switcher_title">Selector</string>
-    <string name="tour_switcher_body">Esta barra lateral muestra tu servidor, canales y mensajes privados. Toca cualquier elemento para cambiar.</string>
+    <string name="tour_connect_body">Toca Conectar para abrir una conexión. El botón se vuelve verde cuando estás en línea. Puedes tener varias redes conectadas a la vez.</string>
+    <string name="tour_settings_title">Apariencia y ajustes</string>
+    <string name="tour_settings_body">Elige un tema, ajusta el tamaño de fuente, notificaciones y más. Los cambios se aplican al instante.</string>
+    <string name="tour_switcher_title">Lista de buffers</string>
+    <string name="tour_switcher_body">Este panel lista todos tus servidores, canales y mensajes privados abiertos. Desliza o toca ☰ para mostrarlo.</string>
     <string name="tour_more_title">Más acciones</string>
-    <string name="tour_more_body">Este menú contiene lista de canales, transferencias, ajustes, redes y más.</string>
+    <string name="tour_more_body">Este menú da acceso a la lista de canales, transferencias de archivos, lista de ignorados, configuración de red y más.</string>
     <string name="tour_send_title">Enviar mensajes</string>
-    <string name="tour_send_body">Escribe aquí para chatear. También puedes usar comandos como /join #canal, /msg nick hola, /whois nick, etc.</string>
-    <string name="tour_dcc_title">Habilitar DCC</string>
-    <string name="tour_dcc_body">Activa DCC para enviar/recibir archivos. Si estás detrás de NAT, el modo Pasivo puede ayudar.</string>
+    <string name="tour_send_body">Escribe aquí para chatear. Los comandos de barra también funcionan: /join #canal, /msg nick texto, /part, /whois nick.</string>
+    <string name="tour_dcc_title">Transferencias de archivos (DCC)</string>
+    <string name="tour_dcc_body">Activa DCC para enviar y recibir archivos directamente entre usuarios. El DCC pasivo evita problemas con NAT.</string>
     <string name="tour_send_file_title">Enviar un archivo</string>
-    <string name="tour_send_file_body">Introduce un nick destino y selecciona un archivo. (Requiere DCC habilitado.) Las ofertas entrantes también aparecen aquí.</string>
+    <string name="tour_send_file_body">Introduce el nick de destino y elige un archivo. Las ofertas DCC entrantes también aparecen aquí.</string>
     <string name="tour_support_title">¿Necesitas ayuda?</string>
-    <string name="tour_support_body">Puedes conectarte aquí si necesitas soporte en #HexDroid.</string>
-    <string name="tour_support_fallback">Si no ves AfterNET en tu lista, toca Agregar AfterNET (o +) para añadirlo. Puedes conectarte allí para soporte en #HexDroid.</string>
+    <string name="tour_support_body">Conéctate a AfterNET y únete a #HexDroid para soporte, sugerencias de funciones o simplemente charlar.</string>
+    <string name="tour_support_fallback">AfterNET no está en tu lista — toca Añadir AfterNET y únete a #HexDroid para soporte.</string>
     <string name="tour_support_action">Agregar AfterNET</string>
     <string name="tour_replay_title">Repetir este tour</string>
-    <string name="tour_replay_body">Puedes repetir el recorrido en cualquier momento desde Ajustes.</string>
+    <string name="tour_replay_body">Puedes volver a ejecutar el tutorial desde Ajustes → Acerca de. Toca Listo para terminar.</string>
 
     <string name="about_title">Acerca de</string>
     <string name="transfers_title">Transferencias</string>
