@@ -598,6 +598,9 @@ class IrcClient(val config: IrcConfig) {
     @Volatile private var socket: Socket? = null
     @Volatile private var lastQuitReason: String? = null
     private var triedAltNick = false
+    // True once 001 (RPL_WELCOME) is received.
+	// any queued 433 responses for nicks tried before SASL finished should be ignored.
+    private var registered = false
 
     // Tracks where a WHOIS was invoked from so we can route the numeric replies back
     // to that buffer (instead of always dumping them in the server buffer).
@@ -1482,6 +1485,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         // Welcome: <me> ...
         val me = msg.params.getOrNull(0) ?: config.nick
         currentNick = me
+        registered = true
         send(IrcEvent.Registered(me))
         // Note: BOUNCER BIND for soju upstream selection is sent from IrcViewModel after
         // the Registered event is received, since sendRaw is not callable from here.
@@ -1818,16 +1822,21 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				}
 
 				if (msg.command == "433") {
-					val alt = config.altNick
-					if (!triedAltNick && !alt.isNullOrBlank()) {
-						triedAltNick = true
-						writeLine("NICK $alt")
-						send(IrcEvent.Status("Nick in use; trying alt nick: $alt"))
-					} else {
-						val rnd = (1000 + rng.nextInt(9000)).toString()
-						val next = (alt ?: config.nick) + "_" + rnd
-						writeLine("NICK $next")
-						send(IrcEvent.Status("Nick in use; trying: $next"))
+					// Ignore 433 after successful registration. Some IRCd's (Ergo) with SASL nick-reclaim
+					// send queued 433s for nicks tried pre-SASL after the 001 welcome is already issued with the correct nick.
+					// Acting on them would cause an endless collision loop.
+					if (!registered) {
+						val alt = config.altNick
+						if (!triedAltNick && !alt.isNullOrBlank()) {
+							triedAltNick = true
+							writeLine("NICK $alt")
+							send(IrcEvent.Status("Nick in use; trying alt nick: $alt"))
+						} else {
+							val rnd = (1000 + rng.nextInt(9000)).toString()
+							val next = (alt ?: config.nick) + "_" + rnd
+							writeLine("NICK $next")
+							send(IrcEvent.Status("Nick in use; trying: $next"))
+						}
 					}
 					continue
 				}
