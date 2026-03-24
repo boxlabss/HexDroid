@@ -546,7 +546,7 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = listOf(AutoJoinChannel("#afternet,#hexdroid", null))
+            autoJoin = listOf(AutoJoinChannel("#hexdroid", null))
         ),
         NetworkProfile(
             id = "Libera",

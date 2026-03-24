@@ -44,6 +44,10 @@
                 android:value="Keeps an IRC connection active for real-time messages when the user enables Keep connection alive; shows an ongoing notification" />
         </service>
 
+        <receiver
+            android:name=".NotificationReplyReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -55,13 +59,16 @@
             </intent-filter>
             <!-- Handle irc:// and ircs:// deep links.
                  Scheme-only matching catches all servers/ports/channels.
-                 CATEGORY_BROWSABLE is required for links clicked in a browser to reach this app. -->
+                 CATEGORY_BROWSABLE is required for links clicked in a browser to reach this app.
+                 irc+ssl:// is also handled as a valid-URI alternative used by HexChat/irssi
+                 for SSL connections (avoids the non-standard +port hack that Chrome rejects). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="irc" />
                 <data android:scheme="ircs" />
+                <data android:scheme="irc+ssl" />
             </intent-filter>
         </activity>
 

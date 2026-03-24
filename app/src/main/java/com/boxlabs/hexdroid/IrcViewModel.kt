@@ -914,12 +914,15 @@ class IrcViewModel(
     )
 
     /**
-     * Parses irc:// and ircs:// URIs into an [IrcUri].
+     * Parses irc://, ircs://, and irc+ssl:// URIs into an [IrcUri].
      *
      * Handles every form seen in the wild:
      *   irc://host/channel           plain, port 6667
-     *   irc://host:+6697/channel     TLS via +port convention (mIRC/ZNC)
-     *   ircs://host:6697/channel     TLS via scheme
+     *   irc://host:+6697/channel     TLS via +port convention (mIRC/ZNC) — note: Chrome
+     *                                rejects this as an invalid URI; ircs:// or irc+ssl:// are
+     *                                the browser-safe alternatives
+     *   ircs://host:6697/channel     TLS via scheme (standard)
+     *   irc+ssl://host:6697/channel  TLS via scheme (HexChat/irssi alternative)
      *   irc://host/#channel          # consumed as fragment by Uri; recovered
      *   irc://host/%23channel        percent-encoded; decoded automatically
      *   irc://host/chan?key=secret   channel key
@@ -932,10 +935,10 @@ class IrcViewModel(
 
         val uri = Uri.parse(normalised) ?: return null
         val scheme = uri.scheme?.lowercase() ?: return null
-        if (scheme != "irc" && scheme != "ircs") return null
+        if (scheme != "irc" && scheme != "ircs" && scheme != "irc+ssl") return null
 
         val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
-        val useTls = scheme == "ircs" || plusPortTls
+        val useTls = scheme == "ircs" || scheme == "irc+ssl" || plusPortTls
         val port = uri.port.takeIf { it in 1..65535 } ?: if (useTls) 6697 else 6667
 
         // Channel in path segments (irc://host/channel or irc://host/%23channel).
@@ -1040,7 +1043,7 @@ class IrcViewModel(
             val uriString = intent.dataString
             if (!uriString.isNullOrBlank()) {
                 val scheme = Uri.parse(uriString)?.scheme?.lowercase()
-                if (scheme == "irc" || scheme == "ircs") {
+                if (scheme == "irc" || scheme == "ircs" || scheme == "irc+ssl") {
                     parseIrcUri(uriString)?.let { handleIrcUri(it) }
                     return
                 }
@@ -1217,6 +1220,62 @@ class IrcViewModel(
     fun toggleChannelsOnly() { _state.value = _state.value.copy(channelsOnly = !_state.value.channelsOnly) }
     fun setListFilter(v: String) { _state.value = _state.value.copy(listFilter = v) }
     fun setListSort(v: String)   { _state.value = _state.value.copy(listSort = v) }
+
+    /**
+     * Sends [text] as a PRIVMSG to [buffer] on [networkId] without switching the active buffer.
+     * Used by [NotificationReplyReceiver] for inline notification replies.
+     *
+     * If the server supports IRCv3 `+reply`/`draft/reply` and [msgId] is known, the reply tag
+     * is attached so clients that understand threading show it as a reply.
+     *
+     * If the server does NOT support reply tags and [buffer] is a channel (not a PM), the
+     * message is prefixed with `Nick: (quote) -` so context isn't lost when replying
+     * to an older message from the notification drawer.
+     */
+    fun sendToBuffer(
+        networkId: String,
+        buffer: String,
+        text: String,
+        from: String = "",
+        originalText: String = "",
+        msgId: String? = null,
+    ) {
+        viewModelScope.launch {
+            val rt = runtimes[networkId] ?: return@launch
+            val client = rt.client
+            val myNick = _state.value.connections[networkId]?.myNick ?: _state.value.myNick
+
+            val hasReplyTag = client.hasCap("draft/reply") || client.hasCap("message-tags")
+            val isChannel   = buffer.isNotEmpty() && buffer[0] in "#&+!"
+
+            val outText = when {
+                // Server supports reply tags send with tag (IrcCore.privmsg handles label).
+                // The tag itself is sent as a raw prefix since privmsg() doesn't take tags.
+                hasReplyTag && msgId != null -> {
+                    val tagLine = "@+draft/reply=$msgId PRIVMSG $buffer :${text.replace("\r", "").replace("\n", " ")}"
+                    client.sendRaw(tagLine)
+                    text  // for local echo only
+                }
+                // Channel without reply tag support: prepend "Nick: (quote) - reply"
+                !hasReplyTag && isChannel && from.isNotBlank() && originalText.isNotBlank() -> {
+                    val quote = originalText.take(60).let { if (originalText.length > 60) "$it..." else it }
+                    "$from: ($quote) - $text"
+                }
+                // Channel without reply tag, but we at least know the sender
+                !hasReplyTag && isChannel && from.isNotBlank() -> "$from: $text"
+                // PM or no context — just send as-is
+                else -> text
+            }
+
+            // Only send via privmsg if we didn't already sendRaw above
+            if (!(hasReplyTag && msgId != null)) {
+                client.privmsg(buffer, outText)
+            }
+
+            val key = bufKey(networkId, buffer)
+            append(key, from = myNick, text = outText, isLocal = true)
+        }
+    }
     fun updateSettings(update: UiSettings.() -> UiSettings) {
         // Apply immediately; DataStore confirms shortly after.
         val st = _state.value
@@ -2015,10 +2074,23 @@ fun startAddNetwork() {
             val trimmed = raw.trim()
             if (trimmed.isEmpty()) return@launch
 
+            // Strip IRC formatting codes (bold, colour, italic, etc.) from the front of the
+            // input before checking for a leading '/'. If the user has bold or colour active
+            // in the input field, the raw string starts with formatting bytes, not '/'.
+            val strippedForCommandCheck = trimmed.trimStart(
+                '\u0002', '\u0003', '\u000f', '\u0016', '\u001d', '\u001e', '\u001f'
+            ).let {
+                // \u0003 may be followed by colour digits — skip them too
+                it.replace(Regex("^\u0003\\d{0,2}(?:,\\d{0,2})?"), "")
+            }
+
             // Check if this is a command (starts with /)
-            if (trimmed.startsWith("/")) {
-                // Commands are processed as-is (first line only if multiline)
-                val cmdLine = trimmed.drop(1).substringBefore('\n').trim()
+            // Use the formatting-stripped version for detection, but keep `trimmed` for
+            // the actual command content so explicit /me with colour still works.
+            if (strippedForCommandCheck.startsWith("/")) {
+                // Use the stripped string to parse the command name/args, but content
+                // after the command verb is taken from strippedForCommandCheck directly.
+                val cmdLine = strippedForCommandCheck.drop(1).substringBefore('\n').trim()
                 val cmd = cmdLine.substringBefore(' ').lowercase()
 
                 when (cmd) {
@@ -4352,8 +4424,14 @@ if (affectLive) {
         }
 
         // notifications
-        val isSelected = (bufferKey == st.selectedBuffer && st.screen == AppScreen.CHAT)
-        if (doNotify && !isSelected && !isLocal && st.settings.notificationsEnabled) {
+        // Suppress only when the buffer is actively visible to the user — i.e. it's the
+        // selected buffer on the CHAT screen AND the app is in the foreground.
+        // If the app is backgrounded, always notify regardless of which buffer is "selected",
+        // because the user can't see the message.
+        val isActivelyVisible = (bufferKey == st.selectedBuffer
+            && st.screen == AppScreen.CHAT
+            && AppVisibility.isForeground)
+        if (doNotify && !isActivelyVisible && !isLocal && st.settings.notificationsEnabled) {
             val (netId, bufferName) = splitKey(bufferKey)
             val cleanText = stripIrcFormatting(text)
             val preview = when {
@@ -4369,13 +4447,16 @@ if (affectLive) {
                 st.networks.firstOrNull { it.id == netId }?.name ?: "Server"
             } else bufferName
             val bufferForNotif = bufferName  // always the real buffer key segment
+            // Snippet for quote-fallback when server lacks +reply cap.
+            val originalSnippet = stripIrcFormatting(text).take(100)
+            val senderNick = from ?: ""
             if (isPrivate && st.settings.notifyOnPrivateMessages) {
-                runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle) }
+                runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle, from = senderNick, originalText = originalSnippet) }
                 if (st.settings.vibrateOnHighlight) {
                     runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                 }
             } else if (isHighlight && st.settings.notifyOnHighlights) {
-                runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle) }
+                runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle, from = senderNick, originalText = originalSnippet) }
                 if (st.settings.vibrateOnHighlight) {
                     runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                 }
