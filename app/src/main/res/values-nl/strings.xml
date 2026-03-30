@@ -242,7 +242,7 @@
     <string name="network_command_delay_desc">Seconden wachten na verbinden voor uitvoeren opdrachten</string>
     <string name="network_service_auth_label">Serviceauthenticatieopdracht</string>
     <string name="network_service_auth_hint">bijv. /msg NickServ IDENTIFY wachtwoord</string>
-    <string name="network_commands_hint">Opdrachten na verbinden, bijv. /join #kanaal</string>
+    <string name="network_commands_hint">Één commando per regel. Voeg ;wait N toe voor N seconden wachten, bijv. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Geen netwerk geselecteerd</string>
     <string name="network_undo_remove">Verwijdering ongedaan maken</string>
     <string name="networks_selected">Geselecteerd</string>
@@ -250,6 +250,11 @@
     <string name="networks_remove_favourite">Uit favorieten verwijderen</string>
     <string name="networks_drag_reorder">Slepen om te herordenen</string>
     <string name="networks_insecure_title">Onveilige verbinding geblokkeerd</string>
+    <string name="networks_local_title">Lokale netwerktoegang vereist</string>
+    <string name="networks_local_body">Verbinding met {0} vereist de lokale netwerktoestemming.
+
+Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokale netwerk.</string>
+    <string name="networks_local_grant">Toestemming verlenen</string>
     <string name="networks_insecure_body">Onversleutelde IRC-verbindingen zijn niet beveiligd en kunnen uw berichten en wachtwoord blootstellen.</string>
     <string name="networks_insecure_body2">Om verbinding te maken met %1$s zonder TLS, moet u onversleutelde verbindingen expliciet toestaan voor dit netwerk.</string>
     <string name="networks_allow_connect">Toestaan en verbinden</string>
@@ -374,7 +379,7 @@ Dit kan niet ongedaan worden gemaakt.</string>
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Mediavoorbeelden</string>
     <string name="setting_image_previews">Afbeeldings- en videovoorbeelden inschakelen</string>
-    <string name="setting_image_previews_desc">Inline voorbeelden tonen voor afbeeldingen en YouTube-links in de chat.</string>
+    <string name="setting_image_previews_desc">Inline voorbeelden tonen voor afbeeldingen en YouTube-links in de chat. Twitter/X-links worden verwerkt via fxtwitter.com (externe dienst) — tweet-ID\'s worden naar die dienst gestuurd bij het laden van een voorbeeld.</string>
     <string name="setting_previews_wifi_only">Alleen Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Voorbeelden alleen laden bij Wi-Fi-verbinding om mobiele data te besparen.</string>
     <string name="theme_system_default">Systeemstandaard</string>
@@ -452,7 +457,7 @@ Dit kan niet ongedaan worden gemaakt.</string>
     <string name="nick_send_file_desc">Een bestand verzenden via DCC SEND</string>
     <string name="nick_dcc_disabled">DCC is uitgeschakeld in instellingen</string>
     <string name="nick_dcc_chat">DCC Chat</string>
-    <string name="nick_dcc_chat_desc">Een directe versleutelde chatsessie openen</string>
+    <string name="nick_dcc_chat_desc">Een directe peer-to-peer chatsessie openen</string>
     <string name="nick_ignore">Negeren</string>
     <string name="nick_unignore">Negeren opheffen</string>
     <string name="nick_ignore_desc">Alle berichten van deze gebruiker verbergen</string>
@@ -468,4 +473,14 @@ Dit kan niet ongedaan worden gemaakt.</string>
     <string name="about_tagline">IRC-client voor Android</string>
     <string name="about_support_title">Documentatie &amp; Ondersteuning</string>
     <string name="about_support_desc">Bezoek de website voor handleidingen, veelgestelde vragen en het melden van problemen.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">SDCC gebruiken (TLS-versleuteling)</string>
+    <string name="setting_dcc_secure_desc">Uitgaande bestandsoverdrachten gebruiken DCC SSEND (TLS-versleuteld). De externe client moet ook SDCC ondersteunen.</string>
+    <string name="list_users_filter_label">Gebruikers:</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Max</string>
+    <string name="topic_edit_title">Onderwerp bewerken</string>
+    <string name="topic_edit_label">Onderwerp</string>
+    <string name="topic_set">Instellen</string>
 </resources>

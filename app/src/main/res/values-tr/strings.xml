@@ -255,7 +255,7 @@
     <string name="network_command_delay_desc">Bağlandıktan sonra komutları çalıştırmadan önce bu kadar saniye bekle</string>
     <string name="network_service_auth_label">Servis kimlik doğrulama komutu</string>
     <string name="network_service_auth_hint">ör. /msg NickServ IDENTIFY şifre</string>
-    <string name="network_commands_hint">Bağlandıktan sonra komutlar, ör. /join #kanal</string>
+    <string name="network_commands_hint">Satır başına bir komut. N saniye beklemek için ;wait N ekleyin, örn. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Ağ seçilmedi</string>
     <string name="network_undo_remove">Kaldırmayı geri al</string>
     <string name="networks_selected">Seçildi</string>
@@ -263,6 +263,11 @@
     <string name="networks_remove_favourite">Favorilerden kaldır</string>
     <string name="networks_drag_reorder">Yeniden sıralamak için sürükle</string>
     <string name="networks_insecure_title">Güvensiz bağlantı engellendi</string>
+    <string name="networks_local_title">Yerel ağ erişimi gerekli</string>
+    <string name="networks_local_body">{0} adresine bağlanmak için yerel ağ izni gereklidir.
+
+Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bir gerekliliktir.</string>
+    <string name="networks_local_grant">İzin ver</string>
     <string name="networks_insecure_body">Şifrelenmemiş IRC bağlantıları korumasızdır ve mesajlarınızı ile şifrenizi ifşa edebilir.</string>
     <string name="networks_insecure_body2">%1$s adresine TLS olmadan bağlanmak için bu ağ için şifrelenmemiş bağlantılara açıkça izin vermelisiniz.</string>
     <string name="networks_allow_connect">İzin ver ve bağlan</string>
@@ -387,7 +392,7 @@ Bu işlem geri alınamaz.</string>
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Medya Önizlemeleri</string>
     <string name="setting_image_previews">Resim ve video önizlemelerini etkinleştir</string>
-    <string name="setting_image_previews_desc">Sohbete gönderilen resimler ve YouTube bağlantıları için satır içi önizlemeler göster.</string>
+    <string name="setting_image_previews_desc">Sohbete gönderilen resimler ve YouTube bağlantıları için satır içi önizlemeler göster. Twitter/X bağlantıları fxtwitter.com (üçüncü taraf hizmet) aracılığıyla çözümlenir — önizleme yüklenirken tweet kimliği bu hizmete gönderilir.</string>
     <string name="setting_previews_wifi_only">Yalnızca Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Mobil veri kullanımını önlemek için önizlemeleri yalnızca Wi-Fi bağlantısında yükle.</string>
     <string name="theme_system_default">Sistem varsayılanı</string>
@@ -465,7 +470,7 @@ Bu işlem geri alınamaz.</string>
     <string name="nick_send_file_desc">DCC SEND ile dosya gönder</string>
     <string name="nick_dcc_disabled">DCC ayarlarda devre dışı</string>
     <string name="nick_dcc_chat">DCC Sohbet</string>
-    <string name="nick_dcc_chat_desc">Doğrudan şifreli sohbet oturumu aç</string>
+    <string name="nick_dcc_chat_desc">Doğrudan eşler arası sohbet oturumu aç</string>
     <string name="nick_ignore">Yoksay</string>
     <string name="nick_unignore">Yoksaymayı kaldır</string>
     <string name="nick_ignore_desc">Bu kullanıcının tüm mesajlarını gizle</string>
@@ -481,4 +486,14 @@ Bu işlem geri alınamaz.</string>
     <string name="about_tagline">Android için IRC İstemcisi</string>
     <string name="about_support_title">Belgeler &amp; Destek</string>
     <string name="about_support_desc">Kılavuzlar, SSS ve sorun bildirmek için web sitesini ziyaret edin.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">SDCC kullan (TLS şifrelemesi)</string>
+    <string name="setting_dcc_secure_desc">Giden dosya aktarımları DCC SSEND (TLS şifreli) kullanır. Uzak istemci de SDCC\'yi desteklemelidir.</string>
+    <string name="list_users_filter_label">Kullanıcılar:</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Maks</string>
+    <string name="topic_edit_title">Konuyu düzenle</string>
+    <string name="topic_edit_label">Konu</string>
+    <string name="topic_set">Ayarla</string>
 </resources>

@@ -67,31 +67,39 @@ class KeepAliveService : Service() {
         const val EXTRA_SERVER_LABEL = "extra_server_label"
         const val EXTRA_STATUS = "extra_status"
 
-        // Scoped wake lock for the connect/handshake burst.
-        @Volatile private var scopedWakeLock: PowerManager.WakeLock? = null
+        // Use a per-netId map ensuring each network's
+        // WakeLock is tracked and released independently.
+        private val scopedWakeLocks = java.util.concurrent.ConcurrentHashMap<String, PowerManager.WakeLock>()
 
         /**
-         * Acquire a PARTIAL_WAKE_LOCK scoped to the connect/handshake burst.
-         * Must be paired with [releaseScopedWakeLock].
+         * Acquire a PARTIAL_WAKE_LOCK scoped to the connect/handshake burst for [netId].
+         * Must be paired with [releaseScopedWakeLock] using the same [netId].
          * The lock has a 60-second safety timeout so it is released automatically if the
          * caller forgets (e.g. due to an exception path).
          */
-        fun acquireScopedWakeLock(context: Context) {
+        fun acquireScopedWakeLock(context: Context, netId: String) {
             val pm = context.getSystemService(POWER_SERVICE) as PowerManager
-            val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HexDroid:ConnectBurst")
+            val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HexDroid:ConnectBurst:$netId")
             lock.acquire(60_000L) // 60 s safety timeout
-            scopedWakeLock = lock
+            // Release any stale lock for this netId before storing the new one.
+            scopedWakeLocks.put(netId, lock)?.let { old -> if (old.isHeld) old.release() }
         }
 
         /**
-         * Release the scoped wake lock acquired by [acquireScopedWakeLock].
-         * Safe to call even if no lock is held.
+         * Release the scoped wake lock for [netId] acquired by [acquireScopedWakeLock].
+         * Safe to call even if no lock is held for [netId].
          */
-        fun releaseScopedWakeLock() {
-            scopedWakeLock?.let { lock ->
+        fun releaseScopedWakeLock(netId: String) {
+            scopedWakeLocks.remove(netId)?.let { lock ->
                 if (lock.isHeld) lock.release()
-                scopedWakeLock = null
             }
+        }
+
+        /** Release ALL scoped wake locks (called from [onDestroy] as a last-resort cleanup). */
+        fun releaseAllScopedWakeLocks() {
+            val snapshot = scopedWakeLocks.entries.toList()
+            scopedWakeLocks.clear()
+            for ((_, lock) in snapshot) runCatching { if (lock.isHeld) lock.release() }
         }
 
         /**
@@ -162,7 +170,7 @@ class KeepAliveService : Service() {
 
     override fun onDestroy() {
         if (::wifiLock.isInitialized && wifiLock.isHeld) wifiLock.release()
-        releaseScopedWakeLock() // clean up if still held
+        releaseAllScopedWakeLocks() // clean up any stale per-netId locks
 
         isRunning = false
         super.onDestroy()

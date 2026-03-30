@@ -125,6 +125,30 @@ class SecretStore(private val ctx: Context) {
         }
     }
 
+    /**
+     * Result of a secret lookup — distinguishes "never set", "decrypted OK", and
+     * "Keystore key invalidated" so callers can show the right message to the user.
+     */
+    sealed class SecretResult {
+        data object NotSet : SecretResult()
+        data class Value(val secret: String) : SecretResult()
+        /**
+         * FIX #7: The Keystore key was invalidated (biometric change, factory reset of
+         * Keystore, etc.). The stored ciphertext has been cleared. The caller should warn
+         * the user and prompt them to re-enter the credential in Network Settings.
+         */
+        data object KeystoreInvalidated : SecretResult()
+    }
+
+    fun getSaslPasswordResult(networkId: String): SecretResult {
+        val enc = prefs.getString("sasl:$networkId", null) ?: return SecretResult.NotSet
+        val bytes = decryptFromB64(enc) ?: run {
+            clearSaslPassword(networkId)
+            return SecretResult.KeystoreInvalidated
+        }
+        return SecretResult.Value(bytes.toString(Charsets.UTF_8))
+    }
+
     fun getSaslPassword(networkId: String): String? {
         val enc = prefs.getString("sasl:$networkId", null) ?: return null
         val bytes = decryptFromB64(enc) ?: run {

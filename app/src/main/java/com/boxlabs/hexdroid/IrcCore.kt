@@ -252,7 +252,13 @@ sealed class IrcEvent {
         val prefixSymbols: String,
         val statusMsg: String? = null,
         /** Raw CHANMODES token value (e.g. "b,e,I,k,l,imnpst"). */
-        val chanModes: String? = null
+        val chanModes: String? = null,
+        /**
+         * LINELEN ISUPPORT token: maximum bytes per IRC line including the trailing CRLF.
+         * RFC 1459 = 512; IRCv3 / Ergo / InspIRCd = typically 4096.
+         * Null when the server did not advertise LINELEN (assume 512).
+         */
+        val linelen: Int? = null
     ) : IrcEvent()
 
     // Join failure numerics (e.g. 471-477) with the channel extracted
@@ -595,11 +601,17 @@ class IrcClient(val config: IrcConfig) {
     private val outbound = Channel<String>(capacity = 300)
     private val rng = SecureRandom()
 
+    companion object {
+        /** Pre-allocated CRLF terminator reused on every line send to avoid a ByteArray allocation per write. */
+        private val CRLF = "\r\n".toByteArray(Charsets.US_ASCII)
+    }
+
     @Volatile private var socket: Socket? = null
     @Volatile private var lastQuitReason: String? = null
     private var triedAltNick = false
-    // True once 001 (RPL_WELCOME) is received.
-	// any queued 433 responses for nicks tried before SASL finished should be ignored.
+    // True once 001 (RPL_WELCOME) is received. After registration, 433 during pre-reg
+    // IRCd's like Ergo sends the correct nick via 001 after SASL completes, so any
+    // queued 433 responses for nicks tried before SASL finished should be ignored.
     private var registered = false
 
     // Tracks where a WHOIS was invoked from so we can route the numeric replies back
@@ -625,6 +637,13 @@ class IrcClient(val config: IrcConfig) {
     )
     /** True when the server advertises WHOX in ISUPPORT (005). */
     @Volatile private var whoxSupported: Boolean = false
+    /**
+     * LINELEN from ISUPPORT 005: maximum bytes per IRC line including trailing CRLF.
+     * RFC 1459 = 512; Ergo / InspIRCd often advertise 4096.
+     * Null until the server sends 005 — callers should treat null as 512.
+     */
+    @Volatile var serverLinelen: Int? = null
+        private set
 
     // Track joined channels (original case preserved, keyed by casefold)
     private val joinedChannelCases = mutableMapOf<String, String>()
@@ -880,11 +899,28 @@ class IrcClient(val config: IrcConfig) {
      * No-op if the draft/typing capability was not negotiated.
      */
     suspend fun sendTypingStatus(target: String, state: String) {
-        if (!hasTypingCap()) return
+        // Require either a dedicated typing cap OR the base message-tags cap.
+        // Servers like Libera advertise CLIENTTAGDENY=*,-typing rather than a separate
+        // typing cap - they permit the tag via message-tags without advertising it separately.
+        val hasTyping = hasCap("typing") || hasCap("draft/typing")
+        val hasTagsPermit = hasCap("message-tags")
+        if (!hasTyping && !hasTagsPermit) return
         // Graduated "typing" cap uses the standard tag name (no "+" prefix).
-        // Draft "draft/typing" cap uses the vendor tag "+typing".
+        // Draft or message-tags fallback uses the vendor tag "+typing".
         val tag = if (hasCap("typing")) "typing=$state" else "+typing=$state"
         sendRaw("@$tag TAGMSG $target")
+    }
+
+    /**
+     * Send a draft/message-reactions emoji reaction to [msgId] in [target].
+     * Requires the message-tags cap (reactions use client-only tags).
+     * Pass [remove] = true to un-react (sends +draft/react-removed instead).
+     */
+    suspend fun sendReaction(target: String, msgId: String, emoji: String, remove: Boolean = false) {
+        if (!hasCap("message-tags") && !hasCap("draft/message-reactions")) return
+        val tagName = if (remove) "+draft/react-removed" else "+draft/react"
+        val labelPart = if (hasCap("labeled-response")) "@label=${nextLabel()} " else ""
+        sendRaw("${labelPart}@$tagName=${emoji.trim()};+draft/reply=$msgId TAGMSG $target")
     }
 
     /**
@@ -1058,6 +1094,8 @@ class IrcClient(val config: IrcConfig) {
                 val arg = parts.drop(1).joinToString(" ").trim()
                 val nick = parts.getOrNull(1)?.trim()
                 if (arg.isBlank() || nick.isNullOrBlank()) return
+                // Cap to prevent unanswered WHOIS requests from accumulating indefinitely.
+                if (pendingWhoisBufferByNick.size >= 50) pendingWhoisBufferByNick.clear()
                 pendingWhoisBufferByNick[casefold(nick)] = currentBuffer
                 sendRaw("WHOIS $arg")
             }
@@ -1338,9 +1376,14 @@ class IrcClient(val config: IrcConfig) {
         // Set up encoding-aware I/O using EncodingHelper
         val inputStream = s.getInputStream()
         val outputStream = s.getOutputStream()
-        
+
+        // Wrap the raw socket InputStream in a BufferedInputStream so EncodingLineReader's
+        // byte-by-byte read() loop draws from an 8 KB in-memory buffer instead of issuing
+        // a JNI syscall per byte. On a busy channel this can be thousands of syscalls/sec.
+        val bufferedInput = java.io.BufferedInputStream(inputStream, 8192)
+
         // Create line reader with encoding detection
-        val lineReader = EncodingLineReader(inputStream, config.encoding)
+        val lineReader = EncodingLineReader(bufferedInput, config.encoding)
         
         // Only notify about the encoding when a non-default encoding is explicitly configured.
         // Auto-detect mode is silent on connect - a notification fires later only if a
@@ -1356,8 +1399,12 @@ class IrcClient(val config: IrcConfig) {
             // ISO-8859-x configs don't accidentally send non-UTF-8 bytes on a strict server.
             val enc = if (this@IrcClient.hasCap("utf8only")) "UTF-8" else lineReader.encoding
             val bytes = EncodingHelper.encode(line, enc)
-            outputStream.write(bytes)
-            outputStream.write("\r\n".toByteArray(Charsets.US_ASCII))
+            // Combine payload + CRLF into one array so we issue a single write() syscall
+            // instead of two, and avoid allocating a new CRLF ByteArray each time.
+            val packet = ByteArray(bytes.size + CRLF.size)
+            bytes.copyInto(packet)
+            CRLF.copyInto(packet, destinationOffset = bytes.size)
+            outputStream.write(packet)
             outputStream.flush()
         }
 
@@ -1501,6 +1548,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         var ps = prefixSymbols
         var sm: String? = statusMsg
         var chm: String? = chanModes
+        var ll: Int? = serverLinelen
 
         for (tok in tokens) {
             if (tok.isBlank()) continue
@@ -1519,6 +1567,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                         ps = m0.groupValues[2]
                     }
                 }
+                // parse LINELEN so the ViewModel can use the server's actual limit
+                "LINELEN" -> v?.toIntOrNull()?.takeIf { it in 512..65535 }?.let { ll = it }
                 // WHOX is a flag token (no value): server supports extended WHO %fields,querytype
                 "WHOX" -> whoxSupported = true
             }
@@ -1530,13 +1580,14 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         chanModes = chm
         prefixModes = pm
         prefixSymbols = ps
+        serverLinelen = ll
 
         val mp = mutableMapOf<Char, Char>()
         val n = minOf(pm.length, ps.length)
         for (i in 0 until n) mp[pm[i]] = ps[i]
         if (mp.isNotEmpty()) prefixModeToSymbol = mp
 
-        send(IrcEvent.ISupport(chantypes, caseMapping, prefixModes, prefixSymbols, statusMsg, chanModes))
+        send(IrcEvent.ISupport(chantypes, caseMapping, prefixModes, prefixSymbols, statusMsg, chanModes, ll))
     },
 
     // LIST output
@@ -1822,9 +1873,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				}
 
 				if (msg.command == "433") {
-					// Ignore 433 after successful registration. Some IRCd's (Ergo) with SASL nick-reclaim
-					// send queued 433s for nicks tried pre-SASL after the 001 welcome is already issued with the correct nick.
-					// Acting on them would cause an endless collision loop.
+					// Ignore 433 after successful registration — Ergo (and other servers with
+					// SASL nick-reclaim) may send queued 433s for nicks tried pre-SASL after
+					// the 001 welcome is already issued with the correct nick. Acting on them
+					// would cause an endless collision loop.
 					if (!registered) {
 						val alt = config.altNick
 						if (!triedAltNick && !alt.isNullOrBlank()) {
@@ -2517,8 +2569,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val target = normalizeMsgTarget(rawTarget)
 						// draft/typing: +typing tag indicates composing status.
 						// Values: "active" (typing), "paused" (stopped briefly), "done" (cleared/sent).
+						// typing is a client-only tag
+						// Libera permits it via CLIENTTAGDENY=*,-typing using message-tags.
 						val typingState = msg.tags["+typing"] ?: msg.tags["typing"]
-						if (typingState != null && (irc.hasCap("draft/typing") || irc.hasCap("typing"))) {
+						if (typingState != null &&
+							(irc.hasCap("draft/typing") || irc.hasCap("typing") || irc.hasCap("message-tags"))) {
 							send(IrcEvent.TypingStatus(
 								target = target,
 								nick = fromNick,

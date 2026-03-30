@@ -256,7 +256,7 @@
     <string name="network_command_delay_desc">Esperar estos segundos tras conectar antes de ejecutar comandos</string>
     <string name="network_service_auth_label">Comando de autenticación de servicio</string>
     <string name="network_service_auth_hint">ej. /msg NickServ IDENTIFY contraseña</string>
-    <string name="network_commands_hint">Comandos al conectar, ej. /join #canal</string>
+    <string name="network_commands_hint">Un comando por línea. Añade ;wait N para pausar N segundos, p.ej. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Ninguna red seleccionada</string>
     <string name="network_undo_remove">Deshacer eliminación</string>
     <string name="networks_selected">Seleccionado</string>
@@ -264,6 +264,11 @@
     <string name="networks_remove_favourite">Quitar de favoritos</string>
     <string name="networks_drag_reorder">Arrastrar para reordenar</string>
     <string name="networks_insecure_title">Conexión insegura bloqueada</string>
+    <string name="networks_local_title">Acceso a red local requerido</string>
+    <string name="networks_local_body">La conexión a {0} requiere el permiso de red local.
+
+Este es un nuevo requisito de Android 17 para conectarse a servidores en la red local.</string>
+    <string name="networks_local_grant">Conceder permiso</string>
     <string name="networks_insecure_body">Las conexiones IRC sin cifrar no están protegidas y pueden exponer tus mensajes y contraseña.</string>
     <string name="networks_insecure_body2">Para conectarte a %1$s sin TLS, debes permitir explícitamente conexiones no cifradas para esta red.</string>
     <string name="networks_allow_connect">Permitir y conectar</string>
@@ -388,7 +393,7 @@ Esto no se puede deshacer.</string>
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Vistas previas de medios</string>
     <string name="setting_image_previews">Activar vistas previas de imágenes y vídeos</string>
-    <string name="setting_image_previews_desc">Mostrar vistas previas en línea para imágenes y enlaces de YouTube publicados en el chat.</string>
+    <string name="setting_image_previews_desc">Mostrar vistas previas en línea para imágenes y enlaces de YouTube publicados en el chat. Los enlaces de Twitter/X se resuelven a través de fxtwitter.com (un servicio de terceros): los IDs de tuit se envían a ese servicio al cargar una vista previa.</string>
     <string name="setting_previews_wifi_only">Solo Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Cargar vistas previas solo cuando estés conectado a Wi-Fi para evitar usar datos móviles.</string>
     <string name="theme_system_default">Predeterminado del sistema</string>
@@ -466,7 +471,7 @@ Esto no se puede deshacer.</string>
     <string name="nick_send_file_desc">Enviar un archivo via DCC SEND</string>
     <string name="nick_dcc_disabled">DCC está desactivado en los ajustes</string>
     <string name="nick_dcc_chat">DCC Chat</string>
-    <string name="nick_dcc_chat_desc">Abrir una sesión de chat directo cifrado</string>
+    <string name="nick_dcc_chat_desc">Abrir una sesión de chat directo entre pares</string>
     <string name="nick_ignore">Ignorar</string>
     <string name="nick_unignore">Dejar de ignorar</string>
     <string name="nick_ignore_desc">Ocultar todos los mensajes de este usuario</string>
@@ -482,4 +487,14 @@ Esto no se puede deshacer.</string>
     <string name="about_tagline">Cliente IRC para Android</string>
     <string name="about_support_title">Documentación &amp; Soporte</string>
     <string name="about_support_desc">Visita la web para guías, preguntas frecuentes y para reportar problemas.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">Usar SDCC (cifrado TLS)</string>
+    <string name="setting_dcc_secure_desc">Las transferencias de archivos salientes usan DCC SSEND (cifrado TLS). El cliente remoto también debe admitir SDCC.</string>
+    <string name="list_users_filter_label">Usuarios:</string>
+    <string name="list_users_min">Mín</string>
+    <string name="list_users_max">Máx</string>
+    <string name="topic_edit_title">Editar tema</string>
+    <string name="topic_edit_label">Tema</string>
+    <string name="topic_set">Establecer</string>
 </resources>

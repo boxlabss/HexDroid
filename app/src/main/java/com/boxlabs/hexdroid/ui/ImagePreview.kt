@@ -1,3 +1,21 @@
+/*
+* HexDroidIRC - An IRC Client for Android
+* Copyright (C) 2026 boxlabs
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package com.boxlabs.hexdroid.ui
 
 import android.content.Context
@@ -49,6 +67,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 // Twitter / X
 
@@ -76,14 +95,14 @@ private data class TwitterMeta(
     val tweetUrl: String,
 )
 
-private suspend fun fetchTwitterMeta(data: TwitterUrlData): TwitterMeta? = withContext(Dispatchers.IO) {
+private suspend fun fetchTwitterMeta(data: TwitterUrlData, ctx: Context): TwitterMeta? = withContext(Dispatchers.IO) {
     runCatching {
         val apiUrl = "https://api.fxtwitter.com/${data.username}/status/${data.tweetId}"
         val request = Request.Builder()
             .url(apiUrl)
             .header("User-Agent", "HexDroid IRC")
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        httpClient(ctx).newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@use null
             val json = org.json.JSONObject(response.body.string())
             val tweet = json.optJSONObject("tweet") ?: return@use null
@@ -146,21 +165,52 @@ private val allowedMimeTypes = setOf(
 )
 
 private sealed interface FetchResult {
-    data class Success(val bitmap: Bitmap) : FetchResult
+    data class Success(val bitmap: Bitmap, val rawBytes: ByteArray? = null, val isGif: Boolean = false) : FetchResult
     data object TooLarge : FetchResult
     data object Error : FetchResult   // network, 404, decode failure, timeout, etc.
 }
 
-private val httpClient = OkHttpClient()
+// Explicit timeouts prevent a stalled image server from hanging an IO coroutine
+// indefinitely. OkHttp's defaults (10 s connect, 10 s read) are intentionally not relied
+// upon here; spelling them out makes the intended behaviour clear and easy to tune.
+//
+// The client is a process-wide singleton built lazily on first use so we can pass in a
+// Context for the disk cache directory. A 20 MB LRU cache means YouTube thumbnails and
+// inline images are served from disk on subsequent views (e.g. scrolling back through
+// history) without any network round-trip.
+@Volatile private var _httpClient: OkHttpClient? = null
 
-private suspend fun fetchBitmap(url: String): FetchResult = withContext(Dispatchers.IO) {
+private fun httpClient(ctx: Context): OkHttpClient =
+    _httpClient ?: synchronized(OkHttpClient::class.java) {
+        _httpClient ?: OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
+            .cache(
+                okhttp3.Cache(
+                    java.io.File(ctx.applicationContext.cacheDir, "image_preview_cache"),
+                    20L * 1024 * 1024  // 20 MB
+                )
+            )
+            .build()
+            .also { _httpClient = it }
+    }
+
+private suspend fun fetchBitmap(url: String, ctx: Context): FetchResult = withContext(Dispatchers.IO) {
+    // Validate the scheme before handing the URL to OkHttp. The Twitter/fxtwitter
+    // API returns a thumbnail URL from a third-party service; if that API were ever to return
+    // a non-https URL (e.g. file://, http://, or a redirect to a private IP range), we could
+    // inadvertently expose internal resources or send unencrypted traffic. Only https:// is
+    // a legitimate source for image previews in a chat client.
+    if (!url.startsWith("https://", ignoreCase = true)) return@withContext FetchResult.Error
+
     runCatching {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "HexDroid IRC")
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
+        httpClient(ctx).newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@runCatching FetchResult.Error
 
             val mime = response.body.contentType()?.let { "${it.type}/${it.subtype}" }
@@ -184,8 +234,10 @@ private suspend fun fetchBitmap(url: String): FetchResult = withContext(Dispatch
                 }
 
                 val bytes = output.toByteArray()
+                val isGif = mime == "image/gif"
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let {
-                    FetchResult.Success(it)
+                    // For GIFs keep the raw bytes so the animated drawable can be created later.
+                    FetchResult.Success(it, rawBytes = if (isGif) bytes else null, isGif = isGif)
                 } ?: FetchResult.Error
             }
         }
@@ -199,6 +251,8 @@ private sealed interface PreviewState {
     data object Loading : PreviewState
     data class  Ready(
         val bitmap: Bitmap,
+        val rawBytes: ByteArray? = null,
+        val isGif: Boolean = false,
         val isYouTube: Boolean = false,
         val videoId: String = "",
         val isTwitterVideo: Boolean = false,
@@ -292,6 +346,74 @@ private fun YouTubePlayer(videoId: String, onClose: () -> Unit) {
  * SVGs blocked by extension check AND Content-Type validation.
  * Image downloads capped at 5 MB with MIME-type allow-list.
  */
+
+/**
+ * Displays an animated GIF using an [android.widget.ImageView].
+ * On API 28+ uses [android.graphics.ImageDecoder] for hardware-accelerated decoding.
+ * On API 26/27 falls back to [android.graphics.drawable.AnimationDrawable] via [android.graphics.Movie].
+ */
+@Composable
+private fun AnimatedGif(bytes: ByteArray, modifier: Modifier = Modifier) {
+    AndroidView(
+        factory = { ctx ->
+            android.widget.ImageView(ctx).apply {
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    val source = android.graphics.ImageDecoder.createSource(
+                        java.nio.ByteBuffer.wrap(bytes)
+                    )
+                    runCatching {
+                        val drawable = android.graphics.ImageDecoder.decodeDrawable(source)
+                        setImageDrawable(drawable)
+                        (drawable as? android.graphics.drawable.AnimatedImageDrawable)?.start()
+                    }
+                } else {
+                    // API 26/27: use Movie for GIF playback via a custom drawable.
+                    // Movie is deprecated in API 29 but is the only option below API 28.
+                    @Suppress("DEPRECATION")
+                    val movie = android.graphics.Movie.decodeByteArray(bytes, 0, bytes.size)
+                    if (movie != null) {
+                        setImageDrawable(MovieDrawable(movie))
+                    } else {
+                        setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    }
+                }
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+/**
+ * Drawable wrapper for [android.graphics.Movie] to animate GIFs on API < 28.
+ * Movie is deprecated at API 29 but remains the only GIF animation option on API 26/27.
+ */
+@Suppress("DEPRECATION")
+private class MovieDrawable(private val movie: android.graphics.Movie) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val startMs = android.os.SystemClock.uptimeMillis()
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val duration = movie.duration().takeIf { it > 0 } ?: 1000
+        val relTime = ((now - startMs) % duration).toInt()
+        movie.setTime(relTime)
+        val scaleX = bounds.width().toFloat() / movie.width().coerceAtLeast(1)
+        val scaleY = bounds.height().toFloat() / movie.height().coerceAtLeast(1)
+        val scale = minOf(scaleX, scaleY)
+        canvas.save()
+        canvas.scale(scale, scale)
+        movie.draw(canvas, 0f, 0f, paint)
+        canvas.restore()
+        invalidateSelf()  // request next frame
+    }
+
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(cf: android.graphics.ColorFilter?) { paint.colorFilter = cf }
+    @Deprecated("Deprecated in API 29")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+}
+
 @Composable
 fun InlinePreview(
     url: String,
@@ -333,7 +455,7 @@ fun InlinePreview(
 
         when {
             youtubeId != null -> {
-                when (val result = fetchBitmap(youtubeThumbnailUrl(youtubeId))) {
+                when (val result = fetchBitmap(youtubeThumbnailUrl(youtubeId), context)) {
                     is FetchResult.Success -> state = PreviewState.Ready(
                         bitmap = result.bitmap, isYouTube = true, videoId = youtubeId
                     )
@@ -342,12 +464,12 @@ fun InlinePreview(
                 }
             }
             twitterData != null -> {
-                val meta = fetchTwitterMeta(twitterData)
+                val meta = fetchTwitterMeta(twitterData, context)
                 if (meta == null) {
                     // Text-only tweet or API failure — nothing to show.
                     state = PreviewState.Failed("No media in this tweet")
                 } else {
-                    when (val result = fetchBitmap(meta.thumbnailUrl)) {
+                    when (val result = fetchBitmap(meta.thumbnailUrl, context)) {
                         is FetchResult.Success -> state = PreviewState.Ready(
                             bitmap = result.bitmap,
                             isTwitterVideo = meta.hasVideo,
@@ -359,8 +481,12 @@ fun InlinePreview(
                 }
             }
             else -> {
-                when (val result = fetchBitmap(url)) {
-                    is FetchResult.Success -> state = PreviewState.Ready(bitmap = result.bitmap)
+                when (val result = fetchBitmap(url, context)) {
+                    is FetchResult.Success -> state = PreviewState.Ready(
+                        bitmap = result.bitmap,
+                        rawBytes = result.rawBytes,
+                        isGif = result.isGif,
+                    )
                     FetchResult.TooLarge   -> state = PreviewState.Failed("Preview too large (max 5 MB)")
                     FetchResult.Error      -> state = PreviewState.Failed("Failed to load preview")
                 }
@@ -435,16 +561,23 @@ fun InlinePreview(
                             }),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Image(
-                            bitmap             = s.bitmap.asImageBitmap(),
-                            contentDescription = when {
-                                s.isYouTube      -> "YouTube thumbnail"
-                                s.isTwitterVideo -> "Twitter/X video thumbnail"
-                                else             -> "Image preview"
-                            },
-                            contentScale = ContentScale.Crop,
-                            modifier     = Modifier.fillMaxWidth().heightIn(max = 240.dp),
-                        )
+                        if (s.isGif && s.rawBytes != null) {
+                            AnimatedGif(
+                                bytes = s.rawBytes,
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                            )
+                        } else {
+                            Image(
+                                bitmap             = s.bitmap.asImageBitmap(),
+                                contentDescription = when {
+                                    s.isYouTube      -> "YouTube thumbnail"
+                                    s.isTwitterVideo -> "Twitter/X video thumbnail"
+                                    else             -> "Image preview"
+                                },
+                                contentScale = ContentScale.Crop,
+                                modifier     = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                            )
+                        }
                         if (hasPlayOverlay) {
                             Icon(
                                 imageVector        = Icons.Default.PlayCircleOutline,

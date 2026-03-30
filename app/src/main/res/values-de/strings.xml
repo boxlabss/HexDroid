@@ -256,7 +256,7 @@
     <string name="network_command_delay_desc">Sekunden nach dem Verbinden warten, bevor Befehle ausgeführt werden</string>
     <string name="network_service_auth_label">Dienstauthentifizierungsbefehl</string>
     <string name="network_service_auth_hint">z.B. /msg NickServ IDENTIFY passwort</string>
-    <string name="network_commands_hint">Befehle nach dem Verbinden, z.B. /join #kanal</string>
+    <string name="network_commands_hint">Ein Befehl pro Zeile. ;wait N anhängen, um N Sekunden zu warten, z.B. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Kein Netzwerk ausgewählt</string>
     <string name="network_undo_remove">Entfernen rückgängig machen</string>
     <string name="networks_selected">Ausgewählt</string>
@@ -264,6 +264,11 @@
     <string name="networks_remove_favourite">Aus Favoriten entfernen</string>
     <string name="networks_drag_reorder">Zum Neuanordnen ziehen</string>
     <string name="networks_insecure_title">Unsichere Verbindung blockiert</string>
+    <string name="networks_local_title">Lokaler Netzwerkzugang erforderlich</string>
+    <string name="networks_local_body">Die Verbindung zu {0} erfordert die Berechtigung für lokale Netzwerke.
+
+Dies ist eine neue Android-17-Anforderung für Verbindungen zu Servern im lokalen Netzwerk.</string>
+    <string name="networks_local_grant">Berechtigung erteilen</string>
     <string name="networks_insecure_body">Unverschlüsselte IRC-Verbindungen sind nicht gesichert und können Ihre Nachrichten und Ihr Passwort preisgeben.</string>
     <string name="networks_insecure_body2">Um sich mit %1$s ohne TLS zu verbinden, müssen Sie unverschlüsselte Verbindungen für dieses Netzwerk ausdrücklich erlauben.</string>
     <string name="networks_allow_connect">Erlauben &amp; Verbinden</string>
@@ -388,7 +393,7 @@ Dies kann nicht rückgängig gemacht werden.</string>
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Medienvorschauen</string>
     <string name="setting_image_previews">Bild- &amp; Videovorschauen aktivieren</string>
-    <string name="setting_image_previews_desc">Inline-Vorschauen für Bilder und YouTube-Links im Chat anzeigen.</string>
+    <string name="setting_image_previews_desc">Inline-Vorschauen für Bilder und YouTube-Links im Chat anzeigen. Twitter/X-Links werden über fxtwitter.com (Drittanbieter-Dienst) aufgelöst — Tweet-IDs werden beim Laden einer Vorschau an diesen Dienst gesendet.</string>
     <string name="setting_previews_wifi_only">Nur WLAN</string>
     <string name="setting_previews_wifi_only_desc">Vorschauen nur bei WLAN-Verbindung laden, um mobile Daten zu sparen.</string>
     <string name="theme_system_default">Systemstandard</string>
@@ -466,7 +471,7 @@ Dies kann nicht rückgängig gemacht werden.</string>
     <string name="nick_send_file_desc">Eine Datei via DCC SEND senden</string>
     <string name="nick_dcc_disabled">DCC ist in den Einstellungen deaktiviert</string>
     <string name="nick_dcc_chat">DCC Chat</string>
-    <string name="nick_dcc_chat_desc">Eine direkte verschlüsselte Chat-Sitzung öffnen</string>
+    <string name="nick_dcc_chat_desc">Eine direkte Peer-to-Peer-Chat-Sitzung öffnen</string>
     <string name="nick_ignore">Ignorieren</string>
     <string name="nick_unignore">Ignorieren aufheben</string>
     <string name="nick_ignore_desc">Alle Nachrichten dieses Benutzers ausblenden</string>
@@ -482,4 +487,14 @@ Dies kann nicht rückgängig gemacht werden.</string>
     <string name="about_tagline">IRC-Client für Android</string>
     <string name="about_support_title">Dokumentation &amp; Support</string>
     <string name="about_support_desc">Besuchen Sie die Website für Anleitungen, FAQs und zum Melden von Problemen.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">SDCC verwenden (TLS-Verschlüsselung)</string>
+    <string name="setting_dcc_secure_desc">Ausgehende Dateiübertragungen verwenden DCC SSEND (TLS-verschlüsselt). Der Remote-Client muss ebenfalls SDCC unterstützen.</string>
+    <string name="list_users_filter_label">Benutzer:</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Max</string>
+    <string name="topic_edit_title">Thema bearbeiten</string>
+    <string name="topic_edit_label">Thema</string>
+    <string name="topic_set">Setzen</string>
 </resources>

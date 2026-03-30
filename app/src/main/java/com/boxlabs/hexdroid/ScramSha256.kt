@@ -27,6 +27,12 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.experimental.xor
 
+/** Minimum PBKDF2 iteration count mandated by RFC 7677 for SCRAM-SHA-256. */
+private const val SCRAM_MIN_ITERATIONS = 4096
+
+/** Maximum server nonce length we accept (defensive bound against malformed/malicious servers). */
+private const val SCRAM_MAX_NONCE_LENGTH = 512
+
 sealed class ScramNext {
     data class SendClientFinal(val clientFinal: String) : ScramNext()
     data object ExpectServerFinal : ScramNext()
@@ -52,8 +58,17 @@ class ScramSha256Client(
             serverFirst = msg
             val attrs = parseAttrs(msg)
             val nonce = attrs["r"] ?: return ScramNext.Done(false)
+
+            // Reject excessively long nonces from buggy/malicious servers.
+            if (nonce.length > SCRAM_MAX_NONCE_LENGTH) return ScramNext.Done(false)
+
             val saltB64 = attrs["s"] ?: return ScramNext.Done(false)
             val iter = attrs["i"]?.toIntOrNull() ?: return ScramNext.Done(false)
+
+            // RFC 7677 mandates a minimum of 4096 iterations for SCRAM-SHA-256.
+            // Accepting fewer would reduce the PBKDF2 security margin to near-zero.
+            if (iter < SCRAM_MIN_ITERATIONS) return ScramNext.Done(false)
+
             if (!nonce.startsWith(clientNonce)) return ScramNext.Done(false)
 
             val salt = Base64.decode(saltB64, Base64.DEFAULT)
@@ -98,9 +113,15 @@ class ScramSha256Client(
         name.replace("=", "=3D").replace(",", "=2C")
 
     private fun hi(password: String, salt: ByteArray, iterations: Int): ByteArray {
+        // Always clear the PBEKeySpec password array after derivation to
+        // minimise how long the plaintext password lives on the heap.
         val spec = PBEKeySpec(password.toCharArray(), salt, iterations, 256)
-        val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        return skf.generateSecret(spec).encoded
+        return try {
+            val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            skf.generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
     }
 
     private fun hmac(key: ByteArray, data: ByteArray): ByteArray {

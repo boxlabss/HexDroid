@@ -320,7 +320,7 @@
     <string name="network_command_delay_desc">Wait this many seconds after connecting before running commands</string>
     <string name="network_service_auth_label">Service auth command</string>
     <string name="network_service_auth_hint">e.g., /msg NickServ IDENTIFY password</string>
-    <string name="network_commands_hint">Commands to run after connecting, e.g., /join #channel</string>
+    <string name="network_commands_hint">One command per line. Append ;wait N to pause N seconds after that line, e.g. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">No network selected</string>
     <string name="network_undo_remove">Undo remove</string>
 
@@ -330,6 +330,11 @@
     <string name="networks_remove_favourite">Remove from favourites</string>
     <string name="networks_drag_reorder">Drag to reorder</string>
     <string name="networks_insecure_title">Insecure connection blocked</string>
+    <string name="networks_local_title">Local network access required</string>
+    <string name="networks_local_body">Connecting to {0} requires the Local Network permission.
+
+This is a new Android 17 requirement for connecting to servers on your local network (home network, bouncer, etc.).</string>
+    <string name="networks_local_grant">Grant permission</string>
     <string name="networks_insecure_body">Plaintext IRC connections are not encrypted and can expose your messages and password.</string>
     <string name="networks_insecure_body2">To connect to %1$s without TLS, you must explicitly allow insecure plaintext connections for this network.</string>
     <string name="networks_allow_connect">Allow &amp; Connect</string>
@@ -478,7 +483,7 @@
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Media Previews</string>
     <string name="setting_image_previews">Enable image &amp; video previews</string>
-    <string name="setting_image_previews_desc">Show inline previews for images and YouTube links posted in chat.</string>
+    <string name="setting_image_previews_desc">Allow previews for images and YouTube links posted in chat. Twitter/X links are resolved via fxtwitter.com - Previews are not automatic.</string>
     <string name="setting_previews_wifi_only">Wi-Fi only</string>
     <string name="setting_previews_wifi_only_desc">Only load previews when connected to Wi-Fi to avoid using mobile data.</string>
     <string name="theme_system_default">System default</string>
@@ -559,7 +564,7 @@
     <string name="nick_send_file_desc">Send a file via DCC SEND</string>
     <string name="nick_dcc_disabled">DCC is disabled in settings</string>
     <string name="nick_dcc_chat">DCC Chat</string>
-    <string name="nick_dcc_chat_desc">Open a direct encrypted chat session</string>
+    <string name="nick_dcc_chat_desc">Open a direct peer-to-peer chat session</string>
     <string name="nick_ignore">Ignore</string>
     <string name="nick_unignore">Unignore</string>
     <string name="nick_ignore_desc">Hide all messages from this user</string>
@@ -578,4 +583,18 @@
     <string name="about_tagline">IRC Client for Android</string>
     <string name="about_support_title">Documentation &amp; Support</string>
     <string name="about_support_desc">Visit the website for guides, FAQs, and to report issues.</string>
+
+    <!-- SDCC settings -->
+    <string name="setting_dcc_secure">Use SDCC (TLS encryption)</string>
+    <string name="setting_dcc_secure_desc">Outgoing file transfers use DCC SSEND (TLS-wrapped). The remote client must also support SDCC.</string>
+
+    <!-- Channel list user count filter -->
+    <string name="list_users_filter_label">Users:</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Max</string>
+
+    <!-- Topic quick-edit dialog -->
+    <string name="topic_edit_title">Edit topic</string>
+    <string name="topic_edit_label">Topic</string>
+    <string name="topic_set">Set</string>
 </resources>

@@ -17,16 +17,18 @@
 */
 
 package com.boxlabs.hexdroid.ui.theme
-
+ 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
-
-// Slightly rounder than default Material3 to make the UI feel softer / more modern.
+ 
+// Tighter radii than M3 defaults. less bubbly, more composed.
+// Buttons (small) get 8dp, cards (medium) 12dp, sheets (large) 16dp.
 val HexShapes = Shapes(
-    extraSmall = RoundedCornerShape(10.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(28.dp)
+    extraSmall = RoundedCornerShape(4.dp),
+    small      = RoundedCornerShape(8.dp),
+    medium     = RoundedCornerShape(12.dp),
+    large      = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(20.dp),
 )
+ 

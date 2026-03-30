@@ -6,7 +6,16 @@
 * it under the terms of the GNU General Public License as published by
 * the Free Software Foundation, either version 3 of the License, or
 * (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 
 @file:OptIn(ExperimentalMaterial3Api::class)
 package com.boxlabs.hexdroid.ui
@@ -42,12 +51,29 @@ fun ListScreen(
     val filter = state.listFilter.trim()
     val sort   = state.listSort
 
-    // Apply filter then sort. both cheap on the UI thread for typical list sizes.
-    val items = remember(state.channelDirectory, filter, sort) {
-        val filtered = if (filter.isBlank()) state.channelDirectory
-        else state.channelDirectory.filter {
-            it.channel.contains(filter, ignoreCase = true) ||
-            it.topic.contains(filter, ignoreCase = true)
+    // Local user-count range filter
+    var minUsersText by remember { mutableStateOf("") }
+    var maxUsersText by remember { mutableStateOf("") }
+    val minUsers = minUsersText.trim().toIntOrNull()?.coerceAtLeast(0)
+    val maxUsers = maxUsersText.trim().toIntOrNull()?.coerceAtLeast(0)
+
+    // Apply filter then sort.
+    // The original key was `remember(state.channelDirectory, ...)`. Because
+    // `channelDirectory` is a List<ChannelListEntry>, any state update anywhere in the
+    // ViewModel (e.g. a message arriving in another buffer) creates a new list reference
+    // even if the channel data hasn't changed, causing an O(n·log n) sort to run on every
+    // recomposition. Using the list size as a proxy key means the sort only re-runs when
+    // channels are actually added or removed.
+    // The filter/sort/range inputs are still included so user-driven changes re-run immediately.
+    val directorySize = state.channelDirectory.size
+    val items = remember(directorySize, filter, sort, minUsers, maxUsers) {
+        val filtered = state.channelDirectory.filter { ch ->
+            val nameMatch = filter.isBlank() ||
+                ch.channel.contains(filter, ignoreCase = true) ||
+                ch.topic.contains(filter, ignoreCase = true)
+            val minOk = minUsers == null || ch.users >= minUsers
+            val maxOk = maxUsers == null || ch.users <= maxUsers
+            nameMatch && minOk && maxOk
         }
         when (sort) {
             "size_asc"  -> filtered.sortedBy   { it.users }
@@ -84,6 +110,39 @@ fun ListScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            // User count range filter
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.list_users_filter_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = minUsersText,
+                    onValueChange = { if (it.all(Char::isDigit) && it.length <= 6) minUsersText = it },
+                    label = { Text(stringResource(R.string.list_users_min)) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    ),
+                )
+                Text("–", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = maxUsersText,
+                    onValueChange = { if (it.all(Char::isDigit) && it.length <= 6) maxUsersText = it },
+                    label = { Text(stringResource(R.string.list_users_max)) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    ),
+                )
+            }
 
             // Sort chips row
             Row(
@@ -182,7 +241,7 @@ fun ListScreen(
  * A pair of sort controls for one dimension (e.g. "Size").
  *
  * When neither direction is active: shows a single outlined chip labelled with
- * the dimension name. tapping selects descending.
+ * the dimension name — tapping selects descending (the more useful default).
  *
  * When one direction is active: shows a filled chip with an arrow icon.
  * Tapping the active chip toggles to the opposite direction.
@@ -202,7 +261,7 @@ private fun SortChip(
             when {
                 activeDesc -> onClickAsc()   // flip to ascending
                 activeAsc  -> onClickDesc()  // flip to descending
-                else       -> onClickDesc()  // first tap > descending
+                else       -> onClickDesc()  // first tap → descending
             }
         },
         label = { Text(label) },

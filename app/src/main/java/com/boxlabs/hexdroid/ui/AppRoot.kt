@@ -73,6 +73,17 @@ fun AppRoot(
 	var tourReturnScreen by rememberSaveable { mutableStateOf<AppScreen?>(null) }
 	var tourSuppressedThisSession by rememberSaveable { mutableStateOf(false) }
 
+	// Android 17+: request ACCESS_LOCAL_NETWORK when user tries to connect to a LAN server.
+	var localNetworkPermissionNetId by remember { mutableStateOf<String?>(null) }
+	val requestLocalNetwork = rememberLauncherForActivityResult(
+		ActivityResultContracts.RequestPermission()
+	) { granted ->
+		val netId = localNetworkPermissionNetId
+		localNetworkPermissionNetId = null
+		if (granted && netId != null) vm.retryAfterLocalNetworkPermission(netId)
+		else vm.dismissLocalNetworkWarning()
+	}
+
 	// Track whether the welcome screen was shown and completed this session.
 	var welcomeCompletedThisSession by rememberSaveable { mutableStateOf(false) }
 
@@ -227,6 +238,8 @@ fun AppRoot(
                     state = state,
                     onSelectBuffer = vm::openBuffer,
                     onSend = vm::sendInput,
+                    onSendReply = vm::sendToBuffer,
+                    onSendReaction = { msgId, emoji, remove -> vm.sendReaction(msgId, emoji, remove) },
                     onDisconnect = vm::disconnectActive,
                     onReconnect = vm::reconnectActive,
                     onExit = onExit,
@@ -254,6 +267,9 @@ fun AppRoot(
                     onTypingChanged = vm::notifyTypingChanged,
                     onMarkRead = vm::markBufferRead,
                     onHighlightConsumed = vm::clearHighlightScroll,
+                    onCloseFindOverlay = vm::closeFindOverlay,
+                    onFindNavigate = vm::findNavigate,
+                    onShareTextConsumed = vm::consumeShareText,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )
@@ -270,6 +286,11 @@ fun AppRoot(
                     onDisconnect = vm::disconnectNetwork,
                     onAllowPlaintextConnect = vm::allowPlaintextAndConnect,
                     onDismissPlaintextWarning = vm::dismissPlaintextWarning,
+                    onRequestLocalNetworkPermission = { netId ->
+                        localNetworkPermissionNetId = netId
+                        requestLocalNetwork.launch("android.permission.ACCESS_LOCAL_NETWORK")
+                    },
+                    onDismissLocalNetworkWarning = vm::dismissLocalNetworkWarning,
                     onOpenSettings = { vm.goTo(AppScreen.SETTINGS) },
                     onReorder = vm::reorderNetworks,
                     onToggleFavourite = vm::toggleFavourite,

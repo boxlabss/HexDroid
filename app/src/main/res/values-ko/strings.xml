@@ -242,7 +242,7 @@
     <string name="network_command_delay_desc">연결 후 명령을 실행하기 전에 기다릴 초 수</string>
     <string name="network_service_auth_label">서비스 인증 명령</string>
     <string name="network_service_auth_hint">예: /msg NickServ IDENTIFY 비밀번호</string>
-    <string name="network_commands_hint">연결 후 명령, 예: /join #채널</string>
+    <string name="network_commands_hint">한 줄에 명령어 하나. ;wait N을 추가하면 N초 대기합니다. 예: /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">선택된 네트워크 없음</string>
     <string name="network_undo_remove">제거 취소</string>
     <string name="networks_selected">선택됨</string>
@@ -250,6 +250,11 @@
     <string name="networks_remove_favourite">즐겨찾기에서 제거</string>
     <string name="networks_drag_reorder">드래그하여 순서 변경</string>
     <string name="networks_insecure_title">안전하지 않은 연결이 차단됨</string>
+    <string name="networks_local_title">로컬 네트워크 접근 권한 필요</string>
+    <string name="networks_local_body">{0}에 연결하려면 로컬 네트워크 권한이 필요합니다.
+
+Android 17의 새로운 요구 사항입니다.</string>
+    <string name="networks_local_grant">권한 허용</string>
     <string name="networks_insecure_body">암호화되지 않은 IRC 연결은 보호되지 않으며 메시지와 비밀번호가 노출될 수 있습니다.</string>
     <string name="networks_insecure_body2">TLS 없이 %1$s에 연결하려면 이 네트워크에 대해 암호화되지 않은 연결을 명시적으로 허용해야 합니다.</string>
     <string name="networks_allow_connect">허용 및 연결</string>
@@ -374,7 +379,7 @@
     <string name="theme_terminal">터미널</string>
     <string name="section_media_previews">미디어 미리보기</string>
     <string name="setting_image_previews">이미지 및 동영상 미리보기 사용</string>
-    <string name="setting_image_previews_desc">채팅에 게시된 이미지와 YouTube 링크의 인라인 미리보기를 표시합니다.</string>
+    <string name="setting_image_previews_desc">채팅에 게시된 이미지와 YouTube 링크의 인라인 미리보기를 표시합니다. Twitter/X 링크는 fxtwitter.com(서드파티 서비스)을 통해 확인되며, 미리보기 로드 시 트윗 ID가 해당 서비스로 전송됩니다.</string>
     <string name="setting_previews_wifi_only">Wi-Fi만 사용</string>
     <string name="setting_previews_wifi_only_desc">모바일 데이터 사용을 방지하기 위해 Wi-Fi에 연결된 경우에만 미리보기를 불러옵니다.</string>
     <string name="theme_system_default">시스템 기본값</string>
@@ -452,7 +457,7 @@
     <string name="nick_send_file_desc">DCC SEND로 파일 전송</string>
     <string name="nick_dcc_disabled">DCC가 설정에서 비활성화됨</string>
     <string name="nick_dcc_chat">DCC 채팅</string>
-    <string name="nick_dcc_chat_desc">직접 암호화된 채팅 세션 열기</string>
+    <string name="nick_dcc_chat_desc">직접 피어 투 피어 채팅 세션 열기</string>
     <string name="nick_ignore">무시</string>
     <string name="nick_unignore">무시 해제</string>
     <string name="nick_ignore_desc">이 사용자의 모든 메시지 숨기기</string>
@@ -468,4 +473,14 @@
     <string name="about_tagline">Android용 IRC 클라이언트</string>
     <string name="about_support_title">문서 &amp; 지원</string>
     <string name="about_support_desc">가이드, FAQ 및 문제 신고를 위해 웹사이트를 방문하세요.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">SDCC 사용 (TLS 암호화)</string>
+    <string name="setting_dcc_secure_desc">발신 파일 전송은 DCC SSEND(TLS 암호화)를 사용합니다. 원격 클라이언트도 SDCC를 지원해야 합니다.</string>
+    <string name="list_users_filter_label">사용자:</string>
+    <string name="list_users_min">최소</string>
+    <string name="list_users_max">최대</string>
+    <string name="topic_edit_title">주제 편집</string>
+    <string name="topic_edit_label">주제</string>
+    <string name="topic_set">설정</string>
 </resources>

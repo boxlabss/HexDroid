@@ -255,7 +255,7 @@
     <string name="network_command_delay_desc">انتظر هذه الثواني بعد الاتصال قبل تنفيذ الأوامر</string>
     <string name="network_service_auth_label">أمر مصادقة الخدمة</string>
     <string name="network_service_auth_hint">مثال: /msg NickServ IDENTIFY كلمة_المرور</string>
-    <string name="network_commands_hint">أوامر بعد الاتصال، مثال: /join #قناة</string>
+    <string name="network_commands_hint">سطر واحد لكل أمر. أضف ;wait N للانتظار N ثانية، مثلاً: /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">لم يتم اختيار شبكة</string>
     <string name="network_undo_remove">التراجع عن الإزالة</string>
     <string name="networks_selected">محدد</string>
@@ -263,6 +263,11 @@
     <string name="networks_remove_favourite">إزالة من المفضلة</string>
     <string name="networks_drag_reorder">اسحب لإعادة الترتيب</string>
     <string name="networks_insecure_title">تم حجب الاتصال غير الآمن</string>
+    <string name="networks_local_title">مطلوب إذن الشبكة المحلية</string>
+    <string name="networks_local_body">الاتصال بـ {0} يتطلب إذن الشبكة المحلية.
+
+هذا متطلب جديد في Android 17 للاتصال بالخوادم على الشبكة المحلية.</string>
+    <string name="networks_local_grant">منح الإذن</string>
     <string name="networks_insecure_body">اتصالات IRC غير المشفرة ليست محمية ويمكنها كشف رسائلك وكلمة مرورك.</string>
     <string name="networks_insecure_body2">للاتصال بـ %1$s بدون TLS، يجب السماح صراحةً بالاتصالات غير المشفرة لهذه الشبكة.</string>
     <string name="networks_allow_connect">سماح واتصال</string>
@@ -387,7 +392,7 @@
     <string name="theme_terminal">تيرمينال</string>
     <string name="section_media_previews">معاينات الوسائط</string>
     <string name="setting_image_previews">تمكين معاينات الصور والفيديو</string>
-    <string name="setting_image_previews_desc">عرض معاينات مضمّنة للصور وروابط يوتيوب المُرسَلة في الدردشة.</string>
+    <string name="setting_image_previews_desc">عرض معاينات مضمّنة للصور وروابط يوتيوب المُرسَلة في الدردشة. يتم حل روابط Twitter/X عبر fxtwitter.com (خدمة طرف ثالث) — تُرسَل معرّفات التغريدات إلى هذه الخدمة عند تحميل معاينة.</string>
     <string name="setting_previews_wifi_only">Wi-Fi فقط</string>
     <string name="setting_previews_wifi_only_desc">تحميل المعاينات فقط عند الاتصال بشبكة Wi-Fi لتجنب استهلاك بيانات الهاتف.</string>
     <string name="theme_system_default">إعداد النظام الافتراضي</string>
@@ -465,7 +470,7 @@
     <string name="nick_send_file_desc">إرسال ملف عبر DCC SEND</string>
     <string name="nick_dcc_disabled">DCC معطل في الإعدادات</string>
     <string name="nick_dcc_chat">DCC دردشة</string>
-    <string name="nick_dcc_chat_desc">فتح جلسة دردشة مباشرة مشفرة</string>
+    <string name="nick_dcc_chat_desc">فتح جلسة محادثة مباشرة من نظير إلى نظير</string>
     <string name="nick_ignore">تجاهل</string>
     <string name="nick_unignore">إلغاء التجاهل</string>
     <string name="nick_ignore_desc">إخفاء جميع رسائل هذا المستخدم</string>
@@ -481,4 +486,14 @@
     <string name="about_tagline">عميل IRC لنظام Android</string>
     <string name="about_support_title">التوثيق &amp; الدعم</string>
     <string name="about_support_desc">قم بزيارة الموقع للأدلة والأسئلة الشائعة والإبلاغ عن المشكلات.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">استخدام SDCC (تشفير TLS)</string>
+    <string name="setting_dcc_secure_desc">تستخدم عمليات نقل الملفات الصادرة DCC SSEND (مشفّرة بـ TLS). يجب أن يدعم العميل البعيد SDCC أيضاً.</string>
+    <string name="list_users_filter_label">المستخدمون:</string>
+    <string name="list_users_min">الحد الأدنى</string>
+    <string name="list_users_max">الحد الأقصى</string>
+    <string name="topic_edit_title">تعديل الموضوع</string>
+    <string name="topic_edit_label">الموضوع</string>
+    <string name="topic_set">تعيين</string>
 </resources>

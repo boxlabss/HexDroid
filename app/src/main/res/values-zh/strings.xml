@@ -242,7 +242,7 @@
     <string name="network_command_delay_desc">连接后等待此秒数再执行命令</string>
     <string name="network_service_auth_label">服务认证命令</string>
     <string name="network_service_auth_hint">例如 /msg NickServ IDENTIFY 密码</string>
-    <string name="network_commands_hint">连接后的命令，例如 /join #频道</string>
+    <string name="network_commands_hint">每行一条命令。在行末添加 ;wait N 可暂停 N 秒，例如: /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">未选择网络</string>
     <string name="network_undo_remove">撤销删除</string>
     <string name="networks_selected">已选择</string>
@@ -250,6 +250,11 @@
     <string name="networks_remove_favourite">从收藏中移除</string>
     <string name="networks_drag_reorder">拖动以重新排序</string>
     <string name="networks_insecure_title">不安全连接已被阻止</string>
+    <string name="networks_local_title">需要本地网络访问权限</string>
+    <string name="networks_local_body">连接到 {0} 需要本地网络权限。
+
+这是 Android 17 对连接本地网络服务器的新要求。</string>
+    <string name="networks_local_grant">授予权限</string>
     <string name="networks_insecure_body">未加密的 IRC 连接不受保护，可能暴露您的消息和密码。</string>
     <string name="networks_insecure_body2">要在不使用 TLS 的情况下连接到 %1$s，您必须为此网络明确允许未加密的连接。</string>
     <string name="networks_allow_connect">允许并连接</string>
@@ -374,7 +379,7 @@
     <string name="theme_terminal">终端</string>
     <string name="section_media_previews">媒体预览</string>
     <string name="setting_image_previews">启用图片和视频预览</string>
-    <string name="setting_image_previews_desc">在聊天中以内嵌方式预览图片和 YouTube 链接。</string>
+    <string name="setting_image_previews_desc">在聊天中以内嵌方式预览图片和 YouTube 链接。Twitter/X 链接通过 fxtwitter.com（第三方服务）解析——加载预览时，推文 ID 会被发送至该服务。</string>
     <string name="setting_previews_wifi_only">仅限 Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">仅在连接 Wi-Fi 时加载预览，以避免消耗移动数据流量。</string>
     <string name="theme_system_default">系统默认</string>
@@ -452,7 +457,7 @@
     <string name="nick_send_file_desc">通过 DCC SEND 发送文件</string>
     <string name="nick_dcc_disabled">DCC 在设置中已禁用</string>
     <string name="nick_dcc_chat">DCC 聊天</string>
-    <string name="nick_dcc_chat_desc">开启直接加密聊天会话</string>
+    <string name="nick_dcc_chat_desc">打开直接点对点聊天会话</string>
     <string name="nick_ignore">屏蔽</string>
     <string name="nick_unignore">取消屏蔽</string>
     <string name="nick_ignore_desc">隐藏此用户的所有消息</string>
@@ -468,4 +473,14 @@
     <string name="about_tagline">Android IRC 客户端</string>
     <string name="about_support_title">文档 &amp; 支持</string>
     <string name="about_support_desc">访问网站获取指南、常见问题解答和报告问题。</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">使用 SDCC（TLS 加密）</string>
+    <string name="setting_dcc_secure_desc">传出文件传输使用 DCC SSEND（TLS 加密）。远程客户端也必须支持 SDCC。</string>
+    <string name="list_users_filter_label">用户：</string>
+    <string name="list_users_min">最小</string>
+    <string name="list_users_max">最大</string>
+    <string name="topic_edit_title">编辑话题</string>
+    <string name="topic_edit_label">话题</string>
+    <string name="topic_set">设置</string>
 </resources>

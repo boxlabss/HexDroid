@@ -33,53 +33,58 @@ import com.boxlabs.hexdroid.FontChoice
 import com.boxlabs.hexdroid.data.ThemeMode
 
 private val DarkColorScheme = darkColorScheme(
+    // Single blue accent
     primary = HexBlueDark,
-    onPrimary = DarkBackground,
-    primaryContainer = Color(0xFF2B3561),
-    onPrimaryContainer = Color(0xFFE2E6FF),
+    onPrimary = Color(0xFF0D1117),
+    primaryContainer = Color(0xFF1E3A5F),
+    onPrimaryContainer = Color(0xFFBFDBFE),
 
-    secondary = HexPurpleDark,
-    onSecondary = DarkBackground,
-    secondaryContainer = Color(0xFF3B2E63),
-    onSecondaryContainer = Color(0xFFECE6FF),
+    // Neutral slate:  secondary roles only, no competing hue
+    secondary = HexSlateDark,
+    onSecondary = Color(0xFF0D1117),
+    secondaryContainer = Color(0xFF1E2533),
+    onSecondaryContainer = Color(0xFFCDD5E0),
 
-    tertiary = HexTealDark,
-    onTertiary = DarkBackground,
-    tertiaryContainer = Color(0xFF0C3E3A),
-    onTertiaryContainer = Color(0xFFC7FFF6),
+    // Muted steel: informational surfaces (unread pill, find highlight)
+    tertiary = HexSteelDark,
+    onTertiary = Color(0xFF0D1117),
+    tertiaryContainer = Color(0xFF1A2030),
+    onTertiaryContainer = Color(0xFFB8C5D6),
 
     background = DarkBackground,
-    onBackground = Color(0xFFE7E9F2),
+    onBackground = Color(0xFFE6EDF3),
     surface = DarkSurface,
-    onSurface = Color(0xFFE7E9F2),
+    onSurface = Color(0xFFE6EDF3),
     surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = Color(0xFFC4C8D7),
+    onSurfaceVariant = Color(0xFFACB8C8),
     outline = DarkOutline,
+    outlineVariant = DarkOutlineVariant,
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = HexBlueLight,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFDDE4FF),
-    onPrimaryContainer = Color(0xFF001A43),
+    primaryContainer = Color(0xFFDBEAFE),
+    onPrimaryContainer = Color(0xFF1E3A5F),
 
-    secondary = HexPurpleLight,
+    secondary = HexSlateLight,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE9E1FF),
-    onSecondaryContainer = Color(0xFF23105A),
+    secondaryContainer = Color(0xFFE2E8F0),
+    onSecondaryContainer = Color(0xFF1E293B),
 
-    tertiary = HexTealLight,
+    tertiary = HexSteelLight,
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFBFF2EA),
-    onTertiaryContainer = Color(0xFF003731),
+    tertiaryContainer = Color(0xFFE8EEF4),
+    onTertiaryContainer = Color(0xFF334155),
 
     background = LightBackground,
-    onBackground = Color(0xFF101423),
+    onBackground = Color(0xFF0F172A),
     surface = LightSurface,
-    onSurface = Color(0xFF101423),
+    onSurface = Color(0xFF0F172A),
     surfaceVariant = LightSurfaceVariant,
-    onSurfaceVariant = Color(0xFF40465A),
+    onSurfaceVariant = Color(0xFF475569),
     outline = LightOutline,
+    outlineVariant = Color(0xFFE2E8F0),
 )
 
 private val MatrixColorScheme = darkColorScheme(
@@ -141,8 +146,9 @@ private val TerminalColorScheme = darkColorScheme(
 @Composable
 fun HexDroidIRCTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
-    // Dynamic colour is available on Android 12+ (not applied for Matrix theme)
-    dynamicColor: Boolean = true,
+    // dynamicColor parameter retained for call-site compatibility but is no longer
+    // used directly. dynamic colour is now controlled exclusively by themeMode.
+    @Suppress("UNUSED_PARAMETER") dynamicColor: Boolean = false,
     fontChoice: FontChoice = FontChoice.OPEN_SANS,
     customFontPath: String? = null,
     // Deprecated parameter kept for source-compatibility with call sites that pass darkTheme directly.
@@ -159,9 +165,14 @@ fun HexDroidIRCTheme(
     }
 
     val colorScheme = when {
-        isMatrix   -> MatrixColorScheme    // Matrix always uses its own palette, never dynamic
-        isTerminal -> TerminalColorScheme  // Terminal always uses its own palette, never dynamic
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        isMatrix   -> MatrixColorScheme
+        isTerminal -> TerminalColorScheme
+        // SYSTEM theme: honour the wallpaper-derived palette on Android 12+ so the app
+        // feels integrated with the device's own look. The user has explicitly chosen
+        // "Follow system" so a pink or green button is intentional. it matches their
+        // wallpaper. All other explicit themes (LIGHT, DARK) use the fixed HexDroid
+        // palette so semantic colours (unread pill, find highlight, etc.) are predictable.
+        themeMode == ThemeMode.SYSTEM && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (resolvedDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }

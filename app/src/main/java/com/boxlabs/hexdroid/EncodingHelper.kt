@@ -39,6 +39,15 @@ import java.nio.charset.CodingErrorAction
  * - Japanese networks (ISO-2022-JP, Shift_JIS)
  * - Chinese networks (GB2312, Big5)
  */
+
+/**
+ * Maximum bytes accepted per line from the server (applies to both read paths).
+ * RFC 1459 allows 512 bytes; IRCv3 with message-tags extends this to 8191.
+ * We use 8192 as a safe ceiling — anything larger is a protocol violation or
+ * a runaway server bug that would cause unbounded heap growth.
+ */
+private const val MAX_LINE_BYTES = 8192
+
 object EncodingHelper {
     
     /**
@@ -408,7 +417,23 @@ object EncodingHelper {
             when (b) {
                 '\n'.code -> break // End of line
                 '\r'.code -> { /* Skip CR, wait for LF */ }
-                else -> buffer.write(b)
+                else -> {
+                    // cap line length to prevent OOM from a malicious/buggy server
+                    // that sends an enormous line with no newline. IRC protocol allows
+                    // 512 bytes (RFC 1459) or 8191 with message-tags (IRCv3).
+                    if (buffer.size() >= MAX_LINE_BYTES) {
+                        // Drain the rest of this line before throwing so the stream
+                        // stays in a consistent state for subsequent reads.
+                        while (true) {
+                            val skip = input.read()
+                            if (skip == -1 || skip == '\n'.code) break
+                        }
+                        throw java.io.IOException(
+                            "Server sent a line exceeding $MAX_LINE_BYTES bytes — possible protocol violation"
+                        )
+                    }
+                    buffer.write(b)
+                }
             }
         }
         
@@ -503,6 +528,14 @@ class EncodingLineReader(
      */
     private val MAX_CORPUS_BYTES = 8192
 
+    /**
+     * Maximum number of bytes accepted per line from the server.
+     * RFC 1459 allows 512 bytes; IRCv3 with message-tags extends this to 8191.
+     * We use 8192 as a safe ceiling — anything larger is a protocol violation or
+     * a runaway server bug that would cause unbounded memory growth.
+     */
+    private val MAX_LINE_BYTES = 8192
+
     /** Accumulated raw bytes from all non-ASCII lines seen so far during detection. */
     private val corpus = ByteArrayOutputStream(512)
 
@@ -539,7 +572,19 @@ class EncodingLineReader(
             when (b) {
                 '\n'.code -> break
                 '\r'.code -> { /* skip CR */ }
-                else -> buffer.write(b)
+                else -> {
+                    // OOM guard as the internal readLine; drain and throw.
+                    if (buffer.size() >= MAX_LINE_BYTES) {
+                        while (true) {
+                            val skip = input.read()
+                            if (skip == -1 || skip == '\n'.code) break
+                        }
+                        throw java.io.IOException(
+                            "Server sent a line exceeding $MAX_LINE_BYTES bytes — possible protocol violation"
+                        )
+                    }
+                    buffer.write(b)
+                }
             }
         }
         if (b == -1 && buffer.size() == 0) return null

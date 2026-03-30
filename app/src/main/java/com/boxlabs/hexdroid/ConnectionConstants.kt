@@ -49,6 +49,14 @@ object ConnectionConstants {
     
     /** Maximum number of reconnect attempts to track. */
     const val RECONNECT_MAX_ATTEMPTS = 30
+
+    // --- Flap Detection ---
+
+    /** Number of ping-timeout disconnects within FLAP_WINDOW_MS that triggers flap detection. */
+    const val FLAP_THRESHOLD = 3
+
+    /** Time window for flap detection (ms). Ping-timeouts older than this are ignored. */
+    const val FLAP_WINDOW_MS = 15 * 60 * 1000L  // 15 minutes
     
     // --- Connection Timeouts ---
     

@@ -242,7 +242,7 @@
     <string name="network_command_delay_desc">Czekaj tyle sekund po połączeniu przed wykonaniem komend</string>
     <string name="network_service_auth_label">Komenda uwierzytelnienia usługi</string>
     <string name="network_service_auth_hint">np. /msg NickServ IDENTIFY hasło</string>
-    <string name="network_commands_hint">Komendy po połączeniu, np. /join #kanał</string>
+    <string name="network_commands_hint">Jedna komenda na linię. Dodaj ;wait N, aby poczekać N sekund, np. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Nie wybrano sieci</string>
     <string name="network_undo_remove">Cofnij usunięcie</string>
     <string name="networks_selected">Wybrano</string>
@@ -250,6 +250,11 @@
     <string name="networks_remove_favourite">Usuń z ulubionych</string>
     <string name="networks_drag_reorder">Przeciągnij, aby zmienić kolejność</string>
     <string name="networks_insecure_title">Niezabezpieczone połączenie zablokowane</string>
+    <string name="networks_local_title">Wymagany dostęp do sieci lokalnej</string>
+    <string name="networks_local_body">Połączenie z {0} wymaga uprawnienia sieci lokalnej.
+
+To nowe wymaganie Android 17 dla połączeń z serwerami w sieci lokalnej.</string>
+    <string name="networks_local_grant">Przyznaj uprawnienie</string>
     <string name="networks_insecure_body">Niezaszyfrowane połączenia IRC nie są zabezpieczone i mogą ujawnić Twoje wiadomości i hasło.</string>
     <string name="networks_insecure_body2">Aby połączyć się z %1$s bez TLS, musisz jawnie zezwolić na niezaszyfrowane połączenia dla tej sieci.</string>
     <string name="networks_allow_connect">Zezwól i połącz</string>
@@ -374,7 +379,7 @@ Tej operacji nie można cofnąć.</string>
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Podglądy mediów</string>
     <string name="setting_image_previews">Włącz podglądy obrazów i filmów</string>
-    <string name="setting_image_previews_desc">Wyświetlaj podglądy obrazów i linków YouTube zamieszczonych na czacie.</string>
+    <string name="setting_image_previews_desc">Wyświetlaj podglądy obrazów i linków YouTube zamieszczonych na czacie. Linki Twitter/X są rozwiązywane przez fxtwitter.com (usługa zewnętrzna) — identyfikatory tweetów są wysyłane do tej usługi podczas ładowania podglądu.</string>
     <string name="setting_previews_wifi_only">Tylko Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Ładuj podglądy tylko przy połączeniu Wi-Fi, aby nie zużywać danych mobilnych.</string>
     <string name="theme_system_default">Domyślny systemowy</string>
@@ -452,7 +457,7 @@ Tej operacji nie można cofnąć.</string>
     <string name="nick_send_file_desc">Wyślij plik przez DCC SEND</string>
     <string name="nick_dcc_disabled">DCC jest wyłączone w ustawieniach</string>
     <string name="nick_dcc_chat">DCC Chat</string>
-    <string name="nick_dcc_chat_desc">Otwórz bezpośrednią zaszyfrowaną sesję czatu</string>
+    <string name="nick_dcc_chat_desc">Otwórz bezpośrednią sesję czatu peer-to-peer</string>
     <string name="nick_ignore">Ignoruj</string>
     <string name="nick_unignore">Nie ignoruj</string>
     <string name="nick_ignore_desc">Ukryj wszystkie wiadomości od tego użytkownika</string>
@@ -468,4 +473,14 @@ Tej operacji nie można cofnąć.</string>
     <string name="about_tagline">Klient IRC dla systemu Android</string>
     <string name="about_support_title">Dokumentacja &amp; Wsparcie</string>
     <string name="about_support_desc">Odwiedź stronę internetową, aby znaleźć przewodniki, FAQ i zgłaszać problemy.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">Użyj SDCC (szyfrowanie TLS)</string>
+    <string name="setting_dcc_secure_desc">Wychodzące transfery plików używają DCC SSEND (szyfrowane TLS). Zdalny klient musi również obsługiwać SDCC.</string>
+    <string name="list_users_filter_label">Użytkownicy:</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Maks</string>
+    <string name="topic_edit_title">Edytuj temat</string>
+    <string name="topic_edit_label">Temat</string>
+    <string name="topic_set">Ustaw</string>
 </resources>

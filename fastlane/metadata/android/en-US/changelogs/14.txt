@@ -1,0 +1,6 @@
+UI & App improvements
+Improved gestures: Swipe to reply/long press to copy
+Added quick reactions for servers that support REACT
+improved /find & /gfind searching
+added "Jump to unread" messages
+added encrypted file transfers (DCC SSEND)

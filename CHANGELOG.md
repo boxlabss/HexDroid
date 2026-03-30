@@ -2,7 +2,13 @@
 
 All notable changes to HexDroid are documented here.
 ---
-## [1.5.7] - 21/03/2026
+## [1.5.8] - 2026-03-30
+- **UI** improvements: reply gestures, scroll to unread marker
+- **SDCC** add SSEND support for encrypted file transfers
+- **IRCv3** Improve replies and typing support
+- **Other** Improvements for RAM usage and more
+
+## [1.5.7] - 2026-03-21
 - **ASCII Rendering** for bots that provide ascii/ansii art, render this in groups to fit the chat screen with no line spaces.
 - **Nick colours** improve nick colours by splitting hues so each nick has a unique one. Also add option to select a custom colour in Settings
 - **irc:// links** IRC links eg: irc:// or ircs:// (for SSL ports)

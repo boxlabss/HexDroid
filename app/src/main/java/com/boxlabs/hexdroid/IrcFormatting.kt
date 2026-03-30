@@ -54,7 +54,10 @@ fun stripIrcFormatting(input: String): String {
                 i++
                 var n = 0
                 while (i < input.length && n < 2 && input[i].isDigit()) { i++; n++ }
-                if (i < input.length && input[i] == ',') {
+                // only consume the comma when at least one digit follows it,
+                // otherwise a colour reset like "\x03,word" would silently eat the comma.
+                if (i < input.length && input[i] == ',' &&
+                    i + 1 < input.length && input[i + 1].isDigit()) {
                     i++
                     n = 0
                     while (i < input.length && n < 2 && input[i].isDigit()) { i++; n++ }
@@ -66,7 +69,10 @@ fun stripIrcFormatting(input: String): String {
                 var n = 0
                 while (i < input.length && n < 6 &&
                        (input[i].isDigit() || input[i].lowercaseChar() in 'a'..'f')) { i++; n++ }
-                if (i < input.length && input[i] == ',') {
+                // same comma guard for the 24-bit colour case.
+                if (i < input.length && input[i] == ',' &&
+                    i + 1 < input.length &&
+                    (input[i + 1].isDigit() || input[i + 1].lowercaseChar() in 'a'..'f')) {
                     i++
                     n = 0
                     while (i < input.length && n < 6 &&

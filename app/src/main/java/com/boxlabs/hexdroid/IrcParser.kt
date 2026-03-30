@@ -55,6 +55,8 @@ class IrcParser {
 
         val cmdEnd = line.indexOf(' ', i).let { if (it == -1) line.length else it }
         val command = line.substring(i, cmdEnd)
+        // Reject empty commands
+        if (command.isEmpty()) return null
         i = cmdEnd
 
         val params = mutableListOf<String>()

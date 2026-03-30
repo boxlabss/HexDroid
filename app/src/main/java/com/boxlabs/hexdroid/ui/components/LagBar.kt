@@ -40,9 +40,14 @@ fun LagBar(
     val p = progress.coerceIn(0f, 1f)
     val cs = MaterialTheme.colorScheme
 
-    val track = cs.surfaceVariant.copy(alpha = 0.6f)
-    val indicatorBrush = remember(cs.primary, cs.tertiary) {
-        Brush.horizontalGradient(listOf(cs.primary, cs.tertiary))
+    val track = cs.outlineVariant
+    val filledEnd = cs.primary.copy(
+        red   = (cs.primary.red   * 1.25f).coerceAtMost(1f),
+        green = (cs.primary.green * 1.25f).coerceAtMost(1f),
+        blue  = (cs.primary.blue  * 1.25f).coerceAtMost(1f),
+    )
+    val indicatorBrush = remember(cs.primary, filledEnd) {
+        Brush.horizontalGradient(listOf(cs.primary, filledEnd))
     }
 
     Canvas(modifier.fillMaxWidth().height(height)) {

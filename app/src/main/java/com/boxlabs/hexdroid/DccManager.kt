@@ -58,7 +58,9 @@ data class DccOffer(
     /** Passive/reverse DCC token (HexChat "Passive DCC"). */
     val token: Long? = null,
     /** Turbo DCC / TSEND: do not send ACKs back to the sender. */
-    val turbo: Boolean = false
+    val turbo: Boolean = false,
+    /** SDCC / SSEND: transfer is TLS-wrapped. */
+    val secure: Boolean = false,
 ) {
     val isPassive: Boolean get() = port == 0 && token != null
 }
@@ -72,7 +74,9 @@ data class DccChatOffer(
     val ip: String,
     val port: Int,
     /** Passive/reverse token (rare; included for forward compatibility). */
-    val token: Long? = null
+    val token: Long? = null,
+    /** SDCC / SCHAT: session is TLS-wrapped. */
+    val secure: Boolean = false,
 ) {
     val isPassive: Boolean get() = port == 0 && token != null
 }
@@ -117,6 +121,22 @@ class DccManager(ctx: Context) {
 
     // Avoid leaking an Activity context.
     private val ctx: Context = ctx.applicationContext
+
+    /**
+     * Wraps a plain socket with TLS for SDCC (Secure DCC).
+     * Uses the default SSLSocketFactory which trusts system CAs.
+     * SDCC peers are often self-signed; we intentionally skip hostname verification
+     * since DCC is IP-addressed, not hostname-addressed. The encryption still provides
+     * confidentiality against passive eavesdroppers.
+     */
+    private fun wrapTls(sock: Socket, host: String): Socket {
+        val sf = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+        val ssl = sf.createSocket(sock, host, sock.port, true) as javax.net.ssl.SSLSocket
+        // Disable hostname verification; DCC uses raw IPs.
+        ssl.sslParameters = ssl.sslParameters.also { it.endpointIdentificationAlgorithm = null }
+        ssl.startHandshake()
+        return ssl
+    }
 
     /**
      * Rejects IPs that are structurally invalid targets for a DCC connection.
@@ -340,15 +360,23 @@ class DccManager(ctx: Context) {
         customFolderUri: String?,
         onProgress: (Long, Long) -> Unit
     ): String = withContext(Dispatchers.IO) {
+        // Passive DCC offers carry port=0; calling Socket(ip, 0) is undefined behaviour.
+        // The caller should use receivePassive() for those. Catch misrouted calls early.
+        require(offer.port > 0) {
+            "DCC RECEIVE: port must be > 0 for active DCC (use receivePassive() for passive offers)"
+        }
+
         val (outputStream, savedPath) = createDccOutputStream(offer.filename, customFolderUri)
 
         validateRemoteIp(offer.ip)
-        val sock = Socket(offer.ip, offer.port)
+        val rawSock = Socket(offer.ip, offer.port)
+        val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
         try {
             sock.use { s ->
                 outputStream.use { out ->
-                    receiveFromSocket(s, out, offer.size, offer.turbo, onProgress)
+                    // Buffer writes to reduce IPC round-trips for SAF/MediaStore-backed streams.
+                    receiveFromSocket(s, java.io.BufferedOutputStream(out, 256 * 1024), offer.size, offer.turbo, onProgress)
                 }
             }
         } finally {
@@ -389,18 +417,19 @@ class DccManager(ctx: Context) {
             val ipInt = localIpv4AsInt()
             onListening(ipInt, ss.localPort, offer.size, token)
 
-            val sock = try {
+            val rawSock = try {
                 ss.accept()
             } catch (_: java.net.SocketTimeoutException) {
                 outputStream.close()
                 throw RuntimeException("DCC RECEIVE timed out waiting for sender to connect")
             }
+            val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
 
             val sockCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
             try {
                 sock.use { s ->
                     outputStream.use { out ->
-                        receiveFromSocket(s, out, offer.size, offer.turbo, onProgress)
+                        receiveFromSocket(s, java.io.BufferedOutputStream(out, 256 * 1024), offer.size, offer.turbo, onProgress)
                     }
                 }
             } finally {
@@ -421,26 +450,26 @@ class DccManager(ctx: Context) {
         file: File,
         portMin: Int,
         portMax: Int,
+        secure: Boolean = false,
         onClient: suspend (ipAsInt: Long, port: Int, size: Long) -> Unit,
         onProgress: (Long, Long) -> Unit
     ): Unit = withContext(Dispatchers.IO) {
         val size = file.length()
         val ss = bindFirstAvailable(portMin, portMax)
-        // Close the ServerSocket on coroutine cancellation so accept() unblocks immediately.
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { ss.close() } }
         try {
             val ipInt = localIpv4AsInt()
             onClient(ipInt, ss.localPort, size)
 
             ss.soTimeout = 45_000
-            val sock = try {
+            val rawSock = try {
                 ss.accept()
             } catch (_: java.net.SocketTimeoutException) {
                 throw RuntimeException("DCC SEND timed out waiting for peer to connect")
             }
+            val sock = if (secure) wrapTls(rawSock, rawSock.inetAddress.hostAddress ?: "") else rawSock
 
             sock.use { s ->
-                // Close the connected socket on cancellation so sendOverSocket unblocks.
                 val sockHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { s.close() } }
                 try {
                     sendOverSocket(s, file, size, onProgress)
@@ -461,11 +490,13 @@ class DccManager(ctx: Context) {
         file: File,
         host: String,
         port: Int,
+        secure: Boolean = false,
         onProgress: (Long, Long) -> Unit
     ): Unit = withContext(Dispatchers.IO) {
         val size = file.length()
         validateRemoteIp(host)
-        val sock = Socket(host, port)
+        val rawSock = Socket(host, port)
+        val sock = if (secure) wrapTls(rawSock, host) else rawSock
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
         try {
             sock.use { s ->
@@ -505,7 +536,8 @@ class DccManager(ctx: Context) {
 
     /** Standard (active) DCC CHAT: connect to the offered ip:port and return the connected socket. */
     suspend fun connectChat(offer: DccChatOffer): Socket = withContext(Dispatchers.IO) {
-        val sock = Socket(offer.ip, offer.port)
+        val rawSock = Socket(offer.ip, offer.port)
+        val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
         sock.tcpNoDelay = true
         sock.keepAlive = true
         sock
@@ -521,6 +553,9 @@ class DccManager(ctx: Context) {
         sock.tcpNoDelay = true
         sock.getInputStream().use { inp ->
             val buf = ByteArray(32 * 1024)
+            // Reuse a single 4-byte array for ACKs instead of allocating via
+            // ByteBuffer.allocate(4) on every chunk (~3200 allocations per 100 MB transfer).
+            val ackBuf = ByteArray(4)
             var total = 0L
             val expected: Long? = expectedSize.takeIf { it > 0L }
 
@@ -534,8 +569,11 @@ class DccManager(ctx: Context) {
                 if (!turbo) {
                     // DCC SEND expects an ACK of total bytes received (4-byte unsigned int, network byte order).
                     val ackInt = total.coerceAtMost(0xFFFFFFFFL).toInt()
-                    val ack = ByteBuffer.allocate(4).putInt(ackInt).array()
-                    runCatching { sock.getOutputStream().write(ack) }
+                    ackBuf[0] = (ackInt ushr 24).toByte()
+                    ackBuf[1] = (ackInt ushr 16).toByte()
+                    ackBuf[2] = (ackInt ushr  8).toByte()
+                    ackBuf[3] =  ackInt.toByte()
+                    runCatching { sock.getOutputStream().write(ackBuf) }
                 }
 
                 if (expected != null && total >= expected) break

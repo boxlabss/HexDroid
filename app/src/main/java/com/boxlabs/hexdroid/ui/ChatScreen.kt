@@ -20,35 +20,35 @@ package com.boxlabs.hexdroid.ui
 
 import android.content.res.Configuration
 import android.widget.Toast
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -56,28 +56,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -85,27 +85,31 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.filled.FormatColorText
-import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.SendToMobile
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonSearch
-import androidx.compose.material.icons.automirrored.filled.SendToMobile
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
@@ -115,6 +119,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -123,11 +128,11 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
@@ -136,77 +141,83 @@ import androidx.compose.material3.ripple
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.toClipEntry
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.boxlabs.hexdroid.ChatFontStyle
+import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.UiMessage
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
-import com.boxlabs.hexdroid.stripIrcFormatting
 import com.boxlabs.hexdroid.parseAnsiRuns
-import com.boxlabs.hexdroid.toSpanStyle as ansiToSpanStyle
+import com.boxlabs.hexdroid.stripIrcFormatting
 import com.boxlabs.hexdroid.ui.components.LagBar
 import com.boxlabs.hexdroid.ui.theme.fontFamilyForChoice
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.compose.ui.res.stringResource
-import com.boxlabs.hexdroid.R
+import com.boxlabs.hexdroid.toSpanStyle as ansiToSpanStyle
 
 /** Commands with a short description shown in the hint popup. */
 private data class IrcCommand(val name: String, val usage: String, val description: String)
@@ -234,6 +245,8 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("find",       "/find <text>",                   "Search messages in the current buffer"),
     IrcCommand("grep",       "/grep <text>",                   "Alias for /find"),
     IrcCommand("search",     "/search <text>",                 "Alias for /find"),
+    IrcCommand("gsearch",    "/gsearch <text>",                "Search messages across all buffers on this network"),
+    IrcCommand("gfind",      "/gfind <text>",                  "Alias for /gsearch"),
 
     // User & nick
     IrcCommand("nick",       "/nick <new nick>",               "Change your nickname"),
@@ -669,6 +682,9 @@ fun ChatScreen(
     state: UiState,
     onSelectBuffer: (String) -> Unit,
     onSend: (String) -> Unit,
+    /** Send a threaded reply to [msgId]. Falls back to quote-prefix on servers without draft/reply. */
+    onSendReply: (networkId: String, buffer: String, text: String, from: String, originalText: String, msgId: String?) -> Unit = { _, _, _, _, _, _ -> },
+    onSendReaction: (msgId: String, emoji: String, remove: Boolean) -> Unit = { _, _, _ -> },
     onDisconnect: () -> Unit,
     onReconnect: () -> Unit,
     onExit: () -> Unit,
@@ -700,10 +716,15 @@ fun ChatScreen(
      */
     onMarkRead: (bufferKey: String) -> Unit = {},
     onHighlightConsumed: () -> Unit = {},
+    onCloseFindOverlay: () -> Unit = {},
+    onFindNavigate: (Int) -> Unit = {},
+    onShareTextConsumed: () -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val viewConfiguration = LocalViewConfiguration.current
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     val clipboard = LocalClipboard.current
     val cfg = LocalConfiguration.current
     val isWide = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE || cfg.screenWidthDp >= 840
@@ -735,9 +756,13 @@ fun ChatScreen(
 
     data class NetBuffers(val serverKey: String, val others: List<String>)
 
-    val buffersByNet = remember(state.buffers, state.channelsOnly) {
+    // Keyed on the *set of buffer keys* (not the full buffers map) so this only recomputes
+    // when buffers are added or removed — not on every incoming message. Unread/highlight
+    // counts are read directly in BufferRow/sidebarItems below, not cached here.
+    val bufferKeySet = state.buffers.keys
+    val buffersByNet = remember(bufferKeySet, state.channelsOnly) {
         val groups = mutableMapOf<String, MutableList<String>>()
-        for (k in state.buffers.keys) {
+        for (k in bufferKeySet) {
             val idx = k.indexOf("::")
             if (idx <= 0) continue
             val netId = k.take(idx)
@@ -860,8 +885,16 @@ fun ChatScreen(
     }
 
     var input by remember { mutableStateOf(TextFieldValue("")) }
+    /** Non-null when the user has tapped Reply on a message: cleared after send or cancel. */
+    var pendingReply by remember(selected) { mutableStateOf<UiMessage?>(null) }
     var inputHasFocus by remember { mutableStateOf(false) }
 
+    // Pre-fill input with text shared from another app via the system share sheet.
+    LaunchedEffect(state.pendingShareText) {
+        val shared = state.pendingShareText ?: return@LaunchedEffect
+        input = TextFieldValue(shared, androidx.compose.ui.text.TextRange(shared.length))
+        onShareTextConsumed()
+    }
 
     val inputHistory = remember(selected) { mutableListOf<String>() }
     var historyIndex by remember(selected) { mutableStateOf(-1) }
@@ -921,6 +954,7 @@ fun ChatScreen(
     val canTopic = isChannel && myPrefix in listOf('~', '&', '@', '%')
     val canMode  = isChannel && myPrefix in listOf('~', '&', '@')
     val isIrcOper = state.connections[selNetId]?.isIrcOper == true
+    val hasReactionSupport = state.connections[selNetId]?.hasReactionSupport == true
     val currentModeString = if (isChannel) state.buffers[selected]?.modeString else null
 
     val bgLum = MaterialTheme.colorScheme.background.luminance()
@@ -934,11 +968,24 @@ fun ChatScreen(
             .also { it.add(myNickBase) }  // include the global fallback nick too
     }
 
+    // Sorted nicklist used by the nicklist panel for rank-based colour assignment.
+    // Nick colouring in messages use a stable hash so colours don't
+    // shift when someone joins or leaves.
+    val sortedBaseNicks = remember(nicklist) {
+        nicklist
+            .map { baseNick(it).lowercase() }
+            .filter { it.isNotBlank() }
+            .sorted()
+    }
+
     fun nickColor(nick: String): Color {
         if (!state.settings.colorizeNicks) return Color.Unspecified
         val base = baseNick(nick).lowercase()
         val custom = state.settings.ownNickColorInt
         if (custom != null && base in allMyNicks) return Color(custom)
+        // Stable hash-based colour for messages — never changes regardless of who
+        // else is in the channel. The nicklist panel uses colorForNickInChannel
+        // with sortedBaseNicks instead.
         return NickColors.colorForNick(base, bgLum)
     }
 
@@ -946,6 +993,13 @@ fun ChatScreen(
 
     var showNickActions by remember { mutableStateOf(false) }
     var selectedNick by remember { mutableStateOf("") }
+    /** Message long-pressed: shown in a small context sheet with Copy / Reply options. */
+    var longPressedMessage by remember { mutableStateOf<UiMessage?>(null) }
+
+    /** When true, message rows show checkboxes for multi-message copy selection. */
+    var copyRangeMode by remember { mutableStateOf(false) }
+    /** IDs of messages checked in copy-range mode. */
+    var selectedMsgIds by remember { mutableStateOf(emptySet<Long>()) }
 
     var showChanOps by remember { mutableStateOf(false) }
     var showIrcOpTools by remember { mutableStateOf(false) }
@@ -954,6 +1008,7 @@ fun ChatScreen(
     var opsNick by remember { mutableStateOf("") }
     var opsReason by remember { mutableStateOf("") }
     var opsTopic by remember(selected, topic) { mutableStateOf(topic ?: "") }
+    var showTopicQuickEdit by remember { mutableStateOf(false) }
     var topicExpanded by remember(selected, topic) { mutableStateOf(false) }
     var topicHasOverflow by remember(selected, topic) { mutableStateOf(false) }
 
@@ -976,7 +1031,17 @@ fun ChatScreen(
         if (t.isEmpty()) return
 
         // Build IRC formatting prefix based on active formatting state
-        val formattedText = buildString {
+        // Strip any leading IRC formatting bytes from the raw input for command detection.
+        // This mirrors the ViewModel's strippedForCommandCheck so we agree on what's a command.
+        val isCommand = t.trimStart('\u0002', '\u0003', '\u000f', '\u0016', '\u001d', '\u001e', '\u001f')
+            .replace(Regex("^\u0003\\d{0,2}(?:,\\d{0,2})?"), "")
+            .startsWith("/")
+
+        val formattedText = if (isCommand) {
+            // Commands: never prepend formatting — the slash must be the first character
+            // so the ViewModel can detect and parse it correctly without stripping.
+            t
+        } else buildString {
             if (boldActive) append("\u0002")
             if (italicActive) append("\u001D")
             if (underlineActive) append("\u001F")
@@ -999,8 +1064,23 @@ fun ChatScreen(
         historyIndex = -1
         inputSnapshot = ""
 
+        val reply = pendingReply
         input = TextFieldValue("")
-        onSend(formattedText)
+        pendingReply = null
+
+        if (reply != null && !isCommand) {
+            // Route through reply path so the ViewModel can attach draft/reply tag if supported.
+            onSendReply(
+                selNetId,
+                selBufName,
+                formattedText,
+                reply.from ?: "",
+                stripIrcFormatting(reply.text).take(100),
+                reply.msgId,
+            )
+        } else {
+            onSend(formattedText)
+        }
     }
 
     fun openNickActions(nickDisplay: String) {
@@ -1385,13 +1465,18 @@ fun ChatScreen(
                     val cleaned = baseNick(n)
                     Text(
                         n,
-                        color = if (state.settings.colorizeNicks) nickColor(cleaned) else Color.Unspecified,
+                        color = if (state.settings.colorizeNicks)
+                            NickColors.colorForNickInChannel(cleaned, sortedBaseNicks, bgLum)
+                        else Color.Unspecified,
                         fontSize = nickFontSp.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { openNickActions(n) }
+                            .combinedClickable(
+                                onClick = { openNickActions(n) },
+                                onLongClick = { openNickActions(n) },
+                            )
                             .padding(vertical = 2.dp)
                     )
                 }
@@ -1410,6 +1495,9 @@ fun ChatScreen(
     // goes above 0 during a user-initiated scroll, we latch userScrolledUp = true.
     // Pressing the scroll-to-bottom button resets it.
     var userScrolledUp by remember(selected) { mutableStateOf(false) }
+    // Hoisted out of BoxWithConstraints so the "jump to unread" buttiobn can reference it.
+    // -1 means no unread messages to scroll to.
+    var unreadScrollTarget by remember(selected) { mutableStateOf(-1) }
 
     // isAtBottom is still needed to drive the scroll-to-bottom button visibility.
     val isAtBottom by remember(selected) {
@@ -1418,28 +1506,43 @@ fun ChatScreen(
         }
     }
 
+    // True once the user has jumped/scrolled to the unread marker this session.
+    // Distinct from userScrolledUp, the jump-to-unread button should stay visible
+    // while the user is scrolling up toward unread messages, not disappear the moment
+    // scrolling starts.
+    var hasReachedUnread by remember(selected) { mutableStateOf(false) }
+
     // Watch for user-driven scrolls away from the bottom.
     LaunchedEffect(selected) {
         snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
             .collect { (scrolling, idx) ->
                 if (scrolling && idx > 0) userScrolledUp = true
+                // Dismiss the jump-to-unread button once the user has manually scrolled
+                // at or beyond the unread marker (idx >= unreadScrollTarget in reversed layout).
+                val target = unreadScrollTarget
+                if (scrolling && target >= 0 && idx >= target) hasReachedUnread = true
                 // Only clear the flag once the fling/scroll has fully come to rest at index 0.
-                // Checking !scrolling prevents a mid-fling transit through index 0 from
-                // prematurely resetting the flag and causing the separator to flash.
-                if (!scrolling && idx == 0) userScrolledUp = false
+                if (!scrolling && idx == 0) {
+                    userScrolledUp = false
+                    hasReachedUnread = false  // reset on return to bottom so new unreads show button again
+                }
             }
     }
 
-    // On buffer switch: always land at the newest message (visual bottom) and
-    // advance the read marker past all currently visible messages.  Without the
-    // onMarkRead call, lastReadTimestamp stays anchored before the first unread
-    // message that the ViewModel set on open, so the separator immediately reappears
-    // the moment the user scrolls up even one item — showing "unread" for messages
-    // they could already see at the bottom.
-    LaunchedEffect(selected) {
-        listState.scrollToItem(0)
-        onMarkRead(selected)
-    }
+    // On buffer switch: scroll to newest message.
+	// Advance readmarker by the ViewModel whenever new
+    // messages arrive on a selected buffer (append() > newLastRead when isSelected),
+    // and explicitly when the user taps scroll-to-bottom
+     LaunchedEffect(selected) {
+         listState.scrollToItem(0)
+         // Close the /find overlay when switching to a different buffer (local search only).
+         // Global search spans all buffers so stays open while navigating.
+         val fo = state.findOverlay
+         if (fo != null && !fo.bufferKey.startsWith("GLOBAL:") &&
+             fo.bufferKey != selected) {
+             onCloseFindOverlay()
+         }
+     }
 
     // Auto-scroll to newest when a new message arrives, unless the user has scrolled up.
     // baselineMsgId is captured at buffer-switch time so the first LaunchedEffect execution
@@ -1453,46 +1556,108 @@ fun ChatScreen(
     val reversedMessages = remember(messages) { messages.reversed() }
 
     // ── Highlight scroll & flicker ────────────────────────────────────────────
-    // When the user taps a notification, state.pendingHighlightMsgId is set to the
-    // internal ID of the triggering message.  We scroll to it and pulse its background
-    // 3 times so the eye is drawn directly to the relevant line.
+    // When the user taps a notification, state.pendingHighlightAnchor is set to a
+    // stable cross-session anchor.  Format: "msgid:<ircId>", "ts:<sec>|<nick>|<text>",
+    // or legacy "uiid:<Long>".  We resolve it against the current buffer, scroll to
+    // the message and pulse its background 3× so the eye is drawn to it.
     var flickerMsgId by remember { mutableStateOf<Long?>(null) }
     val flickerAlpha = remember { Animatable(0f) }
 
-    // Clear any pending highlight when the user switches to a different buffer —
-    // it belongs to the buffer that was active when the notification fired.
+    // Hoisted map from UiMessage.id → displayItems index.
+    // Populated by BoxWithConstraints once displayItems is computed (below).
+    // The LaunchedEffect that drives highlight scrolling uses this to scroll to
+    // the correct LazyColumn item index rather than the reversedMessages index —
+    // the two diverge whenever art blocks collapse multiple messages into one item.
+    // msgId → displayIdx (forward) used by resolveAnchor and /find scroll.
+    // displayIdx → msgId (reverse) used by the highlight flicker to identify which
+    // message to pulse after scrollToItem. Both populated together by BoxWithConstraints.
+    // Starts empty; LaunchedEffect keys include this map so effects retry once it arrives.
+    var msgIdToDisplayIdxHoisted by remember { mutableStateOf(emptyMap<Long, Int>()) }
+    var displayIdxToMsgIdHoisted  by remember { mutableStateOf(emptyMap<Int, Long>()) }
+
+    // Resolve an anchor string to the displayItems index (or -1).
+    // When msgIdToDisplayIdxHoisted is already populated (buffer was already visible),
+    // we use it for an exact display-index lookup. When it is still empty (first frame
+    // before BoxWithConstraints has fired its sync), we fall back to the reversedMessages
+    // index — without art blocks these are identical, and even with art blocks a near-
+    // correct scroll is better than returning -1 and triggering the isAtBottom race.
+    fun resolveAnchor(anchor: String): Int {
+        fun msgToDisplayIdx(msg: UiMessage?): Int {
+            if (msg == null) return -1
+            val mapIdx = msgIdToDisplayIdxHoisted[msg.id]
+            if (mapIdx != null) return mapIdx
+            // Map not yet populated — fall back to reversedMessages index.
+            return reversedMessages.indexOf(msg)
+        }
+
+        if (anchor.startsWith("msgid:")) {
+            val ircId = anchor.removePrefix("msgid:")
+            return msgToDisplayIdx(reversedMessages.firstOrNull { it.msgId == ircId })
+        }
+        if (anchor.startsWith("ts:")) {
+            val rest = anchor.removePrefix("ts:")
+            val parts = rest.split("|", limit = 3)
+            val anchorSec = parts.getOrNull(0)?.toLongOrNull() ?: return -1
+            val anchorNick = parts.getOrNull(1)?.lowercase()
+            val anchorText = parts.getOrNull(2)?.lowercase().orEmpty()
+            val msg = reversedMessages.firstOrNull { m ->
+                val deltaSec = kotlin.math.abs(m.timeMs / 1000 - anchorSec)
+                deltaSec <= 3 &&
+                    m.from?.lowercase() == anchorNick &&
+                    m.text.take(80).lowercase().startsWith(anchorText.take(80))
+            }
+            return msgToDisplayIdx(msg)
+        }
+        if (anchor.startsWith("uiid:")) {
+            val id = anchor.removePrefix("uiid:").toLongOrNull() ?: return -1
+            return msgToDisplayIdx(reversedMessages.firstOrNull { it.id == id })
+        }
+        return -1
+    }
+
+    // Clear pending anchor only when the user manually navigates to a DIFFERENT buffer
+    // than the one the notification pointed to. If selected == the anchor's buffer (the
+    // normal notification-tap path), do NOT clear. the scroll effect needs it.
     LaunchedEffect(selected) {
-        if (state.pendingHighlightMsgId != null) {
+        val anchorBuf = state.pendingHighlightBufferKey
+        if (state.pendingHighlightAnchor != null &&
+            anchorBuf != null && selected != anchorBuf) {
             flickerMsgId = null
             flickerAlpha.snapTo(0f)
             onHighlightConsumed()
         }
     }
 
-    // Drive the scroll + flicker.  Keyed only on the message ID so that a buffer
-    // switch (handled above) doesn't re-trigger it.
-    LaunchedEffect(state.pendingHighlightMsgId) {
-        val targetId = state.pendingHighlightMsgId ?: return@LaunchedEffect
+    // Exit copy-range mode whenever the user switches buffer so that stale
+    // selectedMsgIds from the previous buffer don't carry over to the new one.
+    LaunchedEffect(selected) {
+        if (copyRangeMode) {
+            copyRangeMode = false
+            selectedMsgIds = emptySet()
+        }
+    }
 
-        val revIdx = reversedMessages.indexOfFirst { it.id == targetId }
-        if (revIdx < 0) {
+    // Drive scroll + flicker. Re-runs when anchor changes or message list grows
+    // (so we retry once scrollback finishes loading from disk).
+    // We do NOT key on msgIdToDisplayIdxHoisted: resolveAnchor falls back to the
+    // reversedMessages index when the map is empty, so the effect always resolves
+    // on its first fire rather than returning -1 and leaving the isAtBottom effect
+    // free to race in and consume the anchor.
+    LaunchedEffect(state.pendingHighlightAnchor, reversedMessages.size) {
+        val anchor = state.pendingHighlightAnchor ?: return@LaunchedEffect
+        val displayIdx = resolveAnchor(anchor)
+        if (displayIdx < 0) {
+            val age = System.currentTimeMillis() - state.pendingHighlightSetAtMs
+            if (age > 8_000L) onHighlightConsumed()
+            return@LaunchedEffect
+        }
+        if (displayIdx == 0 && isAtBottom) {
             onHighlightConsumed()
             return@LaunchedEffect
         }
-
-        // If the message is already visible at the bottom (index 0 in the reversed
-        // list), the user can see it right now — skip scrolling and flickering and
-        // just consume the pending ID so it doesn't linger.
-        if (revIdx == 0 && isAtBottom) {
-            onHighlightConsumed()
-            return@LaunchedEffect
-        }
-
-        // Scroll to the message (reverseLayout=true: 0 = visual bottom).
-        listState.animateScrollToItem(revIdx)
-
-        // Pulse: 3 flashes — bright → fade → bright → fade → bright → fade
-        flickerMsgId = targetId
+        listState.animateScrollToItem(displayIdx)
+        // Use the pre-built reverse map for O(1) msgId lookup instead of a linear scan.
+        flickerMsgId = displayIdxToMsgIdHoisted[displayIdx]
         repeat(3) {
             flickerAlpha.animateTo(0.38f, animationSpec = tween(durationMillis = 130))
             flickerAlpha.animateTo(0f,    animationSpec = tween(durationMillis = 220))
@@ -1501,13 +1666,49 @@ fun ChatScreen(
         onHighlightConsumed()
     }
 
-    // Once the user scrolls back to the bottom after viewing the highlighted message,
-    // clear any still-pending highlight so it doesn't fire again later.
+    // Once the user scrolls back to bottom after reading highlighted history,
+    // clear any lingering anchor so it doesn't interfere with future taps.
+    // skipFirstIsAtBottom guards against the initial composition where isAtBottom
+    // is already true — we must not consume pendingHighlightAnchor before the
+    // highlight LaunchedEffect has had a chance to scroll and flicker.
+    val skipFirstIsAtBottom = remember { mutableStateOf(true) }
     LaunchedEffect(isAtBottom) {
-        if (isAtBottom && state.pendingHighlightMsgId != null) {
+        if (skipFirstIsAtBottom.value) {
+            skipFirstIsAtBottom.value = false
+            return@LaunchedEffect
+        }
+        if (isAtBottom && state.pendingHighlightAnchor != null) {
             flickerMsgId = null
             flickerAlpha.snapTo(0f)
             onHighlightConsumed()
+        }
+    }
+
+    // Scroll when the find overlay navigates to a new result.
+    val findOverlay = state.findOverlay
+    LaunchedEffect(findOverlay?.currentIndex, findOverlay?.bufferKey, selected) {
+        val ov = findOverlay ?: return@LaunchedEffect
+        val isGlobal = ov.bufferKey.startsWith("GLOBAL:")
+        if (!isGlobal && ov.bufferKey != selected) return@LaunchedEffect
+        val targetId = ov.matchIds.getOrNull(ov.currentIndex) ?: return@LaunchedEffect
+        if (isGlobal) {
+            // Find which buffer contains this message.
+            val targetKey = state.buffers.entries.firstOrNull { (_, buf) ->
+                buf.messages.any { it.id == targetId }
+            }?.key
+            if (targetKey != null && targetKey != selected) {
+                // Navigate to the buffer — scroll will happen on next recompose once
+                // selected == targetKey and reversedMessages is updated.
+                onSelectBuffer(targetKey)
+            } else if (targetKey == selected) {
+                val displayIdx = msgIdToDisplayIdxHoisted[targetId]
+                    ?: reversedMessages.indexOfFirst { it.id == targetId }
+                if (displayIdx >= 0) listState.animateScrollToItem(displayIdx)
+            }
+        } else {
+            val displayIdx = msgIdToDisplayIdxHoisted[targetId]
+                ?: reversedMessages.indexOfFirst { it.id == targetId }
+            if (displayIdx >= 0) listState.animateScrollToItem(displayIdx)
         }
     }
     // Only show the separator when the user has scrolled up to read history.
@@ -1763,10 +1964,6 @@ fun ChatScreen(
                                 text = { Text(stringResource(R.string.menu_networks)) },
                                 onClick = { overflowExpanded = false; onOpenNetworks() }
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_system_info)) },
-                                onClick = { overflowExpanded = false; onSysInfo() }
-                            )
                             if (isIrcOper) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_ircop_tools)) },
@@ -1802,9 +1999,16 @@ fun ChatScreen(
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun MessagesPane(mod: Modifier = Modifier) {
-        Column(mod.clipToBounds()) {
+        Box(mod.clipToBounds()) {
+        Column(Modifier.fillMaxSize()) {
             if (state.settings.showTopicBar && isChannel && !topic.isNullOrBlank()) {
-                Surface(tonalElevation = 1.dp) {
+                Surface(
+                    tonalElevation = 1.dp,
+                    modifier = if (canTopic) Modifier.combinedClickable(
+                        onClick = { topicExpanded = !topicExpanded },
+                        onLongClick = { showTopicQuickEdit = true },
+                    ) else Modifier
+                ) {
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -1831,6 +2035,16 @@ fun ChatScreen(
                                 onClick = { topicExpanded = !topicExpanded },
                                 contentPadding = PaddingValues(0.dp)
                             ) { Text(if (topicExpanded) "less" else "more") }
+                        }
+                        if (canTopic) {
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Edit topic",
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .alpha(0.5f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -1868,7 +2082,9 @@ fun ChatScreen(
                     availableWidthPx = motdAvailableWidthPx,
                     style = motdStyle,
                 )
-                // Map message ID → display item index for unread separator placement.
+                // Map message ID → display item index for unread separator placement
+                // and highlight scrolling. Also synced to msgIdToDisplayIdxHoisted so
+                // resolveAnchor() (which lives outside BoxWithConstraints) can use it.
                 val msgIdToDisplayIdx = remember(displayItems) {
                     val map = HashMap<Long, Int>(displayItems.size * 2)
                     for ((i, item) in displayItems.withIndex()) {
@@ -1879,21 +2095,41 @@ fun ChatScreen(
                     }
                     map
                 }
+                // Keep both maps in sync whenever displayItems changes so the
+                // highlight LaunchedEffect always resolves anchors to the correct index.
+                LaunchedEffect(msgIdToDisplayIdx) {
+                    msgIdToDisplayIdxHoisted = msgIdToDisplayIdx
+                    displayIdxToMsgIdHoisted = msgIdToDisplayIdx.entries
+                        .associateTo(HashMap(msgIdToDisplayIdx.size)) { (id, idx) -> idx to id }
+                }
                 val unreadDisplayIdx = if (reversedUnreadIndex in reversedMessages.indices)
                     msgIdToDisplayIdx[reversedMessages[reversedUnreadIndex].id] ?: -1
                 else -1
 
-            SelectionContainer(
+                // Keep the hoisted state in sync so the FAB outside BoxWithConstraints
+                // always knows the current display-item index of the first unread message.
+                // firstUnreadIndex >= 0 means there are unread messages; show button even
+                // when the user hasn't scrolled up yet (that's exactly when they need it).
+                unreadScrollTarget = if (firstUnreadIndex >= 0)
+                    if (unreadDisplayIdx >= 0) unreadDisplayIdx
+                    else if (reversedUnreadIndex in reversedMessages.indices) reversedUnreadIndex
+                    else -1
+                else -1
+
+            // Note: SelectionContainer is intentionally NOT used here. Wrapping a LazyColumn
+            // in SelectionContainer causes NPE crashes when items are recycled mid-drag (see
+            // the long comment that was here before). Text copying is handled entirely through
+            // the long-press bottom sheet (single message) and the copy-range mode above
+            // (multiple messages). This also fixes the bug where text was getting selected
+            // during long-press instead of the bottom sheet appearing.
+            LazyColumn(
+                state = listState,
+                reverseLayout = true,
                 modifier = Modifier
                     .padding(8.dp)
-                    .fillMaxSize()
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp)
             ) {
-                LazyColumn(
-                    state = listState,
-                    reverseLayout = true,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp)
-                ) {
                     itemsIndexed(items = displayItems, key = { _, item -> item.key }) { displayIdx, item ->
                         if (displayIdx == unreadDisplayIdx) {
                             UnreadSeparator()
@@ -1973,154 +2209,168 @@ fun ChatScreen(
                         val m = item.msg
                         val ts =
                             if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
-
-                        val plainLine = buildString {
-                            append(ts)
-                            val from = m.from
-                            when {
-                                from == null -> append(m.text)
-                                m.isAction  -> append("* $from ${m.text}")
-                                else        -> append("<$from> ${m.text}")
-                            }
-                        }
-                        val fromNick = m.from
-                        val isFlickering = flickerMsgId == m.id
-                        // Column so the inline preview is always visually below the message text,
-                        // not detached as a sibling that reverseLayout can misplace.
-                        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
-                        // Reply quote: shown above the message when it carries a +reply tag.
-                        if (m.replyToMsgId != null) {
-                            ReplyQuote(
-                                replyToMsgId = m.replyToMsgId,
-                                messages = messages,
-                                onTap = {
-                                    val parentIdx = reversedMessages.indexOfFirst { it.msgId == m.replyToMsgId }
-                                    if (parentIdx >= 0) scope.launch { listState.animateScrollToItem(parentIdx) }
-                                },
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (isFlickering)
-                                        Modifier.background(
-                                            MaterialTheme.colorScheme.primary.copy(
-                                                alpha = flickerAlpha.value
-                                            )
-                                        )
-                                    else Modifier
-                                )
-                                .combinedClickable(
-                                    onClick = {},
-                                    onLongClick = {
-                                        scope.launch { clipboard.setClipEntry(android.content.ClipData.newPlainText("", plainLine).toClipEntry()) }
-                                    }
-                                )
-                        ) {
-                        if (fromNick == null) {
-                            if (m.isMotd && selBufName == "*server*") {
-                                // MOTD lines: render at the shared font size computed from the
-                                // widest line, so all lines use the same size and ASCII art
-                                // column alignment is preserved.
-                                MotdLine(
-                                    text = m.text,  // timestamps omitted - would skew auto-sizing and look odd
-                                    fontSizeSp = motdFontSizeSp,
-                                    style = motdStyle,
-                                    mircColorsEnabled = state.settings.mircColorsEnabled,
-                                    ansiColorsEnabled = state.settings.ansiColorsEnabled,
-                                    linkStyle = linkStyle,
-                                    onAnnotationClick = onAnnotationClick,
-                                )
-                            } else {
-                                IrcLinkifiedText(
-                                    text = ts + m.text,
-                                    mircColorsEnabled = state.settings.mircColorsEnabled,
-                                    ansiColorsEnabled = state.settings.ansiColorsEnabled,
-                                    linkStyle = linkStyle,
-                                    onAnnotationClick = onAnnotationClick,
-                                    style = chatTextStyle
-                                )
-                            }
-                        } else if (m.isAction) {
-                            val fromDisplay = displayNick(fromNick)
-                            val fromBase = baseNick(fromDisplay)
-                            val annotated = buildAnnotatedString {
-                                append(ts)
-                                append("* ")
-                                pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
-                                withStyle(
-                                    SpanStyle(
-                                        color = if (state.settings.colorizeNicks) nickColor(fromBase) else Color.Unspecified
-                                    )
-                                ) { append(fromDisplay) }
-                                pop()
-                                append(" ")
-                                appendIrcStyledLinkified(
-                                    m.text,
-                                    linkStyle,
-                                    state.settings.mircColorsEnabled,
-                                    state.settings.ansiColorsEnabled
-                                )
-                            }
-                            AnnotatedClickableText(
-                                text = annotated,
-                                onAnnotationClick = onAnnotationClick,
-                                style = chatTextStyle
-                            )
-                        } else {
-                            val fromDisplay = displayNick(fromNick)
-                            val fromBase = baseNick(fromDisplay)
-                            val annotated = buildAnnotatedString {
-                                append(ts)
-                                append("<")
-                                pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
-                                withStyle(
-                                    SpanStyle(
-                                        color = if (state.settings.colorizeNicks) nickColor(fromBase) else Color.Unspecified
-                                    )
-                                ) { append(fromDisplay) }
-                                pop()
-                                append("> ")
-                                appendIrcStyledLinkified(
-                                    m.text,
-                                    linkStyle,
-                                    state.settings.mircColorsEnabled,
-                                    state.settings.ansiColorsEnabled
-                                )
-                            }
-                            AnnotatedClickableText(
-                                text = annotated,
-                                onAnnotationClick = onAnnotationClick,
-                                style = chatTextStyle
-                            )
-                        }
-                        } // end Box
-                        // Inline image / YouTube preview for URLs in this message.
-                        if (state.settings.imagePreviewsEnabled) {
-                            val msgUrls = remember(m.id) {
-                                urlRegex.findAll(m.text).map { it.value }.take(3).toList()
-                            }
-                            for (previewUrl in msgUrls) {
-                                InlinePreview(
-                                    url = previewUrl,
-                                    previewsEnabled = true,
-                                    wifiOnly = state.settings.imagePreviewsWifiOnly,
-                                )
-                            }
-                        }
-                        // No spacing between MOTD lines - preserves ASCII art layout.
-                        if (!m.isMotd || selBufName != "*server*") {
-                            Spacer(Modifier.height(4.dp))
-                        }
-                        } // end Column
+                        val isFindMatch = findOverlay != null &&
+                            (findOverlay.bufferKey == selected || findOverlay.bufferKey.startsWith("GLOBAL:")) &&
+                            findOverlay.matchIds.contains(m.id)
+                        SingleMessageItem(
+                            m = m,
+                            ts = ts,
+                            isFlickering = flickerMsgId == m.id,
+                            flickerAlphaValue = flickerAlpha.value,
+                            isFindMatch = isFindMatch,
+                            isFindCurrent = isFindMatch &&
+                                findOverlay.run { matchIds.getOrNull(currentIndex) } == m.id,
+                            findHighlight = if (isFindMatch) findOverlay.query else null,
+                            isSelectedForCopy = m.id in selectedMsgIds,
+                            copyRangeMode = copyRangeMode,
+                            selBufName = selBufName,
+                            messages = messages,
+                            reversedMessages = reversedMessages,
+                            listState = listState,
+                            msgIdToDisplayIdx = msgIdToDisplayIdxHoisted,
+                            scope = scope,
+                            chatTextStyle = chatTextStyle,
+                            motdStyle = motdStyle,
+                            motdFontSizeSp = motdFontSizeSp,
+                            linkStyle = linkStyle,
+                            onAnnotationClick = onAnnotationClick,
+                            colorizeNicks = state.settings.colorizeNicks,
+                            mircColorsEnabled = state.settings.mircColorsEnabled,
+                            ansiColorsEnabled = state.settings.ansiColorsEnabled,
+                            imagePreviewsEnabled = state.settings.imagePreviewsEnabled,
+                            imagePreviewsWifiOnly = state.settings.imagePreviewsWifiOnly,
+                            nickColor = ::nickColor,
+                            displayNick = ::displayNick,
+                            onToggleSelected = {
+                                selectedMsgIds = if (m.id in selectedMsgIds)
+                                    selectedMsgIds - m.id else selectedMsgIds + m.id
+                            },
+                            onLongPress = { longPressedMessage = m },
+                            onSwipeReply = { pendingReply = m },
+                        )
                         } // end DisplayItem.Single
 
                         } // end when
                     }
                 }
-            }
             } // end BoxWithConstraints
+
+            // Copy-range action bar
+            if (copyRangeMode) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .zIndex(2f),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (selectedMsgIds.isEmpty()) "Tap messages to select"
+                                   else "${selectedMsgIds.size} selected",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            onClick = {
+                                val toCopy = messages
+                                    .filter { it.id in selectedMsgIds }
+                                    .sortedBy { it.timeMs }
+                                    .joinToString("\n") { msg ->
+                                        buildString {
+                                            if (msg.from != null) append("<${msg.from}> ")
+                                            append(stripIrcFormatting(msg.text))
+                                        }
+                                    }
+                                if (toCopy.isNotBlank()) {
+                                    scope.launch {
+                                        clipboard.setClipEntry(
+                                            android.content.ClipData.newPlainText("", toCopy).toClipEntry()
+                                        )
+                                    }
+                                }
+                                copyRangeMode = false
+                                selectedMsgIds = emptySet()
+                            },
+                            enabled = selectedMsgIds.isNotEmpty(),
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                disabledContentColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.38f),
+                            ),
+                        ) { Text("Copy") }
+                        TextButton(
+                            onClick = {
+                                copyRangeMode = false
+                                selectedMsgIds = emptySet()
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ),
+                        ) { Text("Cancel") }
+                    }
+                }
+            }
+
+            // Jump-to-unread button: shown when there are unread messages and the user
+            // hasn't already scrolled up to them. Stacked above the scroll-to-bottom FAB.
+            if (unreadScrollTarget >= 0 && !hasReachedUnread && !isAtBottom) {
+                val unreadCount = buf?.unread ?: 0
+                // Find the timestamp of the oldest unread message for the "since HH:mm" label.
+                val firstUnreadMsg = reversedMessages.getOrNull(unreadScrollTarget)
+                val sinceLabel = firstUnreadMsg?.let { msg ->
+                    runCatching {
+                        val fmt = java.text.SimpleDateFormat(
+                            if (state.settings.timestampFormat.contains("ss")) "HH:mm:ss" else "HH:mm",
+                            java.util.Locale.getDefault()
+                        )
+                        " since ${fmt.format(java.util.Date(msg.timeMs))}"
+                    }.getOrElse { "" }
+                } ?: ""
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = if (!isAtBottom) 56.dp else 8.dp)
+                        .zIndex(1f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = true)
+                        ) {
+                            scope.launch {
+                                listState.animateScrollToItem(unreadScrollTarget)
+                                userScrolledUp = true
+                                hasReachedUnread = true
+                            }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Jump to unread",
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = if (unreadCount > 0) "$unreadCount unread$sinceLabel" else "Jump to unread",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                    }
+                }
+            }
 
             // Scroll-to-bottom button: shown when user has scrolled up (not at tail).
             // Must be a direct child of the outer Box to use .align(Alignment.BottomEnd).
@@ -2154,8 +2404,60 @@ fun ChatScreen(
                 }
             }
             } // end Box
+        } // end inner Column
+
+        // /find overlay pill floats over messages at bottom of MessagesPane Box
+        val showFindPill = findOverlay != null &&
+            (findOverlay.bufferKey == selected || findOverlay.bufferKey.startsWith("GLOBAL:"))
+        if (showFindPill) {
+            val matchCount = findOverlay.matchIds.size
+            val cur = findOverlay.currentIndex
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp, start = 12.dp, end = 12.dp)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "\"${findOverlay.query}\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false).widthIn(max = 180.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "${cur + 1} / $matchCount",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    IconButton(onClick = { onFindNavigate(-1) }, enabled = cur > 0,
+                        modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, "Previous match",
+                            modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { onFindNavigate(1) }, enabled = cur < matchCount - 1,
+                        modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, "Next match",
+                            modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = onCloseFindOverlay, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, "Close search", modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
         }
-    }
+    } // end outer Box
+    } // end MessagesPane
 
 	val bottomBar: @Composable () -> Unit = {
         val cs = MaterialTheme.colorScheme
@@ -2233,22 +2535,84 @@ fun ChatScreen(
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
                 exit = fadeOut() + slideOutVertically(targetOffsetY = { it })
             ) {
-                val typingText = when (typingNicks.size) {
-                    1 -> "${typingNicks.first()} is typing…"
+                val typingLabel = when (typingNicks.size) {
+                    1 -> "${typingNicks.first()} is typing"
                     2 -> {
                         val (a, b) = typingNicks.toList()
-                        "$a and $b are typing…"
+                        "$a and $b are typing"
                     }
-                    else -> "Several people are typing…"
+                    else -> "Several people are typing"
                 }
-                Text(
-                    text = typingText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                // Animate three dots cycling 0→1→2→3 dots every 500ms.
+                val dotCount by produceState(initialValue = 0) {
+                    while (true) {
+                        kotlinx.coroutines.delay(500L)
+                        value = (value + 1) % 4
+                    }
+                }
+                val dots = ".".repeat(dotCount).padEnd(3, ' ')  // keeps width stable
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp)
-                )
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = typingLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                    )
+                    Text(
+                        text = dots,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                    )
+                }
+            }
+            // Reply bar: shown when the user long-pressed a message to reply to it.
+            // Must be in the Column (not the Row) so it stacks vertically above the input.
+            val replyTarget = pendingReply
+            if (replyTarget != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Reply,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Text(
+                        text = buildString {
+                            if (replyTarget.from != null) append("${replyTarget.from}: ")
+                            append(stripIrcFormatting(replyTarget.text).take(80))
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = { pendingReply = null },
+                        modifier = Modifier.size(20.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel reply",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
             }
             Row(
                 Modifier
@@ -2665,6 +3029,7 @@ fun ChatScreen(
             ),
             topBar = topBar,
             bottomBar = bottomBar,
+            snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
             contentWindowInsets = WindowInsets(0),
             content = scaffoldContent,
         )
@@ -2673,7 +3038,15 @@ fun ChatScreen(
     if (!isWide) {
         ModalNavigationDrawer(
             drawerState = drawerState,
-            drawerContent = { ModalDrawerSheet { BufferDrawer() } }
+            drawerContent = {
+                // Match the landscape pane exactly: surface colour at 1 dp tonal elevation.
+                // Without this the portrait drawer uses a different tonal surface token,
+                // making it appear a different shade to the landscape buffer list.
+                ModalDrawerSheet(
+                    drawerContainerColor = MaterialTheme.colorScheme.surface,
+                    drawerTonalElevation = 1.dp,
+                ) { BufferDrawer() }
+            }
         ) {
             scaffold()
         }
@@ -3706,6 +4079,143 @@ fun ChatScreen(
         }
     }
 
+
+
+    // Topic quick-edit dialog appears when an op long-presses the topic bar.
+    if (showTopicQuickEdit && canTopic) {
+        var editTopicText by remember(topic) { mutableStateOf(topic ?: "") }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showTopicQuickEdit = false },
+            title = { Text(stringResource(R.string.topic_edit_title)) },
+            text = {
+                OutlinedTextField(
+                    value = editTopicText,
+                    onValueChange = { editTopicText = it },
+                    label = { Text(stringResource(R.string.topic_edit_label)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = false,
+                    maxLines = 4,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val t = editTopicText.trim()
+                    onSend("/topic $selBufName $t")
+                    showTopicQuickEdit = false
+                }) { Text(stringResource(R.string.topic_set)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTopicQuickEdit = false }) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+    }
+
+
+    // Message long-press context sheet; Copy and Reply actions.
+    val ctxMsg = longPressedMessage
+    if (ctxMsg != null) {
+        val plainCtx = buildString {
+            if (ctxMsg.from != null) append("<${ctxMsg.from}> ")
+            append(stripIrcFormatting(ctxMsg.text))
+        }
+        ModalBottomSheet(onDismissRequest = { longPressedMessage = null }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp),
+            ) {
+                // Preview of the message being acted on
+                Text(
+                    text = plainCtx,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                // Quick reactions; only for messages with a server msgId (requires message-tags)
+                if (ctxMsg.msgId != null) {
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        for (emoji in listOf("👍", "👎", "❤️", "😂", "😮", "🎉")) {
+                            Text(
+                                text = emoji,
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(bounded = false, radius = 24.dp),
+                                    ) {
+                                        if (hasReactionSupport) {
+                                            onSendReaction(ctxMsg.msgId, emoji, false)
+                                            longPressedMessage = null
+                                        } else {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    "This server doesn't support reactions",
+                                                    duration = androidx.compose.material3.SnackbarDuration.Short,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    .padding(8.dp),
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider()
+                // Reply; only for channel/PM messages that have a real sender
+                if (ctxMsg.from != null && !ctxMsg.isMotd) {
+                    ListItem(
+                        headlineContent = { Text("Reply to ${ctxMsg.from}") },
+                        leadingContent = {
+                            Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null)
+                        },
+                        modifier = Modifier.clickable {
+                            pendingReply = ctxMsg
+                            longPressedMessage = null
+                        }
+                    )
+                }
+                // Copy
+                ListItem(
+                    headlineContent = { Text("Copy") },
+                    leadingContent = {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null)
+                    },
+                    modifier = Modifier.clickable {
+                        scope.launch {
+                            clipboard.setClipEntry(
+                                android.content.ClipData.newPlainText("", plainCtx).toClipEntry()
+                            )
+                        }
+                        longPressedMessage = null
+                    }
+                )
+                // Copy messages range picker
+                ListItem(
+                    headlineContent = { Text("Copy messages…") },
+                    supportingContent = { Text("Select multiple messages to copy") },
+                    leadingContent = {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null)
+                    },
+                    modifier = Modifier.clickable {
+                        val m = longPressedMessage
+                        longPressedMessage = null
+                        copyRangeMode = true
+                        selectedMsgIds = if (m != null) setOf(m.id) else emptySet()
+                    }
+                )
+            }
+        }
+    }
+
     if (showNickActions && selectedNick.isNotBlank()) {
         val dccEnabled = state.settings.dccEnabled
         ModalBottomSheet(onDismissRequest = { showNickActions = false }) {
@@ -3868,6 +4378,234 @@ fun ChatScreen(
             }
         }
     }
+}
+
+/**
+ * Renders one [UiMessage] in the chat list.
+ *
+ * Extracted from the inline [itemsIndexed] lambda so Compose's skipping optimisation can
+ * avoid re-executing this entire body when none of the parameters have changed. With the
+ * function inline, Compose had no stable boundary to check, so every state update
+ * (input field, nicklist, scroll position, etc.) caused every visible message to
+ * rebuild its [buildAnnotatedString], nick lookup, and inline preview URL scan.
+ *
+ * All parameters are primitives, stable data classes, or lambdas — Compose treats all
+ * of these as stable, so the function is skipped whenever its inputs are identical.
+ * Mutable state mutations are surfaced as callbacks so this composable itself is
+ * stateless (except for the per-item [swipeOffsetX] animation).
+ */
+@Composable
+private fun SingleMessageItem(
+    m: UiMessage,
+    ts: String,
+    // Pre-computed booleans so the item doesn't capture find/flicker state objects.
+    isFlickering: Boolean,
+    flickerAlphaValue: Float,       // Float, not Animatable, so Compose sees a stable param
+    isFindMatch: Boolean,
+    isFindCurrent: Boolean,
+    findHighlight: String?,
+    isSelectedForCopy: Boolean,
+    copyRangeMode: Boolean,
+    selBufName: String,
+    messages: List<UiMessage>,
+    reversedMessages: List<UiMessage>,
+    listState: LazyListState,
+    msgIdToDisplayIdx: Map<Long, Int>,
+    scope: CoroutineScope,
+    chatTextStyle: androidx.compose.ui.text.TextStyle,
+    motdStyle: androidx.compose.ui.text.TextStyle,
+    motdFontSizeSp: Float,
+    linkStyle: SpanStyle,
+    onAnnotationClick: (String, String) -> Unit,
+    colorizeNicks: Boolean,
+    mircColorsEnabled: Boolean,
+    ansiColorsEnabled: Boolean,
+    imagePreviewsEnabled: Boolean,
+    imagePreviewsWifiOnly: Boolean,
+    nickColor: (String) -> Color,
+    displayNick: (String) -> String,
+    // Callbacks for state mutations that live in the parent.
+    onToggleSelected: () -> Unit,
+    onLongPress: () -> Unit,
+    onSwipeReply: () -> Unit,
+) {
+    val fromNick = m.from
+    // Local copy of ChatScreen's baseNick — strips IRC mode prefixes from a display nick.
+    fun baseNick(display: String) = display.trimStart('~', '&', '@', '%', '+')
+    val swipeOffsetX = remember { Animatable(0f) }
+    val canSwipeReply = fromNick != null && !m.isMotd
+
+    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+        if (m.replyToMsgId != null) {
+            ReplyQuote(
+                replyToMsgId = m.replyToMsgId,
+                messages = messages,
+                onTap = {
+                    val msg = reversedMessages.firstOrNull { it.msgId == m.replyToMsgId }
+                    val displayIdx = if (msg != null) msgIdToDisplayIdx[msg.id] ?: -1 else -1
+                    if (displayIdx >= 0) scope.launch { listState.animateScrollToItem(displayIdx) }
+                },
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    when {
+                        isFlickering  -> Modifier.background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = flickerAlphaValue)
+                        )
+                        isFindCurrent -> Modifier.background(
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f)
+                        )
+                        isFindMatch   -> Modifier.background(
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.10f)
+                        )
+                        else          -> Modifier
+                    }
+                )
+                .then(
+                    if (canSwipeReply) Modifier.pointerInput(m.id) {
+                        val deadZonePx = 64.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            if (down.position.x < deadZonePx) return@awaitEachGesture
+                            var dx = 0f
+                            var dy = 0f
+                            var started = false
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                val pos = change.positionChange()
+                                dx += pos.x; dy += pos.y
+                                val absDx = kotlin.math.abs(dx); val absDy = kotlin.math.abs(dy)
+                                if (!started) {
+                                    if (absDx < viewConfiguration.touchSlop && absDy < viewConfiguration.touchSlop) continue
+                                    if (absDy > absDx || dx < 0f) break
+                                    started = true
+                                }
+                                if (started) {
+                                    change.consume()
+                                    val newVal = (swipeOffsetX.value + pos.x).coerceIn(0f, 200f)
+                                    scope.launch { swipeOffsetX.snapTo(newVal) }
+                                }
+                            }
+                            val triggered = swipeOffsetX.value >= 72f
+                            scope.launch {
+                                swipeOffsetX.animateTo(0f,
+                                    animationSpec = androidx.compose.animation.core.spring())
+                            }
+                            if (triggered) onSwipeReply()
+                        }
+                    } else Modifier
+                )
+                .combinedClickable(
+                    onClick = { if (copyRangeMode) onToggleSelected() },
+                    onLongClick = { if (copyRangeMode) onToggleSelected() else onLongPress() }
+                )
+        ) {
+            if (copyRangeMode && isSelectedForCopy) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                )
+            }
+            if (canSwipeReply && swipeOffsetX.value > 8f) {
+                val iconAlpha = (swipeOffsetX.value / 72f).coerceIn(0f, 1f)
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = iconAlpha),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 4.dp)
+                        .size(20.dp)
+                        .offset(x = (swipeOffsetX.value * 0.3f).dp)
+                )
+            }
+
+            if (fromNick == null) {
+                if (m.isMotd && selBufName == "*server*") {
+                    MotdLine(
+                        text = m.text,
+                        fontSizeSp = motdFontSizeSp,
+                        style = motdStyle,
+                        mircColorsEnabled = mircColorsEnabled,
+                        ansiColorsEnabled = ansiColorsEnabled,
+                        linkStyle = linkStyle,
+                        onAnnotationClick = onAnnotationClick,
+                    )
+                } else {
+                    val hlBg = if (isSystemInDarkTheme())
+                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)
+                    else
+                        androidx.compose.ui.graphics.Color(0xFFFFD54F)
+                    val hlFg = if (isSystemInDarkTheme())
+                        MaterialTheme.colorScheme.onTertiary
+                    else
+                        androidx.compose.ui.graphics.Color.Black
+                    IrcLinkifiedText(
+                        text = ts + m.text,
+                        mircColorsEnabled = mircColorsEnabled,
+                        ansiColorsEnabled = ansiColorsEnabled,
+                        linkStyle = linkStyle,
+                        onAnnotationClick = onAnnotationClick,
+                        style = chatTextStyle,
+                        findHighlight = findHighlight,
+                        findHighlightBg = hlBg,
+                        findHighlightFg = hlFg,
+                    )
+                }
+            } else if (m.isAction) {
+                val fromDisplay = displayNick(fromNick)
+                val fromBase = baseNick(fromDisplay)
+                val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle) {
+                    buildAnnotatedString {
+                        append(ts); append("* ")
+                        pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
+                        withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
+                            append(fromDisplay)
+                        }
+                        pop(); append(" ")
+                        appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
+                    }
+                }
+                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle)
+            } else {
+                val fromDisplay = displayNick(fromNick)
+                val fromBase = baseNick(fromDisplay)
+                val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle) {
+                    buildAnnotatedString {
+                        append(ts); append("<")
+                        pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
+                        withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
+                            append(fromDisplay)
+                        }
+                        pop(); append("> ")
+                        appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
+                    }
+                }
+                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle)
+            }
+        } // end Box
+
+        if (imagePreviewsEnabled) {
+            val msgUrls = remember(m.id) {
+                urlRegex.findAll(m.text).map { it.value }.take(3).toList()
+            }
+            for (previewUrl in msgUrls) {
+                InlinePreview(url = previewUrl, previewsEnabled = true, wifiOnly = imagePreviewsWifiOnly)
+            }
+        }
+        if (!m.isMotd || selBufName != "*server*") {
+            Spacer(Modifier.height(4.dp))
+        }
+    } // end Column
 }
 
 private const val ANN_URL = "URL"
@@ -4185,9 +4923,13 @@ private fun parseMircRuns(input: String): List<MircRun> {
                     st.bg = null
                 } else {
                     st.fg = fg
-                    // Optional ,bg
-                    if (i < input.length && input[i] == ',') {
-                        i++
+                    // Optional ,bg; only consume the comma when at least one
+                    // digit follows it. The original code consumed the comma unconditionally,
+                    // so text like "\x035,word" would silently drop the comma from output,
+                    // rendering "helloworld" instead of "hello,world".
+                    if (i < input.length && input[i] == ',' &&
+                        i + 1 < input.length && input[i + 1].isDigit()) {
+                        i++ // consume comma only when a digit follows
                         val (bg, n2) = parseOneOrTwoDigits(i)
                         i = n2
                         st.bg = bg
@@ -4281,6 +5023,10 @@ private fun AnnotatedClickableText(
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
     var layout: TextLayoutResult? by remember { mutableStateOf(null) }
+    // rememberUpdatedState lets the gesture handler always see the latest text and
+    // callback without restarting the pointerInput coroutine when they change.
+    val currentText by rememberUpdatedState(text)
+    val currentOnClick by rememberUpdatedState(onAnnotationClick)
     Text(
         text = text,
         style = style,
@@ -4290,7 +5036,7 @@ private fun AnnotatedClickableText(
             layout = it
             onTextLayout?.invoke(it)
         },
-        modifier = modifier.pointerInput(text) {
+        modifier = modifier.pointerInput(Unit) {
             val vc = viewConfiguration
             awaitEachGesture {
                 // Don't consume gestures: allow selection (long-press/drag) to work.
@@ -4306,8 +5052,8 @@ private fun AnnotatedClickableText(
                 if (dt <= 200 && dist <= vc.touchSlop) {
                     val l = layout ?: return@awaitEachGesture
                     val offset = l.getOffsetForPosition(up.position)
-                    val ann = text.getStringAnnotations(start = offset, end = offset).firstOrNull()
-                    if (ann != null) onAnnotationClick(ann.tag, ann.item)
+                    val ann = currentText.getStringAnnotations(start = offset, end = offset).firstOrNull()
+                    if (ann != null) currentOnClick(ann.tag, ann.item)
                 }
             }
         }
@@ -4326,9 +5072,24 @@ private fun IrcLinkifiedText(
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
+    findHighlight: String? = null,  // when non-null, highlight all occurrences of this query
+    findHighlightBg: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color(0xFFFFD54F),
+    findHighlightFg: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Black,
 ) {
-    val annotated = remember(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) {
-        buildAnnotatedString { appendIrcStyledLinkified(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) }
+    val annotated = remember(text, linkStyle, mircColorsEnabled, ansiColorsEnabled, findHighlight, findHighlightBg) {
+        val base = buildAnnotatedString { appendIrcStyledLinkified(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) }
+        if (findHighlight.isNullOrBlank()) return@remember base
+        val plain = base.text
+        val query = findHighlight.lowercase()
+        val hlStyle = SpanStyle(background = findHighlightBg, color = findHighlightFg)
+        buildAnnotatedString {
+            append(base)
+            var idx = plain.lowercase().indexOf(query)
+            while (idx >= 0) {
+                addStyle(hlStyle, idx, idx + query.length)
+                idx = plain.lowercase().indexOf(query, idx + 1)
+            }
+        }
     }
     AnnotatedClickableText(
         text = annotated,
@@ -4506,6 +5267,10 @@ private fun rememberDisplayItems(
         // any realistic block size (<131072 lines) and message ID space.
         val cacheKey = (msgs.first().id shl 17) or msgs.size.toLong()
         fontSizeCache[cacheKey]?.let { return it }
+
+        // Evict stale entries when cache grows large. Art blocks trimmed by
+        // maxScrollbackLines leave orphan entries that are never invalidated.
+        if (fontSizeCache.size >= 500) fontSizeCache.clear()
 
         // Not cached — run the binary search (same algorithm as rememberMotdFontSizeSp).
         val plainLines = msgs.map { stripIrcFormatting(it.text) }.filter { it.isNotEmpty() }

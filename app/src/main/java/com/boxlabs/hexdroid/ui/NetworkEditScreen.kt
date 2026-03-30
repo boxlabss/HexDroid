@@ -61,6 +61,7 @@ fun NetworkEditScreen(
     var name by remember(n0.id) { mutableStateOf(n0.name) }
     var host by remember(n0.id) { mutableStateOf(n0.host) }
     var port by remember(n0.id) { mutableStateOf(n0.port.toString()) }
+    var portError by remember(n0.id) { mutableStateOf(false) }
     var tls by remember(n0.id) { mutableStateOf(n0.useTls) }
     var allowInvalidCerts by remember(n0.id) { mutableStateOf(n0.allowInvalidCerts) }
     var allowInsecurePlaintext by remember(n0.id) { mutableStateOf(n0.allowInsecurePlaintext) }
@@ -211,7 +212,13 @@ fun NetworkEditScreen(
                 },
                 actions = {
                     Button(onClick = {
-                        val p = port.filter { it.isDigit() }.toIntOrNull() ?: 6697
+                        val p = port.filter { it.isDigit() }.toIntOrNull() ?: 0
+                        // validate port is in the legal TCP range before saving.
+                        if (p !in 1..65535) {
+                            portError = true
+                            return@Button
+                        }
+                        portError = false
 
                         val aj = autoJoinText
                             .lines()
@@ -358,8 +365,12 @@ fun NetworkEditScreen(
                 )
                 OutlinedTextField(
                     value = port,
-                    onValueChange = { port = it.filter { c -> c.isDigit() } },
+                    onValueChange = { port = it.filter { c -> c.isDigit() }; portError = false },
                     label = { Text(stringResource(R.string.network_port_label)) },
+                    isError = portError,
+                    supportingText = if (portError) {
+                        { Text("Port must be between 1 and 65535") }
+                    } else null,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -899,10 +910,7 @@ private fun CardSection(
     title: String,
     content: @Composable () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)

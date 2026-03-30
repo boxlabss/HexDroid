@@ -242,7 +242,7 @@
     <string name="network_command_delay_desc">接続後にコマンドを実行するまで待機する秒数</string>
     <string name="network_service_auth_label">サービス認証コマンド</string>
     <string name="network_service_auth_hint">例: /msg NickServ IDENTIFY パスワード</string>
-    <string name="network_commands_hint">接続後のコマンド、例: /join #チャンネル</string>
+    <string name="network_commands_hint">1行に1コマンド。;wait N を末尾に付けるとN秒待機します。例: /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">ネットワークが選択されていません</string>
     <string name="network_undo_remove">削除を元に戻す</string>
     <string name="networks_selected">選択済み</string>
@@ -250,6 +250,11 @@
     <string name="networks_remove_favourite">お気に入りから削除</string>
     <string name="networks_drag_reorder">ドラッグして並べ替え</string>
     <string name="networks_insecure_title">安全でない接続がブロックされました</string>
+    <string name="networks_local_title">ローカルネットワーク権限が必要</string>
+    <string name="networks_local_body">{0}への接続にはローカルネットワーク権限が必要です。
+
+これはAndroid 17の新要件で、ローカルネットワーク上のサーバーへの接続に適用されます。</string>
+    <string name="networks_local_grant">権限を許可</string>
     <string name="networks_insecure_body">暗号化されていないIRC接続は保護されておらず、メッセージとパスワードが漏洩する可能性があります。</string>
     <string name="networks_insecure_body2">TLSなしで%1$sに接続するには、このネットワークの暗号化されていない接続を明示的に許可する必要があります。</string>
     <string name="networks_allow_connect">許可して接続</string>
@@ -374,7 +379,7 @@
     <string name="theme_terminal">ターミナル</string>
     <string name="section_media_previews">メディアプレビュー</string>
     <string name="setting_image_previews">画像・動画プレビューを有効にする</string>
-    <string name="setting_image_previews_desc">チャットに投稿された画像やYouTubeリンクのインラインプレビューを表示します。</string>
+    <string name="setting_image_previews_desc">チャットに投稿された画像やYouTubeリンクのインラインプレビューを表示します。Twitter/XのリンクはfxTwitter.com（サードパーティサービス）を通じて解決されます。プレビューを読み込む際にツイートIDがそのサービスに送信されます。</string>
     <string name="setting_previews_wifi_only">Wi-Fiのみ</string>
     <string name="setting_previews_wifi_only_desc">モバイルデータの消費を避けるため、Wi-Fi接続時のみプレビューを読み込みます。</string>
     <string name="theme_system_default">システムデフォルト</string>
@@ -452,7 +457,7 @@
     <string name="nick_send_file_desc">DCC SENDでファイルを送信</string>
     <string name="nick_dcc_disabled">DCCは設定で無効になっています</string>
     <string name="nick_dcc_chat">DCC チャット</string>
-    <string name="nick_dcc_chat_desc">直接暗号化チャットセッションを開く</string>
+    <string name="nick_dcc_chat_desc">ピアツーピアの直接チャットセッションを開く</string>
     <string name="nick_ignore">ミュート</string>
     <string name="nick_unignore">ミュート解除</string>
     <string name="nick_ignore_desc">このユーザーのすべてのメッセージを非表示</string>
@@ -468,4 +473,14 @@
     <string name="about_tagline">AndroidのIRCクライアント</string>
     <string name="about_support_title">ドキュメント &amp; サポート</string>
     <string name="about_support_desc">ガイド、FAQ、問題の報告はウェブサイトをご覧ください。</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">SDCC を使用（TLS 暗号化）</string>
+    <string name="setting_dcc_secure_desc">送信ファイル転送は DCC SSEND（TLS 暗号化）を使用します。リモートクライアントも SDCC に対応している必要があります。</string>
+    <string name="list_users_filter_label">ユーザー:</string>
+    <string name="list_users_min">最小</string>
+    <string name="list_users_max">最大</string>
+    <string name="topic_edit_title">トピックを編集</string>
+    <string name="topic_edit_label">トピック</string>
+    <string name="topic_set">設定</string>
 </resources>

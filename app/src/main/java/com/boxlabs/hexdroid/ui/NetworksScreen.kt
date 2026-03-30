@@ -86,6 +86,8 @@ fun NetworksScreen(
     onDisconnect: (String) -> Unit,
     onAllowPlaintextConnect: (String) -> Unit,
     onDismissPlaintextWarning: () -> Unit,
+    onRequestLocalNetworkPermission: (String) -> Unit = {},
+    onDismissLocalNetworkWarning: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onToggleFavourite: (String) -> Unit = {},
@@ -397,6 +399,29 @@ fun NetworksScreen(
                 Row {
                     TextButton(onClick = { onEdit(warnNetId); onDismissPlaintextWarning() }) { Text(stringResource(R.string.network_edit_title)) }
                     TextButton(onClick = onDismissPlaintextWarning) { Text(stringResource(R.string.cancel)) }
+                }
+            }
+        )
+    }
+
+    // Android 17+: warn when a connection to a local IP is blocked due to missing
+    // ACCESS_LOCAL_NETWORK permission. The user must grant it before retrying.
+    val localWarnNetId = state.localNetworkWarningNetworkId
+    if (localWarnNetId != null) {
+        val prof = state.networks.firstOrNull { it.id == localWarnNetId }
+        val hostPort = if (prof != null) "${prof.host}:${prof.port}" else "this network"
+        AlertDialog(
+            onDismissRequest = onDismissLocalNetworkWarning,
+            title = { Text(stringResource(R.string.networks_local_title)) },
+            text = { Text(stringResource(R.string.networks_local_body, hostPort)) },
+            confirmButton = {
+                TextButton(onClick = { onRequestLocalNetworkPermission(localWarnNetId) }) {
+                    Text(stringResource(R.string.networks_local_grant))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissLocalNetworkWarning) {
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )

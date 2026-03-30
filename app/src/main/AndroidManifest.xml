@@ -7,6 +7,16 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33" />
 
+    <!--
+        Android 17 (API 37) requires ACCESS_LOCAL_NETWORK to connect to devices on the
+        local network (LAN). This covers:
+          - IRC servers/bouncers hosted on a local IP (192.168.x.x, 10.x.x.x, etc.)
+          - DCC file transfers and DCC chat (peer-to-peer, often LAN addresses)
+        On earlier Android versions this permission is not defined and is simply ignored.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK"
+        tools:ignore="ProtectedPermissions" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" tools:targetApi="34" />
 	<uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -69,6 +79,12 @@
                 <data android:scheme="irc" />
                 <data android:scheme="ircs" />
                 <data android:scheme="irc+ssl" />
+            </intent-filter>
+            <!-- Share to IRC: receive text/URLs from other apps via the system share sheet. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 

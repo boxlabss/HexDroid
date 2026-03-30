@@ -242,7 +242,7 @@
     <string name="network_command_delay_desc">Подождать столько секунд после подключения перед выполнением команд</string>
     <string name="network_service_auth_label">Команда аутентификации службы</string>
     <string name="network_service_auth_hint">напр. /msg NickServ IDENTIFY пароль</string>
-    <string name="network_commands_hint">Команды после подключения, напр. /join #канал</string>
+    <string name="network_commands_hint">Одна команда на строку. Добавьте ;wait N для паузы N секунд, напр. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Сеть не выбрана</string>
     <string name="network_undo_remove">Отменить удаление</string>
     <string name="networks_selected">Выбрано</string>
@@ -250,6 +250,11 @@
     <string name="networks_remove_favourite">Удалить из избранного</string>
     <string name="networks_drag_reorder">Перетащите для изменения порядка</string>
     <string name="networks_insecure_title">Небезопасное соединение заблокировано</string>
+    <string name="networks_local_title">Требуется доступ к локальной сети</string>
+    <string name="networks_local_body">Для подключения к {0} требуется разрешение локальной сети.
+
+Это новое требование Android 17 для подключения к серверам в локальной сети.</string>
+    <string name="networks_local_grant">Дать разрешение</string>
     <string name="networks_insecure_body">Незашифрованные IRC-соединения не защищены и могут раскрыть ваши сообщения и пароль.</string>
     <string name="networks_insecure_body2">Для подключения к %1$s без TLS необходимо явно разрешить незашифрованные подключения для этой сети.</string>
     <string name="networks_allow_connect">Разрешить и подключить</string>
@@ -374,7 +379,7 @@
     <string name="theme_terminal">Терминал</string>
     <string name="section_media_previews">Медиапревью</string>
     <string name="setting_image_previews">Включить превью изображений и видео</string>
-    <string name="setting_image_previews_desc">Показывать встроенные превью для изображений и ссылок YouTube в чате.</string>
+    <string name="setting_image_previews_desc">Показывать встроенные превью для изображений и ссылок YouTube в чате. Ссылки Twitter/X разрешаются через fxtwitter.com (сторонний сервис) — идентификаторы твитов отправляются этому сервису при загрузке превью.</string>
     <string name="setting_previews_wifi_only">Только Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Загружать превью только при подключении к Wi-Fi, чтобы не тратить мобильные данные.</string>
     <string name="theme_system_default">Системный по умолчанию</string>
@@ -452,7 +457,7 @@
     <string name="nick_send_file_desc">Отправить файл через DCC SEND</string>
     <string name="nick_dcc_disabled">DCC отключен в настройках</string>
     <string name="nick_dcc_chat">DCC Чат</string>
-    <string name="nick_dcc_chat_desc">Открыть прямой зашифрованный чат-сеанс</string>
+    <string name="nick_dcc_chat_desc">Открыть прямой чат-сеанс точка-точка</string>
     <string name="nick_ignore">Игнорировать</string>
     <string name="nick_unignore">Отменить игнорирование</string>
     <string name="nick_ignore_desc">Скрыть все сообщения этого пользователя</string>
@@ -468,4 +473,14 @@
     <string name="about_tagline">IRC-клиент для Android</string>
     <string name="about_support_title">Документация &amp; Поддержка</string>
     <string name="about_support_desc">Посетите сайт для руководств, FAQ и сообщения о проблемах.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">Использовать SDCC (TLS-шифрование)</string>
+    <string name="setting_dcc_secure_desc">Исходящие передачи файлов используют DCC SSEND (TLS-шифрование). Удалённый клиент также должен поддерживать SDCC.</string>
+    <string name="list_users_filter_label">Пользователи:</string>
+    <string name="list_users_min">Мин</string>
+    <string name="list_users_max">Макс</string>
+    <string name="topic_edit_title">Изменить тему</string>
+    <string name="topic_edit_label">Тема</string>
+    <string name="topic_set">Задать</string>
 </resources>

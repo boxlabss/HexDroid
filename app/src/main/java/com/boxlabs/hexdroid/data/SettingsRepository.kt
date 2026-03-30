@@ -11,6 +11,7 @@ import com.boxlabs.hexdroid.SaslConfig
 import com.boxlabs.hexdroid.SaslMechanism
 import com.boxlabs.hexdroid.UiSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
@@ -281,6 +282,7 @@ class SettingsRepository(private val ctx: Context) {
                 dccSendMode = runCatching {
                     com.boxlabs.hexdroid.DccSendMode.valueOf(o.optString("dccSendMode", com.boxlabs.hexdroid.DccSendMode.AUTO.name))
                 }.getOrDefault(com.boxlabs.hexdroid.DccSendMode.AUTO),
+                dccSecure = o.optBoolean("dccSecure", false),
                 dccIncomingPortMin = o.optInt("dccIncomingPortMin", 5000),
                 dccIncomingPortMax = o.optInt("dccIncomingPortMax", 5010),
                 dccDownloadFolderUri = o.optString("dccDownloadFolderUri", "").takeIf { it.isNotBlank() },
@@ -357,6 +359,7 @@ class SettingsRepository(private val ctx: Context) {
 
         o.put("dccEnabled", s.dccEnabled)
         o.put("dccSendMode", s.dccSendMode.name)
+        o.put("dccSecure", s.dccSecure)
         o.put("dccIncomingPortMin", s.dccIncomingPortMin)
         o.put("dccIncomingPortMax", s.dccIncomingPortMax)
         o.put("dccDownloadFolderUri", s.dccDownloadFolderUri ?: "")
@@ -746,6 +749,48 @@ class SettingsRepository(private val ctx: Context) {
                 prefs[Keys.NETWORKS_JSON] = toNetworksJson(restoredNetworks).toString()
             }
         }
+    }
+
+    // FIX #11: Flap detection state — migrated from SharedPreferences to DataStore so it is
+    // consistent with the rest of the persistence layer and immune to the data-loss issues
+    // that SharedPreferences can exhibit under process death on some OEM ROMs.
+    //
+    // Stored as a JSON object mapping netId → epoch-ms-when-paused, matching the previous
+    // SharedPreferences layout so existing paused-state is naturally superseded on first write.
+
+    private fun flapKey() = stringPreferencesKey("flap_paused_v2_json")
+
+    /** Read the current map of netId → pausedAtMs from DataStore (snapshot read). */
+    suspend fun readFlapPaused(): Map<String, Long> {
+        return ctx.dataStore.data.map { prefs ->
+            parseFlapJson(prefs[flapKey()])
+        }.first()
+    }
+
+    /** Persist the full flap-paused map atomically. */
+    suspend fun writeFlapPaused(map: Map<String, Long>) {
+        ctx.dataStore.edit { prefs ->
+            prefs[flapKey()] = toFlapJson(map)
+        }
+    }
+
+    private fun parseFlapJson(json: String?): Map<String, Long> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return try {
+            val obj = JSONObject(json)
+            buildMap {
+                for (key in obj.keys()) {
+                    val v = obj.optLong(key, -1L)
+                    if (v > 0) put(key, v)
+                }
+            }
+        } catch (_: Throwable) { emptyMap() }
+    }
+
+    private fun toFlapJson(map: Map<String, Long>): String {
+        val obj = JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        return obj.toString()
     }
 }
 

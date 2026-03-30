@@ -593,7 +593,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (customColor != null) {
-                            // Swatch showing current colour/tap to re-pick
+                            // Swatch showing current colour — tap to re-pick
                             Box(
                                 modifier = Modifier
                                     .size(28.dp)
@@ -879,6 +879,21 @@ fun SettingsScreen(
             item { SectionTitle(stringResource(R.string.section_file_transfers)) }
 
             item { SettingToggle(stringResource(R.string.setting_enable_dcc), s.dccEnabled) { onUpdate { copy(dccEnabled = !dccEnabled) } } }
+
+            if (s.dccEnabled) {
+                item {
+                    SettingToggle(stringResource(R.string.setting_dcc_secure), s.dccSecure) {
+                        onUpdate { copy(dccSecure = !dccSecure) }
+                    }
+                }
+                item {
+                    Text(
+                        stringResource(R.string.setting_dcc_secure_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = androidx.compose.ui.Modifier.padding(bottom = 4.dp)
+                    )
+                }
+            }
 
             item {
                 val dccFolderLabel = if (s.dccDownloadFolderUri.isNullOrBlank()) stringResource(R.string.setting_dcc_downloads_default) else stringResource(R.string.setting_dcc_downloads_custom)

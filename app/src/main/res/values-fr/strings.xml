@@ -256,7 +256,7 @@
     <string name="network_command_delay_desc">Attendre ces secondes après connexion avant d\'exécuter les commandes</string>
     <string name="network_service_auth_label">Commande d\'authentification de service</string>
     <string name="network_service_auth_hint">ex. /msg NickServ IDENTIFY motdepasse</string>
-    <string name="network_commands_hint">Commandes après connexion, ex. /join #salon</string>
+    <string name="network_commands_hint">Une commande par ligne. Ajoutez ;wait N pour attendre N secondes, ex. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Aucun réseau sélectionné</string>
     <string name="network_undo_remove">Annuler la suppression</string>
     <string name="networks_selected">Sélectionné</string>
@@ -264,6 +264,11 @@
     <string name="networks_remove_favourite">Retirer des favoris</string>
     <string name="networks_drag_reorder">Faire glisser pour réorganiser</string>
     <string name="networks_insecure_title">Connexion non sécurisée bloquée</string>
+    <string name="networks_local_title">Accès réseau local requis</string>
+    <string name="networks_local_body">La connexion à {0} nécessite l\'autorisation réseau local.
+
+C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du réseau local.</string>
+    <string name="networks_local_grant">Accorder l\'autorisation</string>
     <string name="networks_insecure_body">Les connexions IRC en texte clair ne sont pas chiffrées et peuvent exposer vos messages et votre mot de passe.</string>
     <string name="networks_insecure_body2">Pour vous connecter à %1$s sans TLS, vous devez explicitement autoriser les connexions non chiffrées pour ce réseau.</string>
     <string name="networks_allow_connect">Autoriser et connecter</string>
@@ -388,7 +393,7 @@ Ceci ne peut pas être annulé.</string>
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Aperçus médias</string>
     <string name="setting_image_previews">Activer les aperçus d’images et de vidéos</string>
-    <string name="setting_image_previews_desc">Afficher des aperçus intégrés pour les images et les liens YouTube publiés dans le chat.</string>
+    <string name="setting_image_previews_desc">Afficher des aperçus intégrés pour les images et les liens YouTube publiés dans le chat. Les liens Twitter/X sont résolus via fxtwitter.com (service tiers) — les identifiants de tweets sont envoyés à ce service lors du chargement d\'un aperçu.</string>
     <string name="setting_previews_wifi_only">Wi-Fi uniquement</string>
     <string name="setting_previews_wifi_only_desc">Charger les aperçus uniquement en Wi-Fi pour ne pas consommer de données mobiles.</string>
     <string name="theme_system_default">Par défaut du système</string>
@@ -466,7 +471,7 @@ Ceci ne peut pas être annulé.</string>
     <string name="nick_send_file_desc">Envoyer un fichier via DCC SEND</string>
     <string name="nick_dcc_disabled">DCC est désactivé dans les paramètres</string>
     <string name="nick_dcc_chat">DCC Chat</string>
-    <string name="nick_dcc_chat_desc">Ouvrir une session de chat direct chiffré</string>
+    <string name="nick_dcc_chat_desc">Ouvrir une session de chat direct pair à pair</string>
     <string name="nick_ignore">Ignorer</string>
     <string name="nick_unignore">Ne plus ignorer</string>
     <string name="nick_ignore_desc">Masquer tous les messages de cet utilisateur</string>
@@ -482,4 +487,14 @@ Ceci ne peut pas être annulé.</string>
     <string name="about_tagline">Client IRC pour Android</string>
     <string name="about_support_title">Documentation &amp; Support</string>
     <string name="about_support_desc">Visitez le site web pour des guides, des FAQ et pour signaler des problèmes.</string>
+
+    <!-- SDCC / list filter / topic edit (added) -->
+    <string name="setting_dcc_secure">Utiliser SDCC (chiffrement TLS)</string>
+    <string name="setting_dcc_secure_desc">Les transferts de fichiers sortants utilisent DCC SSEND (chiffré TLS). Le client distant doit également prendre en charge SDCC.</string>
+    <string name="list_users_filter_label">Utilisateurs :</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Max</string>
+    <string name="topic_edit_title">Modifier le sujet</string>
+    <string name="topic_edit_label">Sujet</string>
+    <string name="topic_set">Définir</string>
 </resources>
