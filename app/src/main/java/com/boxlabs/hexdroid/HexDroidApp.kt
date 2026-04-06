@@ -85,6 +85,13 @@ class HexDroidApp : Application() {
                     // a stop/start pair within milliseconds; we only go background if nothing
                     // restarts the activity within the debounce window.
                     mainHandler.postDelayed(goBackgroundRunnable, 500)
+                    // Cancel any in-progress typing indicator immediately when backgrounded
+                    // so remote users don't see a stale "typing" state, and so the
+                    // 30-second paused/done timer coroutine doesn't keep the CPU awake.
+                    ircViewModel.cancelTypingOnBackground()
+                    // Flush log file buffers so lines written since the last periodic
+                    // flush reach disk before the OS might kill the process.
+                    ircViewModel.flushLogs()
                 }
             }
 

@@ -359,7 +359,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     out += IrcAction.Send("AUTHENTICATE *")
                     return out
                 }
-                val authcid = s.authcid ?: ""
+                // Fall back to the connection nick when no explicit authcid is set.
+                // Sending an empty authcid (\u0000\u0000pass) is rejected by most servers including ZNC.
+                val authcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
                 val pass = s.password ?: ""
                 val msg = "\u0000$authcid\u0000$pass"
                 val b64 = Base64.encodeToString(msg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
@@ -369,7 +371,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.SCRAM_SHA_256 -> {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
-                    val authcid = s.authcid ?: ""
+                    val authcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
                     val pass = s.password ?: ""
                     val clientNonce = randomNonce()
                     scram = ScramSha256Client(authcid, pass, clientNonce)

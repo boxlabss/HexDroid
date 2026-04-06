@@ -69,6 +69,22 @@ class NotificationHelper(private val ctx: Context) {
         const val ACTION_INLINE_REPLY     = "action_inline_reply"
 
         fun cancelAll(ctx: Context) { NotificationManagerCompat.from(ctx).cancelAll() }
+
+        // Monotonically-increasing notification ID counter.
+        // Using System.currentTimeMillis() % 100000 causes two problems:
+        //   1. Two notifications within the same millisecond silently replace each other.
+        //   2. Notifications 100 000 ms (~100 s) apart share the same ID and also collide.
+        // An AtomicInteger counter avoids both and is safe across concurrent notify() calls.
+        // Start at 2000 to leave room below for named constants like NOTIF_ID_CONNECTION.
+        private val notifIdCounter = java.util.concurrent.atomic.AtomicInteger(2000)
+        fun nextNotifId(): Int = notifIdCounter.incrementAndGet()
+
+        // Monotonically-increasing PendingIntent request code counter.
+        // String.hashCode() is a 32-bit signed integer with known collision pairs;
+        // two different buffer/network combos can produce the same request code, which
+        // causes one buffer's tap intent to silently overwrite another's in the system.
+        private val piRequestCounter = java.util.concurrent.atomic.AtomicInteger(0)
+        fun nextPiRequestCode(): Int = piRequestCounter.incrementAndGet()
     }
 
     /** Create (or no-op if already exists) per-network notification channels for [networkName].
@@ -138,7 +154,7 @@ class NotificationHelper(private val ctx: Context) {
             .putExtra(EXTRA_ACTION, action)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        return PendingIntent.getActivity(ctx, (networkId + "|" + action).hashCode(), i, flags)
+        return PendingIntent.getActivity(ctx, nextPiRequestCode(), i, flags)
     }
 
     private fun openBufferPendingIntent(networkId: String, buffer: String, msgId: Long = -1L, msgAnchor: String? = null): PendingIntent {
@@ -151,7 +167,7 @@ class NotificationHelper(private val ctx: Context) {
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        return PendingIntent.getActivity(ctx, (networkId + "|" + buffer + "|" + msgId).hashCode(), i, flags)
+        return PendingIntent.getActivity(ctx, nextPiRequestCode(), i, flags)
     }
 
     private fun openTransfersPendingIntent(networkId: String): PendingIntent {
@@ -162,7 +178,7 @@ class NotificationHelper(private val ctx: Context) {
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        return PendingIntent.getActivity(ctx, (networkId + "|open_transfers").hashCode(), i, flags)
+        return PendingIntent.getActivity(ctx, nextPiRequestCode(), i, flags)
     }
 
     /**
@@ -190,7 +206,7 @@ class NotificationHelper(private val ctx: Context) {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0x02000000
         // Use a unique request code so different buffers get independent pending intents.
-        return PendingIntent.getBroadcast(ctx, (networkId + "|reply|" + buffer).hashCode(), i, flags)
+        return PendingIntent.getBroadcast(ctx, nextPiRequestCode(), i, flags)
     }
 
     private fun buildReplyAction(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): NotificationCompat.Action? {
@@ -235,7 +251,7 @@ class NotificationHelper(private val ctx: Context) {
         val netName = networkName.ifBlank { displayTitle }
         ensureNetworkChannels(netName)
         val channelId = networkHighlightChannelId(netName, playSound)
-        val notifId = (System.currentTimeMillis() % 100000).toInt()
+        val notifId = nextNotifId()
         val n = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(displayTitle)
@@ -253,7 +269,7 @@ class NotificationHelper(private val ctx: Context) {
         val netName = networkName.ifBlank { displayTitle }
         ensureNetworkChannels(netName)
         val channelId = networkPmChannelId(netName)
-        val notifId = (System.currentTimeMillis() % 100000).toInt()
+        val notifId = nextNotifId()
         val n = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(displayTitle)
@@ -277,7 +293,7 @@ class NotificationHelper(private val ctx: Context) {
             .addAction(0, "Quit", actionPendingIntent(networkId, ACTION_QUIT))
             .addAction(0, "Exit", actionPendingIntent(networkId, ACTION_EXIT))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
     }
 
     fun notifyDccIncomingFile(networkId: String, from: String, filename: String) {
@@ -289,7 +305,7 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setContentIntent(openTransfersPendingIntent(networkId))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
     }
 
     fun notifyDccIncomingChat(networkId: String, from: String, dccBufferKey: String? = null) {
@@ -307,6 +323,6 @@ class NotificationHelper(private val ctx: Context) {
             .setContentIntent(contentIntent)
             .addAction(0, "Open Transfers", openTransfersPendingIntent(networkId))
             .build()
-        NotificationManagerCompat.from(ctx).notify((System.currentTimeMillis() % 100000).toInt(), n)
+        NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
     }
 }

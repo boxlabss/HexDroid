@@ -148,6 +148,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -870,15 +871,29 @@ fun ChatScreen(
 
     // Separator position. Advances with each message on the active buffer; cleared by the scroll-to-bottom button.
     val firstUnreadIndex = remember(messages, buf?.lastReadTimestamp, buf?.unread) {
+        val unread = buf?.unread ?: 0
         val lastReadTs = buf?.lastReadTimestamp
         if (lastReadTs != null) {
             val lastReadMs = runCatching {
                 java.time.Instant.parse(lastReadTs).toEpochMilli()
-            }.getOrNull() ?: return@remember -1
+            }.getOrNull() ?: return@remember if (unread > 0 && messages.size >= unread) messages.size - unread else -1
             val idx = messages.indexOfFirst { it.timeMs > lastReadMs }
-            if (idx < 0 || idx >= messages.size) -1 else idx
+            if (idx >= 0 && idx < messages.size) {
+                idx
+            } else if (unread > 0 && messages.size >= unread) {
+                // Timestamp search found no messages newer than the read marker, but the
+                // bouncer still reports unread messages.
+                // NOTE: openBuffer() clears unread=0 before ChatScreen renders, so this
+                // branch is almost never taken once the buffer is open. It only fires in
+                // the narrow window before the buffer is selected (e.g. buffer-list preview).
+                // The reliable fix for "no unread bar after bouncer reconnect" is in the
+                // CHATHISTORY load path: once messages with timeMs > lastReadMs arrive,
+                // the timestamp branch above correctly finds them without needing this fallback.
+                messages.size - unread
+            } else {
+                -1
+            }
         } else {
-            val unread = buf?.unread ?: 0
             if (unread <= 0 || messages.size < unread) -1
             else messages.size - unread
         }
@@ -900,13 +915,13 @@ fun ChatScreen(
     var historyIndex by remember(selected) { mutableStateOf(-1) }
     var inputSnapshot by remember(selected) { mutableStateOf("") }
 
-    var showColorPicker by remember { mutableStateOf(false) }
+    var showColorPicker by rememberSaveable { mutableStateOf(false) }
     var selectedFgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
     var selectedBgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
-    var boldActive by remember { mutableStateOf(false) }
-    var italicActive by remember { mutableStateOf(false) }
-    var underlineActive by remember { mutableStateOf(false) }
-    var reverseActive by remember { mutableStateOf(false) }
+    var boldActive by rememberSaveable { mutableStateOf(false) }
+    var italicActive by rememberSaveable { mutableStateOf(false) }
+    var underlineActive by rememberSaveable { mutableStateOf(false) }
+    var reverseActive by rememberSaveable { mutableStateOf(false) }
 
 
     val timeFmt = remember(state.settings.timestampFormat) {
@@ -1534,7 +1549,15 @@ fun ChatScreen(
     // messages arrive on a selected buffer (append() > newLastRead when isSelected),
     // and explicitly when the user taps scroll-to-bottom
      LaunchedEffect(selected) {
-         listState.scrollToItem(0)
+         // Skip the scroll-to-bottom if a highlight notification is targeting this buffer.
+         // Both this effect and the highlight LaunchedEffect fire concurrently on buffer switch;
+         // if we scroll to 0 here the buffer-switch scroll can land after the highlight scroll
+         // and silently undo it, leaving the user at the bottom instead of the flagged message.
+         val highlightTargetsHere = state.pendingHighlightAnchor != null &&
+             state.pendingHighlightBufferKey == selected
+         if (!highlightTargetsHere) {
+             listState.scrollToItem(0)
+         }
          // Close the /find overlay when switching to a different buffer (local search only).
          // Global search spans all buffers so stays open while navigating.
          val fo = state.findOverlay
@@ -2142,7 +2165,11 @@ fun ChatScreen(
                         // zero inter-line gaps — no LazyColumn item boundaries, no font-metric
                         // padding between rows.  Nick badges overlay each sender's first line.
                         is DisplayItem.Art -> {
-                            val blockText = item.msgs.joinToString("\n") { "<${it.from}> ${it.text}" }
+                            // Strip IRC colour/style codes so the clipboard receives clean text.
+                            // Art blocks render without a per-line nick prefix (the attribution
+                            // row at the top handles that), so the copy should match what the
+                            // user sees — plain art text only, no embedded "<nick>" labels.
+                            val blockText = item.msgs.joinToString("\n") { stripIrcFormatting(it.text) }
                             // Collect the unique senders for the attribution line.
                             // Preserve encounter order so the list reads chronologically.
                             val senders = item.msgs.mapNotNull { it.from }
@@ -5108,41 +5135,69 @@ private fun IrcLinkifiedText(
  */
 private fun looksLikeArt(text: String): Boolean {
     // Examine stripped content for structural shape, plus ANSI SGR and mIRC colour
-    // codes as additional signals.  Colour detection is intentionally kept loose
-    // here because the block-size gate (≥2 consecutive lines) does the real false-
-    // positive filtering — a single coloured line never triggers art rendering.
+    // codes as additional signals. The block-size gate (≥2 consecutive lines from
+    // non-action senders) does the primary false-positive filtering.
     val plain = stripIrcFormatting(text)
     if (plain.length < 3) return false
 
-    // ANSI SGR colour sequences ([…m): almost never appear in normal IRC chat,
-    // so even one is a strong signal.  Other ANSI escapes ([3~ = Delete key,
-    // [A = cursor up) are NOT art — check explicitly for the SGR terminator 'm'.
+    // Single pass: detect ANSI SGR and count mIRC colour codes simultaneously.
+    // Previously two separate O(n) scans over the raw text string; merged into one.
+    //
+    // ANSI SGR ([…m): almost never in normal IRC text — even one is a strong signal.
+    // Other ANSI escapes ([3~ = Delete, [A = cursor-up) are NOT art; we check
+    // explicitly for the SGR final byte 'm'.
+    //
+    // mIRC colour codes (): common in normal chat so require ≥4 per line to trigger.
+    var mircCount = 0
     var i = 0
     while (i < text.length) {
-        if (text[i] == '' && i + 1 < text.length && text[i + 1] == '[') {
-            var j = i + 2
-            while (j < text.length && (text[j].isDigit() || text[j] == ';')) j++
-            if (j < text.length && text[j] == 'm') return true
-            i = j + 1
-        } else i++
+        when (text[i]) {
+            '' -> {
+                if (i + 1 < text.length && text[i + 1] == '[') {
+                    var j = i + 2
+                    while (j < text.length && (text[j].isDigit() || text[j] == ';')) j++
+                    if (j < text.length && text[j] == 'm') return true  // ANSI SGR colour
+                    i = j + 1
+                } else i++
+            }
+            '' -> { mircCount++; i++ }
+            else -> i++
+        }
     }
+    if (mircCount >= 4) return true
 
-    // mIRC colour codes (): common in normal chat, so require ≥4 to reduce noise.
-    // False positives at this per-line level are acceptable because the ≥2 consecutive
-    // lines requirement in the block builder will catch them before rendering.
-    if (text.count { it == '' } >= 4) return true
-
-    // Signal 1: ≥2 leading spaces AND first non-space char is structural.
-    // Art bots indent for column alignment and their content opens with box/drawing
-    // characters.  Prose continuation lines (word-wrapped bot output like weather
-    // forecasts) also indent but start with a letter or digit after the spaces.
+    // Signal 1: ≥2 leading spaces AND the content looks like a structural/art line.
+    //
+    // Previous version triggered on any non-alphanumeric first char, producing false
+    // positives for common IRC prose patterns like "  * list item" and "  - bullet".
+    //
+    // Refined rule:
+    // - Unambiguous if the first non-space char is a Unicode box-drawing or block-element
+    //   character (U+2500–U+2BFF): these never appear in normal prose.
+    // - For ASCII structural chars, require the line to be symmetrically framed — both
+    //   ends non-alphanumeric. This catches "|  text  |", "+---+", "*** header ***" while
+    //   correctly rejecting "  * bullet text" and "  - list item" (which end with a letter).
     if (plain.length >= 3 && plain[0] == ' ' && plain[1] == ' ') {
-        val firstNs = plain.trimStart()
-        if (firstNs.isNotEmpty() && !firstNs[0].isLetterOrDigit()) return true
+        val trimmed = plain.trimStart()
+        if (trimmed.isNotEmpty()) {
+            val first = trimmed[0]
+            if (!first.isLetterOrDigit()) {
+                // Box-drawing, block elements, geometric shapes, misc symbols (U+2500–U+2BFF)
+                if (first.code in 0x2500..0x2BFF) return true
+                // ASCII structural: both ends non-alphanumeric → symmetrically framed line
+                val lastCh = trimmed.trimEnd().lastOrNull()
+                if (lastCh != null && !lastCh.isLetterOrDigit()) return true
+            }
+        }
     }
 
-    // Signal 2: high structural-symbol density — ≥30 % of non-space chars are
-    // drawing characters, on a line long enough to rule out typos/emoji.
+    // Signal 2: structural-symbol density — tiered thresholds handle both short
+    // dense lines (e.g. "_____", "|_ _|") and medium-length mixed lines (e.g. "H _|\_/|_ H"):
+    //   • Short  (≥4 non-space):  density ≥ 80 % — catches pure border lines like "_____"
+    //   • Medium (≥8 non-space):  density ≥ 45 % — catches "H   _|\_/|_   H" (78 %) and
+    //                              "nHnn/ \___/ \nnHn" (47 %)
+    //   • Long   (≥16 non-space): density ≥ 30 % — the original threshold for wider art
+    // All thresholds safely reject normal prose: typical IRC chat scores < 20 % symbol density.
     var artCount = 0
     var alphaCount = 0
     for (ch in plain) {
@@ -5150,16 +5205,22 @@ private fun looksLikeArt(text: String): Boolean {
         if (ch.isLetterOrDigit()) alphaCount++ else artCount++
     }
     val nonSpace = artCount + alphaCount
-    if (nonSpace >= 16 && artCount.toFloat() / nonSpace >= 0.30f) return true
+    val density = if (nonSpace > 0) artCount.toFloat() / nonSpace else 0f
+    if (nonSpace >= 4  && density >= 0.80f) return true   // short dense:  "_____", "|_ _|"
+    if (nonSpace >= 8  && density >= 0.45f) return true   // medium mixed: "H _|\/|_ H"
+    if (nonSpace >= 16 && density >= 0.30f) return true   // long:         original threshold
 
     // Signal 3: single-space indent + border character patterns.
+    // Expanded border set to include common art characters (*#@~^<>{}) beyond the
+    // original "|/\_-=+[]".
     if (plain.length >= 4 && plain[0] == ' ' && plain[1] != ' ') {
         val c1 = plain[1]; val c2 = plain[2]
+        val border = "|/\\_-=+[]{}~^<>*#@"
         // 3a: border char followed immediately by space or another border char.
-        if (c1 in "|/\\_-=+[]" && (c2 == ' ' || c2 in "|/\\_-=+[]")) return true
+        if (c1 in border && (c2 == ' ' || c2 in border)) return true
         // 3b: framed label — first AND last non-space chars are both border chars.
         val lastNs = plain.trimEnd().lastOrNull()
-        if (lastNs != null && c1 in "|/\\_-=+[]" && lastNs in "|/\\_-=+[]") return true
+        if (lastNs != null && c1 in border && lastNs in border) return true
     }
 
     return false
@@ -5232,7 +5293,7 @@ private fun rememberDisplayItems(
     val rawItems: List<RawItem> = remember(n, newestId) {
         if (reversedMessages.isEmpty()) return@remember emptyList()
         val result  = mutableListOf<RawItem>()
-        val artRun  = mutableListOf<UiMessage>()  // accumulated in reversed order
+        val artRun  = mutableListOf<UiMessage>()  // accumulated in reversed (newest-first) order
 
         fun flushArtRun() {
             if (artRun.size >= 2) result.add(RawItem.Art(artRun.asReversed().toList()))
@@ -5240,9 +5301,29 @@ private fun rememberDisplayItems(
             artRun.clear()
         }
 
+        // Maximum time gap between consecutive art lines before the block is split.
+        // Art bots paste lines in rapid succession; a gap of ≥60 s almost certainly
+        // means two separate art pastes that should not be rendered as one block.
+        val ART_TIME_GAP_MS = 60_000L
+
         for (msg in reversedMessages) {
-            if (msg.from != null && looksLikeArt(msg.text)) artRun.add(msg)
-            else { flushArtRun(); result.add(RawItem.Single(msg)) }
+            // /me action messages are excluded: their text is rendered with a "* nick"
+            // prefix in normal chat, so absorbing them into an art block would strip that
+            // prefix and display the raw action text without context.
+            // Server messages (from == null) are also excluded.
+            if (msg.from != null && !msg.isAction && looksLikeArt(msg.text)) {
+                // If there is a large time gap between this message and the previous art
+                // line, flush the current run and start a new block. reversedMessages is
+                // newest-first, so artRun.last() is the message directly preceding this
+                // one in time (it is newer than msg).
+                if (artRun.isNotEmpty() && artRun.last().timeMs - msg.timeMs > ART_TIME_GAP_MS) {
+                    flushArtRun()
+                }
+                artRun.add(msg)
+            } else {
+                flushArtRun()
+                result.add(RawItem.Single(msg))
+            }
         }
         flushArtRun()
         result

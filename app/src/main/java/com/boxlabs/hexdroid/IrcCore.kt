@@ -683,6 +683,11 @@ class IrcClient(val config: IrcConfig) {
      * prefixed with "h" so they're valid as IRC parameter tokens.
      */
     private val labelCounter = java.util.concurrent.atomic.AtomicLong(0)
+    // CTCP flood protection: track last reply time per nick so we respond at most
+    // once per CTCP_RATE_LIMIT_MS per sender. This prevents a remote user from
+    // causing a K-line by flooding CTCP requests at us.
+    private val ctcpLastReplyMs = mutableMapOf<String, Long>()
+    private val CTCP_RATE_LIMIT_MS = 5_000L
     private fun nextLabel(): String = "h${labelCounter.incrementAndGet()}"
 
     /**
@@ -1426,12 +1431,14 @@ class IrcClient(val config: IrcConfig) {
             // Wait a moment so the socket is fully established.
             delay(5_000)
             while (true) {
-                // Always ping every 60 s regardless of foreground/background state.
-                // The previous 90 s background stretch was the root cause of random disconnects:
-                // many IRCds close connections idle for ~90 s before the next PING went out.
-                // Battery impact of one extra ping per 30 s is negligible - real savings come
-                // from the WifiLock (WIFI_MODE_FULL not HIGH_PERF) and TCP keepalive already in place.
-                delay(60_000L)
+                // Ping interval: 60 s for direct IRCd connections (many IRCds drop idle
+                // connections after ~90 s, so 60 s is the safe minimum).
+                // For bouncer connections the bouncer maintains its own persistent upstream
+                // session, so the client-to-bouncer link only needs to detect TCP stalls —
+                // 90 s is safe and saves one ping/PONG round-trip per minute (~2 packets,
+                // ~200 bytes) per connection when the device is idle.
+                val pingIntervalMs = if (config.isBouncer) 90_000L else 60_000L
+                delay(pingIntervalMs)
 
                 // If we're waiting on a PONG for a previous probe and it's taking too long,
                 // consider the connection stalled and force a reconnect.
@@ -1797,7 +1804,19 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		try {
 			send(IrcEvent.Status("Negotiating capabilities…"))
 			// Some servers expect PASS to precede any other registration-time commands.
-			config.serverPassword?.takeIf { it.isNotBlank() }?.let { writeLine("PASS $it") }
+			// Always colon-prefix the password as a proper IRC trailing parameter so that
+			// passwords containing spaces (e.g. ZNC "user/network:pass phrase") are not
+			// silently truncated at the first space.
+			//
+			// Skip PASS for bouncer connections when SASL is also configured: bouncers like
+			// ZNC process PASS *after* SASL completes and treat it as a second authentication
+			// attempt, producing a spurious "invalid password" even though SASL succeeded.
+			// For direct IRCd connections we always send PASS when set, because many servers
+			// require a server-wide PASS independently of per-user SASL authentication.
+			val skipPass = config.sasl is SaslConfig.Enabled && config.isBouncer
+			if (!skipPass) {
+				config.serverPassword?.takeIf { it.isNotBlank() }?.let { writeLine("PASS :$it") }
+			}
 			writeLine("CAP LS 302")
 			writeLine("NICK ${config.nick}")
 			writeLine("USER ${config.username} 0 * :${config.realname}")
@@ -2102,38 +2121,64 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 								val ctcpCmd = (if (spaceIdx > 0) ctcpContent.substring(0, spaceIdx) else ctcpContent).uppercase()
 								val ctcpArgs = if (spaceIdx > 0) ctcpContent.substring(spaceIdx + 1) else ""
 
+								// Sanitise the sender nick used in outgoing NOTICE targets: strip
+								// CR/LF/NUL so a malicious server prefix cannot inject IRC commands.
+								val safeSender = from.replace(Regex("[\r\n\u0000]"), "")
+
+								// Rate-limit replies to at most one per CTCP_RATE_LIMIT_MS per nick
+								// so a flood of CTCP requests cannot get us K-lined.
+								// ACTION and DCC are never rate-limited (they don't generate replies).
+								val now = System.currentTimeMillis()
+								val senderKey = safeSender.lowercase()
+								val lastReply = ctcpLastReplyMs[senderKey] ?: 0L
+								val rateLimited = ctcpCmd != "ACTION" && ctcpCmd != "DCC"
+									&& (now - lastReply) < CTCP_RATE_LIMIT_MS
+								if (rateLimited) {
+									send(IrcEvent.Status("CTCP $ctcpCmd from $safeSender ignored (rate limited)"))
+									continue
+								}
+
 								when (ctcpCmd) {
 									"VERSION" -> {
 										// Build the reply at call time so it always reflects the
 										// installed app version - never stale from a saved config.
-										writeLine("NOTICE $from :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.boxlabs.uk/\u0001")
-										send(IrcEvent.Status("CTCP VERSION reply sent to $from"))
+										ctcpLastReplyMs[senderKey] = now
+										writeLine("NOTICE $safeSender :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.boxlabs.uk/\u0001")
+										send(IrcEvent.Status("CTCP VERSION reply sent to $safeSender"))
 										continue
 									}
 									"PING" -> {
-										writeLine("NOTICE $from :\u0001PING $ctcpArgs\u0001")
-										send(IrcEvent.Status("CTCP PING reply sent to $from"))
+										// Strip CR/LF/NUL from the echoed payload to prevent IRC
+										// command injection via a crafted CTCP PING argument.
+										val safeArgs = ctcpArgs.replace(Regex("[\r\n\u0000\u0001]"), "")
+										ctcpLastReplyMs[senderKey] = now
+										writeLine("NOTICE $safeSender :\u0001PING $safeArgs\u0001")
+										send(IrcEvent.Status("CTCP PING reply sent to $safeSender"))
 										continue
 									}
 									"TIME" -> {
 										val timeStr = java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US).format(java.util.Date())
-										writeLine("NOTICE $from :\u0001TIME $timeStr\u0001")
-										send(IrcEvent.Status("CTCP TIME reply sent to $from"))
+										ctcpLastReplyMs[senderKey] = now
+										writeLine("NOTICE $safeSender :\u0001TIME $timeStr\u0001")
+										send(IrcEvent.Status("CTCP TIME reply sent to $safeSender"))
 										continue
 									}
 									"FINGER", "USERINFO" -> {
-										writeLine("NOTICE $from :\u0001$ctcpCmd ${config.realname}\u0001")
-										send(IrcEvent.Status("CTCP $ctcpCmd reply sent to $from"))
+										ctcpLastReplyMs[senderKey] = now
+										writeLine("NOTICE $safeSender :\u0001$ctcpCmd ${config.realname}\u0001")
+										send(IrcEvent.Status("CTCP $ctcpCmd reply sent to $safeSender"))
 										continue
 									}
 									"CLIENTINFO" -> {
-										writeLine("NOTICE $from :\u0001CLIENTINFO ACTION PING VERSION TIME FINGER USERINFO CLIENTINFO SOURCE DCC\u0001")
-										send(IrcEvent.Status("CTCP CLIENTINFO reply sent to $from"))
+										ctcpLastReplyMs[senderKey] = now
+										writeLine("NOTICE $safeSender :\u0001CLIENTINFO ACTION PING VERSION TIME FINGER USERINFO CLIENTINFO SOURCE DCC\u0001")
+										send(IrcEvent.Status("CTCP CLIENTINFO reply sent to $safeSender"))
 										continue
 									}
 									"SOURCE" -> {
-										writeLine("NOTICE $from :\u0001SOURCE https://hexdroid.boxlabs.uk/\u0001")
-										send(IrcEvent.Status("CTCP SOURCE reply sent to $from"))
+										ctcpLastReplyMs[senderKey] = now
+										writeLine("NOTICE $safeSender :\u0001SOURCE https://hexdroid.boxlabs.uk/\u0001")
+										send(IrcEvent.Status("CTCP SOURCE reply sent to $safeSender"))
 										continue
 									}
 									"ACTION" -> {
@@ -2143,8 +2188,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 										// DCC is handled below
 									}
 									else -> {
-										// Unknown CTCP, log it but don't consume (might be custom)
-										send(IrcEvent.Status("Unknown CTCP $ctcpCmd from $from"))
+										// Unknown CTCP — log but don't reply (no reply = no flood risk).
+										send(IrcEvent.Status("Unknown CTCP $ctcpCmd from $safeSender"))
 										continue
 									}
 								}

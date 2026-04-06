@@ -359,7 +359,61 @@ fun NetworkEditScreen(
                 )
                 OutlinedTextField(
                     value = host,
-                    onValueChange = { host = it },
+                    onValueChange = { raw ->
+                        // If the user pastes a full IRC URL into the host field, extract the
+                        // host and port components so they land in the right fields rather than
+                        // producing a broken "host:port:port" connection string.
+                        val trimmed = raw.trim()
+                        val lower = trimmed.lowercase()
+
+                        // Determine scheme and whether TLS is implied by it.
+                        val (afterScheme, schemeTls) = when {
+                            lower.startsWith("ircs://")    -> trimmed.removePrefix("ircs://").removePrefix("IRCS://") to true
+                            lower.startsWith("irc+ssl://") -> trimmed.removePrefix("irc+ssl://").removePrefix("IRC+SSL://") to true
+                            lower.startsWith("irc://")     -> trimmed.removePrefix("irc://").removePrefix("IRC://") to false
+                            else                           -> null to false
+                        }
+
+                        if (afterScheme != null) {
+                            // Strip path, query, fragment — we only care about host[:port]
+                            val authority = afterScheme.substringBefore("/").substringBefore("?")
+
+                            // IPv6 literal: [::1] or [::1]:port
+                            val (rawHost, rawPort, plusTls) = if (authority.startsWith("[")) {
+                                val closeBracket = authority.indexOf(']')
+                                val ipv6Host = if (closeBracket >= 0)
+                                    authority.substring(0, closeBracket + 1) else authority
+                                val portPart = if (closeBracket >= 0 && authority.length > closeBracket + 2)
+                                    authority.substring(closeBracket + 2) // skip "]:"
+                                else null
+                                val plus = portPart?.startsWith("+") == true
+                                Triple(ipv6Host, portPart?.trimStart('+')?.toIntOrNull(), plus)
+                            } else {
+                                // Regular hostname or IPv4: split on last colon
+                                val colonIdx = authority.lastIndexOf(':')
+                                if (colonIdx >= 0) {
+                                    val portStr = authority.substring(colonIdx + 1)
+                                    val plus = portStr.startsWith("+")
+                                    val portNum = portStr.trimStart('+').toIntOrNull()
+                                    // Only treat it as a port if it parsed as a number
+                                    if (portNum != null)
+                                        Triple(authority.substring(0, colonIdx), portNum, plus)
+                                    else
+                                        Triple(authority, null, false)
+                                } else {
+                                    Triple(authority, null, false)
+                                }
+                            }
+
+                            val defaultPort = if (schemeTls) 6697 else 6667
+                            host = rawHost
+                            port = (rawPort ?: defaultPort).toString()
+                            tls = schemeTls || plusTls
+                            portError = false
+                        } else {
+                            host = raw
+                        }
+                    },
                     label = { Text(stringResource(R.string.network_host_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )

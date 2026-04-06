@@ -25,9 +25,7 @@ import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import java.io.BufferedWriter
 import java.io.File
-import java.io.FileOutputStream
 import java.io.FileWriter
-import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -48,6 +46,26 @@ class LogWriter(private val ctx: Context) {
 
     // Cache open BufferedWriters for internal log files to avoid open/close on every line.
     private val openWriters = ConcurrentHashMap<String, BufferedWriter>()
+
+    // Per-key write locks so two coroutines writing to the same buffer file cannot
+    // interleave lines. ConcurrentHashMap.getOrPut is NOT atomic for the writer
+    // itself — two threads can both pass the "not present" check and try to create
+    // a writer for the same file, leading to a double-open and interleaved writes.
+    // A striped lock (one per cache key) gives fine-grained protection with low
+    // contention: buffers on different networks/channels lock independently.
+    private val writeLocks = ConcurrentHashMap<String, Any>()
+    // computeIfAbsent is used here rather than Kotlin's getOrPut extension because
+    // getOrPut on ConcurrentHashMap is NOT atomic — two threads can both pass the
+    // "key absent" check and each receive a different Any() object, defeating the lock.
+    // computeIfAbsent is guaranteed by ConcurrentHashMap to call the lambda at most once
+    // and return the same object to all concurrent callers for the same key.
+    private fun writeLockFor(key: String): Any = writeLocks.computeIfAbsent(key) { Any() }
+
+    // Track the last time each log file was explicitly flushed to disk.
+    // We flush eagerly on background transition and periodically (every FLUSH_INTERVAL_MS)
+    // rather than after every single line — one fewer kernel write call per message.
+    private val lastFlushMs = ConcurrentHashMap<String, Long>()
+    private val FLUSH_INTERVAL_MS = 5_000L
 
     // Cache resolved SAF file URIs to avoid repeated directory scans on every message.
     // Key is "$treeUri|$netDir|$fileName". Cleared when a write to that URI fails, so a
@@ -79,21 +97,49 @@ class LogWriter(private val ctx: Context) {
         dir.mkdirs()
         val f = File(dir, safeBufferFileName(buffer))
         val cacheKey = f.absolutePath
-        val writer = openWriters.getOrPut(cacheKey) {
-            BufferedWriter(FileWriter(f, /* append = */ true), 8192)
+        // Synchronise on a per-file lock so two coroutines writing to the same buffer
+        // cannot interleave lines. ConcurrentHashMap.getOrPut is not atomic for the
+        // writer itself, so we need an explicit guard around the get-or-create + write.
+        synchronized(writeLockFor(cacheKey)) {
+            val writer = openWriters.getOrPut(cacheKey) {
+                BufferedWriter(FileWriter(f, /* append = */ true), 8192)
+            }
+            writer.write(line)
+            writer.newLine()
+            // Throttled flush: flush immediately if we haven't flushed this file within
+            // FLUSH_INTERVAL_MS, otherwise let the BufferedWriter accumulate more data.
+            // flushAll() is called on background transition to ensure no lines are lost
+            // when the process might be killed, so crash safety is preserved.
+            val now = System.currentTimeMillis()
+            if (now - (lastFlushMs[cacheKey] ?: 0L) >= FLUSH_INTERVAL_MS) {
+                writer.flush()
+                lastFlushMs[cacheKey] = now
+            }
         }
-        writer.write(line)
-        writer.newLine()
-        // Flush after each line so partial writes are visible on the disk even if the
-        // process is killed. The BufferedWriter still amortises the syscall overhead
-        // compared to a fresh FileOutputStream per message.
-        writer.flush()
+    }
+
+    /**
+     * Flush all open log file handles without closing them.
+     * Call when the app goes to background so buffered lines reach disk before
+     * the process might be killed by the OS.
+     */
+    fun flushAll() {
+        val now = System.currentTimeMillis()
+        for ((key, writer) in openWriters) {
+            synchronized(writeLockFor(key)) {
+                runCatching { writer.flush() }
+                lastFlushMs[key] = now
+            }
+        }
+        for ((_, stream) in safWriters) runCatching { stream.flush() }
     }
 
     /** Flush and close all open log file handles (internal and SAF). Call when logging is disabled or app exits. */
     fun closeAll() {
         val internalSnapshot = openWriters.entries.toList()
         openWriters.clear()
+        lastFlushMs.clear()
+        writeLocks.clear()
         for ((_, writer) in internalSnapshot) runCatching { writer.close() }
 
         val safSnapshot = safWriters.entries.toList()
@@ -337,21 +383,6 @@ class LogWriter(private val ctx: Context) {
             }
         }
         return result
-    }
-
-    private fun appendToDocument(resolver: ContentResolver, docUri: Uri, text: String) {
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        runCatching {
-            resolver.openOutputStream(docUri, "wa")?.use { it.write(bytes); it.flush(); return }
-        }
-        // Fallback: open RW and seek to end
-        resolver.openFileDescriptor(docUri, "rw")?.use { pfd ->
-            FileOutputStream(pfd.fileDescriptor).channel.use { ch ->
-                ch.position(ch.size())
-                ch.write(ByteBuffer.wrap(bytes))
-                ch.force(true)
-            }
-        }
     }
 
     // Filename helpers

@@ -428,6 +428,12 @@ class IrcViewModel(
     private var desiredNetworkIdsApplied = false
     private val autoReconnectJobs = mutableMapOf<String, Job>()
     private val reconnectAttempts = mutableMapOf<String, Int>()
+    // Cache the last label/status sent to the foreground service notification so we can
+    // skip the startService() Binder IPC when nothing has changed. Every setNetConn() call
+    // (lag updates, status changes, etc.) goes through refreshConnectionNotification(),
+    // which would otherwise fire an IPC and wake the NotificationManager on every ping.
+    private var lastNotifLabel: String? = null
+    private var lastNotifStatus: String? = null
     private val manualDisconnecting = mutableSetOf<String>()
     private val noNetworkNotice = mutableSetOf<String>()
 
@@ -1697,13 +1703,21 @@ fun startAddNetwork() {
                 val p = profile.saslPassword?.trim()
                 if (!p.isNullOrBlank()) {
                     repo.secretStore.setSaslPassword(profile.id, p)
+                } else {
+                    // SASL is enabled but the password field was cleared — remove the
+                    // stored secret so the old password does not persist in SecretStore.
+                    repo.secretStore.clearSaslPassword(profile.id)
                 }
             } else {
                 repo.secretStore.clearSaslPassword(profile.id)
             }
 
             val sp = profile.serverPassword?.trim()
-            if (!sp.isNullOrBlank()) repo.secretStore.setServerPassword(profile.id, sp)
+            if (!sp.isNullOrBlank()) {
+                repo.secretStore.setServerPassword(profile.id, sp)
+            } else {
+                repo.secretStore.clearServerPassword(profile.id)
+            }
 
             var updated = profile.copy(
                 saslPassword = null,
@@ -2390,6 +2404,30 @@ fun startAddNetwork() {
      *
      * No-op if the user has disabled [UiSettings.sendTypingIndicator] in Settings (privacy).
      */
+    /**
+     * Called when the app transitions to background. Immediately sends a "done" typing
+     * indicator so remote users don't see us typing forever, and cancels the pending
+     * paused/done timer coroutine so it doesn't wake the CPU 6–30 s later.
+     */
+    /** Called when the app goes to background: flush log buffers to disk. */
+    fun flushLogs() {
+        if (_state.value.settings.loggingEnabled) {
+            viewModelScope.launch(Dispatchers.IO) { runCatching { logs.flushAll() } }
+        }
+    }
+
+    fun cancelTypingOnBackground() {
+        typingDoneJob?.cancel()
+        typingDoneJob = null
+        val prevKey = typingLastKey ?: return
+        typingLastKey = null
+        typingActiveLastSentMs = 0L
+        val (prevNet, prevBuf) = splitKey(prevKey)
+        viewModelScope.launch {
+            runCatching { runtimes[prevNet]?.client?.sendTypingStatus(prevBuf, "done") }
+        }
+    }
+
     fun notifyTypingChanged(text: String) {
         val st = _state.value
 
@@ -3114,14 +3152,18 @@ fun startAddNetwork() {
                 if (_state.value.activeNetworkId == netId) updateConnectionNotification("Connected")
             }
             is IrcEvent.LagUpdated -> {
-                // Skip the startService() IPC call when backgrounded - the notification
-                // text never shows lag values so there's nothing to update.
-                // Still update state so the lag bar is fresh when the user returns.
                 if (!AppVisibility.isForeground) {
-                    _state.update { st ->
-                        val old = st.connections[netId] ?: NetConnState()
-                        val newConns = st.connections + (netId to old.copy(lagMs = ev.lagMs))
-                        syncActiveNetworkSummary(st.copy(connections = newConns))
+                    // Backgrounded: skip the startService() IPC call (notification text
+                    // never shows lag values) and skip the state write entirely if the
+                    // lag value hasn't changed — every PING/PONG would otherwise trigger
+                    // a full Compose recomposition for no visible benefit.
+                    val current = _state.value.connections[netId]?.lagMs
+                    if (current != ev.lagMs) {
+                        _state.update { st ->
+                            val old = st.connections[netId] ?: NetConnState()
+                            val newConns = st.connections + (netId to old.copy(lagMs = ev.lagMs))
+                            syncActiveNetworkSummary(st.copy(connections = newConns))
+                        }
                     }
                 } else {
                     setNetConn(netId) { it.copy(lagMs = ev.lagMs) }
@@ -4038,11 +4080,13 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     val st1 = _state.value
                     removeNickFromChannel(netId, chanKey, ev.nick)
                     val updated = rebuildNicklist(netId, chanKey)
-                    // Clear any pending typing indicator for the parted nick.
+                    // Clear any pending typing indicator for the parted nick,
+                    // and cancel the expiry coroutine so it doesn't linger for 30 s.
                     val bufAfterPart = st1.buffers[chanKey]
                     val clearedBuf = if (bufAfterPart != null && ev.nick in bufAfterPart.typingNicks)
                         bufAfterPart.copy(typingNicks = bufAfterPart.typingNicks - ev.nick) else bufAfterPart
                     val newBufs = if (clearedBuf != null) st1.buffers + (chanKey to clearedBuf) else st1.buffers
+                    receivedTypingExpiryJobs.remove("$chanKey/${ev.nick}")?.cancel()
                     _state.value = syncActiveNetworkSummary(st1.copy(nicklists = st1.nicklists + (chanKey to updated), buffers = newBufs))
                 }
             }
@@ -4153,8 +4197,10 @@ if (affectLive) {
     nickAwayState[netId]?.remove(casefoldText(netId, ev.nick))
     // Clear any pending typing indicator for the quitting nick across all buffers on this network.
     val newBufs = st1.buffers.mapValues { (k, buf) ->
-        if (k.startsWith("$netId::") && ev.nick in buf.typingNicks)
+        if (k.startsWith("$netId::") && ev.nick in buf.typingNicks) {
+            receivedTypingExpiryJobs.remove("$k/${ev.nick}")?.cancel()
             buf.copy(typingNicks = buf.typingNicks - ev.nick)
+        }
         else buf
     }
     _state.value = syncActiveNetworkSummary(st1.copy(nicklists = newNicklists, buffers = newBufs))
@@ -4933,7 +4979,14 @@ if (affectLive) {
                 return@update st
             }
 
-            val isSelected = (bufferKey == st.selectedBuffer && st.screen == AppScreen.CHAT)
+            // A buffer is only "selected" (suppressing unread tracking) when the user can
+            // actually see it: right screen, right buffer, AND the app is in the foreground.
+            // Without the foreground check, messages arriving while the app is backgrounded
+            // mark themselves as read and advance lastReadTimestamp, so the unread bar never
+            // appears when the user returns — even though a notification fired for the message.
+            val isSelected = (bufferKey == st.selectedBuffer
+                && st.screen == AppScreen.CHAT
+                && AppVisibility.isForeground)
             val unreadInc = if (!isSelected && !isLocal) 1 else 0
             val highlightInc = if (!isSelected && isHighlight && !isLocal) 1 else 0
 
@@ -5366,6 +5419,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 return
             }
 
+            lastNotifLabel = null
+            lastNotifStatus = null
             runCatching {
                 val i = Intent(appContext, KeepAliveService::class.java).apply { action = KeepAliveService.ACTION_STOP }
                 appContext.startService(i)
@@ -5392,6 +5447,12 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         }
 
         if (st.settings.keepAliveInBackground) {
+            // Skip the Binder IPC if the visible text hasn't changed — avoids waking
+            // NotificationManager on every lag update / ping cycle (once per minute).
+            if (label == lastNotifLabel && status == lastNotifStatus && KeepAliveService.isRunning) return
+            lastNotifLabel = label
+            lastNotifStatus = status
+
             val i = Intent(appContext, KeepAliveService::class.java).apply {
                 action = KeepAliveService.ACTION_UPDATE
                 putExtra(KeepAliveService.EXTRA_NETWORK_ID, netIdForIntent)
