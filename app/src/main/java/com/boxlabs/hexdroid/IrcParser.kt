@@ -89,7 +89,15 @@ class IrcParser {
                     else -> out.append(n)
                 }
                 i += 2
-            } else { out.append(c); i++ }
+            } else if (c == '\\') {
+                // Trailing backslash with no following character: the IRCv3 spec says
+                // tag values MUST NOT end with a backslash. Drop it silently rather
+                // than emitting a literal '\' which could confuse downstream consumers.
+                i++
+            } else {
+                out.append(c)
+                i++
+            }
         }
         return out.toString()
     }

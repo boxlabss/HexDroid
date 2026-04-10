@@ -428,6 +428,13 @@ class IrcViewModel(
     private var desiredNetworkIdsApplied = false
     private val autoReconnectJobs = mutableMapOf<String, Job>()
     private val reconnectAttempts = mutableMapOf<String, Int>()
+    /**
+     * Per-network jobs that fire after STABLE_CONNECTION_MS of uptime to reset the
+     * reconnect backoff counter. Cancelled on disconnect so a short-lived connection
+     * (e.g. a Z-lined or immediately-dropped session) never clears the backoff,
+     * preserving exponential back-off across rapid connect/disconnect cycles.
+     */
+    private val stableConnectionJobs = mutableMapOf<String, Job>()
     // Cache the last label/status sent to the foreground service notification so we can
     // skip the startService() Binder IPC when nothing has changed. Every setNetConn() call
     // (lag updates, status changes, etc.) goes through refreshConnectionNotification(),
@@ -1524,6 +1531,14 @@ class IrcViewModel(
                 replyToMsgId = if (hasReplyTagCap && msgId != null) msgId else null)
         }
     }
+    /**
+     * Returns true when there is a live, registered IRC connection for [networkId].
+     * Used by [NotificationReplyReceiver] to detect the dead-process restart case where
+     * the ViewModel exists but has no active runtime, and suppress silent reply drops.
+     */
+    fun hasLiveConnection(networkId: String): Boolean =
+        runtimes[networkId]?.client?.isConnectedNow() == true
+
     fun updateSettings(update: UiSettings.() -> UiSettings) {
         // Apply immediately; DataStore confirms shortly after.
         val st = _state.value
@@ -1789,6 +1804,7 @@ fun startAddNetwork() {
         // Reconnect state
         reconnectAttempts.remove(netId)
         autoReconnectJobs.remove(netId)?.cancel()
+        stableConnectionJobs.remove(netId)?.cancel()
         noNetworkNotice.remove(netId)
         // Flap detection (NOT cleared here - we want to preserve across reconnect cycles
         // so flapping doesn't reset just because cleanupNetworkMaps was called.
@@ -2149,6 +2165,8 @@ fun startAddNetwork() {
         reconnectAttempts.clear()
         autoReconnectJobs.values.forEach { it.cancel() }
         autoReconnectJobs.clear()
+        stableConnectionJobs.values.forEach { it.cancel() }
+        stableConnectionJobs.clear()
         noNetworkNotice.clear()
 
         // Stop the foreground service + cancel notifications immediately.
@@ -2982,43 +3000,44 @@ fun startAddNetwork() {
     }
     
     /**
-     * Split a message into chunks that don't exceed maxLen bytes (UTF-8).
-     * Tries to split on word boundaries when possible.
+     * Split a message into chunks that don't exceed [maxLen] bytes (UTF-8).
+     *
+     * Uses a single-pass byte-slice strategy instead of repeated toByteArray() calls,
+     * keeping allocations O(n) regardless of how many chunks the message produces.
+     * Tries to split on a word boundary (space) when one falls in the back half of a chunk.
      */
     private fun splitMessageByLength(text: String, maxLen: Int): List<String> {
-        if (text.toByteArray(Charsets.UTF_8).size <= maxLen) {
-            return listOf(text)
-        }
-        
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxLen) return listOf(text)
+
         val chunks = mutableListOf<String>()
-        var remaining = text
-        
-        while (remaining.isNotEmpty()) {
-            if (remaining.toByteArray(Charsets.UTF_8).size <= maxLen) {
-                chunks.add(remaining)
+        var byteOffset = 0
+
+        while (byteOffset < bytes.size) {
+            val remaining = bytes.size - byteOffset
+            if (remaining <= maxLen) {
+                chunks.add(String(bytes, byteOffset, remaining, Charsets.UTF_8))
                 break
             }
-            
-            // Find a good split point
-            var splitAt = maxLen
-            // Start from maxLen and work backwards to find a character boundary
-            while (splitAt > 0 && remaining.substring(0, minOf(splitAt, remaining.length))
-                    .toByteArray(Charsets.UTF_8).size > maxLen) {
-                splitAt--
-            }
-            
-            if (splitAt == 0) splitAt = 1  // Ensure we make progress
-            splitAt = minOf(splitAt, remaining.length)
-            
-            // Try to split on a word boundary (space)
-            val chunk = remaining.substring(0, splitAt)
-            val lastSpace = chunk.lastIndexOf(' ')
-            val actualSplit = if (lastSpace > splitAt / 2) lastSpace else splitAt
-            
-            chunks.add(remaining.substring(0, actualSplit).trim())
-            remaining = remaining.substring(actualSplit).trim()
+
+            // End candidate: maxLen bytes from current offset.
+            var end = byteOffset + maxLen
+
+            // Walk back to a UTF-8 character boundary (continuation bytes start with 10xxxxxx).
+            while (end > byteOffset && (bytes[end].toInt() and 0xC0) == 0x80) end--
+
+            // Decode the candidate slice to find a word-boundary split point.
+            val slice = String(bytes, byteOffset, end - byteOffset, Charsets.UTF_8)
+            val lastSpace = slice.lastIndexOf(' ')
+            val chunk = if (lastSpace > slice.length / 2) slice.substring(0, lastSpace) else slice
+
+            chunks.add(chunk.trim())
+            // Advance byte offset by the exact byte count of the chunk we actually kept.
+            byteOffset += chunk.toByteArray(Charsets.UTF_8).size
+            // Skip any leading whitespace at the new offset to avoid empty chunks.
+            while (byteOffset < bytes.size && bytes[byteOffset] == ' '.code.toByte()) byteOffset++
         }
-        
+
         return chunks.filter { it.isNotEmpty() }
     }
 
@@ -3143,7 +3162,10 @@ fun startAddNetwork() {
             }
             is IrcEvent.Connected -> {
                 manualDisconnecting.remove(netId)
-                reconnectAttempts.remove(netId)  // Reset reconnect backoff on successful connection
+                // Do NOT reset reconnectAttempts here — the connection may be dropped
+                // immediately (Z-line, cert error, etc.).  The backoff is only cleared
+                // after STABLE_CONNECTION_MS of uptime (see IrcEvent.Registered).
+                stableConnectionJobs.remove(netId)?.cancel() // cancel any leftover timer
                 runtimes[netId]?.apply { suppressMotd = _state.value.settings.hideMotdOnConnect; manualMotdAtMs = 0L }
                 autoReconnectJobs.remove(netId)?.cancel()
                 setNetConn(netId) {
@@ -3170,6 +3192,9 @@ fun startAddNetwork() {
                 }
             }
             is IrcEvent.Disconnected -> {
+                // A disconnect cancels the stability timer so a short-lived session
+                // (dropped before STABLE_CONNECTION_MS) never clears the backoff counter.
+                stableConnectionJobs.remove(netId)?.cancel()
                 val r = ev.reason?.trim()
                 val pretty = when {
                     r.isNullOrBlank() -> "Disconnected"
@@ -3473,6 +3498,15 @@ if (code == "442") {
                     (rt0.client.hasCap("message-tags") || rt0.client.hasCap("draft/message-reactions"))
                 setNetConn(netId) { it.copy(myNick = ev.nick, hasReactionSupport = hasReact) }
                 append(bufKey(netId, "*server*"), from = null, text = "*** Registered as ${ev.nick}", doNotify = false)
+
+                // Start the stability timer.  Only once this fires do we consider the
+                // connection stable enough to reset the exponential backoff counter.
+                stableConnectionJobs.remove(netId)?.cancel()
+                stableConnectionJobs[netId] = viewModelScope.launch {
+                    delay(ConnectionConstants.STABLE_CONNECTION_MS)
+                    reconnectAttempts.remove(netId)
+                    stableConnectionJobs.remove(netId)
+                }
 
                 val rt = runtimes[netId] ?: return
                 val profile = _state.value.networks.firstOrNull { it.id == netId }
@@ -3856,7 +3890,8 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     isLocal = suppressUnread,
                     timeMs = ev.timeMs,
                     doNotify = false,
-                    msgId = ev.msgId
+                    msgId = ev.msgId,
+                    replyToMsgId = ev.replyToMsgId,
                 )
             }
 
@@ -6098,7 +6133,7 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
         networkCallback?.let { cb -> runCatching { cm?.unregisterNetworkCallback(cb) } }
         networkCallback = null
         // Flush and close all open log file handles so the last few lines written via the
-        // BufferedWriter cache (fix #8) are not lost when the ViewModel is destroyed.
+        // BufferedWriter cache are not lost when the ViewModel is destroyed.
         logs.closeAll()
     }
 }

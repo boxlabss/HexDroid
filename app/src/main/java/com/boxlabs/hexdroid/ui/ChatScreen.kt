@@ -605,26 +605,30 @@ private fun SidebarDragHandle(
 }
 
 /**
- * Small quoted preview shown above a message that carries a +reply tag,
- * pointing at the parent message by its msgid.
+ * Small quoted preview shown above a message that carries a +reply tag.
  *
- * Looks up the parent in [messages] by msgid.  If the parent has scrolled out
- * of the buffer window or hasn't arrived yet, shows a neutral placeholder so
- * the threading intent is still visible.
+ * Resolves the parent via [msgStrToDisplayIdx] (O(1)) rather than scanning
+ * the message list on every recomposition.  [msgIdToText] carries the
+ * (from, text) pair for each known msgId so the label can be rendered without
+ * a second lookup.  Both maps are built once per displayItems change.
+ *
+ * [canScroll] is true when [msgStrToDisplayIdx] contains the parent's msgId,
+ * meaning it is currently visible in the buffer window and the user can tap
+ * to jump to it.  When false (parent outside window), the quote is shown as
+ * a non-tappable placeholder so threading intent is still visible.
  */
 @Composable
 private fun ReplyQuote(
     replyToMsgId: String,
-    messages: List<UiMessage>,
+    msgIdToText: Map<String, Pair<String?, String>>,
+    canScroll: Boolean,
     onTap: () -> Unit,
 ) {
-    val parent = remember(replyToMsgId, messages) {
-        messages.lastOrNull { it.msgId == replyToMsgId }
-    }
+    val entry = msgIdToText[replyToMsgId]  // O(1)
     val label = when {
-        parent == null       -> "↩ (original message not in window)"
-        parent.from != null  -> "↩ ${parent.from}: ${stripIrcFormatting(parent.text).take(80)}"
-        else                 -> "↩ ${stripIrcFormatting(parent.text).take(80)}"
+        entry == null          -> "↩ (original message not in window)"
+        entry.first != null    -> "↩ ${entry.first}: ${stripIrcFormatting(entry.second).take(80)}"
+        else                   -> "↩ ${stripIrcFormatting(entry.second).take(80)}"
     }
     Text(
         text = label,
@@ -634,7 +638,7 @@ private fun ReplyQuote(
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = parent != null, onClick = onTap)
+            .clickable(enabled = canScroll, onClick = onTap)
             .background(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 RoundedCornerShape(4.dp)
@@ -983,9 +987,9 @@ fun ChatScreen(
             .also { it.add(myNickBase) }  // include the global fallback nick too
     }
 
-    // Sorted nicklist used by the nicklist panel for rank-based colour assignment.
-    // Nick colouring in messages use a stable hash so colours don't
-    // shift when someone joins or leaves.
+    // Sorted base nicks used by nicklistColorMap inside NicklistContent and by
+    // the adjacency-nudge logic. Nick colours in messages use a stable hash so
+    // they never shift when someone joins or leaves.
     val sortedBaseNicks = remember(nicklist) {
         nicklist
             .map { baseNick(it).lowercase() }
@@ -999,8 +1003,8 @@ fun ChatScreen(
         val custom = state.settings.ownNickColorInt
         if (custom != null && base in allMyNicks) return Color(custom)
         // Stable hash-based colour for messages — never changes regardless of who
-        // else is in the channel. The nicklist panel uses colorForNickInChannel
-        // with sortedBaseNicks instead.
+        // else is in the channel. The nicklist panel uses nicklistColorMap
+        // (pre-computed with adjacency nudge) instead.
         return NickColors.colorForNick(base, bgLum)
     }
 
@@ -1081,10 +1085,12 @@ fun ChatScreen(
 
         val reply = pendingReply
         input = TextFieldValue("")
-        pendingReply = null
 
         if (reply != null && !isCommand) {
             // Route through reply path so the ViewModel can attach draft/reply tag if supported.
+            // Only clear pendingReply once it has actually been consumed, so a slash command
+            // typed while a reply is pending doesn't silently discard the reply context.
+            pendingReply = null
             onSendReply(
                 selNetId,
                 selBufName,
@@ -1094,6 +1100,9 @@ fun ChatScreen(
                 reply.msgId,
             )
         } else {
+            // Clear reply context only when there is none pending, or when the user typed
+            // a plain message (not a command with a pending reply still active).
+            if (reply == null || !isCommand) pendingReply = null
             onSend(formattedText)
         }
     }
@@ -1475,13 +1484,23 @@ fun ChatScreen(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             HorizontalDivider()
+            // Pre-computed sidebar colours with adjacency-conflict nudge.
+            // Declared here (inside NicklistContent) so it captures sortedBaseNicks
+            // and bgLum from the outer composable scope without needing to be passed
+            // as a parameter. Rebuilds only when the nicklist or theme changes.
+            val nicklistColorMap = remember(sortedBaseNicks, bgLum) {
+                val colors = NickColors.nicklistColors(sortedBaseNicks, bgLum)
+                sortedBaseNicks.zip(colors).toMap<String, Color>()
+            }
+
             LazyColumn(Modifier.fillMaxSize()) {
                 items(nicklist) { n ->
                     val cleaned = baseNick(n)
                     Text(
                         n,
                         color = if (state.settings.colorizeNicks)
-                            NickColors.colorForNickInChannel(cleaned, sortedBaseNicks, bgLum)
+                            nicklistColorMap[cleaned.lowercase()]
+                                ?: NickColors.colorForNick(cleaned.lowercase(), bgLum)
                         else Color.Unspecified,
                         fontSize = nickFontSp.sp,
                         maxLines = 1,
@@ -1597,6 +1616,10 @@ fun ChatScreen(
     // Starts empty; LaunchedEffect keys include this map so effects retry once it arrives.
     var msgIdToDisplayIdxHoisted by remember { mutableStateOf(emptyMap<Long, Int>()) }
     var displayIdxToMsgIdHoisted  by remember { mutableStateOf(emptyMap<Int, Long>()) }
+    /** IRCv3 msgid String → displayItems index; populated together with [msgIdToDisplayIdxHoisted]. */
+    var msgStrToDisplayIdxHoisted by remember { mutableStateOf(emptyMap<String, Int>()) }
+    /** IRCv3 msgid String → (from, text) for O(1) reply-quote label rendering. */
+    var msgIdToTextHoisted by remember { mutableStateOf(emptyMap<String, Pair<String?, String>>()) }
 
     // Resolve an anchor string to the displayItems index (or -1).
     // When msgIdToDisplayIdxHoisted is already populated (buffer was already visible),
@@ -2118,12 +2141,40 @@ fun ChatScreen(
                     }
                     map
                 }
+                // IRCv3 msgid (String) → display index for O(1) reply-quote scroll.
+                // Built alongside the Long-keyed map so both stay in sync.
+                val msgStrToDisplayIdx = remember(displayItems) {
+                    val map = HashMap<String, Int>(displayItems.size * 2)
+                    for ((i, item) in displayItems.withIndex()) {
+                        when (item) {
+                            is DisplayItem.Single ->
+                                item.msg.msgId?.let { map[it] = i }
+                            is DisplayItem.Art    ->
+                                item.msgs.forEach { m -> m.msgId?.let { map[it] = i } }
+                        }
+                    }
+                    map
+                }
+                // IRCv3 msgid String → (from, text) for O(1) reply-quote label rendering.
+                val msgIdToText = remember(displayItems) {
+                    val map = HashMap<String, Pair<String?, String>>(displayItems.size * 2)
+                    for (item in displayItems) {
+                        val msgs = when (item) {
+                            is DisplayItem.Single -> listOf(item.msg)
+                            is DisplayItem.Art    -> item.msgs
+                        }
+                        for (m in msgs) m.msgId?.let { map[it] = m.from to m.text }
+                    }
+                    map
+                }
                 // Keep both maps in sync whenever displayItems changes so the
                 // highlight LaunchedEffect always resolves anchors to the correct index.
                 LaunchedEffect(msgIdToDisplayIdx) {
                     msgIdToDisplayIdxHoisted = msgIdToDisplayIdx
                     displayIdxToMsgIdHoisted = msgIdToDisplayIdx.entries
                         .associateTo(HashMap(msgIdToDisplayIdx.size)) { (id, idx) -> idx to id }
+                    msgStrToDisplayIdxHoisted = msgStrToDisplayIdx
+                    msgIdToTextHoisted = msgIdToText
                 }
                 val unreadDisplayIdx = if (reversedUnreadIndex in reversedMessages.indices)
                     msgIdToDisplayIdx[reversedMessages[reversedUnreadIndex].id] ?: -1
@@ -2255,6 +2306,8 @@ fun ChatScreen(
                             reversedMessages = reversedMessages,
                             listState = listState,
                             msgIdToDisplayIdx = msgIdToDisplayIdxHoisted,
+                            msgStrToDisplayIdx = msgStrToDisplayIdxHoisted,
+                            msgIdToText = msgIdToTextHoisted,
                             scope = scope,
                             chatTextStyle = chatTextStyle,
                             motdStyle = motdStyle,
@@ -4438,6 +4491,10 @@ private fun SingleMessageItem(
     reversedMessages: List<UiMessage>,
     listState: LazyListState,
     msgIdToDisplayIdx: Map<Long, Int>,
+    /** IRCv3 msgid (String) → display index — used for O(1) reply-quote scroll. */
+    msgStrToDisplayIdx: Map<String, Int>,
+    /** IRCv3 msgid (String) → (from, text) — used for O(1) reply label rendering. */
+    msgIdToText: Map<String, Pair<String?, String>>,
     scope: CoroutineScope,
     chatTextStyle: androidx.compose.ui.text.TextStyle,
     motdStyle: androidx.compose.ui.text.TextStyle,
@@ -4464,13 +4521,16 @@ private fun SingleMessageItem(
 
     androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
         if (m.replyToMsgId != null) {
+            val replyDisplayIdx = msgStrToDisplayIdx[m.replyToMsgId] ?: -1
             ReplyQuote(
                 replyToMsgId = m.replyToMsgId,
-                messages = messages,
+                msgIdToText = msgIdToText,
+                canScroll = replyDisplayIdx >= 0,
                 onTap = {
-                    val msg = reversedMessages.firstOrNull { it.msgId == m.replyToMsgId }
-                    val displayIdx = if (msg != null) msgIdToDisplayIdx[msg.id] ?: -1 else -1
-                    if (displayIdx >= 0) scope.launch { listState.animateScrollToItem(displayIdx) }
+                    // O(1): index already resolved above via msgStrToDisplayIdx.
+                    if (replyDisplayIdx >= 0) {
+                        scope.launch { listState.animateScrollToItem(replyDisplayIdx) }
+                    }
                 },
             )
         }

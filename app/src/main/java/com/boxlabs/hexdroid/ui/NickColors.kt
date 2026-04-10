@@ -21,48 +21,63 @@ package com.boxlabs.hexdroid.ui
 import androidx.compose.ui.graphics.Color
 
 /**
- * Nick colour per-channel sorted assignment
+ * Nick colour assignment
  *
- * Each nick's colour is determined by its alphabetical rank in the current
- * channel's nicklist
+ * Both the sidebar and message nicks use the same stable hash ([colorForNick]) so a
+ * nick always appears in the same colour everywhere.  The sidebar additionally runs a
+ * lightweight forward-scan pass ([nicklistColors]) that detects when two alphabetically
+ * adjacent nicks land within [MIN_HUE_GAP]° of each other and nudges the later one to
+ * the opposite side of the wheel, guaranteeing no two consecutive sidebar entries share
+ * a similar hue.  Because this nudge is applied only at display time and held in a
+ * remember-cached map, it carries no persistent memory overhead.
  *
- * Every nick in a channel is guaranteed a distinct hue (up to 18 x 8 = 144 unique slots)
- * Adjacent nicks in the list receive hues ≈180° apart (phi-stride of 7 through
- * 18 slots) so the nicklist looks maximally spread-out.
- * Nicks not found in the current nicklist (e.g. server messages, nicks that have
- * left) fall back to [colorForNick] which is a stable pure-hash function.
+ * Palette: 45 hue slots spanning the full wheel while skipping two visually muddy zones:
+ *   • yellow-green (58–91°): hard to read on both light and dark backgrounds
+ *   • cyan         (168–204°): low contrast, visually confusable with blue/green
  */
 object NickColors {
 
     /**
-     * 18 hues (degrees) chosen for maximum human perceptual separation.
-     * Skips yellow-green (55–88°) and cyan (170–200°) muddle zones.
+     * 45 hue slots — midpoints interpolated within each clean arc to halve the
+     * spacing from ~12° to ~6°, doubling the effective palette without adding
+     * any entries in the two muddy zones.
+     *
+     * Arc 1 — reds / oranges / ambers (0–50°):    9 slots, ~6° apart
+     * Arc 2 — greens / teals          (91–163°):  13 slots, ~6° apart
+     * Arc 3 — blues / purples / pinks (204–347°): 23 slots, ~6–7° apart
+     *
+     * Combined with 8 lightness/saturation bands: 45 × 8 = 360 unique colour
+     * slots before any repeat (up from 24 × 8 = 192).
      */
     private val hueSlots = floatArrayOf(
-          0f,   // red
-         18f,   // red-orange
-         35f,   // orange
-         52f,   // amber / gold
-         95f,   // chartreuse green  (after yellow-green muddle)
-        115f,   // green
-        133f,   // emerald
-        152f,   // teal-green
-        163f,   // teal            (before cyan muddle)
-        208f,   // sky / azure     (after cyan muddle)
-        226f,   // cornflower
-        243f,   // blue
-        260f,   // blue-indigo
-        275f,   // indigo
-        292f,   // violet
-        308f,   // purple
-        325f,   // magenta
-        342f,   // rose / deep pink
+        // Arc 1: reds → ambers (0–50°)
+          0f,   6f,  12f,  18f,  24f,  30f,  36f,  43f,  50f,
+        // Arc 2: chartreuse → teal (91–163°)
+         91f,  97f, 103f, 109f, 115f, 121f, 127f, 133f, 139f, 145f, 151f, 157f, 163f,
+        // Arc 3: azure → deep rose (204–347°)
+        204f, 210f, 217f, 223f, 230f, 236f, 243f, 249f, 256f, 262f,
+        269f, 275f, 282f, 288f, 295f, 301f, 308f, 314f, 321f, 327f, 334f, 340f, 347f,
     )
 
-    // Stride through hue slots. Must be coprime with hueSlots.size (18).
-    // 7 is coprime with 18 and gives phi-like spread: nicks 0,1,2,3 get
-    // hues 0°, 133°, 266°, 39° roughly evenly distributed across the wheel.
-    private const val HUE_STRIDE = 7
+    // 11 is coprime with 45 (45 = 3²×5; gcd(11,45)=1) and gives near-golden-angle
+    // jumps across the slot array, so consecutive hash indices land far apart.
+    // Kept for reference; the hash function uses a multiplicative probe, not this stride.
+    @Suppress("unused")
+    private const val HUE_STRIDE = 11
+
+    /**
+     * Minimum hue distance (°, shortest arc) between two adjacent sidebar nicks
+     * before the later one is nudged away.
+     */
+    private const val MIN_HUE_GAP = 40f
+
+    /**
+     * Rotation applied when a sidebar conflict is detected.  167° (not exactly 180°)
+     * avoids accidentally landing on a hue that is perceptually very similar at a
+     * different saturation/lightness, and keeps the nudged colour in a clearly
+     * distinct region of the wheel.
+     */
+    private const val CONFLICT_NUDGE_DEG = 167f
 
     private data class Band(val lightness: Float, val saturation: Float)
 
@@ -91,40 +106,15 @@ object NickColors {
     )
 
     /**
-     * Assign a colour to [baseNick] based on its position in [sortedBaseNicks].
+     * Stable hash-based colour for [baseNick].
      *
-     * [sortedBaseNicks] should be the channel's nicklist stripped of mode prefixes
-     * (@ + % & ~) and lowercased, sorted alphabetically.  The caller computes and
-     * caches this list for the nicklist UI anyway, so there is no extra allocation.
-     *
-     * Hue slots are assigned with stride [HUE_STRIDE] (coprime with 18) so that
-     * alphabetically adjacent nicks are ≈ 133° apart rather than next-door.
-     * After cycling through all 18 hues, the band increments, giving 144 distinct
-     * slots before any repeat.
-     *
-     * Falls back to [colorForNick] if [baseNick] is not found (left the channel,
-     * server message sender, etc.).
-     */
-    fun colorForNickInChannel(
-        baseNick: String,
-        sortedBaseNicks: List<String>,
-        bgLum: Float,
-    ): Color {
-        val idx = sortedBaseNicks.indexOfFirst { it.equals(baseNick, ignoreCase = true) }
-        if (idx < 0) return colorForNick(baseNick, bgLum)
-
-        val bands = if (bgLum < 0.5f) darkBgBands else lightBgBands
-        val hueIdx  = (idx * HUE_STRIDE) % hueSlots.size
-        val bandIdx = (idx / hueSlots.size) % bands.size
-        return Color.hsl(hueSlots[hueIdx], bands[bandIdx].saturation, bands[bandIdx].lightness)
-    }
-
-    /**
-     * Stable hash-based colour used as a fallback for nicks not in the current
-     * channel nicklist (server buffers, query windows, nicks that have left).
+     * This is the single source of truth used for message rows, query window titles,
+     * and any other place where a nick needs a colour without access to the full sorted
+     * nicklist.  The colour depends only on the nick string and the dark/light mode —
+     * it never changes because of who else happens to be online.
      */
     fun colorForNick(baseNick: String, bgLum: Float): Color {
-        val bands = if (bgLum < 0.5f) darkBgBands else lightBgBands
+        val bands   = if (bgLum < 0.5f) darkBgBands else lightBgBands
         val h       = mixHash(baseNick.lowercase().hashCode())
         val hueIdx  = positiveMod(h * 0x9e3779b9.toInt(), hueSlots.size)
         val bandIdx = positiveMod(mixHash(h xor 0x517cc1b7), bands.size)
@@ -137,6 +127,75 @@ object NickColors {
             (band.saturation + satJitter).coerceIn(0.30f, 0.98f),
             (band.lightness  + lumJitter).coerceIn(0.10f, 0.93f),
         )
+    }
+
+    /**
+     * Pre-compute sidebar colours for a sorted nicklist in a single O(n) pass.
+     *
+     * Each nick starts from its stable [colorForNick] hue.  A forward scan then checks
+     * consecutive pairs: if two adjacent hues are within [MIN_HUE_GAP]° of each other
+     * (shortest arc on the 360° wheel), the later nick is rotated by [CONFLICT_NUDGE_DEG]°
+     * so it lands on a perceptually distinct hue while keeping the same saturation and
+     * lightness band.
+     *
+     * The returned list is parallel to [sortedBaseNicks] — index N is the sidebar colour
+     * for `sortedBaseNicks[N]`.  Build a `Map<String, Color>` once (inside `remember`)
+     * for O(1) lookup during LazyColumn rendering.
+     *
+     * Memory: one `FloatArray(n)` for intermediate hues + the returned `List<Color>`,
+     * both the same size as the input.  No persistent state is stored anywhere.
+     *
+     * For nicks that need no nudge the returned colour is identical to [colorForNick],
+     * so sidebar and message colours match for the vast majority of nicks.
+     */
+    fun nicklistColors(sortedBaseNicks: List<String>, bgLum: Float): List<Color> {
+        if (sortedBaseNicks.isEmpty()) return emptyList()
+
+        val n = sortedBaseNicks.size
+
+        // Step 1: compute the raw hue for every nick including its per-nick jitter,
+        // so comparisons between neighbours use the same hue that will be rendered.
+        val hues = FloatArray(n) { i -> rawHueForNick(sortedBaseNicks[i]) }
+
+        // Step 2: forward scan — nudge any nick that is too close to its predecessor.
+        for (i in 1 until n) {
+            if (hueDist(hues[i], hues[i - 1]) < MIN_HUE_GAP) {
+                hues[i] = (hues[i] + CONFLICT_NUDGE_DEG) % 360f
+            }
+        }
+
+        // Step 3: apply saturation/lightness bands and per-nick jitter to produce Colors.
+        val bands = if (bgLum < 0.5f) darkBgBands else lightBgBands
+        return List(n) { i ->
+            val nick      = sortedBaseNicks[i]
+            val h         = mixHash(nick.lowercase().hashCode())
+            val bandIdx   = positiveMod(mixHash(h xor 0x517cc1b7), bands.size)
+            val band      = bands[bandIdx]
+            val satJitter = (positiveMod(mixHash(h xor 0x45678901), 7) - 3) * 0.012f
+            val lumJitter = (positiveMod(mixHash(h xor 0x6b43a9b5), 5) - 2) * 0.012f
+            Color.hsl(
+                hues[i],
+                (band.saturation + satJitter).coerceIn(0.30f, 0.98f),
+                (band.lightness  + lumJitter).coerceIn(0.10f, 0.93f),
+            )
+        }
+    }
+
+    /**
+     * Raw hue (0–360°) for a nick, including per-nick jitter but before any sidebar
+     * conflict nudging.  Used internally by [nicklistColors] to compare adjacent hues.
+     */
+    private fun rawHueForNick(baseNick: String): Float {
+        val h      = mixHash(baseNick.lowercase().hashCode())
+        val hueIdx = positiveMod(h * 0x9e3779b9.toInt(), hueSlots.size)
+        val jitter = (positiveMod(mixHash(h xor 0x2f6a8b3c), 7) - 3) * 1.2f
+        return (hueSlots[hueIdx] + jitter + 360f) % 360f
+    }
+
+    /** Shortest angular distance between two hues on the 360° wheel. */
+    private fun hueDist(a: Float, b: Float): Float {
+        val d = kotlin.math.abs(a - b) % 360f
+        return if (d > 180f) 360f - d else d
     }
 
     /** Murmur3 finaliser — good avalanche on short strings. */

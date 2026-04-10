@@ -1,0 +1,2 @@
+several improvements to app performance
+Bug fixes to SASL, CTCP and replies. incoming Secure DCC file transfer offers

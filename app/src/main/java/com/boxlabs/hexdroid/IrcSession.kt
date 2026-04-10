@@ -157,6 +157,17 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
                 return out
             }
+            // 908: server does not support our mechanism; it advertises alternatives.
+            // Abort cleanly so CAP END is sent and the connection is not left stalled.
+            "908" -> {
+                val alternatives = m.trailing ?: m.params.drop(1).joinToString(",")
+                saslDone = true; saslInProgress = false
+                out += IrcAction.EmitError(
+                    "SASL: mechanism not supported by server. Supported: $alternatives"
+                )
+                if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
+                return out
+            }
         }
 
         if (m.command == "AUTHENTICATE" && saslInProgress) {
@@ -328,12 +339,10 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 
         if (payload == "+") {
             val buf = saslIncomingB64
-            if (buf != null && buf.isNotEmpty()) {
-                val full = buf.toString()
-                saslIncomingB64 = null
-                return full
-            }
-            return null
+            saslIncomingB64 = null
+            // Return whatever was accumulated (possibly empty string), not null.
+            // null means "not yet complete"; "" means "complete with empty payload".
+            return buf?.toString() ?: ""
         }
 
         val buf = saslIncomingB64 ?: StringBuilder().also { saslIncomingB64 = it }
@@ -353,21 +362,47 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         val s = config.sasl as? SaslConfig.Enabled ?: return out
 
         when (s.mechanism) {
-            SaslMechanism.PLAIN -> if (serverPayload == "+") {
-                if (!config.useTls) {
-                    out += IrcAction.EmitError("SASL PLAIN aborted: refusing to send password over an unencrypted connection. Enable TLS or switch to SCRAM-SHA-256.")
-                    out += IrcAction.Send("AUTHENTICATE *")
-                    return out
+            SaslMechanism.PLAIN -> when (serverPayload) {
+                "+" -> {
+                    if (!config.useTls) {
+                        out += IrcAction.EmitError("SASL PLAIN aborted: refusing to send password over an unencrypted connection. Enable TLS or switch to SCRAM-SHA-256.")
+                        out += IrcAction.Send("AUTHENTICATE *")
+                        return out
+                    }
+                    // Fall back to the connection nick when no explicit authcid is set.
+                    // Sending an empty authcid (\u0000\u0000pass) is rejected by most servers including ZNC.
+                    val authcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    val pass = s.password ?: ""
+                    val msg = "\u0000$authcid\u0000$pass"
+                    val b64 = Base64.encodeToString(msg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    out += chunkAuthenticate(b64)
                 }
-                // Fall back to the connection nick when no explicit authcid is set.
-                // Sending an empty authcid (\u0000\u0000pass) is rejected by most servers including ZNC.
-                val authcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
-                val pass = s.password ?: ""
-                val msg = "\u0000$authcid\u0000$pass"
-                val b64 = Base64.encodeToString(msg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                out += chunkAuthenticate(b64)
+                "*" -> {
+                    // Server aborted the exchange.
+                    out += IrcAction.EmitError("SASL PLAIN: server aborted authentication")
+                    saslAbort(out)
+                }
+                else -> {
+                    // PLAIN is a single-round mechanism; the server should only send "+"
+                    // or a numeric. Any other payload is unexpected. abort cleanly so
+                    // CAP END is still sent and the connection does not stall.
+                    out += IrcAction.EmitError("SASL PLAIN: unexpected server challenge \"$serverPayload\", aborting")
+                    out += IrcAction.Send("AUTHENTICATE *")
+                    saslAbort(out)
+                }
             }
-            SaslMechanism.EXTERNAL -> if (serverPayload == "+") out += IrcAction.Send("AUTHENTICATE +")
+            SaslMechanism.EXTERNAL -> when (serverPayload) {
+                "+" -> out += IrcAction.Send("AUTHENTICATE +")
+                "*" -> {
+                    out += IrcAction.EmitError("SASL EXTERNAL: server aborted authentication")
+                    saslAbort(out)
+                }
+                else -> {
+                    out += IrcAction.EmitError("SASL EXTERNAL: unexpected server challenge \"$serverPayload\", aborting")
+                    out += IrcAction.Send("AUTHENTICATE *")
+                    saslAbort(out)
+                }
+            }
             SaslMechanism.SCRAM_SHA_256 -> {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
@@ -394,18 +429,43 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 
                 val sc = scram ?: return listOf(IrcAction.EmitError("SCRAM state missing"))
                 val next = sc.onServerMessage(decoded)
-                if (next is ScramNext.SendClientFinal) {
-                    val b64 = Base64.encodeToString(next.clientFinal.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                    out += chunkAuthenticate(b64)
-                } else if (next is ScramNext.Done && !next.verified) {
-                    // Server signature verification failed (or server sent an "e=" error attribute).
-                    // Abort the exchange so the server doesn't hang waiting for our client-final.
-                    out += IrcAction.EmitError("SCRAM server signature verification failed")
-                    out += IrcAction.Send("AUTHENTICATE *")
+                when (next) {
+                    is ScramNext.SendClientFinal -> {
+                        val b64 = Base64.encodeToString(next.clientFinal.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                        out += chunkAuthenticate(b64)
+                    }
+                    is ScramNext.Done -> if (next.verified) {
+                        // Server signature verified@ emit a status so it's visible in logs.
+                        // The server will follow up with numeric 903, which is what sets
+                        // saslDone = true and sends CAP END. If 903 never arrives (broken
+                        // server), the SASL timeout watchdog will abort the connection.
+                        out += IrcAction.EmitStatus("SCRAM: server signature verified")
+                    } else {
+                        // Server signature verification failed (or server sent an "e=" error).
+                        // Abort so the server doesn't hang waiting for our client-final.
+                        out += IrcAction.EmitError("SCRAM server signature verification failed")
+                        out += IrcAction.Send("AUTHENTICATE *")
+                    }
                 }
             }
         }
         return out
+    }
+
+    /**
+     * Mark SASL as done (failed) and send CAP END if we haven't already.
+     * Call this whenever an unexpected condition aborts the exchange mid-flight
+     * so the connection is never left stalled waiting for a 903/904 that won't come.
+     */
+    private fun saslAbort(out: MutableList<IrcAction>) {
+        saslDone = true
+        saslInProgress = false
+        scram = null
+        saslIncomingB64 = null
+        if (!capEnded && pendingCapReqs == 0) {
+            capEnded = true
+            out += IrcAction.Send("CAP END")
+        }
     }
 
     private fun chunkAuthenticate(b64: String): List<IrcAction> {

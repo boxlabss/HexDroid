@@ -30,6 +30,13 @@ import androidx.core.app.RemoteInput
  * Android delivers a broadcast here so the app doesn't need to come to the
  * foreground. We pull the typed text, the original sender nick, and the
  * original message snippet, then send via the ViewModel.
+ *
+ * If the app process was dead when the reply fired, Android restarts it and
+ * delivers the broadcast but the ViewModel will have no live connections.
+ * In that case [sendToBuffer] silently finds no runtime and returns without
+ * sending. To prevent replies being silently dropped, we check whether the
+ * send succeeded and update the notification with feedback so the user knows
+ * to reopen the app and reconnect before replying.
  */
 class NotificationReplyReceiver : BroadcastReceiver() {
 
@@ -45,8 +52,29 @@ class NotificationReplyReceiver : BroadcastReceiver() {
             ?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: return
 
         val app = ctx.applicationContext as? HexDroidApp
-        app?.ircViewModel?.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
+        val vm  = app?.ircViewModel
 
-        if (notifId >= 0) NotificationManagerCompat.from(ctx).cancel(notifId)
+        // Check whether there is actually a live connection for this network before
+        // attempting to send. update the notification to prompt the user to
+        // reconnect rather than leaving them thinking the reply was delivered.
+        val hasLiveConnection = vm?.hasLiveConnection(netId) == true
+
+        if (hasLiveConnection) {
+            vm!!.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
+            if (notifId >= 0) NotificationManagerCompat.from(ctx).cancel(notifId)
+        } else {
+            // No live connection. show an error notification so the reply is not lost silently.
+            if (notifId >= 0) {
+                val errorNotif = androidx.core.app.NotificationCompat.Builder(
+                    ctx, NotificationHelper.CH_HIGHLIGHT_SILENT
+                )
+                    .setSmallIcon(android.R.drawable.stat_notify_chat)
+                    .setContentTitle("Reply not sent: not connected")
+                    .setContentText("Open HexDroid and reconnect to send your reply to $buffer")
+                    .setAutoCancel(true)
+                    .build()
+                NotificationManagerCompat.from(ctx).notify(notifId, errorNotif)
+            }
+        }
     }
 }

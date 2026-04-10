@@ -372,7 +372,12 @@ sealed class IrcEvent {
         val timeMs: Long? = null,
         val isHistory: Boolean = false,
         /** IRCv3 msgid tag — used for deduplication. */
-        val msgId: String? = null
+        val msgId: String? = null,
+        /**
+         * IRCv3 +draft/reply / +reply tag: the msgid of the message this NOTICE replies to.
+         * Non-null when the sender attached a reply tag.
+         */
+        val replyToMsgId: String? = null
     ) : IrcEvent()
 
     data class DccOfferEvent(val offer: DccOffer) : IrcEvent()
@@ -1427,6 +1432,17 @@ class IrcClient(val config: IrcConfig) {
             }
         }
 
+        // Registration / SASL watchdog: if 001 has not arrived within
+        // REGISTRATION_TIMEOUT_MS the server may be ignoring us or SASL has stalled.
+        val registrationWatchdogJob = launch {
+            delay(ConnectionConstants.REGISTRATION_TIMEOUT_MS)
+            if (!registered && !userClosing) {
+                lastQuitReason = "Registration timeout"
+                send(IrcEvent.Error("Registration timeout — server did not send 001 within ${ConnectionConstants.REGISTRATION_TIMEOUT_MS / 1000}s"))
+                runCatching { s.close() }
+            }
+        }
+
         val pingJob = launch {
             // Wait a moment so the socket is fully established.
             delay(5_000)
@@ -1540,6 +1556,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         val me = msg.params.getOrNull(0) ?: config.nick
         currentNick = me
         registered = true
+        registrationWatchdogJob.cancel()  // 001 received — connection is live
         send(IrcEvent.Registered(me))
         // Note: BOUNCER BIND for soju upstream selection is sent from IrcViewModel after
         // the Registered event is received, since sendRaw is not callable from here.
@@ -2150,7 +2167,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 									"PING" -> {
 										// Strip CR/LF/NUL from the echoed payload to prevent IRC
 										// command injection via a crafted CTCP PING argument.
-										val safeArgs = ctcpArgs.replace(Regex("[\r\n\u0000\u0001]"), "")
+										val safeArgs = ctcpArgs.replace(Regex("[\r\n\u0000\u0001]"), "").take(200)
 										ctcpLastReplyMs[senderKey] = now
 										writeLine("NOTICE $safeSender :\u0001PING $safeArgs\u0001")
 										send(IrcEvent.Status("CTCP PING reply sent to $safeSender"))
@@ -2164,8 +2181,9 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 										continue
 									}
 									"FINGER", "USERINFO" -> {
+										val safeRealname = config.realname.take(100)
 										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001$ctcpCmd ${config.realname}\u0001")
+										writeLine("NOTICE $safeSender :\u0001$ctcpCmd $safeRealname\u0001")
 										send(IrcEvent.Status("CTCP $ctcpCmd reply sent to $safeSender"))
 										continue
 									}
@@ -2278,7 +2296,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 								isServer = isServerPrefix,
 								timeMs = serverTimeMs,
 								isHistory = (playbackHistory || isHeuristicHistory(histBuf, serverTimeMs, nowMs)),
-								msgId = msg.tags["msgid"]
+								msgId = msg.tags["msgid"],
+								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
 							)
 						)
 					}
@@ -2752,6 +2771,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			joinedChannelCases.clear()
 			runCatching { writerJob.cancel() }
 			runCatching { pingJob.cancel() }
+			runCatching { registrationWatchdogJob.cancel() }
 			// Attempt graceful SSL close_notify only when the connection ended cleanly
 			// (i.e. the user requested a disconnect, not an error path). Calling
 			// shutdownOutput() on a socket that already got an SSL_ERROR_SYSCALL or a
@@ -2779,7 +2799,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 		val afterDcc = inner.drop(3).trimStart() // remove "DCC"
 		val verb = afterDcc.substringBefore(' ').uppercase()
-		if (verb != "SEND" && verb != "TSEND") return null
+		if (verb != "SEND" && verb != "TSEND" && verb != "SSEND") return null
 		var rest = afterDcc.substringAfter(verb, "").trimStart()
 		if (rest.isBlank()) return null
 
@@ -2801,6 +2821,9 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		val port = parts[1].toIntOrNull() ?: return null
 		val size = parts[2].toLongOrNull() ?: 0L
 
+		// SSEND: TLS-wrapped transfer.
+		val secure = verb == "SSEND"
+
 		// Turbo DCC:
 		// - If TSEND, receiver SHOULD NOT send ACKs.
 		// - Some clients append 'T' to the reverse-DCC token to signal turbo.
@@ -2815,7 +2838,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		}
 
 		val ip = if (ipField.contains('.')) ipField else ipFromLong(ipField.toLongOrNull() ?: return null)
-		return DccOffer(from = "?", filename = filename, ip = ip, port = port, size = size, token = token, turbo = turbo)
+		if (ip.isBlank()) return null
+		return DccOffer(from = "?", filename = filename, ip = ip, port = port, size = size, token = token, turbo = turbo, secure = secure)
 	}
 
 	private fun parseDccChat(textRaw: String): DccChatOffer? {
@@ -2827,7 +2851,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 		val afterDcc = inner.drop(3).trimStart() // remove "DCC"
 		val verb = afterDcc.substringBefore(' ').uppercase(Locale.ROOT)
-		if (verb != "CHAT") return null
+		if (verb != "CHAT" && verb != "SCHAT") return null
+
+		// SCHAT: TLS-wrapped chat session.
+		val secure = verb == "SCHAT"
 
 		val rest = afterDcc.substringAfter(verb, "").trimStart()
 		val parts = rest.split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -2837,8 +2864,9 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		val ipField = parts[1]
 		val port = parts[2].toIntOrNull() ?: return null
 		val ip = if (ipField.contains('.')) ipField else ipFromLong(ipField.toLongOrNull() ?: return null)
+		if (ip.isBlank()) return null
 
-		return DccChatOffer(from = "?", protocol = proto, ip = ip, port = port)
+		return DccChatOffer(from = "?", protocol = proto, ip = ip, port = port, secure = secure)
 	}
 
 	private fun ipFromLong(v: Long): String {
@@ -3173,22 +3201,56 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		modeStr: String,
 		args: List<String>
 	): List<Triple<String, Char?, Boolean>> {
-		// Returns list of (nick, prefixChar, adding)
+		// Returns list of (nick, prefixChar, adding).
+		//
+		// We must correctly account for ALL mode arguments, not just prefix-mode args,
+		// so that a mixed MODE line like "+bov nick!*@* victim" doesn't consume
+		// arguments from the wrong position.
+		//
+		// CHANMODES ISUPPORT partitions non-prefix modes into four types:
+		//   A (list modes: b,e,I,q…)  → always take a parameter
+		//   B (key: k)                → always take a parameter
+		//   C (limit: l)              → take a parameter only when adding (+)
+		//   D (flag modes: m,n,t,…)   → never take a parameter
+		// Prefix modes (o,v,h,@,+,…)  → always take a parameter (the nick)
+		//
+		// When chanModes is available from ISUPPORT 005, parse it into sets.
+		// Fall back to a conservative default (treat unknown modes as type A)
+		// to avoid under-consuming args on unfamiliar servers.
+		val cm = chanModes ?: ""
+		val cmParts = cm.split(",")
+		val typeA = cmParts.getOrNull(0)?.toSet() ?: setOf('b', 'e', 'I', 'q')
+		val typeB = cmParts.getOrNull(1)?.toSet() ?: setOf('k')
+		val typeC = cmParts.getOrNull(2)?.toSet() ?: setOf('l')
+		// typeD: any mode not in A, B, C, or prefix — no parameter needed.
+
 		val results = mutableListOf<Triple<String, Char?, Boolean>>()
 		var adding = true
 		var argIdx = 0
-
-		fun prefixForMode(c: Char): Char? = prefixModeToSymbol[c]
 
 		for (c in modeStr) {
 			when (c) {
 				'+' -> adding = true
 				'-' -> adding = false
 				else -> {
-					val prefix = prefixForMode(c) ?: continue
-					val nick = args.getOrNull(argIdx) ?: continue
-					argIdx += 1
-					results.add(Triple(nick, prefix, adding))
+					val prefix = prefixModeToSymbol[c]
+					if (prefix != null) {
+						// Prefix mode (op, voice, etc.) — consumes a nick argument.
+						val nick = args.getOrNull(argIdx) ?: continue
+						argIdx++
+						results.add(Triple(nick, prefix, adding))
+					} else {
+						// Non-prefix mode — consume its argument (if any) so argIdx
+						// stays aligned for subsequent prefix modes in the same line.
+						val takesArg = when {
+							c in typeA -> true          // list modes always take a param
+							c in typeB -> true          // key mode always takes a param
+							c in typeC -> adding        // limit mode: param only when adding
+							else       -> false         // flag mode: no param
+						}
+						if (takesArg && argIdx < args.size) argIdx++
+						// Do not emit a ChannelUserMode event for non-prefix modes.
+					}
 				}
 			}
 		}

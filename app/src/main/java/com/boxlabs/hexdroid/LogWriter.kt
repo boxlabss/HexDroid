@@ -136,14 +136,21 @@ class LogWriter(private val ctx: Context) {
 
     /** Flush and close all open log file handles (internal and SAF). Call when logging is disabled or app exits. */
     fun closeAll() {
+        // Snapshot both maps before clearing them so a concurrent appendInternal() that
+        // slips in after clear() but before close() cannot create a writer that is then
+        // immediately orphaned.  The snapshot holds the only remaining references, so
+        // close() below is guaranteed to run on every writer that existed at call time.
         val internalSnapshot = openWriters.entries.toList()
         openWriters.clear()
         lastFlushMs.clear()
         writeLocks.clear()
+        // Close after clearing so appendInternal() racing here finds an empty map and
+        // creates a new, tracked writer rather than a leaked one.
         for ((_, writer) in internalSnapshot) runCatching { writer.close() }
 
         val safSnapshot = safWriters.entries.toList()
         safWriters.clear()
+        safFileCache.clear()
         for ((_, stream) in safSnapshot) runCatching { stream.close() }
     }
 
@@ -235,10 +242,11 @@ class LogWriter(private val ctx: Context) {
                     }
                 }.getOrNull()
                 if (modMs != null && modMs < cutoffMs) {
-                    // Remove cached URI and stream for this file so the next write re-creates it.
-                    safFileCache.entries.removeIf { it.value == fileUri }
+                    // Look up the writer key BEFORE evicting from safFileCache — once the
+                    // cache entry is removed, safFileCache[key] == fileUri will never match.
                     val writerKey = safWriters.keys.firstOrNull { safFileCache[it] == fileUri }
                     safWriters.remove(writerKey)?.runCatching { close() }
+                    safFileCache.entries.removeIf { it.value == fileUri }
                     runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
                 }
             }

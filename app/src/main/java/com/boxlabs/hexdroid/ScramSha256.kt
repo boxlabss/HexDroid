@@ -35,7 +35,6 @@ private const val SCRAM_MAX_NONCE_LENGTH = 512
 
 sealed class ScramNext {
     data class SendClientFinal(val clientFinal: String) : ScramNext()
-    data object ExpectServerFinal : ScramNext()
     data class Done(val verified: Boolean) : ScramNext()
 }
 

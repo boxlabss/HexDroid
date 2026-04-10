@@ -2,9 +2,13 @@
 
 All notable changes to HexDroid are documented here.
 ---
+## [1.5.9] - 2026-04-10
+- **Improvements** several improvements to app performance
+- **Bug fixes** SASL, CTCP and replies. incoming Secure DCC file transfer offers
+
 ## [1.5.8] - 2026-03-30
 - **UI** improvements: reply gestures, scroll to unread marker
-- **SDCC** add SSEND support for encrypted file transfers
+- **SDCC** add SSEND support for encrypted file transfers 
 - **IRCv3** Improve replies and typing support
 - **Other** Improvements for RAM usage and more
 

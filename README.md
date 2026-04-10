@@ -24,17 +24,30 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 
 ---
 
+## Screenshots
+
+<div align="center">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="30%" alt="Chat screen" />
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="30%" alt="Networks screen" />
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="30%" alt="Settings" />
+</div>
+
+---
+
 ## Features
 
 - **Multi-network** — connect to multiple servers simultaneously, each with independent nick, SASL, TLS, autojoin, and encoding settings
 - **IRCv3** — 40+ capabilities including `chathistory`, `away-notify`, `server-time`, `echo-message`, `draft/typing`, MONITOR, bouncer-specific caps, and more
 - **Security** — TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates, Android Keystore credential storage
+- **irc:// and ircs://** — tapping IRC links in other apps opens HexDroid directly and connects to the target network and channel
 - **Localisation** — Arabic, Chinese, Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish
 
 ### User Interface
 
 - Material Design 3 with light, dark, and Matrix (green-on-black) themes
 - Adjustable font family (Open Sans, Inter, Monospace, custom TTF/OTF) and size, separately for UI and chat
+- Inline image and video link previews
+- ASCII art rendering with auto-sized MOTD display
 - mIRC colour rendering with 99-colour picker + ANSI colour rendering
 - Nick `@` autocomplete and `/command` completion with inline hint chips
 - Channel op panel: topic, key, user limit; ban/quiet/except/invex list management
@@ -85,6 +98,7 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 | `chghost` | Live ident/hostname changes reflected in nicklist |
 | `setname` | Receive realname changes; send your own with `/setname` |
 | `multi-prefix` | Full mode prefix stack in NAMES (e.g. `@+nick`) |
+| `userhost-in-names` | Full `nick!user@host` in NAMES replies (off by default) |
 | `invite-notify` | Notifies all channel members of `/invite` |
 | `monitor` / `draft/extended-monitor` | Nick watch list; MONONLINE/MONOFFLINE notifications |
 | WHOX (005 ISUPPORT) | `WHO %uhsnfar` on join seeds ident, host, account, and initial away state |
@@ -97,10 +111,11 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 | Cap | Notes |
 |---|---|
 | `account-tag` | Sender account exposed on every PRIVMSG/NOTICE |
-| `draft/typing` | Composing indicators; sending opt-in (off by default), receiving opt-out |
+| `draft/typing` / `typing` | Composing indicators; sending opt-in (off by default), receiving opt-out |
 | `draft/message-reactions` | Emoji reactions via TAGMSG `+draft/react`; displayed as status lines |
-| `+draft/reply` | Reply-to msgid threading; forwarded on PRIVMSG and RELAYMSG |
+| `+draft/reply` / `+reply` | Reply-to msgid threading; forwarded on PRIVMSG and NOTICE |
 | `draft/relaymsg` | Relay bot messages attributed to the relayed nick (off by default) |
+| `pre-away` / `draft/pre-away` | Sends AWAY before 001 so the session starts marked away when an away message is configured |
 
 </details>
 
@@ -125,6 +140,7 @@ Automatic detection starting from UTF-8, with fallback to windows-1251, KOI8-R, 
 ### DCC
 
 - DCC SEND and DCC CHAT with active, passive, and auto modes
+- **Secure DCC** — SSEND and SCHAT for TLS-encrypted file transfers and chat sessions
 - Configurable incoming port range and download folder
 - Rich transfer progress cards with one-tap accept from notification
 - Incoming DCC CHAT offers create a buffer immediately and deep-link from notification
@@ -147,6 +163,8 @@ Automatic detection starting from UTF-8, with fallback to windows-1251, KOI8-R, 
 **IzzyOnDroid**
 
 [<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroidButtonGreyBorder_nofont.png" height="35" alt="Get it at IzzyOnDroid">](https://apt.izzysoft.de/packages/com.boxlabs.hexdroid)
+
+*Available via the [IzzyOnDroid F-Droid repo](https://apt.izzysoft.de/fdroid/). Not yet in the main F-Droid repository.*
 
 </td>
 <td align="center">
@@ -180,9 +198,26 @@ Full documentation at [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/).
 
 ---
 
+## Reproducible Builds
+
+The Play Store and IzzyOnDroid releases are [reproducibly buildable](https://reproducible-builds.org/) — the APK produced from source matches the distributed binary byte-for-byte. The `RB Status` badge above links to the verification record. To verify locally:
+
+```bash
+./gradlew assembleRelease
+# Compare the output APK against the downloaded release APK
+```
+
+---
+
 ## Privacy
 
-No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app.
+No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app. See the full [privacy policy](https://hexdroid.boxlabs.uk/privacy).
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ---
 
@@ -198,12 +233,39 @@ No ads, analytics, crash reporters, or third-party SDKs. The app communicates on
 
 ## Contributing
 
-Open an issue before submitting a pull request for non-trivial changes. Bug reports should include:
+Bug reports and pull requests are welcome. Please open an issue before submitting a PR for non-trivial changes.
+
+**Bug reports should include:**
 
 - Device model and Android version
-- HexDroid version
+- HexDroid version (Settings → About)
 - Steps to reproduce
-- Relevant logcat output
+- Relevant logcat output (Android Studio > Logcat, filter by `hexdroid`)
+
+**Development setup:**
+
+1. Clone the repo and open in Android Studio Meerkat (2024.3) or later
+2. Sync Gradle — no additional configuration required
+3. Run on a device or emulator with API 26+
+4. Tests: `./gradlew test` for unit tests, `./gradlew connectedAndroidTest` for instrumented tests
+
+Translations are managed in the string resources under `app/src/main/res/values-*/`. If your language is missing or incomplete, a PR updating the relevant `strings.xml` is very welcome.
+
+---
+
+## License
+
+```
+HexDroid — IRC Client for Android
+Copyright (C) 2026 boxlabs
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+```
+
+Full license text in [LICENSE](LICENSE).
 
 ---
 

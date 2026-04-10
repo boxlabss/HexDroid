@@ -50,6 +50,14 @@ object ConnectionConstants {
     /** Maximum number of reconnect attempts to track. */
     const val RECONNECT_MAX_ATTEMPTS = 30
 
+    /**
+     * How long a connection must stay up (ms) before the reconnect backoff counter is
+     * reset to zero. Waiting for stability prevents a server that connects and immediately
+     * drops the client (Z-line, cert rejection, etc.) from resetting the backoff on every
+     * cycle and hammering the server with rapid retries.
+     */
+    const val STABLE_CONNECTION_MS = 30_000L
+
     // --- Flap Detection ---
 
     /** Number of ping-timeout disconnects within FLAP_WINDOW_MS that triggers flap detection. */

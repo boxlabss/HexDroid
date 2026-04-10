@@ -1,18 +1,76 @@
-Connect to your favourite IRC networks, join channels, chat with friends, and stay up to date with a clean, fast Material Design UI.
+HexDroid is a clean, fast IRC client built for modern Android. Connect to your favourite networks, chat with friends and communities, and stay on top of every mention -  all from a Material Design interface built for mobile.
 
-Features:
+<b>Connect anywhere</b>
+• Connect to multiple IRC networks simultaneously, each with independent settings
+• Auto-connect and auto-join on startup
+• Bouncer support: ZNC and soju (including BOUNCER BIND for soju multi-network)
+• Always Connected mode keeps your session alive in the background using a foreground service
 
-* Multiple network support - connect to several IRC networks simultaneously
-* IRCv3 capabilities - replies, typing indicators, SASL authentication, and more
-* TLS/SSL support - secure connections with optional client certificates
-* Auto-connect and auto-join - automatically connect to networks and join channels on startup
-* SASL authentication - PLAIN, EXTERNAL (client cert), and SCRAM-SHA-256 mechanisms
-* Post-connect commands - run custom commands after connecting
-* Character encoding support - auto-detect or manually set encoding (UTF-8, windows-1251, etc.)
-* Nick highlighting and notifications - get notified when someone mentions you
-* Channel and private message logging
-* Ignore list - filter out unwanted messages
-* Lag indicator - monitor connection quality
-* Clean Material Design 3 interface
+<b>Security and authentication</b>
+• TLS/SSL on every connection by default
+• SASL authentication - PLAIN (TLS-only), EXTERNAL (client certificates), and SCRAM-SHA-256
+• Trust-On-First-Use certificate pinning for self-signed certificates
+• Passwords stored encrypted using Android Keystore AES-GCM
 
-HexDroid is free and open source software, licensed under GPLv3.
+<b>Modern IRC (IRCv3)</b>
+• Message replies with inline quote previews — swipe any message to reply
+• Typing indicators in channels and private messages
+• Chat history replay on supporting servers
+• Message reactions, read markers, account tags, and more
+• Works with Libera.Chat, Ergo, soju, ZNC, and other modern networks and bouncers
+
+<b>Notifications</b>
+• Instant alerts when your nick is mentioned
+• Reply directly from the notification drawer without opening the app
+• DCC file request notifications
+
+<b>DCC file transfers</b>
+• Send and receive files with full DCC support
+• Passive/reverse DCC and Secure DCC (SSEND/SCHAT) for TLS-encrypted transfers
+• Dedicated Transfers screen with progress tracking
+• DCC Chat support
+• Off by default - enable in settings when you need it
+
+<b>Full chat experience</b>
+• /Command and Nick @mention autocomplete
+• Colour-coded nicks with 45 distinct hues, consistent across messages and the sidebar
+• Inline image and video link previews
+• ASCII art rendering with auto-sized MOTD display
+• mIRC and ANSI colour codes
+• Character formatting toolbar (bold, italic, colour)
+• In-buffer search with /find and /gfind
+• Jump-to-unread marker
+• Channel op tools and IRCop tools (when you have +o)
+• Ignore list with nick and hostmask support
+
+<b>Settings and customisation</b>
+• Per-network character encoding: auto-detect, UTF-8, windows-1251, and others
+• Custom nick colour with colour picker
+• Post-connect commands per network
+• Network settings backup and restore to JSON
+• Drag-and-drop network ordering
+
+<b>Logging</b>
+• Optional chat logging stored only on your device
+• Choose between internal storage or any folder via the system file picker
+
+<b>Privacy</b>
+• No ads
+• No analytics SDKs
+• No tracking of any kind
+• Your messages and credentials are sent only to the IRC servers you choose to connect to
+
+<b>Permissions explained</b>
+• Internet / Network state - connect to IRC servers
+• Notifications - alert you to highlights and mentions
+• Foreground service - optional, only used when Always Connected is enabled
+• Wake lock - optional, prevents sleep to keep your connection active with Always Connected
+
+<b>Notes</b>
+• IRCv3 features depend on server support and vary by network
+• Background connectivity may vary depending on device and battery optimisation settings
+
+Free and open source, licensed under GPLv3.
+
+Support: irc.afternet.org #HexDroid
+Privacy policy: hexdroid.boxlabs.uk/privacy
