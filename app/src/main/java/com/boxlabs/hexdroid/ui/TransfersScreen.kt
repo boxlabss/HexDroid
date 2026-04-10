@@ -103,6 +103,7 @@ fun TransfersScreen(
     onSetDccEnabled: (Boolean) -> Unit,
     onSetDccSendMode: (DccSendMode) -> Unit,
     onCancelOutgoing: (target: String, filename: String) -> Unit = { _, _ -> },
+    onClearTransfer: (DccTransferState) -> Unit = {},
     /** Navigate directly to a buffer (e.g. a DCC chat buffer) and close Transfers. */
     onOpenBuffer: ((String) -> Unit)? = null
 ) {
@@ -543,15 +544,32 @@ fun TransfersScreen(
 
                                     // Done state
                                     if (t.done && t.error == null) {
+                                        // Use endTimeMs so elapsed time and avg speed are
+                                        // frozen at completion — not ever-growing wall clock.
+                                        val endMs = t.endTimeMs ?: now
+                                        val elapsedDoneSec = ((endMs - t.startTimeMs) / 1000.0).coerceAtLeast(1.0)
                                         Row(
+                                            Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                "Complete — ${formatBytes(t.received)} in ${formatEta(((now - t.startTimeMs) / 1000).coerceAtLeast(1L))}  (${formatSpeed(t.received / ((now - t.startTimeMs) / 1000.0).coerceAtLeast(1.0))} avg)",
+                                                "Complete — ${formatBytes(t.received)} in ${formatEta(elapsedDoneSec.toLong())}  (${formatSpeed(t.received / elapsedDoneSec)} avg)",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = Color(0xFF4CAF50)
                                             )
+                                            // Clear button: removes this entry from the list
+                                            IconButton(
+                                                onClick = { onClearTransfer(t) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Clear",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
                                         if (t.savedPath != null) {
                                             Button(
@@ -563,11 +581,29 @@ fun TransfersScreen(
 
                                     // Error state
                                     if (t.error != null) {
-                                        Text(
-                                            "Error: ${t.error}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error
-                                        )
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                "Error: ${t.error}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = { onClearTransfer(t) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Clear",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -692,11 +728,27 @@ fun TransfersScreen(
                                     }
 
                                     if (t.done && t.error == null) {
-                                        Text(
-                                            "Complete — ${formatBytes(t.bytesSent)} in ${formatEta(((now - t.startTimeMs) / 1000).coerceAtLeast(1L))}  (${formatSpeed(t.bytesSent / ((now - t.startTimeMs) / 1000.0).coerceAtLeast(1.0))} avg)",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFF4CAF50)
-                                        )
+                                        val endMs = t.endTimeMs ?: now
+                                        val elapsedDoneSec = ((endMs - t.startTimeMs) / 1000.0).coerceAtLeast(1.0)
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                "Complete — ${formatBytes(t.bytesSent)} in ${formatEta(elapsedDoneSec.toLong())}  (${formatSpeed(t.bytesSent / elapsedDoneSec)} avg)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(0xFF4CAF50)
+                                            )
+                                            IconButton(
+                                                onClick = { onClearTransfer(t) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.Close, contentDescription = "Clear",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
                                     }
                                     if (t.error != null) {
                                         Text(stringResource(R.string.transfers_error, t.error), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

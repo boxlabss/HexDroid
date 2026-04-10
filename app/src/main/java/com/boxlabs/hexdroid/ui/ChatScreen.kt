@@ -4298,6 +4298,7 @@ fun ChatScreen(
 
     if (showNickActions && selectedNick.isNotBlank()) {
         val dccEnabled = state.settings.dccEnabled
+        val dccSecure  = state.settings.dccSecure
         ModalBottomSheet(onDismissRequest = { showNickActions = false }) {
             Column(
                 Modifier
@@ -4393,7 +4394,11 @@ fun ChatScreen(
                 ActionRow(
                     icon = Icons.AutoMirrored.Filled.SendToMobile,
                     label = stringResource(R.string.nick_send_file),
-                    subtitle = if (dccEnabled) stringResource(R.string.nick_send_file_desc) else stringResource(R.string.nick_dcc_disabled),
+                    subtitle = when {
+                        !dccEnabled -> stringResource(R.string.nick_dcc_disabled)
+                        dccSecure   -> stringResource(R.string.nick_send_file_desc) + " (SDCC/TLS)"
+                        else        -> stringResource(R.string.nick_send_file_desc)
+                    },
                     enabled = dccEnabled && onDccSendFile != null,
                     tint = if (dccEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     onClick = {
@@ -4404,7 +4409,11 @@ fun ChatScreen(
                 ActionRow(
                     icon = Icons.Default.Terminal,
                     label = stringResource(R.string.nick_dcc_chat),
-                    subtitle = if (dccEnabled) stringResource(R.string.nick_dcc_chat_desc) else stringResource(R.string.nick_dcc_disabled),
+                    subtitle = when {
+                        !dccEnabled -> stringResource(R.string.nick_dcc_disabled)
+                        dccSecure   -> stringResource(R.string.nick_dcc_chat_desc) + " (SDCC/TLS)"
+                        else        -> stringResource(R.string.nick_dcc_chat_desc)
+                    },
                     enabled = dccEnabled && onDccChat != null,
                     tint = if (dccEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     onClick = {

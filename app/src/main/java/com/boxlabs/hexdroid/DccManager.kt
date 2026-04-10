@@ -88,7 +88,11 @@ sealed class DccTransferState {
         val startTimeMs: Long = System.currentTimeMillis(),
         val done: Boolean = false,
         val error: String? = null,
-        val savedPath: String? = null
+        val savedPath: String? = null,
+        /** Epoch ms when the transfer finished; null while still in progress.
+         *  Stored so the completed avg-speed display uses the actual transfer
+         *  duration rather than ever-growing wall-clock time after completion. */
+        val endTimeMs: Long? = null
     ) : DccTransferState()
 
     data class Outgoing(
@@ -98,7 +102,9 @@ sealed class DccTransferState {
         val bytesSent: Long = 0,
         val startTimeMs: Long = System.currentTimeMillis(),
         val done: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        /** Epoch ms when the transfer finished; null while in progress. See [Incoming.endTimeMs]. */
+        val endTimeMs: Long? = null
     ) : DccTransferState()
 
 }
@@ -298,7 +304,9 @@ class DccManager(ctx: Context) {
             }
         }
         
-        return Pair(wrappedStream, "Downloads/$finalName")
+        // Return the content:// URI string (not a display path) so shareFile can
+        // resolve and open the file via ContentResolver on Android 10+.
+        return Pair(wrappedStream, uri.toString())
     }
 
     @Suppress("DEPRECATION")
@@ -374,9 +382,17 @@ class DccManager(ctx: Context) {
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
         try {
             sock.use { s ->
-                outputStream.use { out ->
-                    // Buffer writes to reduce IPC round-trips for SAF/MediaStore-backed streams.
-                    receiveFromSocket(s, java.io.BufferedOutputStream(out, 256 * 1024), offer.size, offer.turbo, onProgress)
+                // Wrap in a BufferedOutputStream to reduce IPC round-trips for SAF/MediaStore
+                // streams, but keep a reference so we can flush it explicitly before the inner
+                // stream is closed. Without this flush, small files (<256 KB) are fully
+                // received into the buffer but never written: the outer outputStream.use{}
+                // closes the raw stream, silently discarding the buffered bytes.
+                val buffered = java.io.BufferedOutputStream(outputStream, 256 * 1024)
+                try {
+                    receiveFromSocket(s, buffered, offer.size, offer.turbo, onProgress)
+                } finally {
+                    runCatching { buffered.flush() }
+                    outputStream.close()
                 }
             }
         } finally {
@@ -428,8 +444,12 @@ class DccManager(ctx: Context) {
             val sockCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
             try {
                 sock.use { s ->
-                    outputStream.use { out ->
-                        receiveFromSocket(s, java.io.BufferedOutputStream(out, 256 * 1024), offer.size, offer.turbo, onProgress)
+                    val buffered = java.io.BufferedOutputStream(outputStream, 256 * 1024)
+                    try {
+                        receiveFromSocket(s, buffered, offer.size, offer.turbo, onProgress)
+                    } finally {
+                        runCatching { buffered.flush() }
+                        outputStream.close()
                     }
                 }
             } finally {

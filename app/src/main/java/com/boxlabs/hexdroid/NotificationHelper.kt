@@ -67,6 +67,10 @@ class NotificationHelper(private val ctx: Context) {
         const val ACTION_OPEN_TRANSFERS   = "action_open_transfers"
         const val ACTION_OPEN_DCC_CHAT    = "action_open_dcc_chat"
         const val ACTION_INLINE_REPLY     = "action_inline_reply"
+        /** Accept the DCC file offer identified by [EXTRA_DCC_FROM] + [EXTRA_DCC_FILENAME]. */
+        const val ACTION_ACCEPT_DCC       = "action_accept_dcc"
+        const val EXTRA_DCC_FROM          = "extra_dcc_from"
+        const val EXTRA_DCC_FILENAME      = "extra_dcc_filename"
 
         fun cancelAll(ctx: Context) { NotificationManagerCompat.from(ctx).cancelAll() }
 
@@ -298,12 +302,23 @@ class NotificationHelper(private val ctx: Context) {
 
     fun notifyDccIncomingFile(networkId: String, from: String, filename: String) {
         ensureChannels()
+        val acceptIntent = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_NETWORK_ID, networkId)
+            putExtra(EXTRA_ACTION, ACTION_ACCEPT_DCC)
+            putExtra(EXTRA_DCC_FROM, from)
+            putExtra(EXTRA_DCC_FILENAME, filename)
+        }
+        val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+        val acceptPi = PendingIntent.getActivity(ctx, nextPiRequestCode(), acceptIntent, piFlags)
         val n = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Incoming file from $from")
             .setContentText(filename)
             .setAutoCancel(true)
             .setContentIntent(openTransfersPendingIntent(networkId))
+            .addAction(0, "Accept", acceptPi)
             .build()
         NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
     }

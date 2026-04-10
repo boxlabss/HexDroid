@@ -18,6 +18,7 @@
 
 package com.boxlabs.hexdroid
 import android.annotation.SuppressLint
+import com.boxlabs.hexdroid.BuildConfig
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
@@ -1263,6 +1264,23 @@ class IrcViewModel(
         if (action == NotificationHelper.ACTION_OPEN_TRANSFERS) {
             if (!netId.isNullOrBlank()) setActiveNetwork(netId)
             _state.value = _state.value.copy(screen = AppScreen.TRANSFERS)
+            return
+        }
+
+        if (action == NotificationHelper.ACTION_ACCEPT_DCC) {
+            val from     = intent.getStringExtra(NotificationHelper.EXTRA_DCC_FROM)     ?: ""
+            val filename = intent.getStringExtra(NotificationHelper.EXTRA_DCC_FILENAME) ?: ""
+            if (!netId.isNullOrBlank()) setActiveNetwork(netId)
+            _state.value = _state.value.copy(screen = AppScreen.TRANSFERS)
+            // Find the matching pending offer and accept it automatically.
+            // The offer is identified by (netId, from, filename) — the same
+            // triple that was put into the notification extras when it was shown.
+            val offer = _state.value.dccOffers.firstOrNull { o ->
+                (netId.isNullOrBlank() || o.netId == netId) &&
+                o.from.equals(from, ignoreCase = true) &&
+                o.filename == filename
+            }
+            if (offer != null) acceptDcc(offer)
             return
         }
 
@@ -5575,13 +5593,29 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         updateIncoming(offer) { it.copy(received = got) }
                     }
                 }
-                updateIncoming(offer) { it.copy(done = true, savedPath = savedPath) }
+                updateIncoming(offer) { it.copy(done = true, savedPath = savedPath, endTimeMs = System.currentTimeMillis()) }
                 val displayPath = if (savedPath.startsWith("content://")) "Downloads" else savedPath.substringAfterLast('/')
                 notifier.notifyFileDone(netId, offer.filename, displayPath)
             } catch (t: Throwable) {
-                updateIncoming(offer) { it.copy(error = t.message ?: "error") }
+                updateIncoming(offer) { it.copy(error = t.message ?: "error", endTimeMs = System.currentTimeMillis()) }
             }
         }
+    }
+
+    /**
+     * Remove a completed or errored transfer entry from the list.
+     * Active in-progress transfers are silently ignored.
+     */
+    fun clearDccTransfer(transfer: DccTransferState) {
+        val canClear = when (transfer) {
+            is DccTransferState.Incoming -> transfer.done || transfer.error != null
+            is DccTransferState.Outgoing -> transfer.done || transfer.error != null
+        }
+        if (!canClear) return
+        // Use structural equality (==) not reference equality (===): data class instances
+        // are rebuilt on each _state.update, so the rendered copy and the live state
+        // copy will be == but never ===.
+        _state.update { it.copy(dccTransfers = it.dccTransfers.filterNot { t -> t == transfer }) }
     }
 
     fun rejectDcc(offer: DccOffer) {
@@ -5740,14 +5774,17 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
         viewModelScope.launch {
             try {
-                append(key, from = null, text = "*** Offering DCC CHAT to $peer…", doNotify = false)
+                val secure = st.settings.dccSecure
+                val chatVerb = if (secure) "SCHAT" else "CHAT"
+                val secureLabel = if (secure) " (SDCC/TLS)" else ""
+                append(key, from = null, text = "*** Offering DCC${secureLabel} CHAT to $peer…", doNotify = false)
                 val socket = dcc.startChat(
                     portMin = minP,
                     portMax = maxP,
                     onClient = { ipAsInt, port ->
-                        val payload = "DCC CHAT chat $ipAsInt $port"
+                        val payload = "DCC $chatVerb chat $ipAsInt $port"
                         c.ctcp(peer, payload)
-                        append(bufKey(netId, "*server*"), from = null, text = "*** Sent DCC CHAT offer to $peer (port $port)", doNotify = false)
+                        append(bufKey(netId, "*server*"), from = null, text = "*** Sent DCC$secureLabel CHAT offer to $peer (port $port)", doNotify = false)
                     }
                 )
                 startDccChatSession(netId, peer, key, socket)
@@ -5884,7 +5921,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
                 val st3 = _state.value
                 _state.value = st3.copy(dccTransfers = st3.dccTransfers.map {
-                    if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName) it.copy(done = true) else it
+                    if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName) it.copy(done = true, endTimeMs = System.currentTimeMillis()) else it
                 })
                 outgoingSendJobs.remove(jobKey)
                 append(statusKey, from = null, text = "*** DCC send complete: $offerName → $target", doNotify = false)
@@ -5897,13 +5934,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     outgoingSendJobs.remove("$target/$fn")
                     _state.value = stErr.copy(dccTransfers = stErr.dccTransfers.map {
                         if (it is DccTransferState.Outgoing && it.target == target && it.filename == fn)
-                            it.copy(done = true, error = if (cancelled) null else msg)
+                            it.copy(done = true, error = if (cancelled) null else msg, endTimeMs = System.currentTimeMillis())
                         else it
                     })
                     if (!cancelled) append(statusKey, from = "DCC", text = "*** DCC send failed: $msg", isHighlight = true)
                     else append(statusKey, from = null, text = "*** DCC send cancelled: $fn", doNotify = false)
                 } ?: run {
-                    _state.value = stErr.copy(dccTransfers = stErr.dccTransfers + DccTransferState.Outgoing(target = target, filename = "(unknown)", done = true, error = msg))
+                    _state.value = stErr.copy(dccTransfers = stErr.dccTransfers + DccTransferState.Outgoing(target = target, filename = "(unknown)", done = true, error = msg, endTimeMs = System.currentTimeMillis()))
                     if (!cancelled) append(statusKey, from = "DCC", text = "*** DCC send failed: $msg", isHighlight = true)
                 }
                 if (cancelled) throw t   // re-throw so coroutine completes correctly
@@ -5988,16 +6025,38 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
     // Sharing
 
     fun shareFile(path: String) {
-        val f = File(path)
-        if (!f.exists()) return
-        val uri = FileProvider.getUriForFile(appContext, appContext.packageName + ".fileprovider", f)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = if (f.isDirectory) "application/octet-stream" else "*/*"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val uri: android.net.Uri = if (path.startsWith("content://")) {
+            // MediaStore or SAF path — already a content URI, use directly.
+            android.net.Uri.parse(path)
+        } else {
+            // Filesystem path — wrap with FileProvider so other apps can read it.
+            val f = File(path)
+            if (!f.exists()) return
+            FileProvider.getUriForFile(appContext, appContext.packageName + ".fileprovider", f)
         }
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        appContext.startActivity(Intent.createChooser(intent, "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        // Use ACTION_VIEW to open the file directly rather than a share sheet.
+        // Fall back to ACTION_SEND if no viewer is installed for this type.
+        val mime = appContext.contentResolver.getType(uri) ?: "*/*"
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        // resolveActivity() is unreliable on API 30+ due to package visibility restrictions
+        // (requires <queries> in the manifest or QUERY_ALL_PACKAGES permission to work).
+        // Instead, attempt startActivity directly and fall back to a chooser on failure.
+        try {
+            appContext.startActivity(viewIntent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            // No app can handle this type directly — show a chooser.
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(
+                Intent.createChooser(shareIntent, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
     }
 
     // /SYSINFO
@@ -6086,7 +6145,8 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
 
         val gpu = cachedGpu ?: readGpuRendererBestEffort().also { cachedGpu = it }
 
-        return "Device: $device running Android $release $codename (API $api), CPU: ${cpuCores}-core $cpuModel, " +
+        return "HexDroid v${BuildConfig.VERSION_NAME} | " +
+            "Device: $device running Android $release $codename (API $api), CPU: ${cpuCores}-core $cpuModel, " +
             "Memory: ${fmtBytes(totalMem)} total, ${fmtBytes(usedMem)} (${fmtPct(usedMemPct)}) used, ${fmtBytes(availMem)} (${fmtPct(1.0 - usedMemPct)}) free, " +
             "Storage: ${fmtBytes(totalStorage)} total, ${fmtBytes(usedStorage)} (${fmtPct(usedStoPct)}) used, ${fmtBytes(freeStorage)} (${fmtPct(1.0 - usedStoPct)}) free, " +
             "Graphics: $gpu, Uptime: $uptime"
@@ -6133,7 +6193,7 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
         networkCallback?.let { cb -> runCatching { cm?.unregisterNetworkCallback(cb) } }
         networkCallback = null
         // Flush and close all open log file handles so the last few lines written via the
-        // BufferedWriter cache are not lost when the ViewModel is destroyed.
+        // BufferedWriter cache (fix #8) are not lost when the ViewModel is destroyed.
         logs.closeAll()
     }
 }
