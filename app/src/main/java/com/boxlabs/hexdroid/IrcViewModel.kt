@@ -18,6 +18,7 @@
 
 package com.boxlabs.hexdroid
 import android.annotation.SuppressLint
+import androidx.core.app.NotificationManagerCompat
 import com.boxlabs.hexdroid.BuildConfig
 import android.app.ActivityManager
 import android.content.Context
@@ -1034,18 +1035,27 @@ class IrcViewModel(
             }
             
             override fun onLost(network: android.net.Network) {
-                // Network lost - check if we still have connectivity via another network
+                // Network lost - check if we still have connectivity via another network.
                 viewModelScope.launch {
-                    delay(500) // Brief delay to see if another network takes over
+                    delay(500) // Brief window to let a failover interface take over.
                     if (!hasInternetConnection()) {
-                        // No connectivity at all - mark connections as waiting
+                        // No connectivity at all. Actively disconnect each affected
+                        // network so the socket's readLine() unblocks immediately
+                        // instead of blocking for up to SOCKET_READ_TIMEOUT_MS (150 s).
+                        // Without this, the UI freezes on the stale connection state,
+                        // the exit drawer button appears to do nothing (the disconnect
+                        // coroutine is queued behind the blocked read), and the app can
+                        // hang long enough for the OS to restart the process.
+                        // disconnectNetwork() honours desiredConnected, so onAvailable()
+                        // will reconnect everything once the network returns.
                         val st = _state.value
                         for (netId in desiredConnected) {
                             val conn = st.connections[netId]
                             if (conn?.connected == true || conn?.connecting == true) {
                                 val serverKey = bufKey(netId, "*server*")
                                 append(serverKey, from = null, text = "*** Network lost. Waiting for connectivity…", doNotify = false)
-                                setNetConn(netId) { it.copy(status = "Waiting for network…") }
+                                noNetworkNotice.add(netId)
+                                disconnectNetwork(netId)
                             }
                         }
                     }
@@ -1270,11 +1280,13 @@ class IrcViewModel(
         if (action == NotificationHelper.ACTION_ACCEPT_DCC) {
             val from     = intent.getStringExtra(NotificationHelper.EXTRA_DCC_FROM)     ?: ""
             val filename = intent.getStringExtra(NotificationHelper.EXTRA_DCC_FILENAME) ?: ""
+            val notifId  = intent.getIntExtra(NotificationHelper.EXTRA_NOTIF_ID, -1)
             if (!netId.isNullOrBlank()) setActiveNetwork(netId)
             _state.value = _state.value.copy(screen = AppScreen.TRANSFERS)
+            // Dismiss the incoming-file notification immediately so the user
+            // doesn't see a stale "incoming file" banner after accepting.
+            if (notifId >= 0) NotificationManagerCompat.from(appContext).cancel(notifId)
             // Find the matching pending offer and accept it automatically.
-            // The offer is identified by (netId, from, filename) — the same
-            // triple that was put into the notification extras when it was shown.
             val offer = _state.value.dccOffers.firstOrNull { o ->
                 (netId.isNullOrBlank() || o.netId == netId) &&
                 o.from.equals(from, ignoreCase = true) &&
@@ -2215,7 +2227,7 @@ fun startAddNetwork() {
         // One job per network.
         autoReconnectJobs.remove(netId)?.cancel()
         val serverKey = bufKey(netId, "*server*")
-        autoReconnectJobs[netId] = viewModelScope.launch {
+        autoReconnectJobs[netId] = viewModelScope.launch(Dispatchers.Default) {
             while (isActive) {
                 val attempt = reconnectAttempts[netId] ?: 0
                 val baseDelaySec = _state.value.settings.autoReconnectDelaySec.coerceIn(
@@ -5612,10 +5624,23 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
             is DccTransferState.Outgoing -> transfer.done || transfer.error != null
         }
         if (!canClear) return
-        // Use structural equality (==) not reference equality (===): data class instances
-        // are rebuilt on each _state.update, so the rendered copy and the live state
-        // copy will be == but never ===.
-        _state.update { it.copy(dccTransfers = it.dccTransfers.filterNot { t -> t == transfer }) }
+        // Match by logical identity key rather than full structural equality:
+        // the transfer state is updated frequently (progress ticks, endTimeMs stamp)
+        // so a full == comparison against the rendered snapshot will fail once
+        // any field has changed since the item was composed.
+        _state.update { st ->
+            st.copy(dccTransfers = st.dccTransfers.filterNot { t ->
+                when {
+                    t is DccTransferState.Incoming && transfer is DccTransferState.Incoming ->
+                        t.offer == transfer.offer
+                    t is DccTransferState.Outgoing && transfer is DccTransferState.Outgoing ->
+                        t.target == transfer.target &&
+                        t.filename == transfer.filename &&
+                        t.startTimeMs == transfer.startTimeMs
+                    else -> false
+                }
+            })
+        }
     }
 
     fun rejectDcc(offer: DccOffer) {
@@ -6193,7 +6218,7 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
         networkCallback?.let { cb -> runCatching { cm?.unregisterNetworkCallback(cb) } }
         networkCallback = null
         // Flush and close all open log file handles so the last few lines written via the
-        // BufferedWriter cache (fix #8) are not lost when the ViewModel is destroyed.
+        // BufferedWriter cache are not lost when the ViewModel is destroyed.
         logs.closeAll()
     }
 }

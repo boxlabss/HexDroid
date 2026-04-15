@@ -293,21 +293,21 @@ class NotificationHelper(private val ctx: Context) {
             .setContentTitle("DCC complete")
             .setContentText("$filename saved to $where")
             .setAutoCancel(true)
-            .setContentIntent(openBufferPendingIntent(networkId, "*server*"))
-            .addAction(0, "Quit", actionPendingIntent(networkId, ACTION_QUIT))
-            .addAction(0, "Exit", actionPendingIntent(networkId, ACTION_EXIT))
+            .setContentIntent(openTransfersPendingIntent(networkId))
             .build()
         NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
     }
 
     fun notifyDccIncomingFile(networkId: String, from: String, filename: String) {
         ensureChannels()
+        val notifId = nextNotifId()
         val acceptIntent = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_NETWORK_ID, networkId)
             putExtra(EXTRA_ACTION, ACTION_ACCEPT_DCC)
             putExtra(EXTRA_DCC_FROM, from)
             putExtra(EXTRA_DCC_FILENAME, filename)
+            putExtra(EXTRA_NOTIF_ID, notifId)
         }
         val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
@@ -320,7 +320,7 @@ class NotificationHelper(private val ctx: Context) {
             .setContentIntent(openTransfersPendingIntent(networkId))
             .addAction(0, "Accept", acceptPi)
             .build()
-        NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
+        NotificationManagerCompat.from(ctx).notify(notifId, n)
     }
 
     fun notifyDccIncomingChat(networkId: String, from: String, dccBufferKey: String? = null) {

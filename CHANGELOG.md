@@ -2,6 +2,10 @@
 
 All notable changes to HexDroid are documented here.
 ---
+## [1.6.0] - 2026-04-15
+- **Improvements** several improvements to app performance. 
+- **Bug fixes** DCC outgoing, welcome splash and more
+
 ## [1.5.9] - 2026-04-10
 - **Improvements** several improvements to app performance
 - **Bug fixes** SASL, CTCP and replies. incoming Secure DCC file transfer offers

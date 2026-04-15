@@ -30,9 +30,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
@@ -114,6 +114,7 @@ fun WelcomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
+            .imePadding()
     ) {
         AnimatedVisibility(
             visible = showContent,
@@ -122,6 +123,7 @@ fun WelcomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -155,12 +157,16 @@ fun WelcomeScreen(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    LazyColumn(
+                    // Plain Column (not LazyColumn) so it can live inside the outer
+                    // verticalScroll without nested-scroll conflicts. 14 items is small
+                    // enough that lazy loading gives no benefit here.
+                    Column(
                         modifier = Modifier
                             .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState())
                             .fillMaxWidth()
                     ) {
-                        items(SUPPORTED_LANGUAGES) { lang ->
+                        SUPPORTED_LANGUAGES.forEach { lang ->
                             val isSelected = lang.code == selectedLang
                             Row(
                                 modifier = Modifier
@@ -222,7 +228,7 @@ fun WelcomeScreen(
                     isError = nickError != null,
                 )
 
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(32.dp))
 
                 // Continue button
                 Button(

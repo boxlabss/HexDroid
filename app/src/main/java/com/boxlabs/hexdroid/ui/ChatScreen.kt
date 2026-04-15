@@ -5358,8 +5358,14 @@ private fun rememberDisplayItems(
     // ── Phase 1: block detection — O(n) string ops, no measurement ───────────
     val n        = reversedMessages.size
     val newestId = reversedMessages.firstOrNull()?.id ?: -1L
+    // Include oldestId in the cache key so that interior changes (scrollback trim
+    // racing with new arrivals) invalidate the cache even when n and newestId are
+    // unchanged. Without this, a stale rawItems list could produce DisplayItem keys
+    // pointing to old UiMessage.ids, and if those ids reappear in the live list
+    // Compose detects a duplicate key in one measure pass -> IllegalArgumentException.
+    val oldestId = reversedMessages.lastOrNull()?.id ?: -1L
 
-    val rawItems: List<RawItem> = remember(n, newestId) {
+    val rawItems: List<RawItem> = remember(n, newestId, oldestId) {
         if (reversedMessages.isEmpty()) return@remember emptyList()
         val result  = mutableListOf<RawItem>()
         val artRun  = mutableListOf<UiMessage>()  // accumulated in reversed (newest-first) order

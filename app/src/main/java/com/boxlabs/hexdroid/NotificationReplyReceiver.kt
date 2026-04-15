@@ -60,7 +60,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         val hasLiveConnection = vm?.hasLiveConnection(netId) == true
 
         if (hasLiveConnection) {
-            vm!!.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
+            vm.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
             if (notifId >= 0) NotificationManagerCompat.from(ctx).cancel(notifId)
         } else {
             // No live connection. show an error notification so the reply is not lost silently.

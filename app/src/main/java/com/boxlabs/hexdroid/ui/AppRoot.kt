@@ -19,6 +19,7 @@
 package com.boxlabs.hexdroid.ui
 
 import android.app.Activity
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -165,10 +166,22 @@ fun AppRoot(
     val view = LocalView.current
     val activity = LocalContext.current as? Activity
     DisposableEffect(darkTheme, view) {
-        activity?.let {
-            val controller = WindowCompat.getInsetsController(it.window, view)
+        activity?.let { act ->
+            val controller = WindowCompat.getInsetsController(act.window, view)
             controller.isAppearanceLightStatusBars = !darkTheme
             controller.isAppearanceLightNavigationBars = !darkTheme
+            // On pre-API 30, the system bars are painted using the XML theme colours
+            // (values/themes.xml hard-codes white for light mode). When the user picks a
+            // dark in-app theme those XML colours are never updated, producing white
+            // stripes on the status and nav bars. Set them programmatically here so they
+            // always match the active in-app theme regardless of OS version.
+            @Suppress("DEPRECATION") // statusBarColor/navigationBarColor deprecated in API 35,
+            // but this branch only runs on pre-API 30 where they are the correct API.
+            if (Build.VERSION.SDK_INT < 30) {
+                val barColor = if (darkTheme) 0xFF121212.toInt() else 0xFFFFFFFF.toInt()
+                act.window.statusBarColor = barColor
+                act.window.navigationBarColor = barColor
+            }
         }
         onDispose { }
     }
