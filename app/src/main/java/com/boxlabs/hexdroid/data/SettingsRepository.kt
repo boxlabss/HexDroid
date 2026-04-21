@@ -260,6 +260,7 @@ class SettingsRepository(private val ctx: Context) {
                 autoReconnectEnabled = o.optBoolean("autoReconnectEnabled", true),
                 autoReconnectDelaySec = o.optInt("autoReconnectDelaySec", 10),
                 autoConnectOnStartup = o.optBoolean("autoConnectOnStartup", false),
+                rejoinOnKick = o.optBoolean("rejoinOnKick", false),
                 playSoundOnHighlight = o.optBoolean("playSoundOnHighlight", false),
                 vibrateOnHighlight = o.optBoolean("vibrateOnHighlight", false),
                 vibrateIntensity = runCatching {
@@ -343,6 +344,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("autoReconnectEnabled", s.autoReconnectEnabled)
         o.put("autoReconnectDelaySec", s.autoReconnectDelaySec)
         o.put("autoConnectOnStartup", s.autoConnectOnStartup)
+        o.put("rejoinOnKick", s.rejoinOnKick)
         o.put("playSoundOnHighlight", s.playSoundOnHighlight)
         o.put("vibrateOnHighlight", s.vibrateOnHighlight)
         o.put("vibrateIntensity", s.vibrateIntensity.name)
@@ -461,6 +463,24 @@ class SettingsRepository(private val ctx: Context) {
                     sortOrder = o.optInt("sortOrder", 0),
                     isFavourite = o.optBoolean("isFavourite", false),
                     isBouncer = o.optBoolean("isBouncer", false),
+                    // Migration: profiles written before BouncerKind existed used
+                    // bouncerNetworkName with the soju-style `user/network` syntax.
+                    // Default kind to SOJU when only the legacy field is present so existing
+                    // setups continue to work unchanged. New profiles always write bouncerKind
+                    // explicitly and are unaffected.
+                    bouncerKind = run {
+                        val raw = o.optString("bouncerKind", "")
+                        if (raw.isNotBlank()) {
+                            runCatching { com.boxlabs.hexdroid.BouncerKind.valueOf(raw) }
+                                .getOrDefault(com.boxlabs.hexdroid.BouncerKind.NONE)
+                        } else if (o.optString("bouncerNetworkName", "").isNotBlank()) {
+                            com.boxlabs.hexdroid.BouncerKind.SOJU
+                        } else {
+                            com.boxlabs.hexdroid.BouncerKind.NONE
+                        }
+                    },
+                    bouncerNetworkName = o.optString("bouncerNetworkName", "").takeIf { it.isNotBlank() },
+                    bouncerClientId = o.optString("bouncerClientId", "").takeIf { it.isNotBlank() },
                     tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
                 )
             }
@@ -525,6 +545,10 @@ class SettingsRepository(private val ctx: Context) {
             o.put("sortOrder", n.sortOrder)
             o.put("isFavourite", n.isFavourite)
             o.put("isBouncer", n.isBouncer)
+            // Always emit bouncerKind so the migration on next read doesn't second-guess us.
+            o.put("bouncerKind", n.bouncerKind.name)
+            if (!n.bouncerNetworkName.isNullOrBlank()) o.put("bouncerNetworkName", n.bouncerNetworkName)
+            if (!n.bouncerClientId.isNullOrBlank()) o.put("bouncerClientId", n.bouncerClientId)
             if (n.tlsTofuFingerprint != null) o.put("tlsTofuFingerprint", n.tlsTofuFingerprint)
             arr.put(o)
         }
@@ -611,7 +635,7 @@ class SettingsRepository(private val ctx: Context) {
         NetworkProfile(
             id = "EFnet",
             name = "EFnet",
-            host = "irc.efnet.org",
+            host = "irc.efnet.nl",
             port = 6697,
             useTls = true,
             allowInvalidCerts = false,
@@ -689,17 +713,24 @@ class SettingsRepository(private val ctx: Context) {
      */
     fun exportBackupJson(networks: List<NetworkProfile>, settings: com.boxlabs.hexdroid.UiSettings): String {
         val root = JSONObject()
-        // version: incremented only when a field is REMOVED or RENAMED (breaking change).
-        // minCompatVersion: the oldest app version that can safely import this backup.
-        // New optional fields added in later versions are silently ignored by older builds
-        // because all parse* calls use optXxx() with defaults throughout.
-        root.put("version", 2)
+        // version: bumped when the schema gains fields whose absence in a round-trip through
+        //   an older build would silently change behaviour (not just lose data). e.g. bouncerKind:
+        //   a v3 ZNC profile written, imported on a v2-only build, re-exported and re-imported
+        //   would come back as soju-style routing. Distinct from a no-op field loss.
+        // minCompatVersion: the oldest app version that can still *open* this backup without
+        //   errors. older builds get default behaviour for unknown fields via the
+        //   optXxx() parse calls; they just miss the new features (bouncer-kind distinction,
+        //   TOFU pins, rejoinOnKick)
+        root.put("version", 3)
         root.put("minCompatVersion", 1)
         root.put("app", "HexDroid")
         root.put("exportedAt", java.time.Instant.now().toString())
         root.put("note", "Passwords and TLS certificates are not included in the backup.")
         root.put("schemaChanges", org.json.JSONArray(listOf(
-            "v2: added sortOrder and isFavourite fields on NetworkProfile"
+            "v2: added sortOrder and isFavourite fields on NetworkProfile",
+            "v3: added bouncerKind, bouncerClientId, tlsTofuFingerprint on NetworkProfile; " +
+                "added rejoinOnKick on UiSettings. bouncerNetworkName pre-v3 profiles are " +
+                "migrated to bouncerKind=SOJU on import."
         )))
         root.put("settings", toSettingsJson(settings))
         root.put("networks", toNetworksJson(networks))
@@ -714,7 +745,17 @@ class SettingsRepository(private val ctx: Context) {
      *
      * @throws IllegalArgumentException if the JSON is invalid or the version is unsupported.
      */
-    suspend fun importBackup(json: String) {
+    /**
+     * Import a backup, replacing current settings and/or networks with the ones in [json].
+     * Does not touch the encrypted secret store — passwords and client certs live in
+     * [SecretStore] and are deliberately excluded from backups.
+     *
+     * Returns the set of profile ids that existed locally before the restore but are
+     * absent from the imported backup. Callers should clear any encrypted secrets for
+     * those ids out of [SecretStore] to avoid orphaned credential material accumulating
+     * on device after repeated restore cycles.
+     */
+    suspend fun importBackup(json: String): Set<String> {
         val root = try {
             JSONObject(json)
         } catch (e: Throwable) {
@@ -726,7 +767,7 @@ class SettingsRepository(private val ctx: Context) {
         // import this file.  If minCompatVersion is absent, assume it equals version (old
         // backups that predate this field are version 1 and this build supports version 1).
         val minCompat = root.optInt("minCompatVersion", version)
-        val appBackupVersion = 2  // this build's highest supported backup version
+        val appBackupVersion = 3  // this build's highest supported backup version
         if (minCompat > appBackupVersion) {
             throw IllegalArgumentException(
                 "This backup requires a newer version of HexDroid (backup minCompatVersion=$minCompat, app supports up to $appBackupVersion). Please update the app."
@@ -739,19 +780,24 @@ class SettingsRepository(private val ctx: Context) {
         val settingsJson = root.optJSONObject("settings")
         val networksJson = root.optJSONArray("networks")
 
+        val orphanedIds = mutableSetOf<String>()
         ctx.dataStore.edit { prefs ->
             if (settingsJson != null) {
                 val restoredSettings = parseSettings(settingsJson.toString())
                 prefs[Keys.SETTINGS_JSON] = toSettingsJson(restoredSettings).toString()
             }
             if (networksJson != null) {
+                val oldIds = parseNetworks(prefs[Keys.NETWORKS_JSON]).map { it.id }.toSet()
                 val restoredNetworks = parseNetworks(networksJson.toString())
+                val newIds = restoredNetworks.map { it.id }.toSet()
+                orphanedIds.addAll(oldIds - newIds)
                 prefs[Keys.NETWORKS_JSON] = toNetworksJson(restoredNetworks).toString()
             }
         }
+        return orphanedIds
     }
 
-    // FIX #11: Flap detection state — migrated from SharedPreferences to DataStore so it is
+    // Flap detection state migrated from SharedPreferences to DataStore so it is
     // consistent with the rest of the persistence layer and immune to the data-loss issues
     // that SharedPreferences can exhibit under process death on some OEM ROMs.
     //
@@ -864,6 +910,24 @@ data class NetworkProfile(
      */
     val isBouncer: Boolean = false,
     /**
+     * Which bouncer protocol family this profile targets. Drives the username/network/clientId
+     * assembly in [com.boxlabs.hexdroid.IrcConfig.effectiveAuthIdentity]. See [com.boxlabs.hexdroid.BouncerKind]
+     * for the per-kind syntax. Default NONE = direct connection, no bouncer munging.
+     */
+    val bouncerKind: com.boxlabs.hexdroid.BouncerKind = com.boxlabs.hexdroid.BouncerKind.NONE,
+    /**
+     * The upstream network name on the bouncer (e.g. "libera", "oftc"). Composed into the
+     * auth identity per [bouncerKind]. Leave null when this profile points at a direct
+     * IRCd or at a bouncer's default upstream.
+     */
+    val bouncerNetworkName: String? = null,
+    /**
+     * Per-client identifier for bouncers that support per-client buffers (ZNC clientbuffer,
+     * soju per-client history). Short opaque string, typically a device name like "phone"
+     * or "desktop". Leave null to share a single buffer across all clients.
+     */
+    val bouncerClientId: String? = null,
+    /**
      * Stored TOFU (Trust On First Use) TLS certificate fingerprint (SHA-256, colon-separated hex).
      *
      * - null: no fingerprint stored yet.
@@ -901,6 +965,9 @@ data class NetworkProfile(
             autoJoin = autoJoin,
             encoding = encoding,
             isBouncer = isBouncer,
+            bouncerKind = bouncerKind,
+            bouncerNetworkName = bouncerNetworkName?.takeIf { it.isNotBlank() },
+            bouncerClientId = bouncerClientId?.takeIf { it.isNotBlank() },
             tlsTofuFingerprint = tlsTofuFingerprint
         )
     }

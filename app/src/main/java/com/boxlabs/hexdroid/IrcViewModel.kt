@@ -187,6 +187,14 @@ data class UiSettings(
     val autoReconnectEnabled: Boolean = true,
     val autoReconnectDelaySec: Int = 10,
     val autoConnectOnStartup: Boolean = false,
+    /**
+     * When true, automatically rejoin a channel if the user is kicked from it. Off by
+     * default because auto-rejoin can be perceived as rude on some servers (operators
+     * may interpret it as ignoring the kick), and can cause a loop if the channel has
+     * a set mode like +i that the user can't satisfy. The one-attempt behaviour avoids
+     * the loop case: a second kick within [AUTO_REJOIN_SUPPRESS_MS] is NOT rejoined.
+     */
+    val rejoinOnKick: Boolean = false,
     val playSoundOnHighlight: Boolean = false,
     val vibrateOnHighlight: Boolean = false,
     val vibrateIntensity: VibrateIntensity = VibrateIntensity.MEDIUM,
@@ -261,6 +269,29 @@ data class BanEntry(
     val mask: String,
     val setBy: String? = null,
     val setAtMs: Long? = null
+)
+
+/**
+ * Snapshot of one upstream network reported by a soju/pounce bouncer via the
+ * `soju.im/bouncer-networks` extension. Distinct from [NetworkProfile] — this is what the
+ * bouncer *says* exists, not what HexDroid is configured to connect to. The difference is
+ * what lets the UI offer "bouncer has a network you haven't added" hints.
+ *
+ * [id] is the stable per-user netid assigned by the bouncer. The spec guarantees it does
+ * not change during the lifetime of the network, so it's safe to use as a map key.
+ *
+ * [state] mirrors the spec values: "connected" | "connecting" | "disconnected". Null until
+ * the bouncer has told us, or when an update message omits the attribute (spec rule: a
+ * missing attribute means "preserve the previous value"; we honour that by keeping non-null
+ * state when a later message doesn't include one, via the merge logic in the handler).
+ */
+data class BouncerUpstreamInfo(
+    val id: String,
+    val name: String? = null,
+    val host: String? = null,
+    val state: String? = null,
+    /** Epoch-ms of the most recent BOUNCER NETWORK update for this upstream. */
+    val lastSeenMs: Long = 0L,
 )
 
 /**
@@ -341,6 +372,18 @@ data class UiState(
 
     val networkEditError: String? = null,
 
+    /**
+     * Per-connection map of upstream bouncer networks reported by `soju.im/bouncer-networks`.
+     * Key = our local network profile id (the id used in [connections] and [runtimes]); inner
+     * key = the bouncer's upstream netid (stable per user). This is "what soju says exists",
+     * not "what HexDroid is configured to connect to". Distinguishing the two is what lets
+     * the UI show "your bouncer has a new network you haven't added yet" hints.
+     *
+     * Kept in sync with `BOUNCER NETWORK` push notifications (see the BouncerNetwork handler).
+     * Cleared when the connection drops so stale upstream state doesn't leak across reconnects.
+     */
+    val bouncerNetworks: Map<String, Map<String, BouncerUpstreamInfo>> = emptyMap(),
+
     val plaintextWarningNetworkId: String? = null,
     /** Non-null when a connect attempt was blocked because ACCESS_LOCAL_NETWORK is not granted (API 37+). */
     val localNetworkWarningNetworkId: String? = null,
@@ -382,6 +425,22 @@ class IrcViewModel(
     private val _channelListBuffer = ArrayList<ChannelListEntry>()
     private companion object {
         const val CHANNEL_LIST_BATCH_SIZE = 200
+        /**
+         * Delay between successive connectNetwork() calls when fanning out autoconnect or
+         * restoring a set of keep-alive connections. ~500 ms is enough to satisfy typical
+         * bouncer and IRCd "reconnect too fast" rate limits (soju defaults to one new TCP
+         * per second per source IP) without being perceptible to the user.
+         */
+        const val CONNECT_FAN_OUT_DELAY_MS = 500L
+        /**
+         * Suppression window for auto-rejoin after a kick. A second kick on the same channel
+         * within this window will NOT trigger another rejoin attempt — protects against
+         * loops when the user can't satisfy a channel mode (+i, +k, +b) or is being
+         * deliberately kick-banned by an op.
+         */
+        const val AUTO_REJOIN_SUPPRESS_MS = 60_000L
+        /** Small delay before sending the rejoin so it doesn't feel adversarial to the kicker. */
+        const val AUTO_REJOIN_DELAY_MS = 1500L
     }
 
     private data class NamesRequest(
@@ -597,7 +656,13 @@ class IrcViewModel(
         val existing = st.networks.map { it.id }.toSet()
         val targets = desiredConnected.filter { existing.contains(it) }.toList()
         if (targets.isEmpty()) return
-        targets.forEach { id -> connectNetwork(id) }
+        // Same rationale as maybeAutoConnect: stagger to avoid bouncer rate-limit bounces.
+        viewModelScope.launch {
+            targets.forEachIndexed { i, id ->
+                if (i > 0) delay(CONNECT_FAN_OUT_DELAY_MS)
+                connectNetwork(id)
+            }
+        }
         val before = desiredConnected.size
         desiredConnected.retainAll(existing)
         if (desiredConnected.size != before) persistDesiredNetworkIds()
@@ -656,6 +721,12 @@ class IrcViewModel(
 
     // away-notify state. Outer key = netId, inner key = case-folded nick, value = away message ("" if away with no message). Absent = present.
     private val nickAwayState: MutableMap<String, MutableMap<String, String>> = mutableMapOf()
+
+    // Auto-rejoin throttle. Key = "$netId::${chan.lowercase()}", value = epoch-ms of the last
+    // auto-rejoin attempt. Used to suppress repeat rejoins within AUTO_REJOIN_SUPPRESS_MS so a
+    // user who is being kick-banned (or who can't satisfy +i / +k) doesn't get into an
+    // immediate kick → rejoin → kick loop. One auto-rejoin per minute per channel is plenty.
+    private val recentKickRejoins: MutableMap<String, Long> = mutableMapOf()
 
     private var autoConnectAttempted = false
 
@@ -1093,7 +1164,16 @@ class IrcViewModel(
         autoConnectAttempted = true
         val targets = st.networks.filter { it.autoConnect }
         if (targets.isEmpty()) return
-        targets.forEach { connectNetwork(it.id) }
+        // Stagger the fan-out. Bouncers and many IRCds rate-limit new TCP from one IP,
+        // so firing N connect attempts simultaneously triggers "reconnect too fast" errors
+        // against soju in particular. A small inter-connect delay is invisible to the user
+        // (the UI still shows all networks connecting) but satisfies typical rate limits.
+        viewModelScope.launch {
+            targets.forEachIndexed { i, n ->
+                if (i > 0) delay(CONNECT_FAN_OUT_DELAY_MS)
+                connectNetwork(n.id)
+            }
+        }
     }
 
     fun setNetworkAutoConnect(netId: String, enabled: Boolean) {
@@ -1839,6 +1919,14 @@ fun startAddNetwork() {
         // Flap detection (NOT cleared here - we want to preserve across reconnect cycles
         // so flapping doesn't reset just because cleanupNetworkMaps was called.
         // Cleared explicitly in reconnectNetwork() when the user manually reconnects.)
+
+        // Bouncer upstream cache: drop so a reconnect doesn't surface stale "discovered"
+        // entries from the previous session. The bouncer re-announces the full list on
+        // every reconnect, so rebuilding from scratch is correct and cheap.
+        _state.update { st ->
+            if (!st.bouncerNetworks.containsKey(netId)) st
+            else st.copy(bouncerNetworks = st.bouncerNetworks - netId)
+        }
     }
 
     fun deleteNetwork(id: String) {
@@ -1893,7 +1981,21 @@ fun startAddNetwork() {
                 val json = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?.toString(Charsets.UTF_8)
                     ?: throw java.io.IOException("Unable to read backup file")
-                repo.importBackup(json)
+                val orphanedIds = repo.importBackup(json)
+                // Clear encrypted secrets for profiles that existed locally before the restore
+                // but are absent from the imported backup. Without this, SASL passwords / server
+                // passwords / TLS client certs for deleted profiles linger in SecretStore
+                // indefinitely — a data-hygiene issue rather than an active security bug, but
+                // worth closing because the material is encrypted credential data.
+                for (id in orphanedIds) {
+                    runCatching { repo.secretStore.clearSaslPassword(id) }
+                    runCatching { repo.secretStore.clearServerPassword(id) }
+                    // Client cert lookup requires the certId stored on the (now-deleted) profile;
+                    // we no longer have that reference after the import overwrites NETWORKS_JSON,
+                    // so cert files under /client_certs/*.bin for deleted profiles may still
+                    // remain. They'll never be used (loadTlsClientCert requires both netId and
+                    // certId), but a follow-up housekeeping pass could walk the directory.
+                }
                 "Backup restored successfully.\nPasswords were not restored — please re-enter them in each network's settings."
             }
             val msg = result.getOrElse { e -> "Restore failed: ${e.message}" }
@@ -2489,6 +2591,10 @@ fun startAddNetwork() {
         if (!rt.client.hasCap("draft/typing") && !rt.client.hasCap("typing")
             && !rt.client.hasCap("message-tags")) return
         if (bufferName == "*server*") return
+        // DCC chat buffers are peer-to-peer and don't speak IRC — sending a TAGMSG with
+        // a DCC buffer name as the target routes it to the IRC server, which bounces it
+        // back as ERR_NOSUCHNICK. Skip silently.
+        if (isDccChatBufferName(bufferName)) return
 
         typingDoneJob?.cancel()
 
@@ -3542,15 +3648,7 @@ if (code == "442") {
                 val profile = _state.value.networks.firstOrNull { it.id == netId }
 
                 viewModelScope.launch {
-                    // 1. soju bouncer: bind to a specific upstream network after registration.
-                    //    BOUNCER BIND <networkId> tells soju to route subsequent traffic through
-                    //    that upstream, enabling per-network connection from a single soju endpoint.
-                    val bindId = rt.client.config.bouncerNetworkId
-                    if (rt.client.config.isBouncer && !bindId.isNullOrBlank()) {
-                        rt.client.sendRaw("BOUNCER BIND $bindId")
-                    }
-
-                    // 2. Service auth command (e.g. /msg NickServ IDENTIFY password)
+                    // Service auth command (e.g. /msg NickServ IDENTIFY password)
                     //    Runs first, before autojoin, so channels with +r can be joined.
                     profile?.serviceAuthCommand?.takeIf { it.isNotBlank() }?.let { cmd ->
                         val trimmed = cmd.trim()
@@ -3837,7 +3935,22 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                 val allowNotify = if (ev.isHistory) st.settings.ircHistoryTriggersNotifications else true
                 val targetKey = resolveIncomingBufferKey(netId, ev.target)
 
-                if (!ev.isHistory && fromMe && consumeEchoIfMatch(netId, targetKey, ev.text, ev.isAction)) return
+                if (!ev.isHistory && fromMe && consumeEchoIfMatch(netId, targetKey, ev.text, ev.isAction)) {
+                    // We deliberately dropped this echo, but if the server tagged it with a msgid
+                    // we need to record it in the buffer's seenMsgIds so a *second* echo of the
+                    // same message (e.g. ZNC reflecting via both server-time and legacy
+                    // server-time-iso paths) is caught by append()'s O(1) msgid dedup rather
+                    // than slipping through as a visible duplicate.
+                    val mid = ev.msgId
+                    if (!mid.isNullOrBlank()) {
+                        _state.update { s ->
+                            val buf = s.buffers[targetKey] ?: UiBuffer(targetKey)
+                            if (buf.seenMsgIds.contains(mid)) s
+                            else s.copy(buffers = s.buffers + (targetKey to buf.copy(seenMsgIds = buf.seenMsgIds + mid)))
+                        }
+                    }
+                    return
+                }
 
                 ensureBuffer(targetKey)
                 // Clear this nick's typing indicator when they send a message (implicit "done").
@@ -4198,6 +4311,34 @@ if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
 
     val finalList = if (victimIsMe) emptyList() else rebuildNicklist(netId, chanKey)
     _state.value = syncActiveNetworkSummary(st1.copy(nicklists = st1.nicklists + (chanKey to finalList)))
+
+    // Auto-rejoin on kick. Off by default. Throttled to one rejoin per channel per
+    // AUTO_REJOIN_SUPPRESS_MS so we don't loop against +i/+k/+b modes or against an
+    // op who is actively kick-banning. The small AUTO_REJOIN_DELAY_MS makes it feel
+    // less adversarial than an instant rejoin.
+    if (victimIsMe && st1.settings.rejoinOnKick) {
+        val rejoinKey = "$netId::${ev.channel.lowercase()}"
+        val now = System.currentTimeMillis()
+        // Opportunistic eviction: if the map has grown past a small bound, drop entries
+        // older than 2× the suppress window so it can't grow without limit on a busy
+        // channel-hopping user.
+        if (recentKickRejoins.size > 32) {
+            val cutoff = now - (AUTO_REJOIN_SUPPRESS_MS * 2)
+            recentKickRejoins.entries.removeAll { it.value < cutoff }
+        }
+        val last = recentKickRejoins[rejoinKey] ?: 0L
+        if (now - last > AUTO_REJOIN_SUPPRESS_MS) {
+            recentKickRejoins[rejoinKey] = now
+            viewModelScope.launch {
+                delay(AUTO_REJOIN_DELAY_MS)
+                runtimes[netId]?.client?.sendRaw("JOIN ${ev.channel}")
+            }
+        } else {
+            append(chanKey, from = null,
+                text = "*** Auto-rejoin suppressed (kicked again within ${AUTO_REJOIN_SUPPRESS_MS / 1000}s)",
+                doNotify = false)
+        }
+    }
 }
             }
 
@@ -4506,14 +4647,68 @@ if (affectLive) {
 
             // soju BOUNCER NETWORK: track upstream network info.
             is IrcEvent.BouncerNetwork -> {
-                // Surface a one-line status in the server buffer so the user can see which
-                // upstream networks the bouncer reports.  Full per-network buffer trees are
-                // deferred to a future feature; for now this gives useful diagnostic info.
                 val serverKey = bufKey(netId, "*server*")
-                val stateStr = ev.state ?: "unknown"
-                val nameStr  = ev.name  ?: ev.networkId
-                val hostStr  = if (ev.host != null) " (${ev.host})" else ""
-                append(serverKey, from = null, text = "*** Bouncer network: $nameStr$hostStr [$stateStr]", doNotify = false, isLocal = true)
+
+                // Deletion path — spec: `BOUNCER NETWORK <id> *`
+                if (ev.removed) {
+                    val stillPresent = _state.value.bouncerNetworks[netId]?.get(ev.networkId)
+                    _state.update { st ->
+                        val inner = st.bouncerNetworks[netId] ?: return@update st
+                        val next = inner - ev.networkId
+                        st.copy(bouncerNetworks = st.bouncerNetworks + (netId to next))
+                    }
+                    if (stillPresent != null) {
+                        val nameStr = stillPresent.name ?: ev.networkId
+                        append(serverKey, from = null, text = "*** Bouncer network removed: $nameStr",
+                            doNotify = false, isLocal = true)
+                    }
+                    return
+                }
+
+                // Upsert path — per spec, a missing attribute means "preserve the prior value".
+                // Only overwrite fields for which ev supplied a non-null value.
+                val prev = _state.value.bouncerNetworks[netId]?.get(ev.networkId)
+                val merged = BouncerUpstreamInfo(
+                    id = ev.networkId,
+                    name = ev.name ?: prev?.name,
+                    host = ev.host ?: prev?.host,
+                    state = ev.state ?: prev?.state,
+                    lastSeenMs = System.currentTimeMillis(),
+                )
+                _state.update { st ->
+                    val inner = st.bouncerNetworks[netId] ?: emptyMap()
+                    st.copy(bouncerNetworks = st.bouncerNetworks + (netId to (inner + (ev.networkId to merged))))
+                }
+
+                // User-visible status — only on genuine change (first-seen or state transition)
+                // to avoid the server buffer filling with "network [connected]" repeats on
+                // every reconnect when soju re-sends the whole list.
+                val isNew = prev == null
+                val stateChanged = prev != null && prev.state != merged.state && merged.state != null
+                if (isNew || stateChanged) {
+                    val stateStr = merged.state ?: "unknown"
+                    val nameStr = merged.name ?: ev.networkId
+                    val hostStr = if (merged.host != null) " (${merged.host})" else ""
+                    val verb = if (isNew) "discovered" else "state changed"
+                    append(serverKey, from = null,
+                        text = "*** Bouncer network $verb: $nameStr$hostStr [$stateStr]",
+                        doNotify = false, isLocal = true)
+
+                    // Hint for first-seen upstreams that don't correspond to any local profile.
+                    // Match on the bouncer-reported host (upstream hostname, e.g. "irc.afternet.org")
+                    // against our configured profile hosts. a user who's already set up a profile
+                    // for afternet shouldn't be nagged. This is conservative: if the bouncer
+                    // doesn't report a host, we skip the hint rather than risk a false positive.
+                    if (isNew && !merged.host.isNullOrBlank()) {
+                        val profileHosts = _state.value.networks.map { it.host.lowercase() }.toSet()
+                        if (merged.host.lowercase() !in profileHosts) {
+                            val displayName = merged.name ?: merged.host
+                            append(serverKey, from = null,
+                                text = "    > no local profile for \"$displayName\" - add one to connect to this upstream.",
+                                doNotify = false, isLocal = true)
+                        }
+                    }
+                }
             }
 
             is IrcEvent.MonitorStatus -> {

@@ -258,8 +258,15 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         // Bouncer-specific CAPs
         if (config.isBouncer) {
             // Legacy ZNC (< 1.7) uses znc.in/server-time-iso instead of server-time.
-            // Requesting both ensures replayed messages get correct timestamps on all ZNC versions.
-            req += "znc.in/server-time-iso"
+            // Modern ZNC (>= 1.7) advertises BOTH, but enabling both causes the bouncer to
+            // play back every buffered message twice (once per time-tag scheme). Per ZNC
+            // upstream guidance, only request the legacy cap when the server does not
+            // advertise the graduated "server-time" cap OR when the user has disabled it.
+            val serverSupportsStandardTime = serverCaps.contains("server-time")
+            val wantStandardTime = config.capPrefs.serverTime
+            if (!(serverSupportsStandardTime && wantStandardTime)) {
+                req += "znc.in/server-time-iso"
+            }
             // ZNC native playback: lets us request only messages since we were last seen,
             // rather than receiving a fixed replay window every connect.
             req += "znc.in/playback"
@@ -371,7 +378,11 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     }
                     // Fall back to the connection nick when no explicit authcid is set.
                     // Sending an empty authcid (\u0000\u0000pass) is rejected by most servers including ZNC.
-                    val authcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    // For soju bouncers, apply the `user/network` suffix so the bouncer can route
+                    // this connection to the right upstream network without the user having to
+                    // manually embed the slash in their authcid field.
+                    val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    val authcid = config.effectiveAuthIdentity(baseAuthcid)
                     val pass = s.password ?: ""
                     val msg = "\u0000$authcid\u0000$pass"
                     val b64 = Base64.encodeToString(msg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
@@ -406,7 +417,11 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.SCRAM_SHA_256 -> {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
-                    val authcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    // Same soju suffix treatment as PLAIN: if the user has named an upstream
+                    // network, encode it into the authcid as `user/network` so the bouncer
+                    // knows which upstream to route this downstream connection through.
+                    val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    val authcid = config.effectiveAuthIdentity(baseAuthcid)
                     val pass = s.password ?: ""
                     val clientNonce = randomNonce()
                     scram = ScramSha256Client(authcid, pass, clientNonce)

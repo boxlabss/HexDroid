@@ -43,10 +43,12 @@ import java.nio.charset.CodingErrorAction
 /**
  * Maximum bytes accepted per line from the server (applies to both read paths).
  * RFC 1459 allows 512 bytes; IRCv3 with message-tags extends this to 8191.
- * We use 8192 as a safe ceiling — anything larger is a protocol violation or
- * a runaway server bug that would cause unbounded heap growth.
+ * In practice, ZNC and other bouncers routinely produce longer lines when replaying
+ * buffered messages with stacked server-time/msgid/batch/account tags. We pick a
+ * generous ceiling (32 KiB) so normal bouncer traffic never trips it; a line that
+ * exceeds even this is treated as garbage and discarded WITHOUT closing the socket.
  */
-private const val MAX_LINE_BYTES = 8192
+private const val MAX_LINE_BYTES = 32768
 
 object EncodingHelper {
     
@@ -384,16 +386,22 @@ object EncodingHelper {
     /**
      * Read a line from an InputStream with proper encoding handling.
      * IRC uses CRLF (\r\n) as line terminators.
-     * 
+     *
      * @param input The input stream to read from
      * @param encoding The encoding to use for decoding, or "auto" for detection
      * @param autoDetect If true, run detection on each line
-     * @return Pair of (decoded line or null if EOF, actual encoding used)
+     * @param onTruncated Optional callback invoked (once) when a line was dropped for
+     *                    exceeding [MAX_LINE_BYTES]. Lets callers distinguish an
+     *                    empty server line from a discarded oversize one.
+     * @return Pair of (decoded line or null if EOF, actual encoding used).
+     *         Returns "" (not null) on overflow so the caller skips that line
+     *         while keeping the stream open for subsequent reads.
      */
     internal fun readLine(
         input: InputStream,
         encoding: String,
-        autoDetect: Boolean = true
+        autoDetect: Boolean = true,
+        onTruncated: (() -> Unit)? = null
     ): Pair<String?, String> {
         val buffer = ByteArrayOutputStream(512)
         var b: Int
@@ -420,17 +428,17 @@ object EncodingHelper {
                 else -> {
                     // cap line length to prevent OOM from a malicious/buggy server
                     // that sends an enormous line with no newline. IRC protocol allows
-                    // 512 bytes (RFC 1459) or 8191 with message-tags (IRCv3).
+                    // 512 bytes (RFC 1459) or 8191 with message-tags (IRCv3); bouncers
+                    // can legitimately exceed even that when replaying long-tagged lines.
+                    // If the ceiling is hit we drain to the next LF and return an empty
+                    // string so the caller skips this line but keeps the connection up.
                     if (buffer.size() >= MAX_LINE_BYTES) {
-                        // Drain the rest of this line before throwing so the stream
-                        // stays in a consistent state for subsequent reads.
                         while (true) {
                             val skip = input.read()
                             if (skip == -1 || skip == '\n'.code) break
                         }
-                        throw java.io.IOException(
-                            "Server sent a line exceeding $MAX_LINE_BYTES bytes — possible protocol violation"
-                        )
+                        onTruncated?.invoke()
+                        return "" to encoding
                     }
                     buffer.write(b)
                 }
@@ -531,10 +539,11 @@ class EncodingLineReader(
     /**
      * Maximum number of bytes accepted per line from the server.
      * RFC 1459 allows 512 bytes; IRCv3 with message-tags extends this to 8191.
-     * We use 8192 as a safe ceiling — anything larger is a protocol violation or
-     * a runaway server bug that would cause unbounded memory growth.
+     * Bouncers replaying buffered lines with stacked tags can legitimately push
+     * past that, so we use a generous 32 KiB ceiling; anything over this is
+     * treated as garbage and silently dropped (the socket is NOT closed).
      */
-    private val MAX_LINE_BYTES = 8192
+    private val MAX_LINE_BYTES = 32768
 
     /** Accumulated raw bytes from all non-ASCII lines seen so far during detection. */
     private val corpus = ByteArrayOutputStream(512)
@@ -549,13 +558,27 @@ class EncodingLineReader(
     val encoding: String get() = currentEncoding
 
     /**
+     * Number of oversized lines discarded since this reader was constructed. The main
+     * read loop can poll this after each [readLine] call to emit a one-shot user-visible
+     * notice without spamming the status buffer. Counts drops from both the fast and
+     * slow paths. Purely informational — does NOT affect connection state.
+     */
+    var truncatedLineCount: Int = 0
+        private set
+
+    /**
      * Read and decode the next line from the stream.
-     * Returns null on EOF.
+     * Returns null on EOF. Returns "" when either (a) the server sent an empty line,
+     * or (b) a line was dropped for exceeding [MAX_LINE_BYTES]. Callers can distinguish
+     * (b) by observing that [truncatedLineCount] increased across the call.
      */
     fun readLine(): String? {
         if (!autoDetect || encodingLocked) {
             // Fast path: locked or explicit encoding - read and decode directly.
-            val (line, _) = EncodingHelper.readLine(input, currentEncoding, autoDetect = false)
+            val (line, _) = EncodingHelper.readLine(
+                input, currentEncoding, autoDetect = false,
+                onTruncated = { truncatedLineCount++ }
+            )
             return line
         }
 
@@ -573,15 +596,16 @@ class EncodingLineReader(
                 '\n'.code -> break
                 '\r'.code -> { /* skip CR */ }
                 else -> {
-                    // OOM guard as the internal readLine; drain and throw.
+                    // Mirror the static readLine's overflow policy: drain and drop
+                    // rather than throw so oversized bouncer lines never kill the
+                    // socket. Returning "" lets the caller skip this line cleanly.
                     if (buffer.size() >= MAX_LINE_BYTES) {
                         while (true) {
                             val skip = input.read()
                             if (skip == -1 || skip == '\n'.code) break
                         }
-                        throw java.io.IOException(
-                            "Server sent a line exceeding $MAX_LINE_BYTES bytes — possible protocol violation"
-                        )
+                        truncatedLineCount++
+                        return ""
                     }
                     buffer.write(b)
                 }

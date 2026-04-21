@@ -5356,16 +5356,25 @@ private fun rememberDisplayItems(
     val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
 
     // ── Phase 1: block detection — O(n) string ops, no measurement ───────────
-    val n        = reversedMessages.size
-    val newestId = reversedMessages.firstOrNull()?.id ?: -1L
-    // Include oldestId in the cache key so that interior changes (scrollback trim
-    // racing with new arrivals) invalidate the cache even when n and newestId are
-    // unchanged. Without this, a stale rawItems list could produce DisplayItem keys
-    // pointing to old UiMessage.ids, and if those ids reappear in the live list
-    // Compose detects a duplicate key in one measure pass -> IllegalArgumentException.
-    val oldestId = reversedMessages.lastOrNull()?.id ?: -1L
-
-    val rawItems: List<RawItem> = remember(n, newestId, oldestId) {
+    //
+    // Cache key: the reversedMessages list itself, by reference identity.
+    //
+    // Previous versions keyed on (n, newestId, oldestId). That fails when a
+    // merge or sort reorders messages while keeping those three values stable —
+    // a rare but real case during case-variant channel merges (mergeDuplicateBuffers
+    // sorts by (timeMs, id) after a .distinctBy { it.id }). A stale rawItems list
+    // then produces DisplayItem keys that collide with live ids, and Compose's
+    // LazyColumn throws "Key was already used" from a measure pass:
+    //   InlineClassHelperKt.throwIllegalArgumentException
+    //     → LayoutNodeSubcompositionsState.subcompose
+    //     → LazyLayoutMeasureScopeImpl.compose
+    // (seen in Play Console crash reports on 1.6.0.)
+    //
+    // Keying on reversedMessages by reference identity invalidates exactly when
+    // content changes. Phase 1 is pure string ops (~microseconds at the 5000
+    // scrollback cap) and Phase 2's expensive TextMeasurer calls are cached
+    // separately below, so the perf cost is negligible.
+    val rawItems: List<RawItem> = remember(reversedMessages) {
         if (reversedMessages.isEmpty()) return@remember emptyList()
         val result  = mutableListOf<RawItem>()
         val artRun  = mutableListOf<UiMessage>()  // accumulated in reversed (newest-first) order

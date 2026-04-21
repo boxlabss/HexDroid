@@ -194,12 +194,88 @@ data class IrcConfig(
      */
     val tlsTofuFingerprint: String? = null,
     /**
-     * For soju multi-network connections: the upstream network ID to attach to after
-     * registration. When set, the client sends `BOUNCER BIND <bouncerNetworkId>` after 001.
-     * Leave null to use soju's default (single-network mode or all-networks view).
+     * Which bouncer protocol family this profile targets, if any. Drives the syntax that
+     * [effectiveAuthIdentity] uses to assemble the SASL authcid and the USER command:
+     *
+     *  - [BouncerKind.NONE]: direct IRCd connection: auth identity is the username unchanged.
+     *  - [BouncerKind.SOJU]:  `user/network@clientid`  (slash before at-sign: soju spec)
+     *  - [BouncerKind.ZNC]:   `user@clientid/network`  (at-sign before slash: ZNC FAQ)
+     *  - [BouncerKind.GENERIC]: other bouncers: falls back to the soju-style
+     *     `user/network` form because that's what most other bouncers (kiwibnc, pounce in
+     *     non-multi mode) accept. No client-id support for generic.
+     *
+     * The order matters: soju parses the outer `/` first then `@` inside; ZNC parses `@`
+     * first then `/`. Producing the wrong order silently routes the connection to the
+     * wrong upstream (or fails authentication entirely).
      */
-    val bouncerNetworkId: String? = null
-)
+    val bouncerKind: BouncerKind = BouncerKind.NONE,
+    /**
+     * For bouncers using a network selector in the username: the upstream network name.
+     * Composed into the auth identity per [bouncerKind]'s rules. Use [effectiveAuthIdentity]
+     * at every send site rather than concatenating inline.
+     */
+    val bouncerNetworkName: String? = null,
+    /**
+     * For bouncers supporting per-client identification (ZNC clientbuffer, soju per-client
+     * history): a short identifier for THIS device/client (e.g. "phone", "hexdroid").
+     * Composed into the auth identity per [bouncerKind]'s rules. Leave null when not using
+     * per-client buffers, or for bouncers that don't support the concept.
+     */
+    val bouncerClientId: String? = null
+) {
+    /**
+     * Assemble the authentication identity string for this connection, applying the bouncer-
+     * specific syntax for embedding the upstream network name and per-client identifier.
+     *
+     * Defensive guards:
+     *  - If [base] already contains a '/', the user has hand-assembled the identity
+     *    (workaround from before the dedicated fields existed) we leave it untouched.
+     *  - For [BouncerKind.NONE] or with both [bouncerNetworkName] and [bouncerClientId]
+     *    blank, the result is just [base] unchanged.
+     *
+     * Examples:
+     *   kind=SOJU,    name="libera",    clientId="phone" > "user/libera@phone"
+     *   kind=SOJU,    name="libera",    clientId=null    > "user/libera"
+     *   kind=SOJU,    name=null,        clientId="phone" > "user@phone"   (soju per-client only)
+     *   kind=ZNC,     name="libera",    clientId="phone" > "user@phone/libera"
+     *   kind=ZNC,     name="libera",    clientId=null    > "user/libera"
+     *   kind=GENERIC, name="libera",    clientId=*       > "user/libera"  (clientId ignored)
+     *   kind=NONE                                        > "user"
+     */
+    fun effectiveAuthIdentity(base: String): String {
+        // Old identity: don't double-up.
+        if (base.contains('/') || base.contains('@')) return base
+
+        val net = bouncerNetworkName?.takeIf { it.isNotBlank() }
+        val cid = bouncerClientId?.takeIf { it.isNotBlank() }
+
+        return when (bouncerKind) {
+            BouncerKind.NONE -> base
+            BouncerKind.SOJU -> when {
+                net != null && cid != null -> "$base/$net@$cid"
+                net != null -> "$base/$net"
+                cid != null -> "$base@$cid"
+                else -> base
+            }
+            BouncerKind.ZNC -> when {
+                net != null && cid != null -> "$base@$cid/$net"
+                net != null -> "$base/$net"
+                cid != null -> "$base@$cid"
+                else -> base
+            }
+            // Generic bouncers (kiwibnc, pounce single-network, anything not explicitly typed):
+            // accept the soju-style `user/network` form. Ignore clientId since the convention
+            // varies and we can't safely guess the order.
+            BouncerKind.GENERIC -> if (net != null) "$base/$net" else base
+        }
+    }
+}
+
+/**
+ * Bouncer protocol family. Determines how [IrcConfig.effectiveAuthIdentity] composes the
+ * username/network/clientId fields into the SASL authcid and USER command.
+ */
+enum class BouncerKind { NONE, SOJU, ZNC, GENERIC }
 
 sealed class IrcEvent {
     data class Status(val text: String) : IrcEvent()
@@ -498,12 +574,17 @@ sealed class IrcEvent {
      * Modern bouncers (soju, pounce) multiplex many upstream networks onto a single connection.
      * Each upstream has a networkId that prefixes target names (e.g. "libera/#channel").
      * This event lets the UI show per-upstream channel trees instead of a flat list.
+     *
+     * @param removed True when the bouncer signalled deletion via `BOUNCER NETWORK <id> *`
+     *                (per the soju.im/bouncer-networks spec). When true, [name], [host] and
+     *                [state] are all null; the only meaningful field is [networkId].
      */
     data class BouncerNetwork(
         val networkId: String,
         val name: String?,
         val host: String?,
-        val state: String?       // "connected" | "connecting" | "disconnected"
+        val state: String?,      // "connected" | "connecting" | "disconnected"
+        val removed: Boolean = false
     ) : IrcEvent()
 
     /**
@@ -609,6 +690,40 @@ class IrcClient(val config: IrcConfig) {
     companion object {
         /** Pre-allocated CRLF terminator reused on every line send to avoid a ByteArray allocation per write. */
         private val CRLF = "\r\n".toByteArray(Charsets.US_ASCII)
+
+        /**
+         * Shared [SSLContext] cache, keyed by the tuple that determines the context's trust
+         * and key material. Reconnects to the same profile (same trust settings, same client
+         * cert) get the same context — and therefore the same JSSE session cache — which
+         * lets the platform perform TLS session resumption, skipping the full handshake.
+         *
+         * The saving is meaningful on mobile: a full TLS handshake costs a round-trip and
+         * ~5-15 ms of CPU on a cold radio; resumption halves that. Across a day of
+         * reconnects on a flaky network this is real battery.
+         *
+         * ConcurrentHashMap is safe because connect() may run on multiple dispatcher threads
+         * for different networks simultaneously. Entries are never evicted — the cache is
+         * bounded by the number of distinct (trust, cert) tuples in use, which is small.
+         */
+        private val sslContextCache = java.util.concurrent.ConcurrentHashMap<SslContextKey, SSLContext>()
+
+        /**
+         * Cache key for [sslContextCache]. Together the fields fully determine the resulting
+         * context's trust/key material behaviour:
+         *  - [allowInvalidCerts]: strict vs. insecure trust manager (different behaviours).
+         *  - [clientCertContentHash]: identity of the mounted client cert (0 when none).
+         *    Uses the PKCS12 bytes' [java.util.Arrays.hashCode] so a rotated cert gets a
+         *    different key automatically, without us keeping a reference to the secret bytes.
+         *  - [clientCertPasswordHash]: password changes also invalidate the cached context.
+         *  - [tlsTofuFingerprint]: TOFU pinning uses a profile-specific trust manager, so
+         *    two profiles with different pins must NOT share a context.
+         */
+        private data class SslContextKey(
+            val allowInvalidCerts: Boolean,
+            val clientCertContentHash: Int,
+            val clientCertPasswordHash: Int,
+            val tlsTofuFingerprint: String?,
+        )
     }
 
     @Volatile private var socket: Socket? = null
@@ -719,6 +834,24 @@ class IrcClient(val config: IrcConfig) {
     private fun isChannelName(name: String): Boolean =
         name.isNotEmpty() && chantypes.contains(name[0])
 
+    /**
+     * True if [nick] is a bouncer-provided pseudo-user whose messages should route to the
+     * server buffer rather than opening a query window. Matches both conventions:
+     *
+     *  - ZNC modules: any nick starting with `*` (e.g. `*status`, `*playback`, `*clientbuffer`,
+     *    `*controlpanel`, plus any user-loaded module). The `*` prefix is reserved by ZNC
+     *  - soju: the single named pseudo-user `BouncerServ` (soju doesn't use a prefix convention).
+     *
+     * Called from both the PRIVMSG and NOTICE handlers: ZNC's `*status` replies via NOTICE to
+     * commands issued through `/znc ...`, and without this routing those NOTICEs would open a
+     * query window with the pseudo-user instead of rendering inline with the server log.
+     */
+    private fun isBouncerPseudoUser(nick: String): Boolean {
+        if (nick.isEmpty()) return false
+        if (nick.startsWith("*")) return true
+        return nick.equals("BouncerServ", ignoreCase = true)
+    }
+
     private fun casefold(s: String): String {
         val cm = caseMapping.lowercase(Locale.ROOT)
         val sb = StringBuilder(s.length)
@@ -788,6 +921,14 @@ class IrcClient(val config: IrcConfig) {
 
     @Volatile private var userClosing: Boolean = false
     @Volatile private var lastTlsInfo: String? = null
+
+    /**
+     * TOFU: the fingerprint we learned during THIS connection's TLS handshake when no prior
+     * fingerprint was stored. Non-null signals the [events] flow to emit [IrcEvent.TlsFingerprintLearned]
+     * so the caller can persist it. Cleared after emission to avoid re-firing on reconnect
+     * within the same [IrcClient] instance.
+     */
+    @Volatile private var learnedFingerprint: String? = null
 
     fun tlsInfo(): String? = lastTlsInfo
 	
@@ -1039,6 +1180,23 @@ class IrcClient(val config: IrcConfig) {
             "bs" -> {
                 val rest = parts.drop(1).joinToString(" ").trim()
                 if (rest.isNotBlank()) privmsg("BotServ", rest)
+            }
+            // ZNC bouncer control: /znc <command> → PRIVMSG *status :<command>
+            // ZNC's own clients have used this shorthand for years; supporting it keeps muscle
+            // memory from HexChat / Quassel etc. working. Modules can be addressed with their
+            // own pseudo-user (/msg *clientbuffer ..., /msg *playback ...) the long way.
+            "znc" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("*status", rest)
+            }
+            // soju bouncer control: /bouncerserv <command> → PRIVMSG BouncerServ :<command>
+            // BouncerServ is soju's equivalent of *status. Note BouncerServ is a normal nick
+            // (not a *-prefixed pseudo-user) so it routes through the regular PRIVMSG path;
+            // the routing-to-*server* logic in the PRIVMSG handler still folds replies into
+            // the server buffer for cleanliness.
+            "bouncerserv", "bnc" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("BouncerServ", rest)
             }
             "me" -> {
                 val msg = parts.drop(1).joinToString(" ")
@@ -1370,6 +1528,14 @@ class IrcClient(val config: IrcConfig) {
         val s = try {
             withContext(Dispatchers.IO) { openSocket() }
         } catch (t: Throwable) {
+            // TOFU pin mismatch gets its own structured event so the UI can show the
+            // stored-vs-actual fingerprints and the user can make an informed choice
+            // (legitimate cert renewal vs. suspected MITM).
+            if (t is TlsFingerprintMismatchException) {
+                send(IrcEvent.TlsFingerprintChanged(stored = t.stored, actual = t.actual))
+                send(IrcEvent.Disconnected("TLS certificate fingerprint changed"))
+                return@channelFlow
+            }
             val msg = friendlyErrorMessage(t)
             send(IrcEvent.Error("Connect failed: $msg"))
             send(IrcEvent.Disconnected(msg))
@@ -1377,6 +1543,14 @@ class IrcClient(val config: IrcConfig) {
         }
 
         socket = s
+
+        // If TOFU captured a fresh fingerprint during the handshake, emit the learned event
+        // so the view model persists it into the profile. Clear the field so a subsequent
+        // reconnect on the same IrcClient instance doesn't re-learn and re-pin.
+        learnedFingerprint?.let { fp ->
+            learnedFingerprint = null
+            send(IrcEvent.TlsFingerprintLearned(fp))
+        }
 
         // If TLS is enabled put TLS session info in the server buffer.
         tlsInfo()?.takeIf { it.isNotBlank() }?.let { info ->
@@ -1558,8 +1732,6 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         registered = true
         registrationWatchdogJob.cancel()  // 001 received — connection is live
         send(IrcEvent.Registered(me))
-        // Note: BOUNCER BIND for soju upstream selection is sent from IrcViewModel after
-        // the Registered event is received, since sendRaw is not callable from here.
     },
 
     "005" to handler@{ msg, _, _, _ ->
@@ -1836,7 +2008,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			}
 			writeLine("CAP LS 302")
 			writeLine("NICK ${config.nick}")
-			writeLine("USER ${config.username} 0 * :${config.realname}")
+			writeLine("USER ${config.effectiveAuthIdentity(config.username)} 0 * :${config.realname}")
 			send(IrcEvent.Connected("${config.host}:${config.port}"))
 			// IRCv3 pre-away: if the user has a stored away message, send AWAY before 001
 			// so the server marks us as away from the start of the session (no window where
@@ -1852,9 +2024,30 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// Track if we've notified about encoding detection
 			var encodingNotified = false
 
+			// Track oversize-line drops so we surface a single user-visible notice on
+			// the first occurrence per connection. Further drops are silent to avoid
+			// a torrent of status messages if a server is wedged emitting huge lines.
+			var truncatedNotified = false
+			var lastTruncatedCount = 0
+
 			while (true) {
 				val prevEncoding = lineReader.encoding
 				val line = withContext(Dispatchers.IO) { lineReader.readLine() } ?: break
+
+				// A truncated line returned as "" — skip parsing, but surface the fact
+				// to the user once so they know something was dropped rather than
+				// silently swallowed.
+				if (lineReader.truncatedLineCount > lastTruncatedCount) {
+					lastTruncatedCount = lineReader.truncatedLineCount
+					if (!truncatedNotified) {
+						truncatedNotified = true
+						send(IrcEvent.ServerText(
+							"*** Dropped an oversize inbound IRC line (>32 KiB). " +
+							"Connection kept alive; further drops will be silent."
+						))
+					}
+					continue
+				}
 				
 				// Notify user if encoding was auto-detected and changed
 				if (!encodingNotified && lineReader.hasDetectedNonUtf8() && prevEncoding != lineReader.encoding) {
@@ -2034,7 +2227,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						"348","349",
 						"728","729",
 						"433",
-						"471","472","473","474","475","476","477"
+						"471","472","473","474","475","476","477",
+						// SASL numerics: emitted as Status/Error by IrcSession's CAP state
+						// machine. Suppress the raw-form fallback so the user sees each
+						// event once, not twice.
+						"903","904","905","906","907","908"
 					)
 				) {
 					// surface unknown numerics in a readable form, even if raw server lines are hidden.
@@ -2075,40 +2272,53 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 						// znc.in/playback: *playback module sends TIMESTAMP <buffer> <epoch>
 						// so we know when we were last seen and can request only missed messages.
+						// Only consume TIMESTAMP messages here; other messages from *playback
+						// (e.g. "Module not loaded") fall through to the generic pseudo-user
+						// routing below and surface in the server buffer.
 						if (config.isBouncer && from.equals("*playback", ignoreCase = true)) {
 							val parts = textRaw.trim().split(" ")
 							if (parts.size >= 2 && parts[0].equals("TIMESTAMP", ignoreCase = true)) {
 								val bufName = parts[1]
 								val epochSecs = parts.getOrNull(2)?.toLongOrNull()
 								if (epochSecs != null) zncLastSeen[bufName.lowercase()] = epochSecs
+								continue  // Internal plumbing only
 							}
-							continue  // Don't surface *playback control messages in the UI
+							// Non-TIMESTAMP: fall through.
 						}
 
-						// ZNC internal pseudo-users (*status, *controlpanel, *sasl, *autocomplete,
-						// *identfile, etc.) send administrative messages.  Route them to the
-						// *server* buffer instead of creating a new DM buffer so they don't
-						// clutter the buffer list with noise the user didn't initiate.
-						if (config.isBouncer && from.startsWith("*", ignoreCase = true)
-							&& !isChannelName(target)
+						// When echo-message is ACK'd the server reflects our own outbound
+						// "PRIVMSG *playback :PLAY …" commands back to us. Without this filter
+						// those echoes create a visible *playback query buffer on every connect.
+						// Treat them as internal plumbing and discard.
+						if (config.isBouncer
+							&& target.equals("*playback", ignoreCase = true)
+							&& nickEquals(from, currentNick)
 						) {
-							val zncPseudoUsers = setOf(
-								"*status", "*controlpanel", "*sasl", "*autocomplete",
-								"*identfile", "*perform", "*blockuser", "*route_replies"
-							)
-							if (from.lowercase() in zncPseudoUsers) {
-								// Show the message but route it to the server buffer.
-								send(IrcEvent.Notice(
-									from = from,
-									target = "*server*",
-									text = textRaw,
-									isPrivate = false,
-									isServer = true,
-									timeMs = serverTimeMs,
-									isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs))
-								))
-								continue
-							}
+							continue
+						}
+
+						// ZNC / soju internal pseudo-users (*status, *controlpanel, *playback,
+						// *clientbuffer, BouncerServ on soju, etc.). These send administrative
+						// messages that we route to the *server* buffer instead of creating a new
+						// DM buffer so they don't clutter the buffer list with noise the user
+						// didn't initiate.
+						//
+						// ZNC convention: any nick starting with '*' is a loaded module. We match
+						// the prefix rather than enumerating module names because users can load
+						// arbitrary modules and the set is extensible.
+						// soju convention: a single named pseudo-user "BouncerServ".
+						if (config.isBouncer && !isChannelName(target) && isBouncerPseudoUser(from)) {
+							// Show the message but route it to the server buffer.
+							send(IrcEvent.Notice(
+								from = from,
+								target = "*server*",
+								text = textRaw,
+								isPrivate = false,
+								isServer = true,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs))
+							))
+							continue
 						}
 
 						val isChannel = isChannelName(target)
@@ -2284,6 +2494,26 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val isChannel = isChannelName(target)
 						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
 
+						// Bouncer pseudo-user NOTICE routing. ZNC replies to /msg *status
+						// commands (and to /znc slash-command wrapper) via NOTICE
+						// without this branch the reply opens a query buffer for *status rather than
+						// rendering inline in the server log. Same rationale and prefix check
+						// as the PRIVMSG handler above; see [isBouncerPseudoUser].
+						if (config.isBouncer && !isChannel && isBouncerPseudoUser(from)) {
+							send(IrcEvent.Notice(
+								from = from,
+								target = "*server*",
+								text = text,
+								isPrivate = false,
+								isServer = true,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs)),
+								msgId = msg.tags["msgid"],
+								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
+							))
+							continue
+						}
+
 						// Keep the IRC target intact and let the UI decide routing.
 						// Use a stable buffer name for history heuristics.
 						val histBuf = if (isChannel) target else "*server*"
@@ -2354,9 +2584,15 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 							// IRCv3 chathistory: request recent messages when we (re)join.
 							// Supports both the graduated "chathistory" and legacy "draft/chathistory" cap.
+							//
+							// Skip when chanHist is true: a JOIN arriving as part of buffer playback
+							// represents our PRIOR session, not the current one. Firing CHATHISTORY
+							// LATEST against it re-requests history we're already in the middle of
+							// receiving: same rationale as the znc.in/playback guard below.
 							if (nickEquals(nick, currentNick)
 								&& config.capPrefs.draftChathistory
 								&& hasChathistoryCap()
+								&& !chanHist
 								&& historyRequested.add(chan.lowercase())
 							) {
 								val lim = config.historyLimit.coerceIn(0, 500)
@@ -2368,9 +2604,15 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 							// znc.in/playback: request only messages we missed since last seen.
 							// Sends: PRIVMSG *playback :PLAY <buffer> <lastSeen> <now>
+							//
+							// Skip when chanHist is true: a JOIN arriving as part of the bouncer's
+							// own buffer playback represents our PRIOR session, not the current one.
+							// Firing PLAY against it re-requests history we're already in the middle
+							// of receiving and produces duplicate lines.
 							if (nickEquals(nick, currentNick)
 								&& config.isBouncer
 								&& irc.hasCap("znc.in/playback")
+								&& !chanHist
 							) {
 								val lastSeen = zncLastSeen[chan.lowercase()] ?: 0L
 								val nowSecs = nowMs / 1000L
@@ -2686,15 +2928,36 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val subCmd = msg.params.getOrNull(0)?.uppercase(Locale.ROOT) ?: continue
 						when (subCmd) {
 							"NETWORK" -> {
-								// BOUNCER NETWORK <id> key=val...
+								// BOUNCER NETWORK <id> <attrs> | BOUNCER NETWORK <id> *
+								//
+								// Per the soju.im/bouncer-networks spec:
+								//  - `*` as the attributes field signals the network was deleted.
+								//  - Otherwise each token is key=value; a bare key (no `=`) means
+								//    the server didn't include that attribute in this update
+								//    (the client should preserve its existing value).
+								//  - Per the updated spec, key= with empty value means the
+								//    attribute was REMOVED. We don't model per-attribute removal
+								//    here since we only track three fields, but we treat empty
+								//    values as "no information" rather than "set to empty string".
 								val networkId = msg.params.getOrNull(1) ?: continue
+								val attrTokens = msg.params.drop(2) +
+									listOfNotNull(msg.trailing).flatMap { it.split(' ') }
+
+								// Deletion sentinel: a lone "*" in the attrs slot.
+								if (attrTokens.size == 1 && attrTokens[0] == "*") {
+									send(IrcEvent.BouncerNetwork(networkId, null, null, null, removed = true))
+									continue
+								}
+
 								var name: String? = null; var host: String? = null; var state: String? = null
-								for (tok in msg.params.drop(2) + listOfNotNull(msg.trailing).flatMap { it.split(' ') }) {
+								for (tok in attrTokens) {
 									val eq = tok.indexOf('='); if (eq < 0) continue
-									when (tok.substring(0, eq).lowercase()) {
-										"name"  -> if (name  == null) name  = tok.substring(eq + 1)
-										"host"  -> if (host  == null) host  = tok.substring(eq + 1)
-										"state" -> if (state == null) state = tok.substring(eq + 1)
+									val key = tok.substring(0, eq).lowercase()
+									val value = tok.substring(eq + 1).takeIf { it.isNotEmpty() }
+									when (key) {
+										"name"  -> if (name  == null) name  = value
+										"host"  -> if (host  == null) host  = value
+										"state" -> if (state == null) state = value
 									}
 								}
 								send(IrcEvent.BouncerNetwork(networkId, name, host, state))
@@ -2891,24 +3154,39 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			s.connect(InetSocketAddress(config.host, config.port), config.connectTimeoutMs)
 			s
 		} else {
-			val sslContext = SSLContext.getInstance("TLS")
-			val tm = if (config.allowInvalidCerts) arrayOf<TrustManager>(InsecureTrustManager()) else null
-			val km: Array<KeyManager>? = config.clientCert?.let { cert ->
-				try {
-					val ks = KeyStore.getInstance("PKCS12")
-					val pwdChars = cert.password?.toCharArray()
-					ByteArrayInputStream(cert.pkcs12).use { ks.load(it, pwdChars) }
-					val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-					kmf.init(ks, pwdChars)
-					kmf.keyManagers
-				} catch (t: Throwable) {
-					throw IllegalStateException(
-						"Client certificate could not be loaded: " + (t.message ?: t::class.java.simpleName),
-						t
-					)
+			// Shared SSLContext cache: reconnects to the same profile reuse the same context
+			// and therefore the same JSSE session cache, letting the platform perform TLS
+			// session resumption (abbreviated handshake). Cuts a round-trip on reconnects.
+			//
+			// SSLContext.init() may only be called ONCE per context instance, so the cache key
+			// must encode every aspect of the context's behaviour. see SslContextKey above.
+			val cacheKey = SslContextKey(
+				allowInvalidCerts = config.allowInvalidCerts,
+				clientCertContentHash = config.clientCert?.pkcs12?.let { java.util.Arrays.hashCode(it) } ?: 0,
+				clientCertPasswordHash = config.clientCert?.password?.hashCode() ?: 0,
+				tlsTofuFingerprint = config.tlsTofuFingerprint,
+			)
+			val sslContext = sslContextCache.getOrPut(cacheKey) {
+				val ctx = SSLContext.getInstance("TLS")
+				val tm = if (config.allowInvalidCerts) arrayOf<TrustManager>(InsecureTrustManager()) else null
+				val km: Array<KeyManager>? = config.clientCert?.let { cert ->
+					try {
+						val ks = KeyStore.getInstance("PKCS12")
+						val pwdChars = cert.password?.toCharArray()
+						ByteArrayInputStream(cert.pkcs12).use { ks.load(it, pwdChars) }
+						val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+						kmf.init(ks, pwdChars)
+						kmf.keyManagers
+					} catch (t: Throwable) {
+						throw IllegalStateException(
+							"Client certificate could not be loaded: " + (t.message ?: t::class.java.simpleName),
+							t
+						)
+					}
 				}
+				ctx.init(km, tm, SecureRandom())
+				ctx
 			}
-			sslContext.init(km, tm, SecureRandom())
 
 			val raw = baseSocket().apply {
 				connect(InetSocketAddress(config.host, config.port), config.connectTimeoutMs)
@@ -2937,6 +3215,53 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			}
 			ss.soTimeout = config.readTimeoutMs  // restore post-handshake timeout
 
+			// TOFU certificate pinning — performed AFTER the handshake so we have access to
+			// the peer cert chain. Strategy:
+			//   1. Compute SHA-256 of the leaf (peer) cert.
+			//   2. If no fingerprint is stored on this config, capture the computed one into
+			//      [learnedFingerprint] — the events flow will emit TlsFingerprintLearned so
+			//      the caller can persist it. This ONLY fires when allowInvalidCerts = true
+			//      (otherwise the standard trust chain already vouched for the cert and TOFU
+			//      pinning would add no value).
+			//   3. If a fingerprint IS stored, compare (after [normaliseFingerprint]). On
+			//      mismatch, throw [TlsFingerprintMismatchException] so the connect flow
+			//      surfaces TlsFingerprintChanged and refuses the connection.
+			//   4. On match, proceed silently.
+			//
+			// Any exception during cert extraction is logged-and-ignored: the fallback is
+			// the standard JSSE trust decision that already happened during the handshake,
+			// so TOFU failures on edge-case peers don't break connectivity.
+			runCatching {
+				val peerCerts = ss.session.peerCertificates
+				val leaf = peerCerts.firstOrNull() as? java.security.cert.X509Certificate
+				if (leaf != null) {
+					val actualFp = computeFingerprintSha256(leaf)
+					val storedRaw = config.tlsTofuFingerprint?.takeIf { it.isNotBlank() }
+					if (storedRaw == null) {
+						// First-seen: only "learn" a fingerprint when we were trusting
+						// everything anyway. Pinning a CA-issued cert would just double-lock
+						// the user out on legitimate renewals for no security gain.
+						if (config.allowInvalidCerts) {
+							learnedFingerprint = actualFp
+						}
+					} else {
+						val storedNorm = normaliseFingerprint(storedRaw)
+						if (!storedNorm.equals(actualFp, ignoreCase = true)) {
+							runCatching { ss.close() }
+							runCatching { raw.close() }
+							throw TlsFingerprintMismatchException(
+								stored = storedNorm,
+								actual = actualFp,
+							)
+						}
+					}
+				}
+			}.onFailure { t ->
+				// Re-throw the sentinel; swallow anything else (cert-extraction quirks
+				// shouldn't break an already-successfully-handshook connection).
+				if (t is TlsFingerprintMismatchException) throw t
+			}
+
 			// Capture basic session info for UI (cipher/protocol/cert subject)
 			lastTlsInfo = runCatching {
 				val sess = ss.session
@@ -2962,12 +3287,25 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 	/**
 	 * Translate raw exception messages — especially opaque OpenSSL/BoringSSL strings —
 	 * into something a user can understand and act on.
+	 *
+	 * Walks the cause chain when matching messages and types: Android's networking stack
+	 * frequently wraps the real error (e.g. an SSLProtocolException from Conscrypt) inside
+	 * a generic IOException, and checking only [t.message] / `t is SSLException` would miss
+	 * it, surfacing the raw library text in the UI.
 	 */
 	private fun friendlyErrorMessage(t: Throwable): String {
-		val raw = t.message ?: t::class.java.simpleName
+		// Walk the cause chain (bounded to 8 hops to avoid pathological cycles) so the
+		// message-substring checks can match regardless of which wrapper level carries
+		// the diagnostic string.
+		val chain = generateSequence<Throwable>(t) { it.cause.takeIf { c -> c !== it } }
+			.take(8)
+			.toList()
+		val raw = chain.mapNotNull { it.message }.joinToString(" | ")
+			.ifBlank { t::class.java.simpleName }
+		val anyIs: (Class<out Throwable>) -> Boolean = { cls -> chain.any { cls.isInstance(it) } }
 
 		// SSL handshake failures (certificate problems, protocol mismatch)
-		if (t is SSLHandshakeException) {
+		if (anyIs(SSLHandshakeException::class.java)) {
 			return when {
 				raw.contains("CERTIFICATE_VERIFY_FAILED", ignoreCase = true) ||
 				raw.contains("CertPathValidatorException", ignoreCase = true) ->
@@ -2983,17 +3321,24 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		}
 
 		// General SSL exceptions (mid-session errors)
-		if (t is SSLException) {
+		if (anyIs(SSLException::class.java)) {
 			return when {
 				// BoringSSL/OpenSSL "Success" (errno=0): TCP FIN received without SSL close_notify.
 				// Common on mobile when the radio silently drops the connection or when the
 				// server closes TCP without a proper SSL shutdown.  Not an error the user can
 				// action; connection will be re-established automatically.
+				//
+				// "Internal OpenSSL error or protocol error" is the BoringSSL signature for a
+				// state-machine confusion commonly seen when the app was force-killed (e.g.
+				// by Play Store during an update) without a clean TLS close_notify, and the
+				// server still holds the old session open when we reconnect. Not actionable;
+				// reconnect will sort itself out.
 				raw.contains(", Success", ignoreCase = false) ||
 				raw.contains("I/O error during system call, Success", ignoreCase = true) ||
 				raw.contains("Internal error in SSL library", ignoreCase = true) ||
 				raw.contains("SSL_ERROR_INTERNAL", ignoreCase = true) ||
-				raw.contains("Internal OpenSSL error", ignoreCase = true) ->
+				raw.contains("Internal OpenSSL error", ignoreCase = true) ||
+				raw.contains("or protocol error", ignoreCase = true) ->
 					"TLS session interrupted — connection will retry"
 				raw.contains("Connection reset", ignoreCase = true) ||
 				raw.contains("ECONNRESET", ignoreCase = true) ->
@@ -3044,12 +3389,71 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
 	}
 
+	/**
+	 * Sentinel exception thrown from [openSocket] when a TOFU-pinned server presents a
+	 * certificate whose SHA-256 fingerprint does NOT match the stored one. Carries both the
+	 * expected (stored) and presented (actual) fingerprints so the [events] flow can surface
+	 * them to the user via [IrcEvent.TlsFingerprintChanged]. This is a distinct type (not a
+	 * plain IOException) so the flow can recognise it without string-matching the message.
+	 */
+	private class TlsFingerprintMismatchException(
+		val stored: String,
+		val actual: String,
+	) : java.io.IOException(
+		"TLS certificate fingerprint mismatch — expected $stored, got $actual"
+	)
+
+	/**
+	 * Compute the SHA-256 fingerprint of an X.509 certificate's DER encoding, formatted as
+	 * lowercase hex pairs separated by colons (e.g. "a1:b2:c3:…"). This is the canonical
+	 * representation used by OpenSSL, Firefox, and most IRC clients that expose TOFU, so it
+	 * round-trips cleanly if a user ever wants to copy-paste a fingerprint between tools.
+	 */
+	private fun computeFingerprintSha256(cert: java.security.cert.X509Certificate): String {
+		val der = cert.encoded
+		val md = java.security.MessageDigest.getInstance("SHA-256")
+		val digest = md.digest(der)
+		val sb = StringBuilder(digest.size * 3)
+		for ((i, b) in digest.withIndex()) {
+			if (i > 0) sb.append(':')
+			sb.append(String.format("%02x", b.toInt() and 0xFF))
+		}
+		return sb.toString()
+	}
+
+	/**
+	 * Normalise a TOFU fingerprint string for comparison. The stored value SHOULD already
+	 * be lowercase colon-separated hex (we emit it that way in [computeFingerprintSha256])
+	 * but accept a few common variations defensively: uppercase hex, missing colons, or
+	 * stray whitespace. This way a user who pastes a fingerprint from OpenSSL or a browser
+	 * into the profile JSON by hand doesn't get locked out by formatting alone.
+	 */
+	private fun normaliseFingerprint(raw: String): String {
+		val cleaned = raw.trim().lowercase().filter { it.isLetterOrDigit() }
+		// Re-insert colons between byte pairs.
+		return buildString(cleaned.length + cleaned.length / 2) {
+			for (i in cleaned.indices) {
+				if (i > 0 && i % 2 == 0) append(':')
+				append(cleaned[i])
+			}
+		}
+	}
+
 	private fun formatNumeric(msg: IrcMessage): String? {
 		val code = msg.command
 		if (code.length != 3 || !code.all { it.isDigit() }) return null
 		
 		// Don't double-emit for numerics that already have dedicated events.
-		if (code in setOf("001","005","321","322","323","324","332","333","353","366","367","368","381","433","442","471","472","473","474","475","476","477")) return null
+		// SASL numerics 903-908 are emitted as IrcEvent.Status/Error by IrcSession's
+		// CAP/SASL state machine; they must be suppressed here or the user sees the
+		// success/failure message twice (once as a clean Status, once as raw ServerText).
+		// 900 (RPL_LOGGEDIN), 901 (RPL_LOGGEDOUT), and 902 (ERR_NICKLOCKED) are NOT
+		// handled by IrcSession, so they fall through to the generic ServerText path.
+		if (code in setOf(
+				"001","005","321","322","323","324","332","333","353","366","367","368","381",
+				"433","442","471","472","473","474","475","476","477",
+				"903","904","905","906","907","908"
+			)) return null
 
 		fun p(i: Int) = msg.params.getOrNull(i)
 		// Strip IRC formatting for most numerics, but preserve it for MOTD lines (372/375/376)

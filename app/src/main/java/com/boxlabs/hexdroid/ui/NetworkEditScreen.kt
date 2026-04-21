@@ -138,6 +138,10 @@ fun NetworkEditScreen(
     var autoConnect by remember(n0.id) { mutableStateOf(n0.autoConnect) }
     var autoReconnect by remember(n0.id) { mutableStateOf(n0.autoReconnect) }
     var isBouncer by remember(n0.id) { mutableStateOf(n0.isBouncer) }
+    var bouncerKind by remember(n0.id) { mutableStateOf(n0.bouncerKind) }
+    var bouncerKindExpanded by remember { mutableStateOf(false) }
+    var bouncerNetworkName by remember(n0.id) { mutableStateOf(n0.bouncerNetworkName ?: "") }
+    var bouncerClientId by remember(n0.id) { mutableStateOf(n0.bouncerClientId ?: "") }
     var encoding by remember(n0.id) { mutableStateOf(n0.encoding) }
     var encodingExpanded by remember { mutableStateOf(false) }
 
@@ -323,6 +327,9 @@ fun NetworkEditScreen(
                                 autoConnect = autoConnect,
                                 autoReconnect = autoReconnect,
                                 isBouncer = isBouncer,
+                                bouncerKind = if (isBouncer) bouncerKind else com.boxlabs.hexdroid.BouncerKind.NONE,
+                                bouncerNetworkName = bouncerNetworkName.trim().takeIf { it.isNotBlank() },
+                                bouncerClientId = bouncerClientId.trim().takeIf { it.isNotBlank() },
                                 autoCommandDelaySeconds = postDelayText.toIntOrNull() ?: 0,
                                 serviceAuthCommand = serviceAuthCommand.trim().takeIf { it.isNotBlank() },
                                 autoCommandsText = autoCommandsText,
@@ -551,6 +558,82 @@ fun NetworkEditScreen(
                         )
                     }
                     Switch(checked = isBouncer, onCheckedChange = { isBouncer = it })
+                }
+
+                // Bouncer kind selector. Determines how IrcConfig.effectiveAuthIdentity
+                // composes the upstream network name and per-client identifier into the SASL
+                // authcid and USER command. soju and ZNC use *different* orderings of `/` and
+                // `@` and producing the wrong order silently misroutes the connection.
+                AnimatedVisibility(visible = isBouncer) {
+                    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        ExposedDropdownMenuBox(
+                            expanded = bouncerKindExpanded,
+                            onExpandedChange = { bouncerKindExpanded = it }
+                        ) {
+                            OutlinedTextField(
+                                value = stringResource(when (bouncerKind) {
+                                    com.boxlabs.hexdroid.BouncerKind.NONE -> R.string.network_bouncer_kind_none
+                                    com.boxlabs.hexdroid.BouncerKind.SOJU -> R.string.network_bouncer_kind_soju
+                                    com.boxlabs.hexdroid.BouncerKind.ZNC -> R.string.network_bouncer_kind_znc
+                                    com.boxlabs.hexdroid.BouncerKind.GENERIC -> R.string.network_bouncer_kind_generic
+                                }),
+                                onValueChange = {},
+                                readOnly = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                                label = { Text(stringResource(R.string.network_bouncer_kind_label)) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bouncerKindExpanded) }
+                            )
+                            ExposedDropdownMenu(
+                                expanded = bouncerKindExpanded,
+                                onDismissRequest = { bouncerKindExpanded = false }
+                            ) {
+                                listOf(
+                                    com.boxlabs.hexdroid.BouncerKind.SOJU to R.string.network_bouncer_kind_soju,
+                                    com.boxlabs.hexdroid.BouncerKind.ZNC to R.string.network_bouncer_kind_znc,
+                                    com.boxlabs.hexdroid.BouncerKind.GENERIC to R.string.network_bouncer_kind_generic,
+                                    com.boxlabs.hexdroid.BouncerKind.NONE to R.string.network_bouncer_kind_none,
+                                ).forEach { (kind, labelRes) ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(labelRes)) },
+                                        onClick = {
+                                            bouncerKind = kind
+                                            bouncerKindExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        // Network name + Client ID. Shown for all kinds except NONE.
+                        // ClientId only for SOJU/ZNC since the per-client convention isn't
+                        // standard for generic bouncers.
+                        AnimatedVisibility(visible = bouncerKind != com.boxlabs.hexdroid.BouncerKind.NONE) {
+                            Column {
+                                OutlinedTextField(
+                                    value = bouncerNetworkName,
+                                    onValueChange = { bouncerNetworkName = it },
+                                    label = { Text(stringResource(R.string.network_bouncer_network_label)) },
+                                    supportingText = { Text(stringResource(R.string.network_bouncer_network_help)) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                )
+                                AnimatedVisibility(
+                                    visible = bouncerKind == com.boxlabs.hexdroid.BouncerKind.SOJU
+                                          || bouncerKind == com.boxlabs.hexdroid.BouncerKind.ZNC
+                                ) {
+                                    OutlinedTextField(
+                                        value = bouncerClientId,
+                                        onValueChange = { bouncerClientId = it },
+                                        label = { Text(stringResource(R.string.network_bouncer_clientid_label)) },
+                                        supportingText = { Text(stringResource(R.string.network_bouncer_clientid_help)) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))

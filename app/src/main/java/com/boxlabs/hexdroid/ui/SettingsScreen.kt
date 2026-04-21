@@ -752,6 +752,19 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_rejoin_on_kick), s.rejoinOnKick) {
+                        onUpdate { copy(rejoinOnKick = !rejoinOnKick) }
+                    }
+                    Text(
+                        stringResource(R.string.setting_rejoin_on_kick_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_notifications)) }
