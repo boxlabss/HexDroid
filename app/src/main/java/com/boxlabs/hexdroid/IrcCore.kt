@@ -129,7 +129,8 @@ data class CapPrefs(
     /**
      * draft/message-reactions: emoji reactions sent via TAGMSG +draft/react.
      * When enabled, incoming reactions are surfaced as status lines in the buffer.
-     * Outgoing reactions require a /react command (see slash-command handler).
+     * Outgoing reactions: long-press a message in the chat UI to pick a preset emoji,
+     * or use the /react and /unreact slash commands for arbitrary emoji.
      */
     val messageReactions: Boolean = true,
 
@@ -197,10 +198,10 @@ data class IrcConfig(
      * Which bouncer protocol family this profile targets, if any. Drives the syntax that
      * [effectiveAuthIdentity] uses to assemble the SASL authcid and the USER command:
      *
-     *  - [BouncerKind.NONE]: direct IRCd connection: auth identity is the username unchanged.
-     *  - [BouncerKind.SOJU]:  `user/network@clientid`  (slash before at-sign: soju spec)
-     *  - [BouncerKind.ZNC]:   `user@clientid/network`  (at-sign before slash: ZNC FAQ)
-     *  - [BouncerKind.GENERIC]: other bouncers: falls back to the soju-style
+     *  - [BouncerKind.NONE]: direct IRCd connection — auth identity is the username unchanged.
+     *  - [BouncerKind.SOJU]:  `user/network@clientid`  (slash before at-sign — soju spec)
+     *  - [BouncerKind.ZNC]:   `user@clientid/network`  (at-sign before slash — ZNC FAQ)
+     *  - [BouncerKind.GENERIC]: legacy / other bouncers — falls back to the soju-style
      *     `user/network` form because that's what most other bouncers (kiwibnc, pounce in
      *     non-multi mode) accept. No client-id support for generic.
      *
@@ -217,7 +218,7 @@ data class IrcConfig(
     val bouncerNetworkName: String? = null,
     /**
      * For bouncers supporting per-client identification (ZNC clientbuffer, soju per-client
-     * history): a short identifier for THIS device/client (e.g. "phone", "hexdroid").
+     * history): a short identifier for THIS device/client (e.g. "phone", "desktop").
      * Composed into the auth identity per [bouncerKind]'s rules. Leave null when not using
      * per-client buffers, or for bouncers that don't support the concept.
      */
@@ -228,22 +229,22 @@ data class IrcConfig(
      * specific syntax for embedding the upstream network name and per-client identifier.
      *
      * Defensive guards:
-     *  - If [base] already contains a '/', the user has hand-assembled the identity
-     *    (workaround from before the dedicated fields existed) we leave it untouched.
+     *  - If [base] already contains a '/', the user has hand-assembled the identity (legacy
+     *    workaround from before the dedicated fields existed); we leave it untouched.
      *  - For [BouncerKind.NONE] or with both [bouncerNetworkName] and [bouncerClientId]
      *    blank, the result is just [base] unchanged.
      *
      * Examples:
-     *   kind=SOJU,    name="libera",    clientId="phone" > "user/libera@phone"
-     *   kind=SOJU,    name="libera",    clientId=null    > "user/libera"
-     *   kind=SOJU,    name=null,        clientId="phone" > "user@phone"   (soju per-client only)
-     *   kind=ZNC,     name="libera",    clientId="phone" > "user@phone/libera"
-     *   kind=ZNC,     name="libera",    clientId=null    > "user/libera"
-     *   kind=GENERIC, name="libera",    clientId=*       > "user/libera"  (clientId ignored)
-     *   kind=NONE                                        > "user"
+     *   kind=SOJU,    name="libera",    clientId="phone" → "user/libera@phone"
+     *   kind=SOJU,    name="libera",    clientId=null    → "user/libera"
+     *   kind=SOJU,    name=null,        clientId="phone" → "user@phone"   (soju per-client only)
+     *   kind=ZNC,     name="libera",    clientId="phone" → "user@phone/libera"
+     *   kind=ZNC,     name="libera",    clientId=null    → "user/libera"
+     *   kind=GENERIC, name="libera",    clientId=*       → "user/libera"  (clientId ignored)
+     *   kind=NONE                                         → "user"
      */
     fun effectiveAuthIdentity(base: String): String {
-        // Old identity: don't double-up.
+        // Legacy hand-rolled identity — don't double-up.
         if (base.contains('/') || base.contains('@')) return base
 
         val net = bouncerNetworkName?.takeIf { it.isNotBlank() }
@@ -577,7 +578,7 @@ sealed class IrcEvent {
      *
      * @param removed True when the bouncer signalled deletion via `BOUNCER NETWORK <id> *`
      *                (per the soju.im/bouncer-networks spec). When true, [name], [host] and
-     *                [state] are all null; the only meaningful field is [networkId].
+     *                [state] are all null — the only meaningful field is [networkId].
      */
     data class BouncerNetwork(
         val networkId: String,
@@ -839,17 +840,328 @@ class IrcClient(val config: IrcConfig) {
      * server buffer rather than opening a query window. Matches both conventions:
      *
      *  - ZNC modules: any nick starting with `*` (e.g. `*status`, `*playback`, `*clientbuffer`,
-     *    `*controlpanel`, plus any user-loaded module). The `*` prefix is reserved by ZNC
+     *    `*controlpanel`, plus any user-loaded module). The `*` prefix is reserved by ZNC and
+     *    no real user can hold a nick starting with `*`.
      *  - soju: the single named pseudo-user `BouncerServ` (soju doesn't use a prefix convention).
      *
-     * Called from both the PRIVMSG and NOTICE handlers: ZNC's `*status` replies via NOTICE to
-     * commands issued through `/znc ...`, and without this routing those NOTICEs would open a
+     * Called from both the PRIVMSG and NOTICE handlers — ZNC's `*status` replies via NOTICE to
+     * commands issued through `/znc …`, and without this routing those NOTICEs would open a
      * query window with the pseudo-user instead of rendering inline with the server log.
      */
     private fun isBouncerPseudoUser(nick: String): Boolean {
         if (nick.isEmpty()) return false
         if (nick.startsWith("*")) return true
         return nick.equals("BouncerServ", ignoreCase = true)
+    }
+
+    /**
+     * Mask type for channel-op commands (/ban, /kickban, /mute). Chosen with a short
+     * keyword after the nick: `/ban spammer host` → ban `*!*@<host>`.
+     *
+     *  - [NICK] — `nick!*@*`. Weakest; trivial to evade by changing nick. Current default.
+     *  - [USER] — `*!<user>@*`. Bans the ident/username; survives nick changes, breaks
+     *    if the user can control their ident (many desktop clients let them).
+     *  - [HOST] — `*!*@<host>`. Bans the whole hostname; most common "real" ban and the
+     *    strongest that works everywhere.
+     *  - [DOMAIN] — `*!*@*.<base-domain>`. Bans the entire reverse-DNS suffix; useful
+     *    against users who rotate addresses within one ISP or cloaking domain.
+     *  - [ACCOUNT] — `$a:<services-account>`. IRCv3 extban, strongest where supported —
+     *    survives nick changes, host changes, and reconnects. Requires the user to be
+     *    logged in to services; we get this from 330 (RPL_WHOISACCOUNT).
+     *  - [RAW] — the user typed a literal mask (contains `!`, `@`, or starts with `$`).
+     *    Passed through unchanged.
+     */
+    private enum class BanMaskType { NICK, USER, HOST, DOMAIN, ACCOUNT, RAW }
+
+    /**
+     * Parse an optional mask-type keyword. `n|nick`, `u|user|ident`, `h|host`, `d|domain`,
+     * `a|acct|account`. Returns null if the keyword isn't recognised — callers treat that
+     * as the default ([BanMaskType.NICK]).
+     */
+    private fun parseMaskType(kw: String?): BanMaskType? = when (kw?.lowercase()) {
+        null, "" -> null
+        "n", "nick" -> BanMaskType.NICK
+        "u", "user", "ident" -> BanMaskType.USER
+        "h", "host" -> BanMaskType.HOST
+        "d", "domain" -> BanMaskType.DOMAIN
+        "a", "acct", "account" -> BanMaskType.ACCOUNT
+        else -> null
+    }
+
+    /** True if [s] already looks like a ban mask rather than a plain nick. */
+    private fun looksLikeRawMask(s: String): Boolean =
+        s.contains('!') || s.contains('@') || s.startsWith("$")
+
+    /**
+     * Build a domain-wildcard mask from a hostname.
+     * `foo.bar.isp.example` → `*!*@*.isp.example`; keeps the final two labels, wildcards
+     * the rest. IPv4-ish strings (all-numeric labels) are passed through as `*!*@<host>`
+     * so we don't produce meaningless `*.1.2` masks.
+     */
+    private fun buildDomainMask(host: String): String {
+        if (host.isBlank()) return "*!*@*"
+        // IPv4 literal — don't mangle.
+        if (host.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) return "*!*@$host"
+        // IPv6 literal (contains ':') — can't meaningfully domain-wildcard; fall back to host.
+        if (host.contains(':')) return "*!*@$host"
+        val labels = host.split('.')
+        return if (labels.size <= 2) "*!*@$host"
+        else "*!*@*." + labels.takeLast(2).joinToString(".")
+    }
+
+    /**
+     * A ban queued while we wait for a WHOIS to supply the required host/account data.
+     *
+     * [channel]     — channel to apply +b/+q on.
+     * [type]        — mask type; determines how we interpret the 311/330 reply.
+     * [quiet]       — if true, use +q (mute) instead of +b (ban).
+     * [alsoKick]    — if true, issue KICK after the mode is set.
+     * [kickReason]  — reason for the kick.
+     * [queuedAtMs]  — used to age-out stale entries if WHOIS is slow or never replies.
+     */
+    private data class PendingBan(
+        val channel: String,
+        val type: BanMaskType,
+        val quiet: Boolean,
+        val alsoKick: Boolean,
+        val kickReason: String,
+        val queuedAtMs: Long = System.currentTimeMillis(),
+    )
+
+    /**
+     * WHOIS-pending bans keyed by casefolded nick. A single nick can have multiple entries
+     * queued (e.g. user typed `/ban spammer host` then `/kickban spammer account` in quick
+     * succession). All are flushed when the WHOIS reply arrives.
+     *
+     * Entries older than [PENDING_BAN_TIMEOUT_MS] are discarded when a reply arrives or
+     * when we add a new entry; this avoids applying a stale ban if the user WHOIS'd
+     * themselves much later on.
+     */
+    private val pendingBansByNick = mutableMapOf<String, MutableList<PendingBan>>()
+
+    /**
+     * Bridge between 311 (RPL_WHOISUSER) and 330 (RPL_WHOISACCOUNT) for ACCOUNT-type
+     * pending bans: 311 carries user/host, 330 carries the services account name, and
+     * we need both pieces in [completePendingBans] to either build the `$a:account`
+     * mask or fall back gracefully. Cleared on 330 or 318.
+     */
+    private val pendingWhoisHostByNick = mutableMapOf<String, Pair<String, String>>()
+
+    /**
+     * Max age of a [PendingBan] before it's discarded. A nick's WHOIS normally completes
+     * in < 1 s on a healthy connection; 10 s is generous enough to cover a bouncer
+     * round-trip on flaky mobile networks without applying stale bans long after the
+     * user has moved on.
+     */
+    private val PENDING_BAN_TIMEOUT_MS = 10_000L
+
+    /**
+     * Drop [pendingBansByNick] entries older than [PENDING_BAN_TIMEOUT_MS]. Called
+     * whenever a new entry is queued or a WHOIS reply arrives so the map doesn't grow.
+     */
+    private fun pruneExpiredPendingBans() {
+        val cutoff = System.currentTimeMillis() - PENDING_BAN_TIMEOUT_MS
+        val toRemove = mutableListOf<String>()
+        for ((fold, list) in pendingBansByNick) {
+            list.removeAll { it.queuedAtMs < cutoff }
+            if (list.isEmpty()) toRemove.add(fold)
+        }
+        for (k in toRemove) pendingBansByNick.remove(k)
+    }
+
+    /**
+     * Result of parsing a slash command of the shape
+     *   `/cmd [#channel] <target> [args...]`
+     *
+     *  [chan]   — channel the command applies to. Either the explicit `#channel` arg or
+     *             the current buffer if it's a channel.
+     *  [target] — the nick / mask / etc. that comes after the channel (or first if no
+     *             explicit channel was given). Null only when the command was called with
+     *             needsTarget = false and no target was supplied.
+     *  [tail]   — remaining tokens after the target (mask type, kick reason, etc.).
+     */
+    private data class ParsedChanTarget(
+        val chan: String,
+        val target: String?,
+        val tail: List<String>,
+    )
+
+    /**
+     * Parse a `/cmd [#channel] <target> [tail...]` style invocation, surfacing user-friendly
+     * usage and "needs a channel" errors via [commandEvents] instead of silently returning.
+     *
+     * Channel-op slash commands (/kick, /ban, /unban, /kb, /mute, /unmute, etc.) all share
+     * the same arg shape: an optional leading `#channel`, then a target nick/mask, then
+     * command-specific tail args. Without this helper each command repeated the same
+     * `parts.getOrNull(1) ?: return` boilerplate, which silently no-op'd if the user typed
+     * the command from a server buffer with no channel arg or omitted the target.
+     *
+     * Returns null and emits a notice on bad input; non-null result has [ParsedChanTarget.chan]
+     * guaranteed to satisfy [isChannelName].
+     */
+    private suspend fun parseChanTargetCommand(
+        parts: List<String>,
+        cmd: String,
+        usageHint: String,
+        needsTarget: Boolean,
+    ): ParsedChanTarget? {
+        val a1 = parts.getOrNull(1)
+        if (a1.isNullOrBlank()) {
+            commandEvents.send(IrcEvent.Notice(
+                from = "*", target = currentBuffer,
+                text = "Usage: /$cmd $usageHint", isPrivate = true,
+            ))
+            return null
+        }
+        val chan: String
+        val target: String?
+        val restIdx: Int
+        if (isChannelName(a1)) {
+            // Explicit channel arg.
+            val t = parts.getOrNull(2)
+            if (needsTarget && t.isNullOrBlank()) {
+                commandEvents.send(IrcEvent.Notice(
+                    from = "*", target = currentBuffer,
+                    text = "Usage: /$cmd $usageHint", isPrivate = true,
+                ))
+                return null
+            }
+            chan = a1
+            target = t
+            restIdx = 3
+        } else {
+            // No explicit channel — use the current buffer if it is one.
+            chan = currentBuffer
+            target = a1
+            restIdx = 2
+        }
+        if (!isChannelName(chan)) {
+            commandEvents.send(IrcEvent.Notice(
+                from = "*", target = currentBuffer,
+                text = "/$cmd needs a channel — switch to one, or pass #channel as the first argument",
+                isPrivate = true,
+            ))
+            return null
+        }
+        return ParsedChanTarget(chan, target, parts.drop(restIdx))
+    }
+
+    /**
+     * Apply a ban/mute synchronously if [type] doesn't need remote data, otherwise queue
+     * a [PendingBan] and issue a WHOIS so the 311 / 330 handler can finish the job.
+     *
+     * Slash commands ([handleSlashCommand] cases for ban / unban / kickban / mute / unmute)
+     * funnel through this so the mask-construction logic lives in one place.
+     *
+     * [nickOrMask] — what the user typed. If it already looks like a mask (contains `!`,
+     *                `@`, or starts with `$`), [type] is forced to [BanMaskType.RAW] and
+     *                the string is passed through unchanged.
+     * [quiet]      — +q instead of +b. Server must support `+q` in CHANMODES; otherwise
+     *                we fall back to +b silently so the command still has an effect.
+     * [alsoKick]   — issue KICK after the mode (for /kickban and /kb).
+     */
+    private suspend fun applyBanOrQueue(
+        channel: String,
+        nickOrMask: String,
+        type: BanMaskType,
+        quiet: Boolean,
+        alsoKick: Boolean,
+        kickReason: String,
+    ) {
+        val modeChar = if (quiet && supportsQuietMode()) 'q' else 'b'
+
+        // Raw mask — bypass everything.
+        if (type == BanMaskType.RAW || looksLikeRawMask(nickOrMask)) {
+            sendRaw("MODE $channel +$modeChar $nickOrMask")
+            // Raw masks don't have a single nick to KICK, so alsoKick is a no-op here.
+            // If the user really wanted /kickban on a raw mask, they probably also want
+            // to kick a specific nick separately.
+            return
+        }
+
+        val nick = nickOrMask
+        val mask = when (type) {
+            BanMaskType.NICK -> "$nick!*@*"
+            else -> null  // needs WHOIS
+        }
+
+        if (mask != null) {
+            sendRaw("MODE $channel +$modeChar $mask")
+            if (alsoKick) {
+                sendRaw(if (kickReason.isBlank()) "KICK $channel $nick" else "KICK $channel $nick :$kickReason")
+            }
+            return
+        }
+
+        // Queue and WHOIS.
+        pruneExpiredPendingBans()
+        val fold = casefold(nick)
+        pendingBansByNick.getOrPut(fold) { mutableListOf() }.add(
+            PendingBan(
+                channel = channel,
+                type = type,
+                quiet = quiet,
+                alsoKick = alsoKick,
+                kickReason = kickReason,
+            )
+        )
+        // Also stash the current buffer so WHOIS reply surfaces there.
+        if (pendingWhoisBufferByNick.size >= 50) pendingWhoisBufferByNick.clear()
+        pendingWhoisBufferByNick[fold] = channel
+        sendRaw("WHOIS $nick $nick")  // double-nick form gets idle + full info on most ircds
+        commandEvents.send(IrcEvent.Status("Looking up $nick for ${type.name.lowercase()}-based ban…"))
+    }
+
+    /**
+     * True if the server's CHANMODES advertises `+q` as a list mode (mute/quiet).
+     * Checked via ISUPPORT. Conservative: returns false if unknown, which causes
+     * [applyBanOrQueue] to fall back to +b. Ircds known to support +q include
+     * InspIRCd, UnrealIRCd, Charybdis/Solanum, ircd-seven (freenode/libera).
+     */
+    private fun supportsQuietMode(): Boolean {
+        // CHANMODES is parsed into chanModes; its first segment lists type-A (list) modes.
+        val cm = chanModes ?: return false
+        val typeA = cm.substringBefore(',', cm)
+        return typeA.contains('q')
+    }
+
+    /**
+     * Build the final mask from WHOIS data and apply a queued [PendingBan]. Called from
+     * the 311 (RPL_WHOISUSER) handler for HOST/USER/DOMAIN, and from 330 (RPL_WHOISACCOUNT)
+     * for ACCOUNT. 311 fires for every successful WHOIS; 330 only when the user is
+     * logged in to services.
+     */
+    private suspend fun completePendingBans(nick: String, user: String?, host: String?, account: String?) {
+        val fold = casefold(nick)
+        val queued = pendingBansByNick.remove(fold) ?: return
+        pruneExpiredPendingBans()
+        val now = System.currentTimeMillis()
+        for (pb in queued) {
+            if (now - pb.queuedAtMs > PENDING_BAN_TIMEOUT_MS) continue
+            val mask = when (pb.type) {
+                BanMaskType.USER    -> if (!user.isNullOrBlank()) "*!${user}@*" else null
+                BanMaskType.HOST    -> if (!host.isNullOrBlank()) "*!*@${host}" else null
+                BanMaskType.DOMAIN  -> if (!host.isNullOrBlank()) buildDomainMask(host) else null
+                BanMaskType.ACCOUNT -> if (!account.isNullOrBlank()) "\$a:${account}" else null
+                BanMaskType.NICK, BanMaskType.RAW -> "$nick!*@*"  // shouldn't reach here
+            }
+            if (mask == null) {
+                val reason = when (pb.type) {
+                    BanMaskType.ACCOUNT -> "$nick is not logged in to services"
+                    else -> "couldn't resolve host for $nick"
+                }
+                commandEvents.send(IrcEvent.Error("Ban by ${pb.type.name.lowercase()} failed — $reason. Falling back to nick mask."))
+                val modeChar = if (pb.quiet && supportsQuietMode()) 'q' else 'b'
+                sendRaw("MODE ${pb.channel} +$modeChar $nick!*@*")
+            } else {
+                val modeChar = if (pb.quiet && supportsQuietMode()) 'q' else 'b'
+                sendRaw("MODE ${pb.channel} +$modeChar $mask")
+            }
+            if (pb.alsoKick) {
+                sendRaw(if (pb.kickReason.isBlank()) "KICK ${pb.channel} $nick"
+                        else "KICK ${pb.channel} $nick :${pb.kickReason}")
+            }
+        }
     }
 
     private fun casefold(s: String): String {
@@ -1143,14 +1455,24 @@ class IrcClient(val config: IrcConfig) {
                 sendRaw(if (key.isNullOrBlank()) "JOIN $chan" else "JOIN $chan $key")
             }
             "msg" -> {
-                val target = parts.getOrNull(1) ?: return
+                val target = parts.getOrNull(1)
                 val msg = parts.drop(2).joinToString(" ")
+                if (target.isNullOrBlank() || msg.isBlank()) {
+                    commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+                        text = "Usage: /msg <nick|#channel> <message>", isPrivate = true))
+                    return
+                }
                 privmsg(target, msg)
             }
             // /query <nick> [message] - open a PM buffer with a user (buffer switching handled in ViewModel)
             // /query with no message just opens the buffer; with a message it sends it too.
             "query" -> {
-                val target = parts.getOrNull(1) ?: return
+                val target = parts.getOrNull(1)
+                if (target.isNullOrBlank()) {
+                    commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+                        text = "Usage: /query <nick> [message]", isPrivate = true))
+                    return
+                }
                 val msg = parts.drop(2).joinToString(" ").trim()
                 if (msg.isNotBlank()) privmsg(target, msg)
                 // Signal the ViewModel to open/focus the query buffer via a fake incoming event.
@@ -1282,29 +1604,58 @@ class IrcClient(val config: IrcConfig) {
                 if (arg.isNotBlank()) sendRaw("MODE $arg")
             }
             "kick" -> {
-                val chan = parts.getOrNull(1) ?: currentBuffer
-                val nick = parts.getOrNull(2) ?: return
-                val reason = parts.drop(3).joinToString(" ").trim()
-                sendRaw(if (reason.isBlank()) "KICK $chan $nick" else "KICK $chan $nick :$reason")
+                // /kick <nick> [reason]      — kick from current channel
+                // /kick <#chan> <nick> [reason] — kick from a different channel
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick>", needsTarget = true) ?: return
+                val reason = parsed.tail.joinToString(" ").trim()
+                sendRaw(if (reason.isBlank()) "KICK ${parsed.chan} ${parsed.target}"
+                        else "KICK ${parsed.chan} ${parsed.target} :$reason")
             }
             "ban" -> {
-                val chan = parts.getOrNull(1) ?: currentBuffer
-                val nick = parts.getOrNull(2) ?: return
-                val mask = parts.getOrNull(3) ?: "$nick!*@*"
-                sendRaw("MODE $chan +b $mask")
+                // /ban <nick-or-mask> [type]      — ban in current channel
+                // /ban <#chan> <nick-or-mask> [type] — ban in a different channel
+                // [type] is one of: nick (default), user, host, domain, account
+                // If <nick-or-mask> contains !, @, or starts with $, it's treated as a raw mask.
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type]", needsTarget = true) ?: return
+                val type = parseMaskType(parsed.tail.firstOrNull()) ?: BanMaskType.NICK
+                applyBanOrQueue(parsed.chan, parsed.target!!, type, quiet = false, alsoKick = false, kickReason = "")
             }
             "unban" -> {
-                val chan = parts.getOrNull(1) ?: currentBuffer
-                val mask = parts.getOrNull(2) ?: return
-                sendRaw("MODE $chan -b $mask")
+                // /unban <nick-or-mask>      — remove ban in current channel
+                // /unban <#chan> <nick-or-mask> — remove ban in a different channel
+                // Plain nicks are expanded to nick!*@*; raw masks pass through. To remove a
+                // host/account ban, paste the exact mask shown by /banlist.
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask>", needsTarget = true) ?: return
+                val mask = if (looksLikeRawMask(parsed.target!!)) parsed.target else "${parsed.target}!*@*"
+                sendRaw("MODE ${parsed.chan} -b $mask")
             }
             "kb", "kickban" -> {
-                val chan = parts.getOrNull(1) ?: currentBuffer
-                val nick = parts.getOrNull(2) ?: return
-                val reason = parts.drop(3).joinToString(" ").trim()
-                val mask = "$nick!*@*"
-                sendRaw("MODE $chan +b $mask")
-                sendRaw(if (reason.isBlank()) "KICK $chan $nick" else "KICK $chan $nick :$reason")
+                // /kb <nick-or-mask> [type] [reason...]
+                // /kb <#chan> <nick-or-mask> [type] [reason...]
+                // type, if present, is the same keyword as /ban. When the target is a raw
+                // mask, the kick step is skipped (no single nick to kick).
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type] [reason...]", needsTarget = true) ?: return
+                // Distinguish "/kb nick host with extra reason words" from "/kb nick reason words"
+                // by checking whether the next word is a recognised type keyword. If it is,
+                // it's the type; otherwise it's the start of the reason.
+                val maybeType = parseMaskType(parsed.tail.firstOrNull())
+                val (type, reasonStartIdx) = if (maybeType != null) maybeType to 1 else BanMaskType.NICK to 0
+                val reason = parsed.tail.drop(reasonStartIdx).joinToString(" ").trim()
+                applyBanOrQueue(parsed.chan, parsed.target!!, type, quiet = false, alsoKick = true, kickReason = reason)
+            }
+            "mute", "quiet" -> {
+                // /mute <nick-or-mask> [type]      — set +q (quiet) in current channel
+                // /mute <#chan> <nick-or-mask> [type] — same in a different channel
+                // Same syntax as /ban. Falls back to +b on ircds without quiet support.
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type]", needsTarget = true) ?: return
+                val type = parseMaskType(parsed.tail.firstOrNull()) ?: BanMaskType.NICK
+                applyBanOrQueue(parsed.chan, parsed.target!!, type, quiet = true, alsoKick = false, kickReason = "")
+            }
+            "unmute", "unquiet" -> {
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask>", needsTarget = true) ?: return
+                val mask = if (looksLikeRawMask(parsed.target!!)) parsed.target else "${parsed.target}!*@*"
+                val modeChar = if (supportsQuietMode()) 'q' else 'b'
+                sendRaw("MODE ${parsed.chan} -$modeChar $mask")
             }
 			"sajoin" -> {
 				// Services/admin forced join: SAJOIN <nick> <#channel>
@@ -1393,34 +1744,52 @@ class IrcClient(val config: IrcConfig) {
 				disconnect(reason.ifBlank { "Quitting" })
 			}
 			"notice" -> {
-				val target = parts.getOrNull(1) ?: return
+				val target = parts.getOrNull(1)
 				val msg = parts.drop(2).joinToString(" ")
-				if (msg.isNotBlank()) sendRaw("NOTICE $target :$msg")
+				if (target.isNullOrBlank() || msg.isBlank()) {
+					commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+						text = "Usage: /notice <nick|#channel> <message>", isPrivate = true))
+					return
+				}
+				sendRaw("NOTICE $target :$msg")
 			}
 			"invite" -> {
-				val nick = parts.getOrNull(1) ?: return
-				val chan = parts.getOrNull(2) ?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer else return
+				val nick = parts.getOrNull(1)
+				if (nick.isNullOrBlank()) {
+					commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+						text = "Usage: /invite <nick> [#channel]", isPrivate = true))
+					return
+				}
+				val chan = parts.getOrNull(2)
+					?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer
+					   else {
+						commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+							text = "/invite needs a channel — switch to one or pass it as the second argument",
+							isPrivate = true))
+						return
+					   }
 				sendRaw("INVITE $nick $chan")
 			}
-			"op" -> {
-				val nick = parts.getOrNull(1) ?: return
-				val chan = parts.getOrNull(2) ?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer else return
-				sendRaw("MODE $chan +o $nick")
-			}
-			"deop" -> {
-				val nick = parts.getOrNull(1) ?: return
-				val chan = parts.getOrNull(2) ?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer else return
-				sendRaw("MODE $chan -o $nick")
-			}
-			"voice" -> {
-				val nick = parts.getOrNull(1) ?: return
-				val chan = parts.getOrNull(2) ?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer else return
-				sendRaw("MODE $chan +v $nick")
-			}
-			"devoice" -> {
-				val nick = parts.getOrNull(1) ?: return
-				val chan = parts.getOrNull(2) ?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer else return
-				sendRaw("MODE $chan -v $nick")
+			"op", "deop", "voice", "devoice" -> {
+				val nick = parts.getOrNull(1)
+				if (nick.isNullOrBlank()) {
+					commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+						text = "Usage: /$cmd <nick> [#channel]", isPrivate = true))
+					return
+				}
+				val chan = parts.getOrNull(2)
+					?: if (currentBuffer != "*server*" && isChannelName(currentBuffer)) currentBuffer
+					   else {
+						commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+							text = "/$cmd needs a channel — switch to one or pass it as the second argument",
+							isPrivate = true))
+						return
+					   }
+				val mode = when (cmd) {
+					"op" -> "+o"; "deop" -> "-o"; "voice" -> "+v"; "devoice" -> "-v"
+					else -> return  // unreachable; satisfies the when-expression exhaustiveness check
+				}
+				sendRaw("MODE $chan $mode $nick")
 			}
 			"ctcpping", "ping" -> {
 				val target = parts.getOrNull(1) ?: return
@@ -2185,6 +2554,56 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				// server numerics (MOTD/WHOIS/errors/etc)
 				val numericText = formatNumeric(msg)
 
+				// Pending-ban completion: when a queued [PendingBan] is waiting on WHOIS
+				// data for this nick, fish the user/host (311) or services account (330)
+				// out of the reply and apply the queued bans. 318 (end of WHOIS) is also
+				// a sentinel — if we never saw a 311 we drain the queue with whatever data
+				// we have (typically nothing), which surfaces a "couldn't resolve" error.
+				if (pendingBansByNick.isNotEmpty()) {
+					when (msg.command) {
+						"311" -> {
+							val nick = msg.params.getOrNull(1)
+							val user = msg.params.getOrNull(2)
+							val host = msg.params.getOrNull(3)
+							if (nick != null && pendingBansByNick.containsKey(casefold(nick))) {
+								// HOST/USER/DOMAIN bans complete here; ACCOUNT bans wait for 330.
+								val hasAccountQueued = pendingBansByNick[casefold(nick)]
+									?.any { it.type == BanMaskType.ACCOUNT } == true
+								if (!hasAccountQueued) {
+									completePendingBans(nick, user, host, account = null)
+								}
+								// stash for 330 handler in case ACCOUNT is queued
+								if (hasAccountQueued) {
+									pendingWhoisHostByNick[casefold(nick)] = (user ?: "") to (host ?: "")
+								}
+							}
+						}
+						"330" -> {
+							// RPL_WHOISACCOUNT: <client> <nick> <account> :is logged in as
+							val nick = msg.params.getOrNull(1)
+							val account = msg.params.getOrNull(2)
+							if (nick != null && account != null) {
+								val fold = casefold(nick)
+								val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
+								completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account)
+							}
+						}
+						"318" -> {
+							// End of WHOIS: drain any still-pending bans for this nick. They
+							// either succeeded (handled above and removed from the map) or the
+							// server gave us no useful data — surface the failure now.
+							val nick = msg.params.getOrNull(1)
+							if (nick != null) {
+								val fold = casefold(nick)
+								val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
+								if (pendingBansByNick.containsKey(fold)) {
+									completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account = null)
+								}
+							}
+						}
+					}
+				}
+
 				// Route WHOIS numerics back to the buffer where the WHOIS was invoked.
 				val whoisTargetBuffer: String? = run {
 					val whoisCodes = setOf(
@@ -2281,7 +2700,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 								val bufName = parts[1]
 								val epochSecs = parts.getOrNull(2)?.toLongOrNull()
 								if (epochSecs != null) zncLastSeen[bufName.lowercase()] = epochSecs
-								continue  // Internal plumbing only
+								continue  // Internal plumbing only — never shown.
 							}
 							// Non-TIMESTAMP: fall through.
 						}
@@ -2495,8 +2914,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
 
 						// Bouncer pseudo-user NOTICE routing. ZNC replies to /msg *status
-						// commands (and to /znc slash-command wrapper) via NOTICE
-						// without this branch the reply opens a query buffer for *status rather than
+						// commands (and to /znc slash-command wrapper) via NOTICE — without
+						// this branch the reply opens a query buffer for *status rather than
 						// rendering inline in the server log. Same rationale and prefix check
 						// as the PRIVMSG handler above; see [isBouncerPseudoUser].
 						if (config.isBouncer && !isChannel && isBouncerPseudoUser(from)) {
@@ -2588,7 +3007,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 							// Skip when chanHist is true: a JOIN arriving as part of buffer playback
 							// represents our PRIOR session, not the current one. Firing CHATHISTORY
 							// LATEST against it re-requests history we're already in the middle of
-							// receiving: same rationale as the znc.in/playback guard below.
+							// receiving — same rationale as the znc.in/playback guard below.
 							if (nickEquals(nick, currentNick)
 								&& config.capPrefs.draftChathistory
 								&& hasChathistoryCap()
@@ -3159,7 +3578,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// session resumption (abbreviated handshake). Cuts a round-trip on reconnects.
 			//
 			// SSLContext.init() may only be called ONCE per context instance, so the cache key
-			// must encode every aspect of the context's behaviour. see SslContextKey above.
+			// must encode every aspect of the context's behaviour — see SslContextKey above.
 			val cacheKey = SslContextKey(
 				allowInvalidCerts = config.allowInvalidCerts,
 				clientCertContentHash = config.clientCert?.pkcs12?.let { java.util.Arrays.hashCode(it) } ?: 0,
@@ -3329,7 +3748,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				// action; connection will be re-established automatically.
 				//
 				// "Internal OpenSSL error or protocol error" is the BoringSSL signature for a
-				// state-machine confusion commonly seen when the app was force-killed (e.g.
+				// state-machine confusion — commonly seen when the app was force-killed (e.g.
 				// by Play Store during an update) without a clean TLS close_notify, and the
 				// server still holds the old session open when we reconnect. Not actionable;
 				// reconnect will sort itself out.

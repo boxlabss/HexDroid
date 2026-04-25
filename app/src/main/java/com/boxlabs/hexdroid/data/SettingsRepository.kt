@@ -635,7 +635,7 @@ class SettingsRepository(private val ctx: Context) {
         NetworkProfile(
             id = "EFnet",
             name = "EFnet",
-            host = "irc.efnet.nl",
+            host = "irc.efnet.org",
             port = 6697,
             useTls = true,
             allowInvalidCerts = false,
@@ -718,9 +718,9 @@ class SettingsRepository(private val ctx: Context) {
         //   a v3 ZNC profile written, imported on a v2-only build, re-exported and re-imported
         //   would come back as soju-style routing. Distinct from a no-op field loss.
         // minCompatVersion: the oldest app version that can still *open* this backup without
-        //   errors. older builds get default behaviour for unknown fields via the
+        //   errors. Kept at 1 — older builds get default behaviour for unknown fields via the
         //   optXxx() parse calls; they just miss the new features (bouncer-kind distinction,
-        //   TOFU pins, rejoinOnKick)
+        //   TOFU pins, rejoinOnKick). That's acceptable graceful downgrade, not corruption.
         root.put("version", 3)
         root.put("minCompatVersion", 1)
         root.put("app", "HexDroid")
@@ -781,23 +781,70 @@ class SettingsRepository(private val ctx: Context) {
         val networksJson = root.optJSONArray("networks")
 
         val orphanedIds = mutableSetOf<String>()
+        // Cleartext passwords that arrived in the backup JSON. These must be moved into
+        // SecretStore explicitly because [toNetworksJson] does not persist password fields
+        // (passwords live in EncryptedSharedPreferences, not in the DataStore JSON), so a
+        // v1-format backup whose JSON still has `serverPassword` / `saslPassword` would
+        // otherwise drop those passwords on the floor when we re-serialise.
+        val pendingServerPasswords = mutableMapOf<String, String>()  // id → cleartext
+        val pendingSaslPasswords = mutableMapOf<String, String>()    // id → cleartext
+
         ctx.dataStore.edit { prefs ->
             if (settingsJson != null) {
                 val restoredSettings = parseSettings(settingsJson.toString())
                 prefs[Keys.SETTINGS_JSON] = toSettingsJson(restoredSettings).toString()
             }
             if (networksJson != null) {
-                val oldIds = parseNetworks(prefs[Keys.NETWORKS_JSON]).map { it.id }.toSet()
+                val oldNetworks = parseNetworks(prefs[Keys.NETWORKS_JSON])
                 val restoredNetworks = parseNetworks(networksJson.toString())
+
+                // Refuse to replace a non-empty network list with an empty one. This guards
+                // against importing a backup that was malformed or settings-only — losing
+                // every configured network in one tap with no undo would be devastating, and
+                // a backup that legitimately contains zero networks is a non-use case (you
+                // would just delete networks manually instead of round-tripping a file).
+                // The user can still wipe networks manually via Settings > Reset.
+                if (oldNetworks.isNotEmpty() && restoredNetworks.isEmpty()) {
+                    throw IllegalArgumentException(
+                        "Backup contains zero networks; refusing to replace your existing " +
+                        "${oldNetworks.size} network(s). If you want to clear all networks, " +
+                        "delete them manually in Network Settings."
+                    )
+                }
+
+                // Capture any cleartext passwords that came in via legacy v1/v2 backups so
+                // we can route them into SecretStore after the DataStore edit commits.
+                // NB: parseNetworks deliberately returns saslPassword=null (and serverPassword
+                // gets stripped by toNetworksJson on the way out), so we read these fields
+                // straight from the source JSON rather than via the parsed NetworkProfile.
+                val rawArr = try { JSONArray(networksJson.toString()) } catch (_: Throwable) { JSONArray() }
+                for (i in 0 until rawArr.length()) {
+                    val o = rawArr.optJSONObject(i) ?: continue
+                    val id = o.optString("id", "").takeIf { it.isNotBlank() } ?: continue
+                    o.optString("serverPassword", "").takeIf { it.isNotBlank() }
+                        ?.let { pendingServerPasswords[id] = it }
+                    o.optString("saslPassword", "").takeIf { it.isNotBlank() }
+                        ?.let { pendingSaslPasswords[id] = it }
+                }
+
+                val oldIds = oldNetworks.map { it.id }.toSet()
                 val newIds = restoredNetworks.map { it.id }.toSet()
                 orphanedIds.addAll(oldIds - newIds)
                 prefs[Keys.NETWORKS_JSON] = toNetworksJson(restoredNetworks).toString()
             }
         }
+
+        // Write to SecretStore *after* the DataStore edit so a SecretStore failure doesn't
+        // leave the JSON pointing at non-existent secrets. SecretStore writes are individual
+        // EncryptedSharedPreferences puts; if any one fails the others still take effect,
+        // and the user can re-enter that one password manually.
+        for ((id, pw) in pendingServerPasswords) runCatching { secretStore.setServerPassword(id, pw) }
+        for ((id, pw) in pendingSaslPasswords) runCatching { secretStore.setSaslPassword(id, pw) }
+
         return orphanedIds
     }
 
-    // Flap detection state migrated from SharedPreferences to DataStore so it is
+    // FIX #11: Flap detection state — migrated from SharedPreferences to DataStore so it is
     // consistent with the rest of the persistence layer and immune to the data-loss issues
     // that SharedPreferences can exhibit under process death on some OEM ROMs.
     //

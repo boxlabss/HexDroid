@@ -374,11 +374,21 @@ class DccManager(ctx: Context) {
             "DCC RECEIVE: port must be > 0 for active DCC (use receivePassive() for passive offers)"
         }
 
-        val (outputStream, savedPath) = createDccOutputStream(offer.filename, customFolderUri)
-
+        // Validate the remote IP BEFORE creating the output file. createDccOutputStream
+        // creates a real on-disk file (or SAF document); if validateRemoteIp threw after
+        // it, the file was leaked as zero bytes. Open the socket here too for the same
+        // reason — if the connect fails, no file gets created.
         validateRemoteIp(offer.ip)
         val rawSock = Socket(offer.ip, offer.port)
         val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
+
+        val (outputStream, savedPath) = try {
+            createDccOutputStream(offer.filename, customFolderUri)
+        } catch (t: Throwable) {
+            runCatching { sock.close() }
+            throw t
+        }
+        var receivedAnyBytes = false
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
         try {
             sock.use { s ->
@@ -389,10 +399,14 @@ class DccManager(ctx: Context) {
                 // closes the raw stream, silently discarding the buffered bytes.
                 val buffered = java.io.BufferedOutputStream(outputStream, 256 * 1024)
                 try {
-                    receiveFromSocket(s, buffered, offer.size, offer.turbo, onProgress)
+                    receiveFromSocket(s, buffered, offer.size, offer.turbo) { sent, total ->
+                        if (sent > 0) receivedAnyBytes = true
+                        onProgress(sent, total)
+                    }
                 } finally {
                     runCatching { buffered.flush() }
                     outputStream.close()
+                    if (!receivedAnyBytes) deleteSavedPathIfEmpty(savedPath)
                 }
             }
         } finally {
@@ -423,9 +437,20 @@ class DccManager(ctx: Context) {
         // send port 0 without a token (malformed passive DCC) - catch this early.
         if (offer.port != 0) throw IllegalArgumentException("Passive DCC offer has non-zero port: ${offer.port}")
         val token = offer.token ?: throw IllegalArgumentException("Passive DCC offer is missing token (port=0 but no token)")
-        val (outputStream, savedPath) = createDccOutputStream(offer.filename, customFolderUri)
 
+        // Bind FIRST so a port-exhausted failure doesn't leave a leaked zero-byte file
+        // on disk. Same rationale as the validateRemoteIp-before-createDccOutputStream
+        // ordering in receive() above.
         val ss = bindFirstAvailable(portMin, portMax)
+        val (outputStream, savedPath) = try {
+            createDccOutputStream(offer.filename, customFolderUri)
+        } catch (t: Throwable) {
+            runCatching { ss.close() }
+            throw t
+        }
+        // If anything goes wrong before bytes start arriving, close+delete the file so the
+        // user doesn't end up with a zero-byte placeholder cluttering Downloads.
+        var receivedAnyBytes = false
         // Close the ServerSocket on cancellation so accept() unblocks immediately.
         val ssCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { ss.close() } }
         try {
@@ -435,21 +460,35 @@ class DccManager(ctx: Context) {
 
             val rawSock = try {
                 ss.accept()
-            } catch (_: java.net.SocketTimeoutException) {
+            } catch (t: Throwable) {
                 outputStream.close()
-                throw RuntimeException("DCC RECEIVE timed out waiting for sender to connect")
+                deleteSavedPathIfEmpty(savedPath)
+                throw if (t is java.net.SocketTimeoutException)
+                    RuntimeException("DCC RECEIVE timed out waiting for sender to connect")
+                else t
             }
-            val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
+            val sock = try {
+                if (offer.secure) wrapTls(rawSock, rawSock.inetAddress?.hostAddress ?: "0.0.0.0") else rawSock
+            } catch (t: Throwable) {
+                runCatching { rawSock.close() }
+                outputStream.close()
+                deleteSavedPathIfEmpty(savedPath)
+                throw t
+            }
 
             val sockCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { runCatching { sock.close() } }
             try {
                 sock.use { s ->
                     val buffered = java.io.BufferedOutputStream(outputStream, 256 * 1024)
                     try {
-                        receiveFromSocket(s, buffered, offer.size, offer.turbo, onProgress)
+                        receiveFromSocket(s, buffered, offer.size, offer.turbo) { sent, total ->
+                            if (sent > 0) receivedAnyBytes = true
+                            onProgress(sent, total)
+                        }
                     } finally {
                         runCatching { buffered.flush() }
                         outputStream.close()
+                        if (!receivedAnyBytes) deleteSavedPathIfEmpty(savedPath)
                     }
                 }
             } finally {
@@ -461,6 +500,23 @@ class DccManager(ctx: Context) {
         }
 
         savedPath
+    }
+
+    /**
+     * Best-effort delete of a savedPath when the transfer didn't actually receive any
+     * bytes. Handles both file:// paths and SAF/MediaStore content:// URIs. Failures are
+     * swallowed: a leaked zero-byte file is annoying but not a correctness issue, so
+     * "delete failed" is not worth bubbling up over the original cause.
+     */
+    private fun deleteSavedPathIfEmpty(savedPath: String) {
+        runCatching {
+            if (savedPath.startsWith("content://")) {
+                val uri = Uri.parse(savedPath)
+                ctx.contentResolver.delete(uri, null, null)
+            } else {
+                File(savedPath).takeIf { it.exists() && it.length() == 0L }?.delete()
+            }
+        }
     }
 
     /**
@@ -579,8 +635,21 @@ class DccManager(ctx: Context) {
             var total = 0L
             val expected: Long? = expectedSize.takeIf { it > 0L }
 
+            // Hard ceiling for transfers without an advertised size: 8 GB. Without this,
+            // a malicious sender that omits the size field could keep writing forever and
+            // fill the device's storage, causing the OS to start killing apps — including
+            // ours. With a known size we still cap at the advertised size so a sender that
+            // lies (offers 1 KB then sends 10 GB) can't bypass the limit either.
+            val maxAccept: Long = expected ?: (8L * 1024 * 1024 * 1024)
+
             while (true) {
-                val n = inp.read(buf)
+                // Don't read more than we're prepared to keep. If the next read would
+                // exceed maxAccept, shrink the read window so we stop precisely at the cap
+                // rather than discarding the overshoot.
+                val remaining = maxAccept - total
+                if (remaining <= 0L) break
+                val toRead = if (remaining < buf.size) remaining.toInt() else buf.size
+                val n = inp.read(buf, 0, toRead)
                 if (n <= 0) break
 
                 outputStream.write(buf, 0, n)

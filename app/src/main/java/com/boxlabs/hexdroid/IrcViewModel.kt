@@ -2699,6 +2699,54 @@ fun startAddNetwork() {
                         return@launch
                     }
 
+                    "react", "unreact" -> {
+                        // /react <emoji> [n]   — react to the n-th most recent message (n=1, default)
+                        // /unreact <emoji> [n] — remove a reaction from the n-th most recent message
+                        // Examples: /react 👍   /react :tada: 3   /unreact ❤️
+                        //
+                        // Reacting requires a server msgId on the target message (IRCv3 message-tags),
+                        // so the lookup walks backwards from the newest message and skips any line
+                        // without a msgId (server-status lines, /me actions if echo-message wasn't on,
+                        // older messages from before the cap was negotiated, etc.).
+                        val remove = (cmd == "unreact")
+                        val args = cmdLine.substringAfter(' ', "").trim().split(Regex("\\s+"))
+                        val emoji = args.getOrNull(0)?.takeIf { it.isNotBlank() }
+                        if (emoji == null) {
+                            append(currentKey, from = null, isLocal = true, doNotify = false,
+                                text = "*** Usage: /${cmd} <emoji> [n]   — n is how many messages back, default 1")
+                            return@launch
+                        }
+                        if (bufferName == "*server*" || c == null) {
+                            append(currentKey, from = null, isLocal = true, doNotify = false,
+                                text = "*** /${cmd} requires an active channel or query")
+                            return@launch
+                        }
+                        // Match the long-press UI's friendly fail mode: surface a clear message
+                        // when the server doesn't support reactions rather than silently no-op.
+                        // hasReactionSupport is set on CAP-negotiated -> ack of message-tags.
+                        if (st.connections[netId]?.hasReactionSupport != true) {
+                            append(currentKey, from = null, isLocal = true, doNotify = false,
+                                text = "*** This server doesn't support reactions (no message-tags cap)")
+                            return@launch
+                        }
+                        val nBack = args.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 100) ?: 1
+                        val msgs = _state.value.buffers[currentKey]?.messages ?: emptyList()
+                        // Walk newest-first, collect messages with msgIds, pick the nBack-th one.
+                        val withMsgId = msgs.asReversed().asSequence()
+                            .filter { !it.msgId.isNullOrBlank() }
+                            .take(nBack)
+                            .toList()
+                        val target = withMsgId.getOrNull(nBack - 1)
+                        if (target?.msgId == null) {
+                            val noun = if (nBack == 1) "the latest message" else "message #$nBack back"
+                            append(currentKey, from = null, isLocal = true, doNotify = false,
+                                text = "*** /${cmd} couldn't find $noun with a server msgId — the server may not support message-tags")
+                            return@launch
+                        }
+                        c.sendReaction(bufferName, target.msgId, emoji, remove = remove)
+                        return@launch
+                    }
+
                     "find", "grep", "search" -> {
                         val query = cmdLine.substringAfter(' ', "").trim()
                         if (query.isBlank()) {
@@ -4695,16 +4743,16 @@ if (affectLive) {
                         doNotify = false, isLocal = true)
 
                     // Hint for first-seen upstreams that don't correspond to any local profile.
-                    // Match on the bouncer-reported host (upstream hostname, e.g. "irc.afternet.org")
-                    // against our configured profile hosts. a user who's already set up a profile
-                    // for afternet shouldn't be nagged. This is conservative: if the bouncer
+                    // Match on the bouncer-reported host (upstream hostname, e.g. "irc.libera.chat")
+                    // against our configured profile hosts — a user who's already set up a profile
+                    // for libera.chat shouldn't be nagged. This is conservative: if the bouncer
                     // doesn't report a host, we skip the hint rather than risk a false positive.
                     if (isNew && !merged.host.isNullOrBlank()) {
                         val profileHosts = _state.value.networks.map { it.host.lowercase() }.toSet()
                         if (merged.host.lowercase() !in profileHosts) {
                             val displayName = merged.name ?: merged.host
                             append(serverKey, from = null,
-                                text = "    > no local profile for \"$displayName\" - add one to connect to this upstream.",
+                                text = "    → no local profile for \"$displayName\" — add one to connect to this upstream.",
                                 doNotify = false, isLocal = true)
                         }
                     }

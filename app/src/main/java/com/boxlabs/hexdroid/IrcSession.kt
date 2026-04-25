@@ -374,6 +374,10 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     if (!config.useTls) {
                         out += IrcAction.EmitError("SASL PLAIN aborted: refusing to send password over an unencrypted connection. Enable TLS or switch to SCRAM-SHA-256.")
                         out += IrcAction.Send("AUTHENTICATE *")
+                        // Abort locally so CAP END is still sent even if the server
+                        // doesn't reply with 906 (the spec says it SHOULD; not all do).
+                        // Without this, registration stalls forever after a refused PLAIN.
+                        saslAbort(out)
                         return out
                     }
                     // Fall back to the connection nick when no explicit authcid is set.
@@ -439,6 +443,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 } catch (_: Throwable) {
                     out += IrcAction.EmitError("SASL: could not decode server AUTHENTICATE payload")
                     out += IrcAction.Send("AUTHENTICATE *")
+                    // Defensive abort: server SHOULD reply with 904/906 after our `*` but
+                    // some implementations stall instead. Force-end CAP locally.
+                    saslAbort(out)
                     return out
                 }
 
@@ -457,9 +464,12 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         out += IrcAction.EmitStatus("SCRAM: server signature verified")
                     } else {
                         // Server signature verification failed (or server sent an "e=" error).
-                        // Abort so the server doesn't hang waiting for our client-final.
+                        // Abort so the server doesn't hang waiting for our client-final, and
+                        // also abort locally in case the server itself stalls waiting for our
+                        // next AUTHENTICATE rather than responding with 904.
                         out += IrcAction.EmitError("SCRAM server signature verification failed")
                         out += IrcAction.Send("AUTHENTICATE *")
+                        saslAbort(out)
                     }
                 }
             }

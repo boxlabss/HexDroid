@@ -167,8 +167,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -228,6 +229,8 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("me",         "/me <action>",                   "Send a CTCP ACTION (/me waves)"),
     IrcCommand("msg",        "/msg <nick> <message>",          "Send a private message"),
     IrcCommand("notice",     "/notice <target> <text>",        "Send a NOTICE to a user or channel"),
+    IrcCommand("react",      "/react <emoji> [n]",             "Add an emoji reaction to a recent message (n = how many back; default 1)"),
+    IrcCommand("unreact",    "/unreact <emoji> [n]",           "Remove your emoji reaction from a recent message"),
     IrcCommand("amsg",       "/amsg <message>",                "Send a message to all open channels"),
     IrcCommand("ame",        "/ame <action>",                  "Send an action to all open channels"),
 
@@ -260,10 +263,14 @@ private val IRC_COMMANDS = listOf(
 
     // Moderation
     IrcCommand("kick",       "/kick <nick> [reason]",          "Kick a user from the channel"),
-    IrcCommand("ban",        "/ban <nick>",                    "Ban a user from the channel"),
-    IrcCommand("unban",      "/unban <nick>",                  "Remove a ban from the channel"),
-    IrcCommand("kb",         "/kb <nick> [reason]",            "Kick and ban a user"),
-    IrcCommand("kickban",    "/kickban <nick> [reason]",       "Alias for /kb"),
+    IrcCommand("ban",        "/ban <nick|mask> [n|u|h|d|a]",   "Ban: nick (default), user, host, domain, account"),
+    IrcCommand("unban",      "/unban <nick|mask>",             "Remove a ban (paste exact mask from /banlist for non-nick bans)"),
+    IrcCommand("kb",         "/kb <nick> [n|u|h|d|a] [reason]","Kick and ban a user (same mask types as /ban)"),
+    IrcCommand("kickban",    "/kickban <nick> [type] [reason]","Alias for /kb"),
+    IrcCommand("mute",       "/mute <nick|mask> [n|u|h|d|a]",  "Quiet a user (+q, falls back to +b)"),
+    IrcCommand("quiet",      "/quiet <nick|mask> [type]",      "Alias for /mute"),
+    IrcCommand("unmute",     "/unmute <nick|mask>",            "Remove a quiet (-q, or -b on ircds without +q)"),
+    IrcCommand("unquiet",    "/unquiet <nick|mask>",           "Alias for /unmute"),
     IrcCommand("op",         "/op <nick> [channel]",           "Grant operator (+o) to a user"),
     IrcCommand("deop",       "/deop <nick> [channel]",         "Remove operator (-o) from a user"),
     IrcCommand("voice",      "/voice <nick> [channel]",        "Grant voice (+v) to a user"),
@@ -324,7 +331,218 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("hs",         "/hs <command>",                  "Alias for /msg HostServ"),
     IrcCommand("ms",         "/ms <command>",                  "Alias for /msg MemoServ"),
     IrcCommand("bs",         "/bs <command>",                  "Alias for /msg BotServ"),
+
+    // Bouncer shortcuts
+    IrcCommand("znc",        "/znc <command>",                 "Send a command to ZNC's *status"),
+    IrcCommand("bouncerserv","/bouncerserv <command>",         "Send a command to soju's BouncerServ"),
+    IrcCommand("bnc",        "/bnc <command>",                 "Alias for /bouncerserv"),
+
+    // IRCv3
+    IrcCommand("setname",    "/setname <realname>",            "Change your realname without reconnecting (SETNAME cap)"),
+    IrcCommand("markread",   "/markread [target] [timestamp]", "Mark a buffer as read (IRCv3 read-marker)"),
+    IrcCommand("monitor",    "/monitor +nick | -nick | C | L | S", "Watch for nicks coming online (IRCv3 MONITOR)"),
 )
+
+/**
+ * Subcommand hints shown after the user types a command that takes a well-known
+ * verb as its first argument — services aliases (/ns IDENTIFY, /cs ACCESS, …),
+ * ZNC's *status module (/znc ListNetworks), soju's BouncerServ (/bouncerserv
+ * network status). The second-word hint fires when the user has typed the parent
+ * command plus a space, and narrows as they type the sub-verb.
+ *
+ * Keys are the parent command's short name (case-insensitive match against the
+ * IRC_COMMANDS name). /bnc and /bouncerserv share the soju set since /bnc is
+ * just an alias.
+ *
+ * Lists are intentionally curated — not every verb every services bot or module
+ * supports, but the ones users actually reach for. Full reference lives at:
+ *   NickServ/ChanServ: network docs (Atheme/Anope command set, stable across forks)
+ *   ZNC *status:       https://wiki.znc.in/Using_commands
+ *   BouncerServ:       https://soju.im/doc/soju.1.html  (commands under "SERVICE COMMANDS")
+ *
+ * Sub-verbs are stored in their canonical display casing so we can render them
+ * directly in the chip; matching against [query] is case-insensitive.
+ */
+private val SUB_COMMANDS: Map<String, List<IrcCommand>> = mapOf(
+    // NickServ — Atheme/Anope-compatible verbs
+    "ns" to listOf(
+        IrcCommand("IDENTIFY", "IDENTIFY [account] <password>", "Log in to your account"),
+        IrcCommand("LOGIN",    "LOGIN [account] <password>",    "Alias for IDENTIFY (Anope)"),
+        IrcCommand("REGISTER", "REGISTER <password> <email>",   "Register a new nickname"),
+        IrcCommand("GHOST",    "GHOST <nick> [password]",       "Kill a ghost session holding your nick"),
+        IrcCommand("RECOVER",  "RECOVER <nick> [password]",     "Recover a nickname (Atheme)"),
+        IrcCommand("RELEASE",  "RELEASE <nick> [password]",     "Release a held nickname"),
+        IrcCommand("GROUP",    "GROUP <nick> <password>",       "Group this nick to another account (Anope)"),
+        IrcCommand("UNGROUP",  "UNGROUP <nick>",                "Remove a nick from your group"),
+        IrcCommand("SET",      "SET <option> <value>",          "Set an account option (password, email, …)"),
+        IrcCommand("CERT",     "CERT [ADD|DEL|LIST] [fingerprint]", "Manage CertFP fingerprints"),
+        IrcCommand("INFO",     "INFO [nick]",                   "Show account info"),
+        IrcCommand("LIST",     "LIST <pattern>",                "List matching nicknames"),
+        IrcCommand("DROP",     "DROP <nick> [password]",        "Drop (unregister) a nickname"),
+        IrcCommand("LOGOUT",   "LOGOUT",                        "Log out of your account"),
+        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+    ),
+    // ChanServ — Atheme/Anope-compatible verbs
+    "cs" to listOf(
+        IrcCommand("REGISTER", "REGISTER <channel>",            "Register a channel"),
+        IrcCommand("DROP",     "DROP <channel>",                "Unregister a channel"),
+        IrcCommand("INFO",     "INFO <channel>",                "Show channel info"),
+        IrcCommand("ACCESS",   "ACCESS <channel> [LIST|ADD|DEL] [mask] [level]", "Manage the access list"),
+        IrcCommand("FLAGS",    "FLAGS <channel> [target] [flags]", "Manage channel flags (Atheme)"),
+        IrcCommand("OP",       "OP <channel> [nick]",           "Grant op (+o)"),
+        IrcCommand("DEOP",     "DEOP <channel> [nick]",         "Remove op (-o)"),
+        IrcCommand("VOICE",    "VOICE <channel> [nick]",        "Grant voice (+v)"),
+        IrcCommand("DEVOICE",  "DEVOICE <channel> [nick]",      "Remove voice (-v)"),
+        IrcCommand("HALFOP",   "HALFOP <channel> [nick]",       "Grant half-op (+h)"),
+        IrcCommand("PROTECT",  "PROTECT <channel> [nick]",      "Grant protect (+a)"),
+        IrcCommand("OWNER",    "OWNER <channel> [nick]",        "Grant owner (+q)"),
+        IrcCommand("INVITE",   "INVITE <channel> [nick]",       "Invite yourself or a nick"),
+        IrcCommand("UNBAN",    "UNBAN <channel> [nick]",        "Remove bans preventing you or [nick] from joining"),
+        IrcCommand("KICK",     "KICK <channel> <nick> [reason]", "Kick via services"),
+        IrcCommand("BAN",      "BAN <channel> <mask>",          "Ban via services"),
+        IrcCommand("QUIET",    "QUIET <channel> <mask>",        "Quiet (+q on $~a/+q) via services"),
+        IrcCommand("TOPIC",    "TOPIC <channel> [topic]",       "Set or lock topic"),
+        IrcCommand("CLEAR",    "CLEAR <channel> <what>",        "Clear bans / users / modes"),
+        IrcCommand("RECOVER", "RECOVER <channel>",              "Recover a channel (unban, deop takeover)"),
+        IrcCommand("SET",      "SET <channel> <option> <value>","Set a channel option"),
+        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+    ),
+    // MemoServ — same verbs on Atheme/Anope
+    "ms" to listOf(
+        IrcCommand("SEND",   "SEND <nick> <message>",           "Send a memo"),
+        IrcCommand("LIST",   "LIST",                            "List your memos"),
+        IrcCommand("READ",   "READ <number>",                   "Read memo by number"),
+        IrcCommand("DELETE", "DELETE <number|ALL>",             "Delete a memo"),
+        IrcCommand("FORWARD","FORWARD <number> <nick>",         "Forward a memo"),
+        IrcCommand("IGNORE", "IGNORE [ADD|DEL|LIST] [mask]",    "Manage memo ignore list"),
+        IrcCommand("SET",    "SET <option> <value>",            "Set memo options"),
+        IrcCommand("HELP",   "HELP [command]",                  "Show help"),
+    ),
+    // HostServ
+    "hs" to listOf(
+        IrcCommand("REQUEST", "REQUEST <vhost>",                "Request a vhost from staff"),
+        IrcCommand("ON",      "ON",                             "Enable your vhost"),
+        IrcCommand("OFF",     "OFF",                            "Disable your vhost"),
+        IrcCommand("TAKE",    "TAKE <vhost>",                   "Take a pre-offered vhost (Atheme)"),
+        IrcCommand("DROP",    "DROP",                           "Drop your vhost"),
+        IrcCommand("INFO",    "INFO [nick]",                    "Show vhost info"),
+        IrcCommand("HELP",    "HELP [command]",                 "Show help"),
+    ),
+    // BotServ — Anope; Atheme has a similar but narrower set
+    "bs" to listOf(
+        IrcCommand("ASSIGN",   "ASSIGN <channel> <bot>",        "Assign a bot to a channel"),
+        IrcCommand("UNASSIGN", "UNASSIGN <channel>",            "Unassign the bot"),
+        IrcCommand("BOTLIST",  "BOTLIST",                       "List available bots"),
+        IrcCommand("INFO",     "INFO <channel|bot>",            "Show bot or channel info"),
+        IrcCommand("KICK",     "KICK <channel> <option> [args]","Configure auto-kick triggers"),
+        IrcCommand("SET",      "SET <channel> <option> <value>","Configure bot options"),
+        IrcCommand("SAY",      "SAY <channel> <text>",          "Make the bot say something"),
+        IrcCommand("ACT",      "ACT <channel> <action>",        "Make the bot perform an action"),
+        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+    ),
+    // AuthServ — InspIRCd / some Atheme setups; fewer verbs
+    "as" to listOf(
+        IrcCommand("AUTH",     "AUTH <account> <password>",     "Authenticate to AuthServ"),
+        IrcCommand("REGISTER", "REGISTER <account> <password> <email>", "Register an account"),
+        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+    ),
+    // ZNC *status — curated from https://wiki.znc.in/Using_commands
+    "znc" to listOf(
+        IrcCommand("Help",          "Help [filter]",                   "List available commands"),
+        IrcCommand("Version",       "Version",                         "Print ZNC version"),
+        IrcCommand("ListNetworks",  "ListNetworks",                    "List your networks"),
+        IrcCommand("JumpNetwork",   "JumpNetwork <network>",           "Switch to another network"),
+        IrcCommand("AddNetwork",    "AddNetwork <name>",               "Add a new network"),
+        IrcCommand("DelNetwork",    "DelNetwork <name>",               "Delete a network"),
+        IrcCommand("ListServers",   "ListServers",                     "List servers on the current network"),
+        IrcCommand("AddServer",     "AddServer <host> [+port] [pass]", "Add an alternate server"),
+        IrcCommand("DelServer",     "DelServer <host> [port] [pass]",  "Remove an alternate server"),
+        IrcCommand("Connect",       "Connect",                         "Reconnect this network"),
+        IrcCommand("Disconnect",    "Disconnect [message]",            "Disconnect this network"),
+        IrcCommand("Jump",          "Jump [server]",                   "Cycle to the next/given server"),
+        IrcCommand("ListChans",     "ListChans",                       "List joined channels"),
+        IrcCommand("ListClients",   "ListClients",                     "List clients connected to this session"),
+        IrcCommand("ListMods",      "ListMods",                        "List loaded modules"),
+        IrcCommand("ListAvailMods", "ListAvailMods",                   "List available modules"),
+        IrcCommand("LoadMod",       "LoadMod <module> [args]",         "Load a module"),
+        IrcCommand("UnloadMod",     "UnloadMod <module>",              "Unload a module"),
+        IrcCommand("ReloadMod",     "ReloadMod <module> [args]",       "Reload a module"),
+        IrcCommand("Attach",        "Attach <#chan>",                  "Attach to a detached channel"),
+        IrcCommand("Detach",        "Detach <#chan>",                  "Detach from a channel (stay joined server-side)"),
+        IrcCommand("PlayBuffer",    "PlayBuffer <#chan>",              "Replay a channel buffer"),
+        IrcCommand("ClearBuffer",   "ClearBuffer <#chan>",             "Clear a channel buffer"),
+        IrcCommand("ClearAllChannelBuffers", "ClearAllChannelBuffers", "Clear all channel buffers"),
+        IrcCommand("ClearAllQueryBuffers",   "ClearAllQueryBuffers",   "Clear all query buffers"),
+        IrcCommand("SetBuffer",     "SetBuffer <#chan> [lines]",       "Set the buffer line limit for a channel"),
+        IrcCommand("Topics",        "Topics",                          "Show topics across joined channels"),
+        IrcCommand("Uptime",        "Uptime",                          "Show ZNC uptime"),
+        IrcCommand("Traffic",       "Traffic",                         "Show bytes in/out"),
+        IrcCommand("Rehash",        "Rehash",                          "Reload znc.conf"),
+        IrcCommand("SaveConfig",    "SaveConfig",                      "Write znc.conf"),
+        IrcCommand("ShowMOTD",      "ShowMOTD",                        "Show the ZNC MOTD"),
+    ),
+    // soju BouncerServ — curated from soju(1) manpage; commands parsed as shell tokens
+    "bouncerserv" to listOf(
+        IrcCommand("help",            "help [command]",                      "Show help for a command"),
+        IrcCommand("network create",  "network create -addr <uri> -name <name> [-nick <nick>] [-pass <pw>]", "Add a new upstream network"),
+        IrcCommand("network update",  "network update <name> [options]",     "Update an existing network"),
+        IrcCommand("network delete",  "network delete <name>",               "Delete a network"),
+        IrcCommand("network status",  "network status",                      "List networks and connection status"),
+        IrcCommand("network quote",   "network quote <name> <raw line>",     "Send a raw IRC line on a network"),
+        IrcCommand("channel status",  "channel status [-network <name>]",    "List saved channels"),
+        IrcCommand("channel update",  "channel update <name> [options]",     "Update channel options (-detached, -relay-detached, …)"),
+        IrcCommand("channel delete",  "channel delete <name>",               "Delete (leave) a saved channel"),
+        IrcCommand("certfp generate", "certfp generate [-network <name>]",   "Generate a client CertFP for upstream"),
+        IrcCommand("certfp fingerprint", "certfp fingerprint [-network <name>]", "Show the current CertFP"),
+        IrcCommand("sasl status",     "sasl status [-network <name>]",       "Show SASL status"),
+        IrcCommand("sasl set-plain",  "sasl set-plain [-network <name>] <user> <pass>", "Set PLAIN credentials"),
+        IrcCommand("sasl reset",      "sasl reset [-network <name>]",        "Remove SASL credentials"),
+        IrcCommand("user update",     "user update [options]",               "Update your own user (-nick, -realname, -pass)"),
+        IrcCommand("server status",   "server status",                       "Show bouncer statistics (admin)"),
+    ),
+)
+
+/**
+ * Parent commands that share a subcommand set. /bnc delegates to the soju
+ * BouncerServ set because /bnc is just an alias for /bouncerserv.
+ */
+private val SUB_COMMAND_ALIASES: Map<String, String> = mapOf(
+    "bnc" to "bouncerserv",
+)
+
+/**
+ * For each parent command, the maximum number of spaces that can appear in any
+ * of its sub-verb names. Used by the query detector to decide when the user has
+ * typed past the sub-verb into its own arguments: if the user's partial sub-verb
+ * already contains more spaces than the longest sub-verb for this parent, the
+ * hint bar hides itself because no further match is possible.
+ *
+ * Cached at class load — SUB_COMMANDS is a static map, so the values never change.
+ */
+private val SUB_COMMAND_MAX_SPACES: Map<String, Int> =
+    SUB_COMMANDS.mapValues { (_, verbs) ->
+        verbs.maxOfOrNull { it.name.count { c -> c == ' ' } } ?: 0
+    }
+
+/**
+ * Resolve the subcommand list for [parentCmd], following aliases. Returns null
+ * if the parent command has no subcommand hints configured.
+ */
+private fun subCommandsFor(parentCmd: String): List<IrcCommand>? {
+    val key = parentCmd.lowercase()
+    val resolved = SUB_COMMAND_ALIASES[key] ?: key
+    return SUB_COMMANDS[resolved]
+}
+
+/**
+ * Maximum number of spaces permitted in a partial sub-verb for [parentCmd]
+ * before we give up and hide the bar. Returns 0 when the parent has no entry.
+ */
+private fun subCommandMaxSpaces(parentCmd: String): Int {
+    val key = parentCmd.lowercase()
+    val resolved = SUB_COMMAND_ALIASES[key] ?: key
+    return SUB_COMMAND_MAX_SPACES[resolved] ?: 0
+}
 
 /**
  * Command-completion bar shown above the input field when the user starts /typing
@@ -413,6 +631,133 @@ private fun CommandHints(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        if (argsText.isNotEmpty()) {
+                            Text(
+                                text = argsText,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+                        Text(
+                            text = cmd.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Subcommand-completion bar. Fires after the user has typed a parent command that
+ * has a curated sub-verb list — /ns, /cs, /ms, /hs, /bs, /as, /znc, /bouncerserv, /bnc —
+ * followed by a space and (optionally) a prefix of the sub-verb.
+ *
+ * Tapping a chip replaces the input with "/parent subverb " so the cursor lands
+ * ready for the sub-verb's own arguments. The parent command and any prefix the
+ * user typed are both resolved; typing "/ns id" narrows to IDENTIFY, and tapping
+ * it produces "/ns IDENTIFY ".
+ *
+ * A separate composable from [CommandHints] rather than a generalised one: the
+ * chip label, detail rendering, and onPick behaviour all differ in small but
+ * non-parametric ways (sub-verbs render bare, not with a leading /; the detail
+ * row shows the parent-command prefix; onPick preserves the parent). Shared
+ * styling via Material3 tokens keeps the two visually consistent.
+ */
+@Composable
+private fun SubCommandHints(
+    parentCmd: String,          // e.g. "ns", "znc", "bouncerserv" — must have a SUB_COMMANDS entry
+    query: String,              // text typed after the first space (may be empty)
+    onPick: (String) -> Unit    // called with "/parent subverb " ready for args
+) {
+    val subCmds = remember(parentCmd) { subCommandsFor(parentCmd) ?: emptyList() }
+    val matches = remember(subCmds, query) {
+        if (query.isEmpty()) subCmds
+        else subCmds.filter { it.name.startsWith(query, ignoreCase = true) }
+    }
+
+    // Track which chip the user has highlighted (defaults to first match)
+    var highlighted by remember(matches) { mutableStateOf(matches.firstOrNull()) }
+
+    AnimatedVisibility(
+        visible = matches.isNotEmpty(),
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit  = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+    ) {
+        Surface(
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp,
+            shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column {
+                // Chip row
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(matches, key = { it.name }) { cmd ->
+                        val isHighlighted = highlighted?.name == cmd.name
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isHighlighted)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable {
+                                highlighted = cmd
+                                onPick("/$parentCmd ${cmd.name} ")
+                            }
+                        ) {
+                            Text(
+                                // Bare sub-verb — no leading slash — since it's
+                                // rendered as a second-token suggestion.
+                                text = cmd.name,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isHighlighted)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Detail row for the highlighted sub-verb
+                highlighted?.let { cmd ->
+                    HorizontalDivider(thickness = 0.5.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick("/$parentCmd ${cmd.name} ") }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Show "/parent SUBVERB" as the label so the user sees
+                        // the whole command they'd send.
+                        Text(
+                            text = "/$parentCmd ${cmd.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        // Args portion of the usage string, stripped of the
+                        // sub-verb prefix so it reads naturally.
+                        val argsText = cmd.usage.removePrefix(cmd.name).trim()
                         if (argsText.isNotEmpty()) {
                             Text(
                                 text = argsText,
@@ -2557,6 +2902,29 @@ fun ChatScreen(
             if (t.length >= 2 && t.startsWith("/") && !t.contains(" ")) t.drop(1) else null
         }
 
+        // Subcommand-hint query: non-null when the user has typed a known parent
+        // command followed by a space and is (optionally) partway through a sub-verb.
+        // E.g. "/ns " → Pair("ns", ""); "/ns ID" → Pair("ns", "ID"); "/znc list" →
+        // Pair("znc", "list"). Unknown parent commands (no SUB_COMMANDS entry)
+        // and any input with a *second* space — meaning the user has moved past
+        // the sub-verb into its args — return null so the bar dismisses cleanly.
+        val subCmdQuery: Pair<String, String>? = remember(input.text) {
+            val t = input.text
+            if (!t.startsWith("/") || t.length < 2) return@remember null
+            val firstSpace = t.indexOf(' ')
+            if (firstSpace < 0) return@remember null  // still typing the parent command
+            val parent = t.substring(1, firstSpace).lowercase()
+            if (subCommandsFor(parent) == null) return@remember null
+            val rest = t.substring(firstSpace + 1)
+            // Stop hinting once the user has moved past the sub-verb into its arguments.
+            // For BouncerServ-style two-word sub-verbs ("network status") we do allow
+            // one embedded space, but only while the second token is still a prefix
+            // match — this is handled naturally because the subcommand names in the
+            // SUB_COMMANDS entry already contain that space.
+            if (rest.count { it == ' ' } > subCommandMaxSpaces(parent)) return@remember null
+            parent to rest
+        }
+
         // Nick-hint query: non-null when the word at cursor starts with "@" and has ≥1 char after it.
         // Only active in channel buffers (not server buffers or DCC chat).
         val nickQuery = remember(input.text, isChannel) {
@@ -2575,8 +2943,10 @@ fun ChatScreen(
             .navigationBarsPadding()
             .imePadding()
         ) {
-            // Nick hints - shown when user types @prefix in a channel; takes priority over command hints
-            if (nickQuery != null && cmdQuery == null) {
+            // Priority: nick hints > subcommand hints > command hints. Nick hints
+            // win on channels (user is mid-@mention). Subcommand hints win when
+            // we're past the parent-command space. Command hints are the baseline.
+            if (nickQuery != null && cmdQuery == null && subCmdQuery == null) {
                 NickHints(
                     prefix = nickQuery,
                     nicks = nicklist,
@@ -2590,8 +2960,20 @@ fun ChatScreen(
                     }
                 )
             }
+            // Subcommand hints — shown after the user has typed a parent with a
+            // known sub-verb set (e.g. "/ns ", "/znc list", "/bouncerserv network ").
+            else if (subCmdQuery != null) {
+                val (parent, verbPrefix) = subCmdQuery
+                SubCommandHints(
+                    parentCmd = parent,
+                    query = verbPrefix,
+                    onPick = { completion ->
+                        input = TextFieldValue(completion, TextRange(completion.length))
+                    }
+                )
+            }
             // Command hints popup - rendered above the input row inside a Column
-            if (cmdQuery != null) {
+            else if (cmdQuery != null) {
                 CommandHints(
                     query = cmdQuery,
                     onPick = { completion ->
@@ -2731,17 +3113,30 @@ fun ChatScreen(
 						.heightIn(min = 40.dp)
 						.tourTarget(TourTarget.CHAT_INPUT)
 						.onFocusChanged { inputHasFocus = it.isFocused }
-						.onKeyEvent { ev ->
-                            if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+						.onPreviewKeyEvent { ev ->
+                            // onPreviewKeyEvent rather than onKeyEvent because the text field's
+                            // own key handling consumes Enter for newline insertion before
+                            // onKeyEvent fires — particularly on ChromeOS and physical keyboards
+                            // attached to Android tablets, where pressing Enter would otherwise
+                            // insert a newline rather than send. Preview catches the key first.
+                            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             when (ev.key) {
                                 Key.Enter, Key.NumPadEnter -> {
-
+                                    // Shift+Enter inserts a newline (multiline editing); plain
+                                    // Enter sends. Matches Discord, Slack, modern chat conventions.
+                                    if (ev.isShiftPressed) return@onPreviewKeyEvent false
                                     sendNow()
                                     true
                                 }
                                 Key.DirectionUp -> {
-
-                                    if (inputHistory.isEmpty()) return@onKeyEvent false
+                                    // Up-arrow recalls input history. Only intercepted when the
+                                    // input is empty or the cursor is on the first line — otherwise
+                                    // it would steal cursor movement during multi-line editing.
+                                    if (inputHistory.isEmpty()) return@onPreviewKeyEvent false
+                                    if (input.text.contains('\n') &&
+                                        input.selection.start > input.text.indexOf('\n')) {
+                                        return@onPreviewKeyEvent false
+                                    }
                                     if (historyIndex == -1) inputSnapshot = input.text
                                     val next = (if (historyIndex == -1) inputHistory.lastIndex
                                                 else (historyIndex - 1).coerceAtLeast(0))
@@ -2751,8 +3146,13 @@ fun ChatScreen(
                                     true
                                 }
                                 Key.DirectionDown -> {
-
-                                    if (historyIndex == -1) return@onKeyEvent false
+                                    // Down-arrow walks forward through history; same first-line
+                                    // guard as Up so cursor movement still works while editing.
+                                    if (historyIndex == -1) return@onPreviewKeyEvent false
+                                    if (input.text.contains('\n') &&
+                                        input.selection.start <= input.text.lastIndexOf('\n')) {
+                                        return@onPreviewKeyEvent false
+                                    }
                                     val next = historyIndex + 1
                                     if (next > inputHistory.lastIndex) {
                                         historyIndex = -1

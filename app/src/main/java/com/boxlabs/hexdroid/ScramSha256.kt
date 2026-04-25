@@ -96,7 +96,22 @@ class ScramSha256Client(
         val attrs = parseAttrs(msg)
         if (attrs.containsKey("e")) return ScramNext.Done(false)
         val v = attrs["v"] ?: return ScramNext.Done(false)
-        return ScramNext.Done(v == expectedServerSigB64)
+        // Constant-time comparison: although in normal operation the server is trusted,
+        // SCRAM's mutual-authentication design requires this comparison to be timing-safe
+        // so a malicious server can't probe for the expected signature byte-by-byte by
+        // measuring how long different `v=` values take to be rejected.
+        val expected = expectedServerSigB64 ?: return ScramNext.Done(false)
+        return ScramNext.Done(constantTimeEquals(v, expected))
+    }
+
+    /** Constant-time string comparison to avoid leaking comparison-position via timing. */
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        if (a.length != b.length) return false
+        var diff = 0
+        for (i in a.indices) {
+            diff = diff or (a[i].code xor b[i].code)
+        }
+        return diff == 0
     }
 
     private fun parseAttrs(s: String): Map<String, String> {

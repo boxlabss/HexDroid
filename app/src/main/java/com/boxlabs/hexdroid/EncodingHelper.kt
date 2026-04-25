@@ -554,6 +554,17 @@ class EncodingLineReader(
     /** Total non-ASCII lines seen (used for MIN_EVIDENCE_LINES guard). */
     private var evidenceLines = 0
 
+    /**
+     * Pre-resolved candidate encodings (excluding UTF-8) used by the scoring loop.
+     * Cached here so the per-line readLine() doesn't allocate a new list and re-resolve
+     * Charset.forName() on every line during the detection window.
+     */
+    private val candidateEncodings: List<Pair<String, Charset>> by lazy {
+        EncodingHelper.COMMON_ENCODINGS.drop(1).mapNotNull { name ->
+            runCatching { name to Charset.forName(name) }.getOrNull()
+        }
+    }
+
     /** The currently committed/used encoding. */
     val encoding: String get() = currentEncoding
 
@@ -641,8 +652,7 @@ class EncodingLineReader(
         var bestScore = Int.MIN_VALUE
         var secondScore = Int.MIN_VALUE
 
-        for (enc in EncodingHelper.COMMON_ENCODINGS.drop(1)) {   // skip UTF-8
-            val charset = runCatching { java.nio.charset.Charset.forName(enc) }.getOrNull() ?: continue
+        for ((enc, charset) in candidateEncodings) {
             val score = EncodingHelper.scoreEncodingPublic(corpusBytes, charset)
             if (score > bestScore) {
                 secondScore = bestScore

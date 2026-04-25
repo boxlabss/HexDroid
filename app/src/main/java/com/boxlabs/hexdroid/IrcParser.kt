@@ -53,6 +53,12 @@ class IrcParser {
             i = end + 1
         }
 
+        // Skip any extra whitespace before the command. IRC is normally single-space
+        // delimited, but some bouncers and middleware (older ZNC modules, badly written
+        // bots that emit lines themselves) double-up spaces. RFC 2812 is unclear here;
+        // RFC 1459 and IRCv3 both implicitly assume single spaces. We're lenient on input.
+        while (i < line.length && line[i] == ' ') i++
+
         val cmdEnd = line.indexOf(' ', i).let { if (it == -1) line.length else it }
         val command = line.substring(i, cmdEnd)
         // Reject empty commands

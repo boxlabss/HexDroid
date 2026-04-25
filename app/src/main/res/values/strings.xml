@@ -176,17 +176,17 @@
 
     <!-- Tour steps -->
     <string name="tour_add_network_title">Your networks</string>
-    <string name="tour_add_network_body">Tap + to add a server, or edit the ones already here. HexDroid ships with a few defaults so you can connect straight away.</string>
+    <string name="tour_add_network_body">Tap + to add a server, or edit the ones already here. HexDroid ships with a few defaults — Libera, Freenode, and AfterNET — so you can connect straight away.</string>
     <string name="tour_connect_title">Connect</string>
-    <string name="tour_connect_body">Tap Connect to open a connection. You can have multiple networks connected at once.</string>
+    <string name="tour_connect_body">Tap Connect to open a connection. The button turns green when you\'re online. You can have multiple networks connected at once.</string>
     <string name="tour_switcher_title">Buffer list</string>
-    <string name="tour_switcher_body">This panel lists every server, channel, and private message you have open. Swipe or tap the ☰ button to show it. Tap any item to switch to it: new message counts are shown here too.</string>
+    <string name="tour_switcher_body">This panel lists every server, channel, and private message you have open. Swipe or tap the ☰ button to show it. Tap any item to switch to it — unread counts are shown here too.</string>
     <string name="tour_send_title">Send messages</string>
     <string name="tour_send_body">Type here to chat. Slash commands work too: /join #channel, /msg nick text, /part, /whois nick, /me action text, and more.</string>
     <string name="tour_more_title">More actions</string>
     <string name="tour_more_body">This menu reaches channel list, file transfers, ignore list, network settings, and more. It also shows channel mode and topic management when you\'re an op.</string>
     <string name="tour_settings_title">Appearance &amp; settings</string>
-    <string name="tour_settings_body">Choose a theme, adjust font size, tweak notification sounds, privacy options, and much more. Changes apply instantly.</string>
+    <string name="tour_settings_body">Choose a theme, adjust font size, tweak notification sounds, privacy options, and much more. Changes apply instantly — no restart needed.</string>
     <string name="tour_dcc_title">File transfers (DCC)</string>
     <string name="tour_dcc_body">Enable DCC to send and receive files directly between users. If you\'re behind a router, Passive DCC avoids port-forwarding headaches.</string>
     <string name="tour_send_file_title">Send a file</string>
@@ -196,7 +196,7 @@
     <string name="tour_support_fallback">AfterNET isn\'t in your list yet — tap Add AfterNET to add it, then connect and join #HexDroid for support.</string>
     <string name="tour_support_action">Add AfterNET</string>
     <string name="tour_replay_title">Replay this tour</string>
-    <string name="tour_replay_body">You can run the walkthrough again any time from Settings. Tap Done to finish.</string>
+    <string name="tour_replay_body">You can run the walkthrough again any time from Settings → About. Tap Done to finish.</string>
 
     <!-- About -->
     <string name="about_title">About</string>
