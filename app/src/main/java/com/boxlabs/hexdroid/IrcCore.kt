@@ -1165,6 +1165,56 @@ class IrcClient(val config: IrcConfig) {
         }
     }
 
+    /**
+     * WHOIS-reply hook: dispatch 311/330/318 numerics to [completePendingBans] when
+     * a queued [PendingBan] is waiting on WHOIS data for the named nick.
+     *
+     * Extracted from the [events] channelFlow body so its bytecode lives in its own
+     * method. The events flow's `invokeSuspend` was approaching the JVM 64KB
+     * per-method limit (the read loop has very large `when` arms for every PRIVMSG /
+     * NOTICE / numeric); keeping infrequent extension hooks in separate functions
+     * gives us headroom for future additions without hitting MethodTooLargeException.
+     */
+    private suspend fun handlePendingBanReply(msg: IrcMessage) {
+        when (msg.command) {
+            "311" -> {
+                // RPL_WHOISUSER: <client> <nick> <user> <host> * :realname
+                val nick = msg.params.getOrNull(1) ?: return
+                val user = msg.params.getOrNull(2)
+                val host = msg.params.getOrNull(3)
+                val fold = casefold(nick)
+                if (!pendingBansByNick.containsKey(fold)) return
+                // HOST/USER/DOMAIN bans can complete from this reply alone.
+                // ACCOUNT bans need 330 too, so we stash the user/host pair until then.
+                val hasAccountQueued = pendingBansByNick[fold]?.any { it.type == BanMaskType.ACCOUNT } == true
+                if (!hasAccountQueued) {
+                    completePendingBans(nick, user, host, account = null)
+                } else {
+                    pendingWhoisHostByNick[fold] = (user ?: "") to (host ?: "")
+                }
+            }
+            "330" -> {
+                // RPL_WHOISACCOUNT: <client> <nick> <account> :is logged in as
+                val nick = msg.params.getOrNull(1) ?: return
+                val account = msg.params.getOrNull(2) ?: return
+                val fold = casefold(nick)
+                val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
+                completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account)
+            }
+            "318" -> {
+                // RPL_ENDOFWHOIS: drain any still-pending bans for this nick. They either
+                // succeeded above (and were removed from the map) or the server gave us no
+                // useful data — surface the fallback "couldn't resolve" error now.
+                val nick = msg.params.getOrNull(1) ?: return
+                val fold = casefold(nick)
+                val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
+                if (pendingBansByNick.containsKey(fold)) {
+                    completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account = null)
+                }
+            }
+        }
+    }
+
     private fun casefold(s: String): String {
         val cm = caseMapping.lowercase(Locale.ROOT)
         val sb = StringBuilder(s.length)
@@ -2555,55 +2605,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				// server numerics (MOTD/WHOIS/errors/etc)
 				val numericText = formatNumeric(msg)
 
-				// Pending-ban completion: when a queued [PendingBan] is waiting on WHOIS
-				// data for this nick, fish the user/host (311) or services account (330)
-				// out of the reply and apply the queued bans. 318 (end of WHOIS) is also
-				// a sentinel — if we never saw a 311 we drain the queue with whatever data
-				// we have (typically nothing), which surfaces a "couldn't resolve" error.
-				if (pendingBansByNick.isNotEmpty()) {
-					when (msg.command) {
-						"311" -> {
-							val nick = msg.params.getOrNull(1)
-							val user = msg.params.getOrNull(2)
-							val host = msg.params.getOrNull(3)
-							if (nick != null && pendingBansByNick.containsKey(casefold(nick))) {
-								// HOST/USER/DOMAIN bans complete here; ACCOUNT bans wait for 330.
-								val hasAccountQueued = pendingBansByNick[casefold(nick)]
-									?.any { it.type == BanMaskType.ACCOUNT } == true
-								if (!hasAccountQueued) {
-									completePendingBans(nick, user, host, account = null)
-								}
-								// stash for 330 handler in case ACCOUNT is queued
-								if (hasAccountQueued) {
-									pendingWhoisHostByNick[casefold(nick)] = (user ?: "") to (host ?: "")
-								}
-							}
-						}
-						"330" -> {
-							// RPL_WHOISACCOUNT: <client> <nick> <account> :is logged in as
-							val nick = msg.params.getOrNull(1)
-							val account = msg.params.getOrNull(2)
-							if (nick != null && account != null) {
-								val fold = casefold(nick)
-								val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
-								completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account)
-							}
-						}
-						"318" -> {
-							// End of WHOIS: drain any still-pending bans for this nick. They
-							// either succeeded (handled above and removed from the map) or the
-							// server gave us no useful data — surface the failure now.
-							val nick = msg.params.getOrNull(1)
-							if (nick != null) {
-								val fold = casefold(nick)
-								val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
-								if (pendingBansByNick.containsKey(fold)) {
-									completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account = null)
-								}
-							}
-						}
-					}
-				}
+				// Pending-ban completion: extracted to keep the events() channelFlow body
+				// under the JVM 64KB method-size limit. The handler reads pendingBansByNick
+				// and pendingWhoisHostByNick (both class-level state) and calls
+				// completePendingBans, so it doesn't need the local read-loop variables.
+				if (pendingBansByNick.isNotEmpty()) handlePendingBanReply(msg)
 
 				// Route WHOIS numerics back to the buffer where the WHOIS was invoked.
 				val whoisTargetBuffer: String? = run {
