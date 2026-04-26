@@ -1004,6 +1004,7 @@ class IrcClient(val config: IrcConfig) {
         cmd: String,
         usageHint: String,
         needsTarget: Boolean,
+        currentBuffer: String,
     ): ParsedChanTarget? {
         val a1 = parts.getOrNull(1)
         if (a1.isNullOrBlank()) {
@@ -1606,7 +1607,7 @@ class IrcClient(val config: IrcConfig) {
             "kick" -> {
                 // /kick <nick> [reason]      — kick from current channel
                 // /kick <#chan> <nick> [reason] — kick from a different channel
-                val parsed = parseChanTargetCommand(parts, cmd, "<nick>", needsTarget = true) ?: return
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick>", needsTarget = true, currentBuffer = currentBuffer) ?: return
                 val reason = parsed.tail.joinToString(" ").trim()
                 sendRaw(if (reason.isBlank()) "KICK ${parsed.chan} ${parsed.target}"
                         else "KICK ${parsed.chan} ${parsed.target} :$reason")
@@ -1616,7 +1617,7 @@ class IrcClient(val config: IrcConfig) {
                 // /ban <#chan> <nick-or-mask> [type] — ban in a different channel
                 // [type] is one of: nick (default), user, host, domain, account
                 // If <nick-or-mask> contains !, @, or starts with $, it's treated as a raw mask.
-                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type]", needsTarget = true) ?: return
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type]", needsTarget = true, currentBuffer = currentBuffer) ?: return
                 val type = parseMaskType(parsed.tail.firstOrNull()) ?: BanMaskType.NICK
                 applyBanOrQueue(parsed.chan, parsed.target!!, type, quiet = false, alsoKick = false, kickReason = "")
             }
@@ -1625,7 +1626,7 @@ class IrcClient(val config: IrcConfig) {
                 // /unban <#chan> <nick-or-mask> — remove ban in a different channel
                 // Plain nicks are expanded to nick!*@*; raw masks pass through. To remove a
                 // host/account ban, paste the exact mask shown by /banlist.
-                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask>", needsTarget = true) ?: return
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask>", needsTarget = true, currentBuffer = currentBuffer) ?: return
                 val mask = if (looksLikeRawMask(parsed.target!!)) parsed.target else "${parsed.target}!*@*"
                 sendRaw("MODE ${parsed.chan} -b $mask")
             }
@@ -1634,7 +1635,7 @@ class IrcClient(val config: IrcConfig) {
                 // /kb <#chan> <nick-or-mask> [type] [reason...]
                 // type, if present, is the same keyword as /ban. When the target is a raw
                 // mask, the kick step is skipped (no single nick to kick).
-                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type] [reason...]", needsTarget = true) ?: return
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type] [reason...]", needsTarget = true, currentBuffer = currentBuffer) ?: return
                 // Distinguish "/kb nick host with extra reason words" from "/kb nick reason words"
                 // by checking whether the next word is a recognised type keyword. If it is,
                 // it's the type; otherwise it's the start of the reason.
@@ -1647,12 +1648,12 @@ class IrcClient(val config: IrcConfig) {
                 // /mute <nick-or-mask> [type]      — set +q (quiet) in current channel
                 // /mute <#chan> <nick-or-mask> [type] — same in a different channel
                 // Same syntax as /ban. Falls back to +b on ircds without quiet support.
-                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type]", needsTarget = true) ?: return
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask> [type]", needsTarget = true, currentBuffer = currentBuffer) ?: return
                 val type = parseMaskType(parsed.tail.firstOrNull()) ?: BanMaskType.NICK
                 applyBanOrQueue(parsed.chan, parsed.target!!, type, quiet = true, alsoKick = false, kickReason = "")
             }
             "unmute", "unquiet" -> {
-                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask>", needsTarget = true) ?: return
+                val parsed = parseChanTargetCommand(parts, cmd, "<nick|mask>", needsTarget = true, currentBuffer = currentBuffer) ?: return
                 val mask = if (looksLikeRawMask(parsed.target!!)) parsed.target else "${parsed.target}!*@*"
                 val modeChar = if (supportsQuietMode()) 'q' else 'b'
                 sendRaw("MODE ${parsed.chan} -$modeChar $mask")
