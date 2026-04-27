@@ -23,6 +23,7 @@ import com.boxlabs.hexdroid.connection.ConnectionConstants
 import com.boxlabs.hexdroid.data.AutoJoinChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -947,6 +948,55 @@ class IrcClient(val config: IrcConfig) {
      */
     private val pendingWhoisHostByNick = mutableMapOf<String, Pair<String, String>>()
 
+    // ── Read-loop state, hoisted from events() ──────────────────────────────────
+    //
+    // These maps were originally locals inside the events() channelFlow body, but
+    // accessing them from extracted dispatcher methods (handleMessageCommand) means
+    // they need to be reachable across method boundaries. Hoisting to class fields
+    // is the simplest fix; the lifetime is identical (one IrcClient -> one events()
+    // call). They get reset implicitly on each new IrcClient instance.
+
+    /** Channels we've requested CHATHISTORY for in this session, to avoid re-fetching on rejoin. */
+    private val historyRequested = mutableSetOf<String>()
+
+    /** Per-buffer "history expected until" timestamp — anything older than this is treated as
+     *  history rather than live, so we don't re-notify for already-seen messages. */
+    private val historyExpectUntil = mutableMapOf<String, Long>()
+
+    /** znc.in/playback last-seen timestamps. Key = lowercase buffer name. Value = epoch seconds. */
+    private val zncLastSeen = mutableMapOf<String, Long>()
+
+    /** Open IRCv3 znc.in/playback batch IDs — messages tagged with these are historical. */
+    private val openPlaybackBatches = mutableSetOf<String>()
+
+    /** Open netsplit/netjoin batch IDs → "netsplit" / "netjoin". */
+    private val openNetsplitBatches = mutableMapOf<String, String>()
+
+    /** Buffered JOIN/QUIT lines per netsplit batch ID, used to collapse the events on close. */
+    private val netsplitBuffer = mutableMapOf<String, MutableList<IrcMessage>>()
+
+    /** Heuristic: a message in [target] with [timeMs] should be treated as history if we're
+     *  currently expecting history for that target and the message is older than ~now. */
+    private fun isHeuristicHistory(target: String?, timeMs: Long?, nowMs: Long): Boolean {
+        if (target.isNullOrBlank() || timeMs == null) return false
+        val until = historyExpectUntil[target.lowercase()] ?: 0L
+        if (until < nowMs) return false
+        return timeMs < (nowMs - 15_000L)
+    }
+
+    /** Parse server-time tag from IRCv3 tags (legacy `t` from znc.in/server-time-iso, or
+     *  modern `time` from server-time). Returns null if absent or malformed. */
+    private fun parseServerTimeMs(tags: Map<String, String?>): Long? {
+        val raw = tags["time"] ?: tags["t"] ?: return null
+        return runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull()
+    }
+
+    /** True if the message is part of a currently-open znc.in/playback batch (i.e. history). */
+    private fun isPlaybackHistory(tags: Map<String, String?>): Boolean {
+        val batch = tags["batch"]
+        return batch != null && openPlaybackBatches.contains(batch)
+    }
+
     /**
      * Max age of a [PendingBan] before it's discarded. A nick's WHOIS normally completes
      * in < 1 s on a healthy connection; 10 s is generous enough to cover a bouncer
@@ -1213,6 +1263,793 @@ class IrcClient(val config: IrcConfig) {
                 }
             }
         }
+    }
+
+    /**
+     * Per-message dispatcher for non-numeric IRC commands. Extracted from the events()
+     * channelFlow body to keep its compiled invokeSuspend method under the JVM 64KB
+     * size limit. The body still has the same shape — one big `when` over the command
+     * name — but lives in its own bytecode method so it doesn't count toward events()'s
+     * budget. Numeric replies are still dispatched by the numericHandlers map further
+     * up; this method only handles letter-keyed commands (PRIVMSG, NOTICE, JOIN, etc).
+     *
+     * Receiver: ProducerScope<IrcEvent> from the channelFlow, so `send(IrcEvent.X)`
+     * works directly inside the body the same as it did when this code was inline.
+     *
+     * Originally each `when` arm used `continue` to skip the rest of the read-loop
+     * iteration for the current message. After extraction those `continue` statements
+     * became `return` (return from this method); the outer loop continues automatically
+     * because there's no further work for the current msg after the dispatcher.
+     */
+    private suspend fun ProducerScope<IrcEvent>.handleMessageCommand(
+        msg: IrcMessage,
+        irc: IrcSession,
+        serverTimeMs: Long?,
+        playbackHistory: Boolean,
+        nowMs: Long,
+    ) {
+				when (msg.command.uppercase(Locale.ROOT)) {
+					"NICK" -> {
+						val old = msg.prefixNick()
+						val newNick = (msg.trailing ?: msg.params.firstOrNull())
+						if (old != null && newNick != null) {
+							send(IrcEvent.NickChanged(old, newNick, timeMs = serverTimeMs, isHistory = playbackHistory))
+						}
+						if (old != null && newNick != null && nickEquals(old, currentNick)) {
+							currentNick = newNick
+						}
+					}
+
+					"PRIVMSG" -> {
+						val from = msg.prefixNick() ?: "?"
+						val rawTarget = msg.params.getOrNull(0) ?: return
+						val target = normalizeMsgTarget(rawTarget)
+						val textRaw = msg.trailing ?: ""
+
+						// znc.in/playback: *playback module sends TIMESTAMP <buffer> <epoch>
+						// so we know when we were last seen and can request only missed messages.
+						// Only consume TIMESTAMP messages here; other messages from *playback
+						// (e.g. "Module not loaded") fall through to the generic pseudo-user
+						// routing below and surface in the server buffer.
+						if (config.isBouncer && from.equals("*playback", ignoreCase = true)) {
+							val parts = textRaw.trim().split(" ")
+							if (parts.size >= 2 && parts[0].equals("TIMESTAMP", ignoreCase = true)) {
+								val bufName = parts[1]
+								val epochSecs = parts.getOrNull(2)?.toLongOrNull()
+								if (epochSecs != null) zncLastSeen[bufName.lowercase()] = epochSecs
+								return  // Internal plumbing only — never shown.
+							}
+							// Non-TIMESTAMP: fall through.
+						}
+
+						// When echo-message is ACK'd the server reflects our own outbound
+						// "PRIVMSG *playback :PLAY …" commands back to us. Without this filter
+						// those echoes create a visible *playback query buffer on every connect.
+						// Treat them as internal plumbing and discard.
+						if (config.isBouncer
+							&& target.equals("*playback", ignoreCase = true)
+							&& nickEquals(from, currentNick)
+						) {
+							return
+						}
+
+						// ZNC / soju internal pseudo-users (*status, *controlpanel, *playback,
+						// *clientbuffer, BouncerServ on soju, etc.). These send administrative
+						// messages that we route to the *server* buffer instead of creating a new
+						// DM buffer so they don't clutter the buffer list with noise the user
+						// didn't initiate.
+						//
+						// ZNC convention: any nick starting with '*' is a loaded module. We match
+						// the prefix rather than enumerating module names because users can load
+						// arbitrary modules and the set is extensible.
+						// soju convention: a single named pseudo-user "BouncerServ".
+						if (config.isBouncer && !isChannelName(target) && isBouncerPseudoUser(from)) {
+							// Show the message but route it to the server buffer.
+							send(IrcEvent.Notice(
+								from = from,
+								target = "*server*",
+								text = textRaw,
+								isPrivate = false,
+								isServer = true,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs))
+							))
+							return
+						}
+
+						val isChannel = isChannelName(target)
+						val isPrivate = !isChannel
+
+						// If this PRIVMSG comes from a server prefix (no '!'), route it to *server*.
+						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
+
+						// For private messages, use the *other party* as the buffer name.
+						val buf = if (isPrivate) {
+							when {
+								isServerPrefix -> "*server*"
+								nickEquals(from, currentNick) -> target
+								else -> from
+							}
+						} else {
+							target
+						}
+
+						// Handle CTCP requests
+						val trimmedText = textRaw.trim()
+						if (trimmedText.startsWith("\u0001") && !nickEquals(from, currentNick)) {
+							// Strip leading \x01 and optional trailing \x01
+							val ctcpContent = trimmedText.removePrefix("\u0001").removeSuffix("\u0001").trim()
+							if (ctcpContent.isNotEmpty()) {
+								val spaceIdx = ctcpContent.indexOf(' ')
+								val ctcpCmd = (if (spaceIdx > 0) ctcpContent.substring(0, spaceIdx) else ctcpContent).uppercase()
+								val ctcpArgs = if (spaceIdx > 0) ctcpContent.substring(spaceIdx + 1) else ""
+
+								// Sanitise the sender nick used in outgoing NOTICE targets: strip
+								// CR/LF/NUL so a malicious server prefix cannot inject IRC commands.
+								val safeSender = from.replace(Regex("[\r\n\u0000]"), "")
+
+								// Rate-limit replies to at most one per CTCP_RATE_LIMIT_MS per nick
+								// so a flood of CTCP requests cannot get us K-lined.
+								// ACTION and DCC are never rate-limited (they don't generate replies).
+								val now = System.currentTimeMillis()
+								val senderKey = safeSender.lowercase()
+								val lastReply = ctcpLastReplyMs[senderKey] ?: 0L
+								val rateLimited = ctcpCmd != "ACTION" && ctcpCmd != "DCC"
+									&& (now - lastReply) < CTCP_RATE_LIMIT_MS
+								if (rateLimited) {
+									send(IrcEvent.Status("CTCP $ctcpCmd from $safeSender ignored (rate limited)"))
+									return
+								}
+
+								when (ctcpCmd) {
+									"VERSION" -> {
+										// Build the reply at call time so it always reflects the
+										// installed app version - never stale from a saved config.
+										ctcpLastReplyMs[senderKey] = now
+										sendRaw("NOTICE $safeSender :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.boxlabs.uk/\u0001")
+										send(IrcEvent.Status("CTCP VERSION reply sent to $safeSender"))
+										return
+									}
+									"PING" -> {
+										// Strip CR/LF/NUL from the echoed payload to prevent IRC
+										// command injection via a crafted CTCP PING argument.
+										val safeArgs = ctcpArgs.replace(Regex("[\r\n\u0000\u0001]"), "").take(200)
+										ctcpLastReplyMs[senderKey] = now
+										sendRaw("NOTICE $safeSender :\u0001PING $safeArgs\u0001")
+										send(IrcEvent.Status("CTCP PING reply sent to $safeSender"))
+										return
+									}
+									"TIME" -> {
+										val timeStr = java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US).format(java.util.Date())
+										ctcpLastReplyMs[senderKey] = now
+										sendRaw("NOTICE $safeSender :\u0001TIME $timeStr\u0001")
+										send(IrcEvent.Status("CTCP TIME reply sent to $safeSender"))
+										return
+									}
+									"FINGER", "USERINFO" -> {
+										val safeRealname = config.realname.take(100)
+										ctcpLastReplyMs[senderKey] = now
+										sendRaw("NOTICE $safeSender :\u0001$ctcpCmd $safeRealname\u0001")
+										send(IrcEvent.Status("CTCP $ctcpCmd reply sent to $safeSender"))
+										return
+									}
+									"CLIENTINFO" -> {
+										ctcpLastReplyMs[senderKey] = now
+										sendRaw("NOTICE $safeSender :\u0001CLIENTINFO ACTION PING VERSION TIME FINGER USERINFO CLIENTINFO SOURCE DCC\u0001")
+										send(IrcEvent.Status("CTCP CLIENTINFO reply sent to $safeSender"))
+										return
+									}
+									"SOURCE" -> {
+										ctcpLastReplyMs[senderKey] = now
+										sendRaw("NOTICE $safeSender :\u0001SOURCE https://hexdroid.boxlabs.uk/\u0001")
+										send(IrcEvent.Status("CTCP SOURCE reply sent to $safeSender"))
+										return
+									}
+									"ACTION" -> {
+										// ACTION is handled below as a message
+									}
+									"DCC" -> {
+										// DCC is handled below
+									}
+									else -> {
+										// Unknown CTCP — log but don't reply (no reply = no flood risk).
+										send(IrcEvent.Status("Unknown CTCP $ctcpCmd from $safeSender"))
+										return
+									}
+								}
+							}
+						}
+
+						// CTCP DCC: consume offers so the raw CTCP line doesn't show in chat.
+						val dccSend = parseDccSend(textRaw)
+						if (dccSend != null) {
+							if (!nickEquals(from, currentNick)) {
+								send(IrcEvent.DccOfferEvent(dccSend.copy(from = from)))
+							}
+							return
+						}
+
+						val dccChat = parseDccChat(textRaw)
+						if (dccChat != null) {
+							if (!nickEquals(from, currentNick)) {
+								send(IrcEvent.DccChatOfferEvent(dccChat.copy(from = from)))
+							}
+							return
+						}
+
+						val isAction = textRaw.startsWith("\u0001ACTION ") && textRaw.endsWith("\u0001")
+						val text = if (isAction) {
+							textRaw.removePrefix("\u0001ACTION ").removeSuffix("\u0001")
+						} else {
+							textRaw
+						}
+
+						// Keep raw formatting codes. UI chooses to strip or render them.
+						send(
+							IrcEvent.ChatMessage(
+								from = from,
+								target = buf,
+								text = text,
+								isPrivate = isPrivate,
+								isAction = isAction,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory(buf, serverTimeMs, nowMs)),
+								msgId = msg.tags["msgid"],
+								// IRCv3 +draft/reply / +reply tag: msgid of message being replied to.
+								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
+								// IRCv3 account-tag: services account of the sender.
+								senderAccount = msg.tags["account"]?.takeIf { it.isNotBlank() && it != "*" }
+							)
+						)
+					}
+
+					"NOTICE" -> {
+						val from = msg.prefixNick() ?: (msg.prefix ?: "?")
+						val rawTarget = msg.params.getOrNull(0) ?: "*server*"
+						val target = normalizeMsgTarget(rawTarget)
+						val text = msg.trailing ?: ""
+
+						// Check for CTCP reply (wrapped in \x01)
+						// Only process if it's from someone else, not our own echoed reply
+						if (text.startsWith("\u0001") && text.endsWith("\u0001") && !nickEquals(from, currentNick)) {
+							val ctcpContent = text.trim('\u0001')
+							val spaceIdx = ctcpContent.indexOf(' ')
+							val ctcpCmd = if (spaceIdx > 0) ctcpContent.substring(0, spaceIdx) else ctcpContent
+							val ctcpArgs = if (spaceIdx > 0) ctcpContent.substring(spaceIdx + 1) else ""
+							send(
+								IrcEvent.CtcpReply(
+									from = from,
+									command = ctcpCmd,
+									args = ctcpArgs,
+									timeMs = serverTimeMs
+								)
+							)
+							return
+						}
+
+						val isChannel = isChannelName(target)
+						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
+
+						// Bouncer pseudo-user NOTICE routing. ZNC replies to /msg *status
+						// commands (and to /znc slash-command wrapper) via NOTICE — without
+						// this branch the reply opens a query buffer for *status rather than
+						// rendering inline in the server log. Same rationale and prefix check
+						// as the PRIVMSG handler above; see [isBouncerPseudoUser].
+						if (config.isBouncer && !isChannel && isBouncerPseudoUser(from)) {
+							send(IrcEvent.Notice(
+								from = from,
+								target = "*server*",
+								text = text,
+								isPrivate = false,
+								isServer = true,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs)),
+								msgId = msg.tags["msgid"],
+								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
+							))
+							return
+						}
+
+						// Keep the IRC target intact and let the UI decide routing.
+						// Use a stable buffer name for history heuristics.
+						val histBuf = if (isChannel) target else "*server*"
+						send(
+							IrcEvent.Notice(
+								from = from,
+								target = target,
+								text = text,
+								isPrivate = !isChannel && !isServerPrefix,
+								isServer = isServerPrefix,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory(histBuf, serverTimeMs, nowMs)),
+								msgId = msg.tags["msgid"],
+								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
+							)
+						)
+					}
+
+					"JOIN" -> {
+						val nick = msg.prefixNick() ?: return
+						// JOIN can be "JOIN :#chan" or, with extended-join, "JOIN #chan account :realname".
+						// Prefer the first param when it looks like a channel; otherwise fall back to trailing.
+						val chanRaw = msg.params.firstOrNull()?.takeIf { isChannelName(it) }
+							?: msg.trailing?.takeIf { isChannelName(it) }
+							?: return
+
+						// Suppress JOIN events that are part of a netjoin batch - emit one collapsed line instead.
+						val batchId = msg.tags["batch"]
+						if (batchId != null && openNetsplitBatches[batchId] == "netjoin") {
+							netsplitBuffer.getOrPut(batchId) { mutableListOf() }.add(msg)
+							return
+						}
+
+						// JOIN may include a comma-separated list (JOIN #a,#b). Emit one event per channel.
+						val chans = chanRaw
+							.split(',')
+							.map { it.trim() }
+							.filter { isChannelName(it) }
+							.ifEmpty { listOf(chanRaw) }
+
+						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
+							?.takeIf { it.isNotBlank() }
+
+						// IRCv3 extended-join: params[1] = services account ("*" = not logged in),
+						// trailing = realname (gecos). Standard JOIN has no params[1].
+						val extAccount = if (irc.hasCap("extended-join")) {
+							msg.params.getOrNull(1)?.takeIf { it.isNotBlank() && it != "*" }
+						} else null
+						val extRealname = if (irc.hasCap("extended-join")) msg.trailing else null
+
+						for (chan in chans) {
+							val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
+							send(
+								IrcEvent.Joined(
+									channel = chan,
+									nick = nick,
+									userHost = userHost,
+									timeMs = serverTimeMs,
+									isHistory = chanHist,
+									account = extAccount,
+									realname = extRealname
+								)
+							)
+							if (nickEquals(nick, currentNick) && !chanHist) {
+								val fold = casefold(chan)
+								joinedChannelCases[fold] = chan
+							}
+
+							// IRCv3 chathistory: request recent messages when we (re)join.
+							// Supports both the graduated "chathistory" and legacy "draft/chathistory" cap.
+							//
+							// Skip when chanHist is true: a JOIN arriving as part of buffer playback
+							// represents our PRIOR session, not the current one. Firing CHATHISTORY
+							// LATEST against it re-requests history we're already in the middle of
+							// receiving — same rationale as the znc.in/playback guard below.
+							if (nickEquals(nick, currentNick)
+								&& config.capPrefs.draftChathistory
+								&& hasChathistoryCap()
+								&& !chanHist
+								&& historyRequested.add(chan.lowercase())
+							) {
+								val lim = config.historyLimit.coerceIn(0, 500)
+								if (lim > 0) {
+									sendRaw("${labelTag()}CHATHISTORY LATEST $chan * $lim")
+									historyExpectUntil[chan.lowercase()] = nowMs + 7_000L
+								}
+							}
+
+							// znc.in/playback: request only messages we missed since last seen.
+							// Sends: PRIVMSG *playback :PLAY <buffer> <lastSeen> <now>
+							//
+							// Skip when chanHist is true: a JOIN arriving as part of the bouncer's
+							// own buffer playback represents our PRIOR session, not the current one.
+							// Firing PLAY against it re-requests history we're already in the middle
+							// of receiving and produces duplicate lines.
+							if (nickEquals(nick, currentNick)
+								&& config.isBouncer
+								&& irc.hasCap("znc.in/playback")
+								&& !chanHist
+							) {
+								val lastSeen = zncLastSeen[chan.lowercase()] ?: 0L
+								val nowSecs = nowMs / 1000L
+								sendRaw("PRIVMSG *playback :PLAY $chan $lastSeen $nowSecs")
+								historyExpectUntil[chan.lowercase()] = nowMs + 15_000L
+							}
+
+							// WHOX: on joining a channel, query the full user/host/account info
+							// for all members using WHO #chan %uhsnfar,42. The query type "42"
+							// is an arbitrary cookie used to identify WHOX replies (354) vs
+							// regular WHO replies (352).  We only do this if the server advertises
+							// WHOX in ISUPPORT(005) to avoid sending a WHO that returns nothing
+							// useful on non-WHOX servers.
+							if (nickEquals(nick, currentNick) && whoxSupported && config.capPrefs.whox && !chanHist) {
+								// %u=ident %h=host %s=server %n=nick %f=flags %a=account %r=realname
+								sendRaw("WHO $chan %uhsnfar,42")
+							}
+						}
+					}
+
+					"PART" -> {
+						val nick = msg.prefixNick() ?: return
+
+						// Most servers send:  PART <channel>[,<channel>...] [:reason]
+						// But some bouncers/bridges send malformed variants
+						// where the channel list lands in the trailing field (with no params).
+						// Accept both so we still update nicklists.
+
+						val trailing0 = msg.trailing?.trim()
+						val chanRaw = when {
+							msg.params.isNotEmpty() -> msg.params[0]
+							// Only treat trailing as channel list if it's a single token and looks like a channel.
+							trailing0 != null && !trailing0.contains(' ') && (trailing0.startsWith('#') || trailing0.startsWith('&')) -> trailing0
+							else -> return
+						}
+
+						// PART may include a comma-separated list (PART #a,#b :reason). Emit one event per channel.
+						val chans = chanRaw
+							.split(',')
+							.map { it.trim() }
+							.filter { it.isNotBlank() }
+							.ifEmpty { listOf(chanRaw) }
+
+						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
+							?.takeIf { it.isNotBlank() }
+						// Reason can be the IRC trailing parameter, or a second param without ':'
+						// e.g. "PART #chan goodbye".
+						val reason = when {
+							msg.params.size >= 2 && msg.trailing == null -> msg.params[1]
+							// If we had to read the channel from trailing (malformed form), don't reuse it as reason.
+							msg.params.isEmpty() -> null
+							else -> msg.trailing
+						}
+
+						for (chan in chans) {
+							val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
+							send(
+								IrcEvent.Parted(
+									channel = chan,
+									nick = nick,
+									userHost = userHost,
+									reason = reason,
+									timeMs = serverTimeMs,
+									isHistory = chanHist
+								)
+							)
+							if (nickEquals(nick, currentNick) && !chanHist) {
+								joinedChannelCases.remove(casefold(chan))
+							}
+						}
+					}
+
+					"KICK" -> {
+						val kicker = msg.prefixNick() ?: return
+						val kickerHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
+							?.takeIf { it.isNotBlank() }
+						val chan = msg.params.getOrNull(0) ?: return
+						val victim = msg.params.getOrNull(1) ?: return
+						val reason = msg.trailing
+						val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
+						send(
+							IrcEvent.Kicked(
+								channel = chan,
+								victim = victim,
+								byNick = kicker,
+								byHost = kickerHost,
+								reason = reason,
+								timeMs = serverTimeMs,
+								isHistory = chanHist
+							)
+						)
+						if (nickEquals(victim, currentNick) && !chanHist) {
+							joinedChannelCases.remove(casefold(chan))
+						}
+					}
+
+					"QUIT" -> {
+						val nick = msg.prefixNick() ?: return
+						// Suppress QUIT events that are part of a netsplit batch - emit one collapsed line instead.
+						val batchId = msg.tags["batch"]
+						if (batchId != null && openNetsplitBatches[batchId] == "netsplit") {
+							netsplitBuffer.getOrPut(batchId) { mutableListOf() }.add(msg)
+							return
+						}
+						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
+							?.takeIf { it.isNotBlank() }
+						val reason = msg.trailing
+						send(IrcEvent.Quit(nick = nick, userHost = userHost, reason = reason, timeMs = serverTimeMs, isHistory = playbackHistory))
+					}
+
+
+					"WALLOPS", "GLOBOPS", "LOCOPS", "OPERWALL", "SNOTICE" -> {
+						val sender = msg.prefixNick() ?: (msg.prefix ?: "server")
+						val txt = (msg.trailing ?: msg.params.drop(0).joinToString(" ")).let { stripIrcFormatting(it) }
+						if (txt.isNotBlank()) {
+							send(IrcEvent.ServerText("* ${msg.command.uppercase(Locale.ROOT)} from $sender: $txt", code = msg.command.uppercase(Locale.ROOT)))
+						}
+					}
+
+					"TOPIC" -> {
+						val chan = msg.params.firstOrNull() ?: return
+						val topic = msg.trailing
+						val setter = msg.prefixNick()
+						send(IrcEvent.Topic(chan, topic, setter = setter, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
+					}
+
+
+					"MODE" -> {
+						val rawTarget = msg.params.getOrNull(0) ?: return
+						val target = normalizeMsgTarget(rawTarget)
+						if (!isChannelName(target)) {
+							// User MODE change (target is a nick, not a channel).
+							// Detect +o/+O on our own nick - covers auto-oper via services,
+							// not just explicit /OPER (which triggers 381 RPL_YOUREOPER).
+							if (nickEquals(target, currentNick)) {
+								val modeStr = msg.params.getOrNull(1) ?: ""
+								var adding = true
+								for (ch in modeStr) {
+									when (ch) {
+										'+' -> adding = true
+										'-' -> adding = false
+										'o', 'O' -> {
+											if (adding) {
+												send(IrcEvent.YoureOper("You are now an IRC operator"))
+											} else {
+												send(IrcEvent.YoureDeOpered)
+											}
+										}
+									}
+								}
+							}
+							return
+						}
+
+						val modeStr = msg.params.getOrNull(1) ?: return
+						val args = msg.params.drop(2)
+
+						// Update nick prefixes for rank modes (op/voice/etc).
+						parseChannelUserModes(target, modeStr, args).forEach { (nick, prefix, adding) ->
+							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
+						}
+
+						// Also surface the mode change as a readable line in the channel buffer.
+						val setter = msg.prefixNick() ?: (msg.prefix ?: "server")
+						val extra = if (args.isEmpty()) "" else " " + args.joinToString(" ")
+						send(IrcEvent.ChannelModeLine(target, "*** $setter sets mode $modeStr$extra", timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
+					}
+
+					// IRCv3 CHGHOST: ident or hostname changed (requires chghost CAP)
+					"CHGHOST" -> {
+						val nick = msg.prefixNick() ?: return
+						val newUser = msg.params.getOrNull(0) ?: return
+						val newHost = msg.params.getOrNull(1) ?: return
+						send(IrcEvent.Chghost(nick, newUser, newHost, timeMs = serverTimeMs, isHistory = playbackHistory))
+					}
+
+					// IRCv3 ACCOUNT: services account changed (requires account-notify CAP)
+					// account name is params[0]; "*" means logged out
+					"ACCOUNT" -> {
+						val nick = msg.prefixNick() ?: return
+						val account = msg.params.getOrNull(0) ?: "*"
+						send(IrcEvent.AccountChanged(nick, account, timeMs = serverTimeMs, isHistory = playbackHistory))
+					}
+
+					// IRCv3 SETNAME: realname changed (requires setname CAP)
+					"SETNAME" -> {
+						val nick = msg.prefixNick() ?: return
+						val newRealname = msg.trailing ?: msg.params.getOrNull(0) ?: return
+						send(IrcEvent.Setname(nick, newRealname, timeMs = serverTimeMs, isHistory = playbackHistory))
+					}
+
+					// INVITE: received an invite to a channel
+					"INVITE" -> {
+						// :inviter INVITE targetNick #channel
+						val from = msg.prefixNick() ?: return
+						val targetNick = msg.params.getOrNull(0) ?: return
+						val channel = msg.trailing ?: msg.params.getOrNull(1) ?: return
+						if (nickEquals(targetNick, currentNick)) {
+							// This invite is for us.
+							send(IrcEvent.InviteReceived(from, channel, timeMs = serverTimeMs))
+						} else if (irc.hasCap("invite-notify")) {
+							// IRCv3 invite-notify: server broadcasts invites to others in shared channels.
+							// Surface as a status line in the channel buffer (and server buffer as fallback).
+							val bufTarget = if (isChannelName(channel)) channel else "*server*"
+							send(IrcEvent.ServerText(
+								"*** $from invited $targetNick to $channel",
+								code = "INVITE",
+								bufferName = bufTarget
+							))
+						}
+					}
+
+					// ERROR: fatal server message, always followed by connection close
+					"ERROR" -> {
+						val message = msg.trailing ?: msg.params.joinToString(" ")
+						send(IrcEvent.ServerError(message))
+						// Emit Disconnected immediately so the reconnect loop doesn't wait for EOF
+						send(IrcEvent.Disconnected("Server error: $message"))
+					}
+
+					// AWAY: another user's away status changed (requires away-notify CAP).
+					// No trailing = returned from away; trailing = new away message.
+					"AWAY" -> {
+						val nick = msg.prefixNick() ?: return
+						if (nickEquals(nick, currentNick)) return  // skip our own reflected echo
+						send(IrcEvent.AwayChanged(nick, msg.trailing, timeMs = serverTimeMs))
+					}
+
+					// draft/relaymsg: relay bot forwarded a message on behalf of another user.
+					// Format: ":relaybot!u@h RELAYMSG #channel relayednick :message"
+					// params[0] = channel/target, params[1] = relayed nick, trailing = message text.
+					// Surface as a regular chat message attributed to the relayed nick so the UI
+					// renders it identically to a direct PRIVMSG from that nick.
+					"RELAYMSG" -> {
+						if (!config.capPrefs.draftRelaymsg) return
+						val target    = msg.params.getOrNull(0) ?: return
+						val relayNick = msg.params.getOrNull(1) ?: return
+						val text      = msg.trailing ?: return
+						val isAction  = text.startsWith("\u0001ACTION ") && text.endsWith("\u0001")
+						val body      = if (isAction) text.removePrefix("\u0001ACTION ").removeSuffix("\u0001") else text
+						send(IrcEvent.ChatMessage(
+							from          = relayNick,
+							target        = target,
+							text          = body,
+							isPrivate     = !isChannelName(target),
+							isAction      = isAction,
+							timeMs        = serverTimeMs,
+							isHistory     = false,
+							msgId         = msg.tags["msgid"],
+							replyToMsgId  = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
+							senderAccount = null   // relay bots don't expose the relayed user's account
+						))
+					}
+
+					// TAGMSG: message-tags-only (no body text).
+					// Used for typing indicators (draft/typing), reactions, and other tag-only events.
+					"TAGMSG" -> {
+						val fromNick = msg.prefixNick() ?: return
+						val rawTarget = msg.params.getOrNull(0) ?: return
+						val target = normalizeMsgTarget(rawTarget)
+						// draft/typing: +typing tag indicates composing status.
+						// Values: "active" (typing), "paused" (stopped briefly), "done" (cleared/sent).
+						// typing is a client-only tag
+						// Libera permits it via CLIENTTAGDENY=*,-typing using message-tags.
+						val typingState = msg.tags["+typing"] ?: msg.tags["typing"]
+						if (typingState != null &&
+							(irc.hasCap("draft/typing") || irc.hasCap("typing") || irc.hasCap("message-tags"))) {
+							send(IrcEvent.TypingStatus(
+								target = target,
+								nick = fromNick,
+								state = typingState,
+								timeMs = serverTimeMs
+							))
+						}
+						// draft/message-reactions: +draft/react tag carries the emoji.
+						// Format: TAGMSG <target> with tags +draft/react=<emoji> +draft/reply=<msgid-of-original>
+						// Removal uses +draft/react-removed=<emoji>.
+						val reactEmoji = msg.tags["+draft/react"]
+						val reactRemoved = msg.tags["+draft/react-removed"]
+						if ((reactEmoji != null || reactRemoved != null) && irc.hasCap("draft/message-reactions")) {
+							val emoji = reactEmoji ?: reactRemoved!!
+							val adding = reactEmoji != null
+							// The target message's msgid is in "+draft/reply" (or "+reply" for the
+							// graduated tag name), NOT in "msgid" which is the TAGMSG's own ID.
+							val replyMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
+							send(IrcEvent.MessageReaction(
+								fromNick = fromNick,
+								target = target,
+								reaction = emoji,
+								msgId = replyMsgId,
+								adding = adding,
+								timeMs = serverTimeMs
+							))
+						}
+					}
+
+					// IRCv3 MARKREAD (draft/read-marker) and READ (soju.im/read):
+					// server confirms updated read pointer for a buffer.
+					// Format: MARKREAD <target> [timestamp=<ISO8601>]
+					//         READ <target> timestamp=<ISO8601>   (soju.im/read)
+					"MARKREAD", "READ" -> {
+						val target = msg.params.getOrNull(0) ?: return
+						val tsParam = (msg.params.drop(1) + listOfNotNull(msg.trailing))
+							.firstOrNull { it.startsWith("timestamp=") }
+							?.removePrefix("timestamp=")
+						if (tsParam != null) {
+							send(IrcEvent.ReadMarker(target = target, timestamp = tsParam))
+						}
+					}
+
+					// soju/pounce BOUNCER sub-protocol: upstream network info
+					"BOUNCER" -> {
+						val subCmd = msg.params.getOrNull(0)?.uppercase(Locale.ROOT) ?: return
+						when (subCmd) {
+							"NETWORK" -> {
+								// BOUNCER NETWORK <id> <attrs> | BOUNCER NETWORK <id> *
+								//
+								// Per the soju.im/bouncer-networks spec:
+								//  - `*` as the attributes field signals the network was deleted.
+								//  - Otherwise each token is key=value; a bare key (no `=`) means
+								//    the server didn't include that attribute in this update
+								//    (the client should preserve its existing value).
+								//  - Per the updated spec, key= with empty value means the
+								//    attribute was REMOVED. We don't model per-attribute removal
+								//    here since we only track three fields, but we treat empty
+								//    values as "no information" rather than "set to empty string".
+								val networkId = msg.params.getOrNull(1) ?: return
+								val attrTokens = msg.params.drop(2) +
+									listOfNotNull(msg.trailing).flatMap { it.split(' ') }
+
+								// Deletion sentinel: a lone "*" in the attrs slot.
+								if (attrTokens.size == 1 && attrTokens[0] == "*") {
+									send(IrcEvent.BouncerNetwork(networkId, null, null, null, removed = true))
+									return
+								}
+
+								var name: String? = null; var host: String? = null; var state: String? = null
+								for (tok in attrTokens) {
+									val eq = tok.indexOf('='); if (eq < 0) return
+									val key = tok.substring(0, eq).lowercase()
+									val value = tok.substring(eq + 1).takeIf { it.isNotEmpty() }
+									when (key) {
+										"name"  -> if (name  == null) name  = value
+										"host"  -> if (host  == null) host  = value
+										"state" -> if (state == null) state = value
+									}
+								}
+								send(IrcEvent.BouncerNetwork(networkId, name, host, state))
+							}
+							// BOUNCER ADDNETWORK / DELNETWORK / CHANGENETWORK: soju bouncer management commands.
+							// Surface them as status text so the user can see the result in the server buffer.
+							"ADDNETWORK", "DELNETWORK", "CHANGENETWORK" -> {
+								val detail = (msg.params.drop(1) + listOfNotNull(msg.trailing)).joinToString(" ")
+								val text = "BOUNCER $subCmd${if (detail.isNotBlank()) " $detail" else ""}"
+								send(IrcEvent.ServerText(text, code = "BOUNCER"))
+							}
+							"ERROR" -> {
+								val detail = msg.params.drop(1).joinToString(" ") + (msg.trailing?.let { " :$it" } ?: "")
+								send(IrcEvent.Error("Bouncer error: $detail"))
+							}
+						}
+					}
+
+					// draft/channel-rename: server renamed a channel we're in.
+					// Format: RENAME <old> <new> [:<reason>]
+					// The client must update its buffer key and membership records.
+					"RENAME" -> {
+						if (!config.capPrefs.channelRename) return
+						val oldName = msg.params.getOrNull(0) ?: return
+						val newName = msg.params.getOrNull(1) ?: return
+						send(IrcEvent.ChannelRenamed(oldName = oldName, newName = newName, timeMs = serverTimeMs))
+						// Also emit a status line so the rename appears in the buffer history.
+						val reason = msg.trailing
+						val text = if (reason.isNullOrBlank()) "Channel renamed: $oldName → $newName"
+						          else "Channel renamed: $oldName → $newName ($reason)"
+						send(IrcEvent.ServerText(text, code = "RENAME"))
+					}
+
+					// IRCv3 standard-replies (FAIL/WARN/NOTE): structured error/warning/info from
+					// modern IRCd (Ergo 2.x, soju, InspIRCd 4+).  Format:
+					//   FAIL <command> <code> [<context>...] :<description>
+					//   WARN <command> <code> [<context>...] :<description>
+					//   NOTE <command> <code> [<context>...] :<description>
+					// params[2..n-1] are optional context tokens (e.g. channel name, offending nick).
+					// The trailing parameter is the human-readable description; params.drop(2) are
+					// only context tokens (not the description) when trailing is present.
+					"FAIL", "WARN", "NOTE" -> {
+						val srCmd = msg.params.getOrNull(0) ?: "?"
+						val srCode = msg.params.getOrNull(1) ?: "?"
+						// Context tokens are params[2..n-1] when trailing carries the description;
+						// when there is no trailing, the last param IS the description (no context).
+						val contextTokens = if (msg.trailing != null) msg.params.drop(2) else emptyList()
+						val srDesc = msg.trailing ?: msg.params.lastOrNull() ?: "?"
+						val srContextStr = if (contextTokens.isNotEmpty()) " [${contextTokens.joinToString(" ")}]" else ""
+						val srText = "${msg.command} $srCmd $srCode$srContextStr: $srDesc"
+						if (msg.command == "FAIL") send(IrcEvent.Error(srText))
+						else send(IrcEvent.ServerText(srText, code = msg.command))
+					}
+
+
+				}
     }
 
     private fun casefold(s: String): String {
@@ -2082,35 +2919,19 @@ class IrcClient(val config: IrcConfig) {
 
         val irc = IrcSession(config, rng)
         sessionRef = irc
-        val historyRequested = mutableSetOf<String>()
-        val historyExpectUntil = mutableMapOf<String, Long>()
-        // znc.in/playback: last-seen timestamps sent by ZNC's *playback module.
-        // Key = lowercase buffer name. Value = epoch seconds (as sent by ZNC).
-        val zncLastSeen = mutableMapOf<String, Long>()
-        val openPlaybackBatches = mutableSetOf<String>()
-        // netsplit/netjoin: track open batch IDs -> type, buffer events for collapse.
-        val openNetsplitBatches = mutableMapOf<String, String>()  // id -> "netsplit"|"netjoin"
-        val netsplitBuffer = mutableMapOf<String, MutableList<IrcMessage>>()  // id -> buffered JOIN/QUITs
-
-        fun parseServerTimeMs(tags: Map<String, String?>): Long? {
-            // "time" = IRCv3 server-time (standard)
-            // "t"    = znc.in/server-time-iso (legacy ZNC < 1.7)
-            val raw = tags["time"] ?: tags["t"] ?: return null
-            return runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull()
-        }
-
-        fun isPlaybackHistory(tags: Map<String, String?>): Boolean {
-            val batch = tags["batch"]
-            return batch != null && openPlaybackBatches.contains(batch)
-        }
-
-        fun isHeuristicHistory(target: String?, timeMs: Long?, nowMs: Long): Boolean {
-            if (target.isNullOrBlank() || timeMs == null) return false
-            val until = historyExpectUntil[target.lowercase()] ?: 0L
-            if (until < nowMs) return false
-            // Only treat it as history if it's not "now".
-            return timeMs < (nowMs - 15_000L)
-        }
+        // Note: historyRequested, historyExpectUntil, zncLastSeen, openPlaybackBatches,
+        // openNetsplitBatches, netsplitBuffer are now class fields (see read-loop state
+        // section near pendingBansByNick). They were hoisted to allow the message
+        // dispatcher to be split into separate methods without exceeding the JVM 64KB
+        // method size limit on events()'s invokeSuspend.
+        // Reset per-session state on every events() invocation (one IrcClient may
+        // technically be reused, although in practice we create a fresh one per connect).
+        historyRequested.clear()
+        historyExpectUntil.clear()
+        zncLastSeen.clear()
+        openPlaybackBatches.clear()
+        openNetsplitBatches.clear()
+        netsplitBuffer.clear()
 
 // Numeric dispatch table (RFC + common de-facto numerics)
 //
@@ -2678,768 +3499,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					}
 				}
 
-				when (msg.command.uppercase(Locale.ROOT)) {
-					"NICK" -> {
-						val old = msg.prefixNick()
-						val newNick = (msg.trailing ?: msg.params.firstOrNull())
-						if (old != null && newNick != null) {
-							send(IrcEvent.NickChanged(old, newNick, timeMs = serverTimeMs, isHistory = playbackHistory))
-						}
-						if (old != null && newNick != null && nickEquals(old, currentNick)) {
-							currentNick = newNick
-						}
-					}
-
-					"PRIVMSG" -> {
-						val from = msg.prefixNick() ?: "?"
-						val rawTarget = msg.params.getOrNull(0) ?: continue
-						val target = normalizeMsgTarget(rawTarget)
-						val textRaw = msg.trailing ?: ""
-
-						// znc.in/playback: *playback module sends TIMESTAMP <buffer> <epoch>
-						// so we know when we were last seen and can request only missed messages.
-						// Only consume TIMESTAMP messages here; other messages from *playback
-						// (e.g. "Module not loaded") fall through to the generic pseudo-user
-						// routing below and surface in the server buffer.
-						if (config.isBouncer && from.equals("*playback", ignoreCase = true)) {
-							val parts = textRaw.trim().split(" ")
-							if (parts.size >= 2 && parts[0].equals("TIMESTAMP", ignoreCase = true)) {
-								val bufName = parts[1]
-								val epochSecs = parts.getOrNull(2)?.toLongOrNull()
-								if (epochSecs != null) zncLastSeen[bufName.lowercase()] = epochSecs
-								continue  // Internal plumbing only — never shown.
-							}
-							// Non-TIMESTAMP: fall through.
-						}
-
-						// When echo-message is ACK'd the server reflects our own outbound
-						// "PRIVMSG *playback :PLAY …" commands back to us. Without this filter
-						// those echoes create a visible *playback query buffer on every connect.
-						// Treat them as internal plumbing and discard.
-						if (config.isBouncer
-							&& target.equals("*playback", ignoreCase = true)
-							&& nickEquals(from, currentNick)
-						) {
-							continue
-						}
-
-						// ZNC / soju internal pseudo-users (*status, *controlpanel, *playback,
-						// *clientbuffer, BouncerServ on soju, etc.). These send administrative
-						// messages that we route to the *server* buffer instead of creating a new
-						// DM buffer so they don't clutter the buffer list with noise the user
-						// didn't initiate.
-						//
-						// ZNC convention: any nick starting with '*' is a loaded module. We match
-						// the prefix rather than enumerating module names because users can load
-						// arbitrary modules and the set is extensible.
-						// soju convention: a single named pseudo-user "BouncerServ".
-						if (config.isBouncer && !isChannelName(target) && isBouncerPseudoUser(from)) {
-							// Show the message but route it to the server buffer.
-							send(IrcEvent.Notice(
-								from = from,
-								target = "*server*",
-								text = textRaw,
-								isPrivate = false,
-								isServer = true,
-								timeMs = serverTimeMs,
-								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs))
-							))
-							continue
-						}
-
-						val isChannel = isChannelName(target)
-						val isPrivate = !isChannel
-
-						// If this PRIVMSG comes from a server prefix (no '!'), route it to *server*.
-						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
-
-						// For private messages, use the *other party* as the buffer name.
-						val buf = if (isPrivate) {
-							when {
-								isServerPrefix -> "*server*"
-								nickEquals(from, currentNick) -> target
-								else -> from
-							}
-						} else {
-							target
-						}
-
-						// Handle CTCP requests
-						val trimmedText = textRaw.trim()
-						if (trimmedText.startsWith("\u0001") && !nickEquals(from, currentNick)) {
-							// Strip leading \x01 and optional trailing \x01
-							val ctcpContent = trimmedText.removePrefix("\u0001").removeSuffix("\u0001").trim()
-							if (ctcpContent.isNotEmpty()) {
-								val spaceIdx = ctcpContent.indexOf(' ')
-								val ctcpCmd = (if (spaceIdx > 0) ctcpContent.substring(0, spaceIdx) else ctcpContent).uppercase()
-								val ctcpArgs = if (spaceIdx > 0) ctcpContent.substring(spaceIdx + 1) else ""
-
-								// Sanitise the sender nick used in outgoing NOTICE targets: strip
-								// CR/LF/NUL so a malicious server prefix cannot inject IRC commands.
-								val safeSender = from.replace(Regex("[\r\n\u0000]"), "")
-
-								// Rate-limit replies to at most one per CTCP_RATE_LIMIT_MS per nick
-								// so a flood of CTCP requests cannot get us K-lined.
-								// ACTION and DCC are never rate-limited (they don't generate replies).
-								val now = System.currentTimeMillis()
-								val senderKey = safeSender.lowercase()
-								val lastReply = ctcpLastReplyMs[senderKey] ?: 0L
-								val rateLimited = ctcpCmd != "ACTION" && ctcpCmd != "DCC"
-									&& (now - lastReply) < CTCP_RATE_LIMIT_MS
-								if (rateLimited) {
-									send(IrcEvent.Status("CTCP $ctcpCmd from $safeSender ignored (rate limited)"))
-									continue
-								}
-
-								when (ctcpCmd) {
-									"VERSION" -> {
-										// Build the reply at call time so it always reflects the
-										// installed app version - never stale from a saved config.
-										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.boxlabs.uk/\u0001")
-										send(IrcEvent.Status("CTCP VERSION reply sent to $safeSender"))
-										continue
-									}
-									"PING" -> {
-										// Strip CR/LF/NUL from the echoed payload to prevent IRC
-										// command injection via a crafted CTCP PING argument.
-										val safeArgs = ctcpArgs.replace(Regex("[\r\n\u0000\u0001]"), "").take(200)
-										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001PING $safeArgs\u0001")
-										send(IrcEvent.Status("CTCP PING reply sent to $safeSender"))
-										continue
-									}
-									"TIME" -> {
-										val timeStr = java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US).format(java.util.Date())
-										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001TIME $timeStr\u0001")
-										send(IrcEvent.Status("CTCP TIME reply sent to $safeSender"))
-										continue
-									}
-									"FINGER", "USERINFO" -> {
-										val safeRealname = config.realname.take(100)
-										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001$ctcpCmd $safeRealname\u0001")
-										send(IrcEvent.Status("CTCP $ctcpCmd reply sent to $safeSender"))
-										continue
-									}
-									"CLIENTINFO" -> {
-										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001CLIENTINFO ACTION PING VERSION TIME FINGER USERINFO CLIENTINFO SOURCE DCC\u0001")
-										send(IrcEvent.Status("CTCP CLIENTINFO reply sent to $safeSender"))
-										continue
-									}
-									"SOURCE" -> {
-										ctcpLastReplyMs[senderKey] = now
-										writeLine("NOTICE $safeSender :\u0001SOURCE https://hexdroid.boxlabs.uk/\u0001")
-										send(IrcEvent.Status("CTCP SOURCE reply sent to $safeSender"))
-										continue
-									}
-									"ACTION" -> {
-										// ACTION is handled below as a message
-									}
-									"DCC" -> {
-										// DCC is handled below
-									}
-									else -> {
-										// Unknown CTCP — log but don't reply (no reply = no flood risk).
-										send(IrcEvent.Status("Unknown CTCP $ctcpCmd from $safeSender"))
-										continue
-									}
-								}
-							}
-						}
-
-						// CTCP DCC: consume offers so the raw CTCP line doesn't show in chat.
-						val dccSend = parseDccSend(textRaw)
-						if (dccSend != null) {
-							if (!nickEquals(from, currentNick)) {
-								send(IrcEvent.DccOfferEvent(dccSend.copy(from = from)))
-							}
-							continue
-						}
-
-						val dccChat = parseDccChat(textRaw)
-						if (dccChat != null) {
-							if (!nickEquals(from, currentNick)) {
-								send(IrcEvent.DccChatOfferEvent(dccChat.copy(from = from)))
-							}
-							continue
-						}
-
-						val isAction = textRaw.startsWith("\u0001ACTION ") && textRaw.endsWith("\u0001")
-						val text = if (isAction) {
-							textRaw.removePrefix("\u0001ACTION ").removeSuffix("\u0001")
-						} else {
-							textRaw
-						}
-
-						// Keep raw formatting codes. UI chooses to strip or render them.
-						send(
-							IrcEvent.ChatMessage(
-								from = from,
-								target = buf,
-								text = text,
-								isPrivate = isPrivate,
-								isAction = isAction,
-								timeMs = serverTimeMs,
-								isHistory = (playbackHistory || isHeuristicHistory(buf, serverTimeMs, nowMs)),
-								msgId = msg.tags["msgid"],
-								// IRCv3 +draft/reply / +reply tag: msgid of message being replied to.
-								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
-								// IRCv3 account-tag: services account of the sender.
-								senderAccount = msg.tags["account"]?.takeIf { it.isNotBlank() && it != "*" }
-							)
-						)
-					}
-
-					"NOTICE" -> {
-						val from = msg.prefixNick() ?: (msg.prefix ?: "?")
-						val rawTarget = msg.params.getOrNull(0) ?: "*server*"
-						val target = normalizeMsgTarget(rawTarget)
-						val text = msg.trailing ?: ""
-
-						// Check for CTCP reply (wrapped in \x01)
-						// Only process if it's from someone else, not our own echoed reply
-						if (text.startsWith("\u0001") && text.endsWith("\u0001") && !nickEquals(from, currentNick)) {
-							val ctcpContent = text.trim('\u0001')
-							val spaceIdx = ctcpContent.indexOf(' ')
-							val ctcpCmd = if (spaceIdx > 0) ctcpContent.substring(0, spaceIdx) else ctcpContent
-							val ctcpArgs = if (spaceIdx > 0) ctcpContent.substring(spaceIdx + 1) else ""
-							send(
-								IrcEvent.CtcpReply(
-									from = from,
-									command = ctcpCmd,
-									args = ctcpArgs,
-									timeMs = serverTimeMs
-								)
-							)
-							continue
-						}
-
-						val isChannel = isChannelName(target)
-						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
-
-						// Bouncer pseudo-user NOTICE routing. ZNC replies to /msg *status
-						// commands (and to /znc slash-command wrapper) via NOTICE — without
-						// this branch the reply opens a query buffer for *status rather than
-						// rendering inline in the server log. Same rationale and prefix check
-						// as the PRIVMSG handler above; see [isBouncerPseudoUser].
-						if (config.isBouncer && !isChannel && isBouncerPseudoUser(from)) {
-							send(IrcEvent.Notice(
-								from = from,
-								target = "*server*",
-								text = text,
-								isPrivate = false,
-								isServer = true,
-								timeMs = serverTimeMs,
-								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs)),
-								msgId = msg.tags["msgid"],
-								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
-							))
-							continue
-						}
-
-						// Keep the IRC target intact and let the UI decide routing.
-						// Use a stable buffer name for history heuristics.
-						val histBuf = if (isChannel) target else "*server*"
-						send(
-							IrcEvent.Notice(
-								from = from,
-								target = target,
-								text = text,
-								isPrivate = !isChannel && !isServerPrefix,
-								isServer = isServerPrefix,
-								timeMs = serverTimeMs,
-								isHistory = (playbackHistory || isHeuristicHistory(histBuf, serverTimeMs, nowMs)),
-								msgId = msg.tags["msgid"],
-								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
-							)
-						)
-					}
-
-					"JOIN" -> {
-						val nick = msg.prefixNick() ?: continue
-						// JOIN can be "JOIN :#chan" or, with extended-join, "JOIN #chan account :realname".
-						// Prefer the first param when it looks like a channel; otherwise fall back to trailing.
-						val chanRaw = msg.params.firstOrNull()?.takeIf { isChannelName(it) }
-							?: msg.trailing?.takeIf { isChannelName(it) }
-							?: continue
-
-						// Suppress JOIN events that are part of a netjoin batch - emit one collapsed line instead.
-						val batchId = msg.tags["batch"]
-						if (batchId != null && openNetsplitBatches[batchId] == "netjoin") {
-							netsplitBuffer.getOrPut(batchId) { mutableListOf() }.add(msg)
-							continue
-						}
-
-						// JOIN may include a comma-separated list (JOIN #a,#b). Emit one event per channel.
-						val chans = chanRaw
-							.split(',')
-							.map { it.trim() }
-							.filter { isChannelName(it) }
-							.ifEmpty { listOf(chanRaw) }
-
-						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
-							?.takeIf { it.isNotBlank() }
-
-						// IRCv3 extended-join: params[1] = services account ("*" = not logged in),
-						// trailing = realname (gecos). Standard JOIN has no params[1].
-						val extAccount = if (irc.hasCap("extended-join")) {
-							msg.params.getOrNull(1)?.takeIf { it.isNotBlank() && it != "*" }
-						} else null
-						val extRealname = if (irc.hasCap("extended-join")) msg.trailing else null
-
-						for (chan in chans) {
-							val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
-							send(
-								IrcEvent.Joined(
-									channel = chan,
-									nick = nick,
-									userHost = userHost,
-									timeMs = serverTimeMs,
-									isHistory = chanHist,
-									account = extAccount,
-									realname = extRealname
-								)
-							)
-							if (nickEquals(nick, currentNick) && !chanHist) {
-								val fold = casefold(chan)
-								joinedChannelCases[fold] = chan
-							}
-
-							// IRCv3 chathistory: request recent messages when we (re)join.
-							// Supports both the graduated "chathistory" and legacy "draft/chathistory" cap.
-							//
-							// Skip when chanHist is true: a JOIN arriving as part of buffer playback
-							// represents our PRIOR session, not the current one. Firing CHATHISTORY
-							// LATEST against it re-requests history we're already in the middle of
-							// receiving — same rationale as the znc.in/playback guard below.
-							if (nickEquals(nick, currentNick)
-								&& config.capPrefs.draftChathistory
-								&& hasChathistoryCap()
-								&& !chanHist
-								&& historyRequested.add(chan.lowercase())
-							) {
-								val lim = config.historyLimit.coerceIn(0, 500)
-								if (lim > 0) {
-									writeLine("${labelTag()}CHATHISTORY LATEST $chan * $lim")
-									historyExpectUntil[chan.lowercase()] = nowMs + 7_000L
-								}
-							}
-
-							// znc.in/playback: request only messages we missed since last seen.
-							// Sends: PRIVMSG *playback :PLAY <buffer> <lastSeen> <now>
-							//
-							// Skip when chanHist is true: a JOIN arriving as part of the bouncer's
-							// own buffer playback represents our PRIOR session, not the current one.
-							// Firing PLAY against it re-requests history we're already in the middle
-							// of receiving and produces duplicate lines.
-							if (nickEquals(nick, currentNick)
-								&& config.isBouncer
-								&& irc.hasCap("znc.in/playback")
-								&& !chanHist
-							) {
-								val lastSeen = zncLastSeen[chan.lowercase()] ?: 0L
-								val nowSecs = nowMs / 1000L
-								writeLine("PRIVMSG *playback :PLAY $chan $lastSeen $nowSecs")
-								historyExpectUntil[chan.lowercase()] = nowMs + 15_000L
-							}
-
-							// WHOX: on joining a channel, query the full user/host/account info
-							// for all members using WHO #chan %uhsnfar,42. The query type "42"
-							// is an arbitrary cookie used to identify WHOX replies (354) vs
-							// regular WHO replies (352).  We only do this if the server advertises
-							// WHOX in ISUPPORT(005) to avoid sending a WHO that returns nothing
-							// useful on non-WHOX servers.
-							if (nickEquals(nick, currentNick) && whoxSupported && config.capPrefs.whox && !chanHist) {
-								// %u=ident %h=host %s=server %n=nick %f=flags %a=account %r=realname
-								writeLine("WHO $chan %uhsnfar,42")
-							}
-						}
-					}
-
-					"PART" -> {
-						val nick = msg.prefixNick() ?: continue
-
-						// Most servers send:  PART <channel>[,<channel>...] [:reason]
-						// But some bouncers/bridges send malformed variants
-						// where the channel list lands in the trailing field (with no params).
-						// Accept both so we still update nicklists.
-
-						val trailing0 = msg.trailing?.trim()
-						val chanRaw = when {
-							msg.params.isNotEmpty() -> msg.params[0]
-							// Only treat trailing as channel list if it's a single token and looks like a channel.
-							trailing0 != null && !trailing0.contains(' ') && (trailing0.startsWith('#') || trailing0.startsWith('&')) -> trailing0
-							else -> continue
-						}
-
-						// PART may include a comma-separated list (PART #a,#b :reason). Emit one event per channel.
-						val chans = chanRaw
-							.split(',')
-							.map { it.trim() }
-							.filter { it.isNotBlank() }
-							.ifEmpty { listOf(chanRaw) }
-
-						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
-							?.takeIf { it.isNotBlank() }
-						// Reason can be the IRC trailing parameter, or a second param without ':'
-						// e.g. "PART #chan goodbye".
-						val reason = when {
-							msg.params.size >= 2 && msg.trailing == null -> msg.params[1]
-							// If we had to read the channel from trailing (malformed form), don't reuse it as reason.
-							msg.params.isEmpty() -> null
-							else -> msg.trailing
-						}
-
-						for (chan in chans) {
-							val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
-							send(
-								IrcEvent.Parted(
-									channel = chan,
-									nick = nick,
-									userHost = userHost,
-									reason = reason,
-									timeMs = serverTimeMs,
-									isHistory = chanHist
-								)
-							)
-							if (nickEquals(nick, currentNick) && !chanHist) {
-								joinedChannelCases.remove(casefold(chan))
-							}
-						}
-					}
-
-					"KICK" -> {
-						val kicker = msg.prefixNick() ?: continue
-						val kickerHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
-							?.takeIf { it.isNotBlank() }
-						val chan = msg.params.getOrNull(0) ?: continue
-						val victim = msg.params.getOrNull(1) ?: continue
-						val reason = msg.trailing
-						val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
-						send(
-							IrcEvent.Kicked(
-								channel = chan,
-								victim = victim,
-								byNick = kicker,
-								byHost = kickerHost,
-								reason = reason,
-								timeMs = serverTimeMs,
-								isHistory = chanHist
-							)
-						)
-						if (nickEquals(victim, currentNick) && !chanHist) {
-							joinedChannelCases.remove(casefold(chan))
-						}
-					}
-
-					"QUIT" -> {
-						val nick = msg.prefixNick() ?: continue
-						// Suppress QUIT events that are part of a netsplit batch - emit one collapsed line instead.
-						val batchId = msg.tags["batch"]
-						if (batchId != null && openNetsplitBatches[batchId] == "netsplit") {
-							netsplitBuffer.getOrPut(batchId) { mutableListOf() }.add(msg)
-							continue
-						}
-						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
-							?.takeIf { it.isNotBlank() }
-						val reason = msg.trailing
-						send(IrcEvent.Quit(nick = nick, userHost = userHost, reason = reason, timeMs = serverTimeMs, isHistory = playbackHistory))
-					}
-
-
-					"WALLOPS", "GLOBOPS", "LOCOPS", "OPERWALL", "SNOTICE" -> {
-						val sender = msg.prefixNick() ?: (msg.prefix ?: "server")
-						val txt = (msg.trailing ?: msg.params.drop(0).joinToString(" ")).let { stripIrcFormatting(it) }
-						if (txt.isNotBlank()) {
-							send(IrcEvent.ServerText("* ${msg.command.uppercase(Locale.ROOT)} from $sender: $txt", code = msg.command.uppercase(Locale.ROOT)))
-						}
-					}
-
-					"TOPIC" -> {
-						val chan = msg.params.firstOrNull() ?: continue
-						val topic = msg.trailing
-						val setter = msg.prefixNick()
-						send(IrcEvent.Topic(chan, topic, setter = setter, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
-					}
-
-
-					"MODE" -> {
-						val rawTarget = msg.params.getOrNull(0) ?: continue
-						val target = normalizeMsgTarget(rawTarget)
-						if (!isChannelName(target)) {
-							// User MODE change (target is a nick, not a channel).
-							// Detect +o/+O on our own nick - covers auto-oper via services,
-							// not just explicit /OPER (which triggers 381 RPL_YOUREOPER).
-							if (nickEquals(target, currentNick)) {
-								val modeStr = msg.params.getOrNull(1) ?: ""
-								var adding = true
-								for (ch in modeStr) {
-									when (ch) {
-										'+' -> adding = true
-										'-' -> adding = false
-										'o', 'O' -> {
-											if (adding) {
-												send(IrcEvent.YoureOper("You are now an IRC operator"))
-											} else {
-												send(IrcEvent.YoureDeOpered)
-											}
-										}
-									}
-								}
-							}
-							continue
-						}
-
-						val modeStr = msg.params.getOrNull(1) ?: continue
-						val args = msg.params.drop(2)
-
-						// Update nick prefixes for rank modes (op/voice/etc).
-						parseChannelUserModes(target, modeStr, args).forEach { (nick, prefix, adding) ->
-							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
-						}
-
-						// Also surface the mode change as a readable line in the channel buffer.
-						val setter = msg.prefixNick() ?: (msg.prefix ?: "server")
-						val extra = if (args.isEmpty()) "" else " " + args.joinToString(" ")
-						send(IrcEvent.ChannelModeLine(target, "*** $setter sets mode $modeStr$extra", timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
-					}
-
-					// IRCv3 CHGHOST: ident or hostname changed (requires chghost CAP)
-					"CHGHOST" -> {
-						val nick = msg.prefixNick() ?: continue
-						val newUser = msg.params.getOrNull(0) ?: continue
-						val newHost = msg.params.getOrNull(1) ?: continue
-						send(IrcEvent.Chghost(nick, newUser, newHost, timeMs = serverTimeMs, isHistory = playbackHistory))
-					}
-
-					// IRCv3 ACCOUNT: services account changed (requires account-notify CAP)
-					// account name is params[0]; "*" means logged out
-					"ACCOUNT" -> {
-						val nick = msg.prefixNick() ?: continue
-						val account = msg.params.getOrNull(0) ?: "*"
-						send(IrcEvent.AccountChanged(nick, account, timeMs = serverTimeMs, isHistory = playbackHistory))
-					}
-
-					// IRCv3 SETNAME: realname changed (requires setname CAP)
-					"SETNAME" -> {
-						val nick = msg.prefixNick() ?: continue
-						val newRealname = msg.trailing ?: msg.params.getOrNull(0) ?: continue
-						send(IrcEvent.Setname(nick, newRealname, timeMs = serverTimeMs, isHistory = playbackHistory))
-					}
-
-					// INVITE: received an invite to a channel
-					"INVITE" -> {
-						// :inviter INVITE targetNick #channel
-						val from = msg.prefixNick() ?: continue
-						val targetNick = msg.params.getOrNull(0) ?: continue
-						val channel = msg.trailing ?: msg.params.getOrNull(1) ?: continue
-						if (nickEquals(targetNick, currentNick)) {
-							// This invite is for us.
-							send(IrcEvent.InviteReceived(from, channel, timeMs = serverTimeMs))
-						} else if (irc.hasCap("invite-notify")) {
-							// IRCv3 invite-notify: server broadcasts invites to others in shared channels.
-							// Surface as a status line in the channel buffer (and server buffer as fallback).
-							val bufTarget = if (isChannelName(channel)) channel else "*server*"
-							send(IrcEvent.ServerText(
-								"*** $from invited $targetNick to $channel",
-								code = "INVITE",
-								bufferName = bufTarget
-							))
-						}
-					}
-
-					// ERROR: fatal server message, always followed by connection close
-					"ERROR" -> {
-						val message = msg.trailing ?: msg.params.joinToString(" ")
-						send(IrcEvent.ServerError(message))
-						// Emit Disconnected immediately so the reconnect loop doesn't wait for EOF
-						send(IrcEvent.Disconnected("Server error: $message"))
-					}
-
-					// AWAY: another user's away status changed (requires away-notify CAP).
-					// No trailing = returned from away; trailing = new away message.
-					"AWAY" -> {
-						val nick = msg.prefixNick() ?: continue
-						if (nickEquals(nick, currentNick)) continue  // skip our own reflected echo
-						send(IrcEvent.AwayChanged(nick, msg.trailing, timeMs = serverTimeMs))
-					}
-
-					// draft/relaymsg: relay bot forwarded a message on behalf of another user.
-					// Format: ":relaybot!u@h RELAYMSG #channel relayednick :message"
-					// params[0] = channel/target, params[1] = relayed nick, trailing = message text.
-					// Surface as a regular chat message attributed to the relayed nick so the UI
-					// renders it identically to a direct PRIVMSG from that nick.
-					"RELAYMSG" -> {
-						if (!config.capPrefs.draftRelaymsg) continue
-						val target    = msg.params.getOrNull(0) ?: continue
-						val relayNick = msg.params.getOrNull(1) ?: continue
-						val text      = msg.trailing ?: continue
-						val isAction  = text.startsWith("\u0001ACTION ") && text.endsWith("\u0001")
-						val body      = if (isAction) text.removePrefix("\u0001ACTION ").removeSuffix("\u0001") else text
-						send(IrcEvent.ChatMessage(
-							from          = relayNick,
-							target        = target,
-							text          = body,
-							isPrivate     = !isChannelName(target),
-							isAction      = isAction,
-							timeMs        = serverTimeMs,
-							isHistory     = false,
-							msgId         = msg.tags["msgid"],
-							replyToMsgId  = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
-							senderAccount = null   // relay bots don't expose the relayed user's account
-						))
-					}
-
-					// TAGMSG: message-tags-only (no body text).
-					// Used for typing indicators (draft/typing), reactions, and other tag-only events.
-					"TAGMSG" -> {
-						val fromNick = msg.prefixNick() ?: continue
-						val rawTarget = msg.params.getOrNull(0) ?: continue
-						val target = normalizeMsgTarget(rawTarget)
-						// draft/typing: +typing tag indicates composing status.
-						// Values: "active" (typing), "paused" (stopped briefly), "done" (cleared/sent).
-						// typing is a client-only tag
-						// Libera permits it via CLIENTTAGDENY=*,-typing using message-tags.
-						val typingState = msg.tags["+typing"] ?: msg.tags["typing"]
-						if (typingState != null &&
-							(irc.hasCap("draft/typing") || irc.hasCap("typing") || irc.hasCap("message-tags"))) {
-							send(IrcEvent.TypingStatus(
-								target = target,
-								nick = fromNick,
-								state = typingState,
-								timeMs = serverTimeMs
-							))
-						}
-						// draft/message-reactions: +draft/react tag carries the emoji.
-						// Format: TAGMSG <target> with tags +draft/react=<emoji> +draft/reply=<msgid-of-original>
-						// Removal uses +draft/react-removed=<emoji>.
-						val reactEmoji = msg.tags["+draft/react"]
-						val reactRemoved = msg.tags["+draft/react-removed"]
-						if ((reactEmoji != null || reactRemoved != null) && irc.hasCap("draft/message-reactions")) {
-							val emoji = reactEmoji ?: reactRemoved!!
-							val adding = reactEmoji != null
-							// The target message's msgid is in "+draft/reply" (or "+reply" for the
-							// graduated tag name), NOT in "msgid" which is the TAGMSG's own ID.
-							val replyMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
-							send(IrcEvent.MessageReaction(
-								fromNick = fromNick,
-								target = target,
-								reaction = emoji,
-								msgId = replyMsgId,
-								adding = adding,
-								timeMs = serverTimeMs
-							))
-						}
-					}
-
-					// IRCv3 MARKREAD (draft/read-marker) and READ (soju.im/read):
-					// server confirms updated read pointer for a buffer.
-					// Format: MARKREAD <target> [timestamp=<ISO8601>]
-					//         READ <target> timestamp=<ISO8601>   (soju.im/read)
-					"MARKREAD", "READ" -> {
-						val target = msg.params.getOrNull(0) ?: continue
-						val tsParam = (msg.params.drop(1) + listOfNotNull(msg.trailing))
-							.firstOrNull { it.startsWith("timestamp=") }
-							?.removePrefix("timestamp=")
-						if (tsParam != null) {
-							send(IrcEvent.ReadMarker(target = target, timestamp = tsParam))
-						}
-					}
-
-					// soju/pounce BOUNCER sub-protocol: upstream network info
-					"BOUNCER" -> {
-						val subCmd = msg.params.getOrNull(0)?.uppercase(Locale.ROOT) ?: continue
-						when (subCmd) {
-							"NETWORK" -> {
-								// BOUNCER NETWORK <id> <attrs> | BOUNCER NETWORK <id> *
-								//
-								// Per the soju.im/bouncer-networks spec:
-								//  - `*` as the attributes field signals the network was deleted.
-								//  - Otherwise each token is key=value; a bare key (no `=`) means
-								//    the server didn't include that attribute in this update
-								//    (the client should preserve its existing value).
-								//  - Per the updated spec, key= with empty value means the
-								//    attribute was REMOVED. We don't model per-attribute removal
-								//    here since we only track three fields, but we treat empty
-								//    values as "no information" rather than "set to empty string".
-								val networkId = msg.params.getOrNull(1) ?: continue
-								val attrTokens = msg.params.drop(2) +
-									listOfNotNull(msg.trailing).flatMap { it.split(' ') }
-
-								// Deletion sentinel: a lone "*" in the attrs slot.
-								if (attrTokens.size == 1 && attrTokens[0] == "*") {
-									send(IrcEvent.BouncerNetwork(networkId, null, null, null, removed = true))
-									continue
-								}
-
-								var name: String? = null; var host: String? = null; var state: String? = null
-								for (tok in attrTokens) {
-									val eq = tok.indexOf('='); if (eq < 0) continue
-									val key = tok.substring(0, eq).lowercase()
-									val value = tok.substring(eq + 1).takeIf { it.isNotEmpty() }
-									when (key) {
-										"name"  -> if (name  == null) name  = value
-										"host"  -> if (host  == null) host  = value
-										"state" -> if (state == null) state = value
-									}
-								}
-								send(IrcEvent.BouncerNetwork(networkId, name, host, state))
-							}
-							// BOUNCER ADDNETWORK / DELNETWORK / CHANGENETWORK: soju bouncer management commands.
-							// Surface them as status text so the user can see the result in the server buffer.
-							"ADDNETWORK", "DELNETWORK", "CHANGENETWORK" -> {
-								val detail = (msg.params.drop(1) + listOfNotNull(msg.trailing)).joinToString(" ")
-								val text = "BOUNCER $subCmd${if (detail.isNotBlank()) " $detail" else ""}"
-								send(IrcEvent.ServerText(text, code = "BOUNCER"))
-							}
-							"ERROR" -> {
-								val detail = msg.params.drop(1).joinToString(" ") + (msg.trailing?.let { " :$it" } ?: "")
-								send(IrcEvent.Error("Bouncer error: $detail"))
-							}
-						}
-					}
-
-					// draft/channel-rename: server renamed a channel we're in.
-					// Format: RENAME <old> <new> [:<reason>]
-					// The client must update its buffer key and membership records.
-					"RENAME" -> {
-						if (!config.capPrefs.channelRename) continue
-						val oldName = msg.params.getOrNull(0) ?: continue
-						val newName = msg.params.getOrNull(1) ?: continue
-						send(IrcEvent.ChannelRenamed(oldName = oldName, newName = newName, timeMs = serverTimeMs))
-						// Also emit a status line so the rename appears in the buffer history.
-						val reason = msg.trailing
-						val text = if (reason.isNullOrBlank()) "Channel renamed: $oldName → $newName"
-						          else "Channel renamed: $oldName → $newName ($reason)"
-						send(IrcEvent.ServerText(text, code = "RENAME"))
-					}
-
-					// IRCv3 standard-replies (FAIL/WARN/NOTE): structured error/warning/info from
-					// modern IRCd (Ergo 2.x, soju, InspIRCd 4+).  Format:
-					//   FAIL <command> <code> [<context>...] :<description>
-					//   WARN <command> <code> [<context>...] :<description>
-					//   NOTE <command> <code> [<context>...] :<description>
-					// params[2..n-1] are optional context tokens (e.g. channel name, offending nick).
-					// The trailing parameter is the human-readable description; params.drop(2) are
-					// only context tokens (not the description) when trailing is present.
-					"FAIL", "WARN", "NOTE" -> {
-						val srCmd = msg.params.getOrNull(0) ?: "?"
-						val srCode = msg.params.getOrNull(1) ?: "?"
-						// Context tokens are params[2..n-1] when trailing carries the description;
-						// when there is no trailing, the last param IS the description (no context).
-						val contextTokens = if (msg.trailing != null) msg.params.drop(2) else emptyList()
-						val srDesc = msg.trailing ?: msg.params.lastOrNull() ?: "?"
-						val srContextStr = if (contextTokens.isNotEmpty()) " [${contextTokens.joinToString(" ")}]" else ""
-						val srText = "${msg.command} $srCmd $srCode$srContextStr: $srDesc"
-						if (msg.command == "FAIL") send(IrcEvent.Error(srText))
-						else send(IrcEvent.ServerText(srText, code = msg.command))
-					}
-
-
-				}
+				handleMessageCommand(msg, irc, serverTimeMs, playbackHistory, nowMs)
 			}
 
 			// If the user requested a disconnect, don't surface "EOF" as an error.
