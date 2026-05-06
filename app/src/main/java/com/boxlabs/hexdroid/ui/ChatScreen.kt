@@ -28,6 +28,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -105,6 +107,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonSearch
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MarkChatRead
+import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Badge
@@ -321,6 +326,7 @@ private val IRC_COMMANDS = listOf(
 
     // Misc
     IrcCommand("raw",        "/raw <command>",                 "Send a raw IRC line to the server"),
+    IrcCommand("quote",      "/quote <command>",               "Alias for /raw — send a raw IRC line to the server"),
     IrcCommand("sysinfo",    "/sysinfo",                       "Post device system info to chat"),
 
     // Query / services shorthands
@@ -354,8 +360,9 @@ private val IRC_COMMANDS = listOf(
  * IRC_COMMANDS name). /bnc and /bouncerserv share the soju set since /bnc is
  * just an alias.
  *
- * Lists are intentionally curated — not every verb every services bot or module
+ * Lists are intentionally curated, not every verb every services bot or module
  * supports, but the ones users actually reach for. Full reference lives at:
+	 X3
  *   NickServ/ChanServ: network docs (Atheme/Anope command set, stable across forks)
  *   ZNC *status:       https://wiki.znc.in/Using_commands
  *   BouncerServ:       https://soju.im/doc/soju.1.html  (commands under "SERVICE COMMANDS")
@@ -440,11 +447,29 @@ private val SUB_COMMANDS: Map<String, List<IrcCommand>> = mapOf(
         IrcCommand("ACT",      "ACT <channel> <action>",        "Make the bot perform an action"),
         IrcCommand("HELP",     "HELP [command]",                "Show help"),
     ),
-    // AuthServ — InspIRCd / some Atheme setups; fewer verbs
+    // AuthServ/X3
     "as" to listOf(
         IrcCommand("AUTH",     "AUTH <account> <password>",     "Authenticate to AuthServ"),
         IrcCommand("REGISTER", "REGISTER <account> <password> <email>", "Register an account"),
         IrcCommand("HELP",     "HELP [command]",                "Show help"),
+    ),
+    "x3" to listOf(
+        IrcCommand("REGISTER", "REGISTER <channel>",                    "Register a channel"),
+        IrcCommand("DROP",     "DROP <channel>",                        "Drop/unregister a channel"),
+        IrcCommand("INFO",     "INFO <channel|user>",                   "Show info about a channel or user"),
+        IrcCommand("OP",       "OP <channel> <user>",                   "Give operator status (+o)"),
+        IrcCommand("DEOP",     "DEOP <channel> <user>",                 "Remove operator status (-o)"),
+        IrcCommand("VOICE",    "VOICE <channel> <user>",                "Give voice (+v)"),
+        IrcCommand("DEVOICE",  "DEVOICE <channel> <user>",              "Remove voice (-v)"),
+        IrcCommand("HALFOP",   "HALFOP <channel> <user>",               "Give half-op (+h)"),
+        IrcCommand("INVITE",   "INVITE <channel> [user]",               "Invite yourself or a user"),
+        IrcCommand("KICK",     "KICK <channel> <user> [reason]",        "Kick a user via services"),
+        IrcCommand("BAN",      "BAN <channel> <mask>",                  "Ban a mask via services"),
+        IrcCommand("UNBAN",    "UNBAN <channel> [mask]",                "Remove a ban"),
+        IrcCommand("TOPIC",    "TOPIC <channel> [topic]",               "Set channel topic"),
+        IrcCommand("FLAGS",    "FLAGS <channel> <user> [flags]",        "Manage user flags/privileges"),
+        IrcCommand("ACCESS",   "ACCESS <channel> [LIST|ADD|DEL] [user] [level]", "Manage access list"),
+        IrcCommand("HELP",     "HELP [command]",                        "Show help"),
     ),
     // ZNC *status — curated from https://wiki.znc.in/Using_commands
     "znc" to listOf(
@@ -1069,6 +1094,10 @@ fun ChatScreen(
     onCloseFindOverlay: () -> Unit = {},
     onFindNavigate: (Int) -> Unit = {},
     onShareTextConsumed: () -> Unit = {},
+    /** Buffer-list toolbar actions. */
+    onCollapseAllNetworks: () -> Unit = {},
+    onMarkAllBuffersRead: () -> Unit = {},
+    onSearchFromToolbar: (query: String, global: Boolean) -> Unit = { _, _ -> },
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
@@ -1528,9 +1557,112 @@ fun ChatScreen(
 		}
 
 		Column(
-			mod.padding(horizontal = 16.dp, vertical = 14.dp),
-			verticalArrangement = Arrangement.spacedBy(10.dp)
+			mod.padding(horizontal = 16.dp, vertical = 8.dp),
+			verticalArrangement = Arrangement.spacedBy(4.dp)
 		) {
+			// Sidepanel toolbar: collapse-all, mark-all-read, search-current-buffer.
+			// HexDroid logo sits absolute-left in the same toolbar row.
+			var showSearchDialog by remember { mutableStateOf(false) }
+			Box(
+				modifier = Modifier.fillMaxWidth(),
+				contentAlignment = Alignment.Center
+			) {
+				Image(
+					painter = painterResource(R.drawable.hexdroid_logo),
+					contentDescription = null,
+					modifier = Modifier
+						.size(24.dp)
+						.align(Alignment.CenterStart)
+				)
+				Row(
+					horizontalArrangement = Arrangement.spacedBy(4.dp),
+					verticalAlignment = Alignment.CenterVertically
+				) {
+					IconButton(
+						onClick = onCollapseAllNetworks,
+						modifier = Modifier.size(28.dp)
+					) {
+						Icon(
+							imageVector = Icons.Default.UnfoldLess,
+							contentDescription = stringResource(R.string.buffer_toolbar_collapse_all),
+							modifier = Modifier.size(16.dp),
+							tint = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+					}
+					IconButton(
+						onClick = onMarkAllBuffersRead,
+						modifier = Modifier.size(28.dp)
+					) {
+						Icon(
+							imageVector = Icons.Default.MarkChatRead,
+							contentDescription = stringResource(R.string.buffer_toolbar_mark_all_read),
+							modifier = Modifier.size(16.dp),
+							tint = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+					}
+					IconButton(
+						onClick = { showSearchDialog = true },
+						modifier = Modifier.size(28.dp)
+					) {
+						Icon(
+							imageVector = Icons.Default.Search,
+							contentDescription = stringResource(R.string.buffer_toolbar_search),
+							modifier = Modifier.size(16.dp),
+							tint = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+					}
+				}
+			}
+			HorizontalDivider(modifier = Modifier.padding(top = 2.dp), thickness = 0.5.dp)
+
+			if (showSearchDialog) {
+				var query by remember { mutableStateOf("") }
+				// Default to global search
+				var globalSearch by remember { mutableStateOf(true) }
+				androidx.compose.material3.AlertDialog(
+					onDismissRequest = { showSearchDialog = false },
+					title = { Text(stringResource(R.string.buffer_toolbar_search_dialog_title)) },
+					text = {
+						Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+							OutlinedTextField(
+								value = query,
+								onValueChange = { query = it },
+								placeholder = { Text(stringResource(R.string.buffer_toolbar_search_placeholder)) },
+								singleLine = true,
+								modifier = Modifier.fillMaxWidth()
+							)
+							Row(verticalAlignment = Alignment.CenterVertically) {
+								androidx.compose.material3.Checkbox(
+									checked = globalSearch,
+									onCheckedChange = { globalSearch = it }
+								)
+								Text(
+									stringResource(R.string.buffer_toolbar_search_global),
+									style = MaterialTheme.typography.bodySmall
+								)
+							}
+						}
+					},
+					confirmButton = {
+						TextButton(
+							enabled = query.isNotBlank(),
+							onClick = {
+								onSearchFromToolbar(query, globalSearch)
+								showSearchDialog = false
+								// Close the drawer so the search-result navigation lands the
+								// user directly on the matched message in the chat view rather
+								// than leaving the sidebar open obscuring it. Mirrors what
+								// happens when the user picks a buffer from the sidebar.
+								scope.launch { if (!isWide) drawerState.close() }
+							}
+						) { Text(stringResource(R.string.buffer_toolbar_search_action)) }
+					},
+					dismissButton = {
+						TextButton(onClick = { showSearchDialog = false }) { Text(stringResource(R.string.cancel)) }
+					}
+				)
+			}
+
 			val listState = rememberLazyListState()
 
 			// Current display order of root netIds - kept in sync with sidebarItems

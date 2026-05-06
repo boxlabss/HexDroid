@@ -29,6 +29,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.net.InetAddress
@@ -139,7 +141,20 @@ data class CapPrefs(
      * draft/no-implicit-names: suppress automatic NAMES list on JOIN (generic form,
      * graduated from the draft). Parallel to soju.im/no-implicit-names.
      */
-    val noImplicitNames: Boolean = false
+    val noImplicitNames: Boolean = false,
+
+    /**
+     * draft/multiline (also requested as graduated `multiline` for forward compat): allow
+     * receiving messages that exceed 512 bytes or contain line breaks, delivered as a
+     * BATCH with type `draft/multiline`. Each batch line is a PRIVMSG / NOTICE to the
+     * batch target; we accumulate them and emit a single ChatMessage / Notice with the
+     * concatenated body. `+draft/multiline-concat` tag on a line means "no newline before
+     * me" - used for messages split mid-paragraph by the sender's flood control.
+     *
+     * Send-side is NOT implemented: this client doesn't currently send multiline batches.
+     * Outbound long messages still split into multiple lines on the wire as before.
+     */
+    val multiline: Boolean = true
 )
 
 data class TlsClientCert(
@@ -183,26 +198,36 @@ data class IrcConfig(
     /**
      * Trust-On-First-Use (TOFU) certificate fingerprint (SHA-256 hex, lowercase, colon-separated).
      *
-     * When set, TLS certificate validation is replaced with fingerprint pinning instead of the
-     * blanket "trust everything" behaviour of [allowInvalidCerts]:
-     *  - On first connect with an unknown/self-signed cert, [allowInvalidCerts] = true is still
-     *    needed; the fingerprint is captured and should be persisted by the caller for future use.
-     *  - On subsequent connects with a stored fingerprint, the cert is accepted ONLY if its
-     *    SHA-256 fingerprint matches — protecting against certificate replacement / MITM.
-     *  - If the fingerprint changes, connection is rejected and a [IrcEvent.TlsFingerprintChanged]
-     *    event is emitted so the UI can warn the user.
+     * **Gated on [allowInvalidCerts].** TOFU only engages when invalid-certs is on, because
+     * that's exactly the case it's designed for, self-signed bouncer certs and similar where
+     * the CA chain can't be trusted. With invalid-certs OFF the standard JSSE trust path
+     * (CA chain + RFC 6125 hostname check) is the identity proof and TOFU has nothing to add.
      *
-     * When null and [allowInvalidCerts] = true, the legacy "trust everything" path is used.
+     *  - With invalid-certs ON, first connect (no pin stored): [IrcEvent.TlsFingerprintLearned]
+     *    fires and the caller persists the fingerprint.
+     *  - With invalid-certs ON, subsequent connect (pin stored): chain + hostname checks are
+     *    bypassed; only the pin is enforced. On mismatch, [IrcEvent.TlsFingerprintChanged]
+     *    fires and the connection is refused.
+     *  - With invalid-certs OFF: standard chain validation runs AND a soft hostname-mismatch
+     *    warning is surfaced (see [IrcEvent.TlsHostnameMismatch]). Any stored pin is ignored.
      */
     val tlsTofuFingerprint: String? = null,
+    /**
+     * Additional accepted TOFU fingerprints. Used for round-robin DNS hosts where the
+     * connection lands on a different server (and thus a different cert) each time.
+     * The verifier accepts any peer whose fingerprint is either [tlsTofuFingerprint] OR a
+     * member of this set. Empty for the common single-server case. Same [allowInvalidCerts]
+     * gating as [tlsTofuFingerprint] - dormant when invalid-certs is off.
+     */
+    val tlsTofuFingerprints: Set<String> = emptySet(),
     /**
      * Which bouncer protocol family this profile targets, if any. Drives the syntax that
      * [effectiveAuthIdentity] uses to assemble the SASL authcid and the USER command:
      *
-     *  - [BouncerKind.NONE]: direct IRCd connection — auth identity is the username unchanged.
-     *  - [BouncerKind.SOJU]:  `user/network@clientid`  (slash before at-sign — soju spec)
-     *  - [BouncerKind.ZNC]:   `user@clientid/network`  (at-sign before slash — ZNC FAQ)
-     *  - [BouncerKind.GENERIC]: legacy / other bouncers — falls back to the soju-style
+     *  - [BouncerKind.NONE]: direct IRCd connection
+     *  - [BouncerKind.SOJU]:  `user/network@clientid`  (slash before at-sign, soju spec)
+     *  - [BouncerKind.ZNC]:   `user@clientid/network`  (at-sign before slash, ZNC FAQ)
+     *  - [BouncerKind.GENERIC]: legacy / other bouncers	falls back to the soju-style
      *     `user/network` form because that's what most other bouncers (kiwibnc, pounce in
      *     non-multi mode) accept. No client-id support for generic.
      *
@@ -229,27 +254,37 @@ data class IrcConfig(
      * Assemble the authentication identity string for this connection, applying the bouncer-
      * specific syntax for embedding the upstream network name and per-client identifier.
      *
-     * Defensive guards:
-     *  - If [base] already contains a '/', the user has hand-assembled the identity (legacy
-     *    workaround from before the dedicated fields existed); we leave it untouched.
-     *  - For [BouncerKind.NONE] or with both [bouncerNetworkName] and [bouncerClientId]
+     * Defensive guards (in order):
+     *  - For [BouncerKind.NONE], or with both [bouncerNetworkName] and [bouncerClientId]
      *    blank, the result is just [base] unchanged.
+     *  - If [base] already contains a '/', the user has hand-assembled the identity (legacy
+     *    workaround from before the dedicated fields existed); we leave it untouched. The
+     *    '/' is unambiguous because both soju (`user/network`) and ZNC (`user@cid/network`)
+     *    use it as the network separator and no real IRC username may contain it.
+     *  - Note that '@' alone is NOT a short-circuit: many users have email-style usernames
+     *    (e.g. `alice@example.com`) and treating that as already-formatted would silently
+     *    drop the bouncer fields and misroute the connection.
      *
      * Examples:
-     *   kind=SOJU,    name="libera",    clientId="phone" → "user/libera@phone"
-     *   kind=SOJU,    name="libera",    clientId=null    → "user/libera"
-     *   kind=SOJU,    name=null,        clientId="phone" → "user@phone"   (soju per-client only)
-     *   kind=ZNC,     name="libera",    clientId="phone" → "user@phone/libera"
-     *   kind=ZNC,     name="libera",    clientId=null    → "user/libera"
-     *   kind=GENERIC, name="libera",    clientId=*       → "user/libera"  (clientId ignored)
-     *   kind=NONE                                         → "user"
+     *   kind=SOJU,    name="libera",    clientId="phone" > "user/libera@phone"
+     *   kind=SOJU,    name="libera",    clientId=null    > "user/libera"
+     *   kind=SOJU,    name=null,        clientId="phone" > "user@phone"   (soju per-client only)
+     *   kind=ZNC,     name="libera",    clientId="phone" > "user@phone/libera"
+     *   kind=ZNC,     name="libera",    clientId=null    > "user/libera"
+     *   kind=GENERIC, name="libera",    clientId=*       > "user/libera"  (clientId ignored)
+     *   kind=NONE                                        > "user"
+     *   kind=SOJU, name="libera", base="alice@host.com"  > "alice@host.com/libera"
      */
     fun effectiveAuthIdentity(base: String): String {
-        // Legacy hand-rolled identity — don't double-up.
-        if (base.contains('/') || base.contains('@')) return base
+        if (bouncerKind == BouncerKind.NONE) return base
 
         val net = bouncerNetworkName?.takeIf { it.isNotBlank() }
         val cid = bouncerClientId?.takeIf { it.isNotBlank() }
+        if (net == null && cid == null) return base
+
+        // Legacy hand-rolled identity (`/` is the unambiguous bouncer-network separator).
+        // Don't double up.
+        if (base.contains('/')) return base
 
         return when (bouncerKind) {
             BouncerKind.NONE -> base
@@ -271,6 +306,53 @@ data class IrcConfig(
             BouncerKind.GENERIC -> if (net != null) "$base/$net" else base
         }
     }
+
+    /**
+     * Compose the wire-format PASS line value for this connection's server password,
+     * automatically prepending the bouncer username + network selector when applicable.
+     *
+     * For bouncer profiles with a non-blank [bouncerNetworkName] or [bouncerClientId]
+	 * composes `<authcid>:<password>` where
+     * `<authcid>` is whatever [effectiveAuthIdentity] would produce for SASL so the
+     * `user/network` (soju) or `user@clientid/network` (ZNC) ordering rules live in one
+     * place. Direct-IRCd connections (BouncerKind.NONE) always pass through unchanged
+     * because the server PASS is meant to be a verbatim secret in that case.
+     *
+     * Hand-assembly detection: if the user typed `username/network:password` (or with
+     * `@clientid`) themselves, we leave it alone. Detection requires the input to look
+     * unambiguously like a hand-assembled auth identity:
+     *  - At least one colon
+     *  - The substring before the FIRST colon contains a `/` (the bouncer-network
+     *    separator is unambiguous, no real username may contain it)
+     *
+     * `@` is deliberately NOT used as a hand-assembly hint because it appears in
+     * passwords routinely (e.g. `M3@home`, `pass@2024`). Treating those as already-
+     * formatted would silently strip the network prefix and route the connection to
+     * the wrong upstream.
+     *
+     * Returns null when [password] is blank/null so the caller can skip the PASS line
+     * entirely (a blank PASS line is rejected by some servers).
+     */
+    fun effectivePassLine(password: String?): String? {
+        val pw = password?.takeIf { it.isNotBlank() } ?: return null
+        if (bouncerKind == BouncerKind.NONE) return pw
+
+        val net = bouncerNetworkName?.takeIf { it.isNotBlank() }
+        val cid = bouncerClientId?.takeIf { it.isNotBlank() }
+        if (net == null && cid == null) return pw  // nothing to prepend
+
+        // Hand-assembled detection: require a `/` before the first `:`. The `/` is the
+        // unambiguous bouncer-network separator (no real IRC username may contain it),
+        // so its presence is a strong signal the user typed the full identity themselves.
+        // `@` is not used because it's common in passwords.
+        val firstColon = pw.indexOf(':')
+        if (firstColon > 0 && pw.substring(0, firstColon).contains('/')) return pw
+
+        // Otherwise compose: <effective-authcid>:<password>.
+        // Reuses effectiveAuthIdentity so SOJU vs ZNC ordering and clientId handling
+        // stay in one place.
+        return "${effectiveAuthIdentity(username)}:$pw"
+    }
 }
 
 /**
@@ -286,7 +368,7 @@ sealed class IrcEvent {
     data class Disconnected(val reason: String?) : IrcEvent()
     /**
      * Emitted when the server presents a TLS certificate whose fingerprint differs from the
-     * stored TOFU fingerprint. The connection is refused. The UI should warn the user — this
+     * stored TOFU fingerprint. The connection is refused. The UI should warn the user, this
      * could indicate a certificate rotation (legitimate) or a MITM attack.
      *
      * @param stored  The fingerprint that was expected (from [IrcConfig.tlsTofuFingerprint]).
@@ -298,6 +380,19 @@ sealed class IrcEvent {
      * The caller should persist [fingerprint] in the network profile for future verification.
      */
     data class TlsFingerprintLearned(val fingerprint: String) : IrcEvent()
+    /**
+     * Emitted when the connected host doesn't match any of the certificate's subjectAltNames
+     * (RFC 6125). This is a soft warning - the connection proceeds because IRC has a long
+     * tradition of small networks running certs with mismatched/legacy CNs, and the user has
+     * TOFU pinning available as the strict-identity option. Surfaced in the *server* buffer
+     * so the user can spot it and decide whether to act (typically by setting a TOFU pin).
+     *
+     * @param expected   The hostname we connected to.
+     * @param sans       The DNS names actually present in the cert's SAN extension; useful for
+     *                   diagnosing typos ("oh, the cert is for `irc.example.org` but I typed
+     *                   `irc.example.com`").
+     */
+    data class TlsHostnameMismatch(val expected: String, val sans: List<String>) : IrcEvent()
     data class Error(val message: String) : IrcEvent()
 
     // get latency from PING/PONG (milliseconds)
@@ -429,7 +524,7 @@ sealed class IrcEvent {
         val msgId: String? = null,
         /**
          * IRCv3 +draft/reply / +reply tag: the msgid of the message this is a reply to.
-         * Non-null when the sender used a reply feature (Ergo, soju, modern clients).
+         * Non-null when the sender used a reply feature
          */
         val replyToMsgId: String? = null,
         /**
@@ -573,20 +668,34 @@ sealed class IrcEvent {
      * soju/bouncer network context: emitted when the bouncer sends a BOUNCER NETWORK command
      * indicating which upstream network a message belongs to.
      *
-     * Modern bouncers (soju, pounce) multiplex many upstream networks onto a single connection.
+     * Modern bouncers multiplex many upstream networks onto a single connection.
      * Each upstream has a networkId that prefixes target names (e.g. "libera/#channel").
      * This event lets the UI show per-upstream channel trees instead of a flat list.
      *
+     * Per the soju.im/bouncer-networks spec, an attribute update has three possible states
+     * for any given key:
+     *  - absent from the message  > "preserve the prior value" (field is null in this event,
+     *    and key is NOT in [clearedKeys])
+     *  - present with non-empty value > set/update (field is non-null in this event)
+     *  - present with empty value (e.g. `state=`) > unset/clear (field is null AND key IS in
+     *    [clearedKeys] so the consumer can drop the prior value)
+     *
+     * The merge-semantics handler in IrcViewModel relies on [clearedKeys] to disambiguate the
+     * first and third cases.
+     *
      * @param removed True when the bouncer signalled deletion via `BOUNCER NETWORK <id> *`
-     *                (per the soju.im/bouncer-networks spec). When true, [name], [host] and
-     *                [state] are all null — the only meaningful field is [networkId].
+     *                (per the soju.im/bouncer-networks spec). When true, [name], [host],
+     *                [state] and [clearedKeys] are all null/empty, the only meaningful
+     *                field is [networkId].
      */
     data class BouncerNetwork(
         val networkId: String,
         val name: String?,
         val host: String?,
         val state: String?,      // "connected" | "connecting" | "disconnected"
-        val removed: Boolean = false
+        val removed: Boolean = false,
+        /** Lower-cased attribute keys that the message explicitly cleared (key= with empty value). */
+        val clearedKeys: Set<String> = emptySet()
     ) : IrcEvent()
 
     /**
@@ -682,6 +791,154 @@ sealed class IrcEvent {
      * necessarily sending a message. The ViewModel handles ensureBuffer + selectBuffer.
      */
     data class OpenQueryBuffer(val nick: String) : IrcEvent()
+
+    /**
+     * Emitted when the server has definitively rejected our credentials and continuing
+     * to retry them would be both pointless and harmful (server-side rate-limits, log
+     * floods, bouncer panic). Sources:
+     *   - 464 ERR_PASSWDMISMATCH (server PASS line rejected)
+     *   - 904 / 905 / 906 SASL authentication failed (wrong creds, signed-off authcid)
+     *
+     * Deliberately NOT emitted for:
+     *   - 907 SASL already authenticated (benign)
+     *   - 908 SASL mechanism unsupported (negotiation issue, may succeed with a
+     *     different mechanism on a retry)
+     *   - generic connection/handshake/TLS failures (transient, retry is correct)
+     *
+     * The viewmodel reacts by setting [authBlockedReconnect] for this network so the
+     * scheduled reconnect bails until the user takes manual action.
+     *
+     * @param reason A short human-readable description suitable for inline UI display.
+     * @param source Which protocol exchange produced the failure ("PASS" or "SASL"),
+     *               so the UI can hint at which credential to fix.
+     */
+    data class AuthFailed(val reason: String, val source: String) : IrcEvent()
+}
+
+/**
+ * Parse the attribute tokens of a `BOUNCER NETWORK <id> <attrs>` message into a typed
+ * [IrcEvent.BouncerNetwork] event. Pure function (no I/O, no state) — kept at top level
+ * to keep the message-dispatch lambda focused on dispatch.
+ *
+ * Per the soju.im/bouncer-networks spec:
+ *  - A single `*` token in [attrTokens] is the deletion sentinel: emits an event with
+ *    `removed = true` and all attribute fields null.
+ *  - Each attribute token has the form `key=value`. Values use IRCv3 message-tag
+ *    escape rules (`\s` → space, `\:` → `;`, `\\` → `\`, `\r` / `\n`); decoded via
+ *    [unescapeIrcTagValue].
+ *  - An attribute absent from the token list means "preserve the cached value" — the
+ *    consumer's merge logic in the BouncerNetwork event handler handles that.
+ *  - An attribute present with empty value (`key=`) means "unset". Surfaced in
+ *    [IrcEvent.BouncerNetwork.clearedKeys] so the merge can drop the cached value.
+ *  - Tokens with no `=` and empty tokens (e.g. from a stray double space) are skipped
+ *    individually rather than aborting the entire update — losing one attribute is
+ *    preferable to losing the whole state transition.
+ *
+ * Note that [attrTokens] should be the message's params from index 2 onward, plus the
+ * trailing field split on spaces. See the BOUNCER NETWORK dispatch site in [IrcClient]
+ * for the assembly.
+ */
+internal fun parseBouncerNetworkAttrs(
+    networkId: String,
+    attrTokens: List<String>
+): IrcEvent.BouncerNetwork {
+    if (attrTokens.size == 1 && attrTokens[0] == "*") {
+        return IrcEvent.BouncerNetwork(networkId, null, null, null, removed = true)
+    }
+    var name: String? = null
+    var host: String? = null
+    var state: String? = null
+    val cleared = mutableSetOf<String>()
+    for (tok in attrTokens) {
+        if (tok.isEmpty()) continue
+        val eq = tok.indexOf('=')
+        if (eq < 0) continue   // malformed token: skip, don't drop the message
+        val key = tok.substring(0, eq).lowercase()
+        val rawValue = tok.substring(eq + 1)
+        if (rawValue.isEmpty()) {
+            // Explicit clear (`key=` with no value).
+            cleared += key
+            continue
+        }
+        val value = unescapeIrcTagValue(rawValue)
+        when (key) {
+            "name"  -> if (name  == null) name  = value
+            "host"  -> if (host  == null) host  = value
+            "state" -> if (state == null) state = value
+        }
+    }
+    return IrcEvent.BouncerNetwork(networkId, name, host, state, clearedKeys = cleared)
+}
+
+/**
+ * Parse one line of a ZNC `*status` ListNetworks reply into a [IrcEvent.BouncerNetwork]
+ * event, or return null if the line is not a recognisable network row.
+ *
+ * ZNC has no spec'd `BOUNCER NETWORK` push protocol like soju does so the only way to
+ * discover what upstreams a ZNC user has is to send `ListNetworks` to `*status` and
+ * scrape the table reply. The format (from ZNC's `Modules/modstatus.cpp`):
+ *
+ * ```
+ * | Network | OnIRC | IRC Server               | IRC User              | Channels |
+ * +---------+-------+--------------------------+-----------------------+----------+
+ * | libera  | Yes   | irc.afternet.org:+6697   | nick!ident@host       | 5        |
+ * | oftc    | No    | irc.libera.chat:+6697    |                       | 0        |
+ * +---------+-------+--------------------------+-----------------------+----------+
+ * ```
+ *
+ * Recognition heuristic (kept conservative to avoid false positives from other ZNC
+ * commands that produce table output):
+ *  - Line starts with `|` and ends with `|` (a data row, not a `+---` divider).
+ *  - At least 4 cells separated by `|`.
+ *  - Second cell trims to "Yes" or "No" (the OnIRC indicator). This is what makes
+ *    ListNetworks unique among ZNC table outputs `ListChans`, `ListMods`, etc.
+ *    don't have a yes/no second column.
+ *  - First cell is non-empty (network name) and is not the literal "Network" header.
+ *
+ * The returned event uses the network name as both [IrcEvent.BouncerNetwork.networkId]
+ * and `name` because ZNC has no separate per-user opaque netid. Server cell is parsed
+ * for `host[:[+]port]` and surfaced as the `host` attribute. The state attribute maps
+ * Yes/No to "connected"/"disconnected" so the existing UI pill logic works unchanged.
+ *
+ * The IRC User cell (nick!ident@host) is currently ignored. the cloned profile inherits
+ * the parent's nick/username since most ZNC users connect
+ * with a single identity per network. A future enhancement could parse it and offer
+ * "use ZNC's per-network identity" as a checkbox during clone.
+ */
+internal fun parseZncListNetworksLine(line: String): IrcEvent.BouncerNetwork? {
+    val trimmed = line.trim()
+    if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
+
+    // Strip the outer `|` chars so split doesn't produce empty leading/trailing cells.
+    val inner = trimmed.substring(1, trimmed.length - 1)
+    val cells = inner.split('|').map { it.trim() }
+    if (cells.size < 4) return null
+
+    val name = cells[0]
+    val onirc = cells[1]
+    val server = cells[2]
+    // cells[3] = "IRC User" (nick!ident@host) currently unused, see kdoc.
+
+    if (name.isEmpty() || name.equals("Network", ignoreCase = true)) return null
+    if (!onirc.equals("Yes", ignoreCase = true) && !onirc.equals("No", ignoreCase = true)) return null
+
+    // ZNC's IRC Server cell looks like `server:+6697` strip the port (and the
+    // `+` TLS flag if present) to get just the host. We keep it best-effort: if the format
+    // is unfamiliar, surface the cell verbatim rather than dropping the row entirely.
+    val host = server.takeIf { it.isNotEmpty() }?.let { s ->
+        val colon = s.indexOf(':')
+        if (colon > 0) s.substring(0, colon) else s
+    }
+
+    val state = if (onirc.equals("Yes", ignoreCase = true)) "connected" else "disconnected"
+
+    return IrcEvent.BouncerNetwork(
+        networkId = name,   // ZNC has no opaque netid; the name doubles as the stable id.
+        name = name,
+        host = host,
+        state = state,
+        clearedKeys = emptySet()
+    )
 }
 
 class IrcClient(val config: IrcConfig) {
@@ -717,8 +974,10 @@ class IrcClient(val config: IrcConfig) {
          *    Uses the PKCS12 bytes' [java.util.Arrays.hashCode] so a rotated cert gets a
          *    different key automatically, without us keeping a reference to the secret bytes.
          *  - [clientCertPasswordHash]: password changes also invalidate the cached context.
-         *  - [tlsTofuFingerprint]: TOFU pinning uses a profile-specific trust manager, so
-         *    two profiles with different pins must NOT share a context.
+         *  - [tlsTofuFingerprint]: TOFU pinning installs an InsecureTrustManager and enforces
+         *    the pin post-handshake (the pin replaces chain validation), so two profiles with
+         *    different pins must NOT share a context. The pin value is also part of the JSSE
+         *    session-cache identity in case a server reuses sessions across cert rotations.
          */
         private data class SslContextKey(
             val allowInvalidCerts: Boolean,
@@ -759,6 +1018,16 @@ class IrcClient(val config: IrcConfig) {
     )
     /** True when the server advertises WHOX in ISUPPORT (005). */
     @Volatile private var whoxSupported: Boolean = false
+
+    /**
+     * MONITOR=<n> from ISUPPORT (005): maximum entries the server allows in this client's
+     * watch list. Int.MAX_VALUE means "advertised with no value" = no limit. -1 (the
+     * pre-005 default) means MONITOR support hasn't been confirmed. The /monitor dispatcher
+     * uses this to surface a clear message in the server buffer when MONITOR is unsupported.
+     * Was previously absent entirely - users on networks without MONITOR saw raw 421
+     * "Unknown command" lines after typing /monitor.
+     */
+    @Volatile private var monitorLimit: Int = -1
     /**
      * LINELEN from ISUPPORT 005: maximum bytes per IRC line including trailing CRLF.
      * RFC 1459 = 512; Ergo / InspIRCd often advertise 4096.
@@ -810,6 +1079,16 @@ class IrcClient(val config: IrcConfig) {
     // causing a K-line by flooding CTCP requests at us.
     private val ctcpLastReplyMs = mutableMapOf<String, Long>()
     private val CTCP_RATE_LIMIT_MS = 5_000L
+
+    /**
+     * Accumulator for IRCv3 MONITOR list entries (732 RPL_MONLIST). Per the spec, the
+     * server may split the list across multiple 732 lines and terminates the stream with
+     * 733 RPL_ENDOFMONLIST; we collect entries here and flush them as one ServerText line
+     * when 733 arrives. Cleared on each new /monitor L (the server starts the response
+     * with a fresh stream of 732 lines, but we also reset on 733 to be defensive against
+     * a malformed mid-stream second 732 burst).
+     */
+    private val monitorListBuffer = mutableListOf<String>()
     private fun nextLabel(): String = "h${labelCounter.incrementAndGet()}"
 
     /**
@@ -959,7 +1238,7 @@ class IrcClient(val config: IrcConfig) {
     /** Channels we've requested CHATHISTORY for in this session, to avoid re-fetching on rejoin. */
     private val historyRequested = mutableSetOf<String>()
 
-    /** Per-buffer "history expected until" timestamp — anything older than this is treated as
+    /** Per-buffer "history expected until" timestamp, anything older than this is treated as
      *  history rather than live, so we don't re-notify for already-seen messages. */
     private val historyExpectUntil = mutableMapOf<String, Long>()
 
@@ -974,6 +1253,32 @@ class IrcClient(val config: IrcConfig) {
 
     /** Buffered JOIN/QUIT lines per netsplit batch ID, used to collapse the events on close. */
     private val netsplitBuffer = mutableMapOf<String, MutableList<IrcMessage>>()
+
+    /**
+     * Open IRCv3 multiline batches.
+     *
+     * Per the multiline spec, a `BATCH +<id> draft/multiline <target>` opens a window
+     * where the next several PRIVMSG/NOTICE lines all target [target] and are accumulated
+     * into a single logical message. The terminating `BATCH -<id>` flushes the buffer.
+     *
+     * The tags we keep belong to the BATCH command itself - server-time, msgid, account,
+     * etc. - because per spec the batch's tags are authoritative for the merged message.
+     * Per-line tags on the inner PRIVMSG/NOTICEs only matter for `+draft/multiline-concat`,
+     * which we read off the inner line.
+     *
+     * Each accumulated entry is a `(text, concat)` pair: text is the PRIVMSG/NOTICE
+     * trailing, and concat is true when that line carried `+draft/multiline-concat`
+     * (meaning "no newline before me when joining").
+     */
+    private data class MultilineBatchState(
+        val target: String,
+        val command: String,        // PRIVMSG or NOTICE - inferred from the first inner line
+        val openTags: Map<String, String?>,
+        val openSenderPrefix: String?,  // From BATCH +<id> command, may be null
+        val innerSenderPrefix: String? = null,  // From first inner PRIVMSG/NOTICE; preferred over BATCH prefix
+        val parts: MutableList<Pair<String, Boolean>> = mutableListOf(),
+    )
+    private val openMultilineBatches = mutableMapOf<String, MultilineBatchState>()
 
     /** Heuristic: a message in [target] with [timeMs] should be treated as history if we're
      *  currently expecting history for that target and the message is older than ~now. */
@@ -1306,6 +1611,37 @@ class IrcClient(val config: IrcConfig) {
 						val target = normalizeMsgTarget(rawTarget)
 						val textRaw = msg.trailing ?: ""
 
+						// IRCv3 multiline: if this line is part of an open multiline batch
+						// for our session, accumulate its body into the batch state instead
+						// of emitting normally. The flush happens on BATCH -<id> close, which
+						// emits a single ChatMessage with the joined text. Per spec, any
+						// PRIVMSG line in the batch MUST target the same recipient as the
+						// batch open; we trust the server here rather than re-validating.
+						val multilineBatchIdPm = msg.tags["batch"]
+						if (multilineBatchIdPm != null) {
+							val mlState = openMultilineBatches[multilineBatchIdPm]
+							if (mlState != null) {
+								// Lock in the inner-line command (PRIVMSG vs NOTICE) AND
+								// capture the inner-line sender on the first inner line.
+								// Per spec the BATCH open MAY have a prefix, but the
+								// authoritative sender is on the inner lines. Subsequent
+								// lines must match the same sender (mixing is forbidden);
+								// we don't try to handle that case.
+								if (mlState.parts.isEmpty()) {
+									openMultilineBatches[multilineBatchIdPm] =
+										mlState.copy(
+											command = "PRIVMSG",
+											innerSenderPrefix = msg.prefix,
+										)
+								}
+								val concat = msg.tags.containsKey("+draft/multiline-concat") ||
+								             msg.tags.containsKey("draft/multiline-concat")
+								openMultilineBatches[multilineBatchIdPm]
+									?.parts?.add(textRaw to concat)
+								return  // Don't emit individually - flushed on BATCH -<id>.
+							}
+						}
+
 						// znc.in/playback: *playback module sends TIMESTAMP <buffer> <epoch>
 						// so we know when we were last seen and can request only missed messages.
 						// Only consume TIMESTAMP messages here; other messages from *playback
@@ -1322,14 +1658,33 @@ class IrcClient(val config: IrcConfig) {
 							// Non-TIMESTAMP: fall through.
 						}
 
-						// When echo-message is ACK'd the server reflects our own outbound
-						// "PRIVMSG *playback :PLAY …" commands back to us. Without this filter
-						// those echoes create a visible *playback query buffer on every connect.
-						// Treat them as internal plumbing and discard.
+						// echo-message handling for outbound messages to bouncer pseudo-users.
+						// When the user sends `/msg *status help`, ZNC reflects the PRIVMSG back
+						// to us with from=ourNick, target=*status. Without this filter the echo
+						// would fall through to the normal PM buffer routing and spawn a `*status`
+						// query buffer the user never wanted. Two sub-cases:
+						//
+						//  - target == *playback: silently drop (these are PLAY commands,
+						//    pure plumbing, no UI surface needed).
+						//  - any other pseudo-user (`*status`, `*controlpanel`, BouncerServ, …):
+						//    show the message inline in *server* with `<self> ...` framing so the
+						//    user can see what they sent in the same buffer where the reply lands.
+						//    Otherwise the conversation appears one-sided.
 						if (config.isBouncer
-							&& target.equals("*playback", ignoreCase = true)
+							&& !isChannelName(target)
 							&& nickEquals(from, currentNick)
+							&& isBouncerPseudoUser(target)
 						) {
+							if (target.equals("*playback", ignoreCase = true)) return
+							send(IrcEvent.Notice(
+								from = from,
+								target = "*server*",
+								text = "→ $target: $textRaw",
+								isPrivate = false,
+								isServer = true,
+								timeMs = serverTimeMs,
+								isHistory = (playbackHistory || isHeuristicHistory("*server*", serverTimeMs, nowMs))
+							))
 							return
 						}
 
@@ -1344,6 +1699,11 @@ class IrcClient(val config: IrcConfig) {
 						// arbitrary modules and the set is extensible.
 						// soju convention: a single named pseudo-user "BouncerServ".
 						if (config.isBouncer && !isChannelName(target) && isBouncerPseudoUser(from)) {
+							// ZNC discover-and-clone: opportunistically scrape any `*status` reply
+							// for ListNetworks rows.
+							if (config.bouncerKind == BouncerKind.ZNC && from.equals("*status", ignoreCase = true)) {
+								parseZncListNetworksLine(textRaw)?.let { send(it) }
+							}
 							// Show the message but route it to the server buffer.
 							send(IrcEvent.Notice(
 								from = from,
@@ -1509,6 +1869,29 @@ class IrcClient(val config: IrcConfig) {
 						val target = normalizeMsgTarget(rawTarget)
 						val text = msg.trailing ?: ""
 
+						// IRCv3 multiline: same buffering path as PRIVMSG above. Multiline
+						// batches can carry NOTICE rather than PRIVMSG (per spec - lines
+						// must be all the same kind), so the flush at BATCH -<id> picks
+						// the right event type from mlState.command.
+						val multilineBatchIdN = msg.tags["batch"]
+						if (multilineBatchIdN != null) {
+							val mlState = openMultilineBatches[multilineBatchIdN]
+							if (mlState != null) {
+								if (mlState.parts.isEmpty()) {
+									openMultilineBatches[multilineBatchIdN] =
+										mlState.copy(
+											command = "NOTICE",
+											innerSenderPrefix = msg.prefix,
+										)
+								}
+								val concat = msg.tags.containsKey("+draft/multiline-concat") ||
+								             msg.tags.containsKey("draft/multiline-concat")
+								openMultilineBatches[multilineBatchIdN]
+									?.parts?.add(text to concat)
+								return
+							}
+						}
+
 						// Check for CTCP reply (wrapped in \x01)
 						// Only process if it's from someone else, not our own echoed reply
 						if (text.startsWith("\u0001") && text.endsWith("\u0001") && !nickEquals(from, currentNick)) {
@@ -1536,6 +1919,14 @@ class IrcClient(val config: IrcConfig) {
 						// rendering inline in the server log. Same rationale and prefix check
 						// as the PRIVMSG handler above; see [isBouncerPseudoUser].
 						if (config.isBouncer && !isChannel && isBouncerPseudoUser(from)) {
+							// ZNC discover-and-clone: also scrape NOTICE bodies. *status itself
+							// almost always sends PRIVMSG (the primary hook is in that handler),
+							// but a handful of modules and configurations route their replies
+							// through NOTICE — keep the duplicate hook so neither delivery path
+							// silently misses upstream rows.
+							if (config.bouncerKind == BouncerKind.ZNC && from.equals("*status", ignoreCase = true)) {
+								parseZncListNetworksLine(text)?.let { send(it) }
+							}
 							send(IrcEvent.Notice(
 								from = from,
 								target = "*server*",
@@ -1965,38 +2356,11 @@ class IrcClient(val config: IrcConfig) {
 						when (subCmd) {
 							"NETWORK" -> {
 								// BOUNCER NETWORK <id> <attrs> | BOUNCER NETWORK <id> *
-								//
-								// Per the soju.im/bouncer-networks spec:
-								//  - `*` as the attributes field signals the network was deleted.
-								//  - Otherwise each token is key=value; a bare key (no `=`) means
-								//    the server didn't include that attribute in this update
-								//    (the client should preserve its existing value).
-								//  - Per the updated spec, key= with empty value means the
-								//    attribute was REMOVED. We don't model per-attribute removal
-								//    here since we only track three fields, but we treat empty
-								//    values as "no information" rather than "set to empty string".
+								// Parsing extracted to top-level [parseBouncerNetworkAttrs] for unit testability.
 								val networkId = msg.params.getOrNull(1) ?: return
 								val attrTokens = msg.params.drop(2) +
 									listOfNotNull(msg.trailing).flatMap { it.split(' ') }
-
-								// Deletion sentinel: a lone "*" in the attrs slot.
-								if (attrTokens.size == 1 && attrTokens[0] == "*") {
-									send(IrcEvent.BouncerNetwork(networkId, null, null, null, removed = true))
-									return
-								}
-
-								var name: String? = null; var host: String? = null; var state: String? = null
-								for (tok in attrTokens) {
-									val eq = tok.indexOf('='); if (eq < 0) return
-									val key = tok.substring(0, eq).lowercase()
-									val value = tok.substring(eq + 1).takeIf { it.isNotEmpty() }
-									when (key) {
-										"name"  -> if (name  == null) name  = value
-										"host"  -> if (host  == null) host  = value
-										"state" -> if (state == null) state = value
-									}
-								}
-								send(IrcEvent.BouncerNetwork(networkId, name, host, state))
+								send(parseBouncerNetworkAttrs(networkId, attrTokens))
 							}
 							// BOUNCER ADDNETWORK / DELNETWORK / CHANGENETWORK: soju bouncer management commands.
 							// Surface them as status text so the user can see the result in the server buffer.
@@ -2130,6 +2494,16 @@ class IrcClient(val config: IrcConfig) {
      */
     @Volatile private var learnedFingerprint: String? = null
 
+    /**
+     * Soft hostname-verification result from THIS connection's handshake. Non-null when the
+     * cert chain validated but its SAN list did NOT cover [config.host]. The [events] flow
+     * picks this up after the socket is open and emits [IrcEvent.TlsHostnameMismatch] so the
+     * UI can surface a warning - the connection itself is allowed to proceed (see the
+     * docstring on [IrcEvent.TlsHostnameMismatch]). Same staged-field pattern as
+     * [learnedFingerprint] because [openSocket] is not inside the channelFlow's send scope.
+     */
+    @Volatile private var pendingHostnameMismatchSans: List<String>? = null
+
     fun tlsInfo(): String? = lastTlsInfo
 	
 	fun isConnectedNow(): Boolean {
@@ -2150,8 +2524,14 @@ class IrcClient(val config: IrcConfig) {
 		userClosing = true
 		lastQuitReason = reason
 
-		// send QUIT before closing
-		runCatching { outbound.send("QUIT :$reason") }
+		// send QUIT before closing.
+		// Use trySend rather than suspending send: if the outbound channel is full (cap 300,
+		// common during disconnect storms when the writer is stuck on a dead socket), a
+		// suspending send hangs indefinitely. The delay(250) below would never fire and the
+		// socket would never close — surfaces as the UI freezing on "Disconnecting…" until
+		// the OS kills the app. Dropping the QUIT silently is acceptable: the server will
+		// see a TCP close shortly and disconnect us anyway, just without a custom reason.
+		runCatching { outbound.trySend("QUIT :$reason") }
 
 		delay(250)
 
@@ -2366,7 +2746,7 @@ class IrcClient(val config: IrcConfig) {
                 // Signal the ViewModel to open/focus the query buffer via a fake incoming event.
                 commandEvents.trySend(IrcEvent.OpenQueryBuffer(target))
             }
-            // Services shorthands: /ns, /cs, /as, /hs, /ms, /bs
+            // Services shorthands: /ns, /cs, /as, /hs, /ms, /bs, /x3
             "ns" -> {
                 val rest = parts.drop(1).joinToString(" ").trim()
                 if (rest.isNotBlank()) privmsg("NickServ", rest)
@@ -2378,6 +2758,10 @@ class IrcClient(val config: IrcConfig) {
             "as" -> {
                 val rest = parts.drop(1).joinToString(" ").trim()
                 if (rest.isNotBlank()) privmsg("AuthServ", rest)
+            }
+            "x3" -> {
+                val rest = parts.drop(1).joinToString(" ").trim()
+                if (rest.isNotBlank()) privmsg("X3", rest)
             }
             "hs" -> {
                 val rest = parts.drop(1).joinToString(" ").trim()
@@ -2483,8 +2867,30 @@ class IrcClient(val config: IrcConfig) {
             }
             "nick" -> parts.getOrNull(1)?.let { sendRaw("NICK $it") }
             "topic" -> {
-                val target = parts.getOrNull(1) ?: currentBuffer
-                val newTopic = parts.drop(2).joinToString(" ").takeIf { it.isNotBlank() }
+                // /topic with no args                  → query current channel's topic
+                // /topic <new topic>                   → set current channel's topic (multi-word)
+                // /topic <#channel>                    → query that channel's topic
+                // /topic <#channel> <new topic>        → set that channel's topic
+                //
+                // Previous logic always treated parts[1] as the target, so
+                // `/topic Hello world` sent `TOPIC Hello :world` against channel "Hello"
+                // instead of setting the current channel's topic to "Hello world". Fixed
+                // by checking whether parts[1] looks like a channel before consuming it
+                // as the target — same disambiguation as /part.
+                val firstArg = parts.getOrNull(1)
+                val target = when {
+                    firstArg != null && isChannelName(firstArg) -> firstArg
+                    currentBuffer != "*server*" -> currentBuffer
+                    firstArg != null -> firstArg  // last-resort: send as-is, server will 403
+                    else -> return
+                }
+                // Re-derive whether we consumed parts[1] as the channel: if the chosen
+                // target equals firstArg AND firstArg looked like a channel, drop the
+                // first arg from the topic text. Otherwise the whole tail is the topic.
+                val firstWasChannel = firstArg != null && isChannelName(firstArg) && target == firstArg
+                val newTopic = (if (firstWasChannel) parts.drop(2) else parts.drop(1))
+                    .joinToString(" ")
+                    .takeIf { it.isNotBlank() }
                 sendRaw(if (newTopic == null) "TOPIC $target" else "TOPIC $target :$newTopic")
             }
             "mode" -> {
@@ -2710,21 +3116,41 @@ class IrcClient(val config: IrcConfig) {
 				val args = parts.drop(1).joinToString(" ")
 				if (args.isNotBlank()) sendRaw("OPER $args")
 			}
-			"raw" -> {
+			"raw", "quote" -> {
+				// /raw and /quote are aliases — both send the rest of the line verbatim to
+				// the server. /quote is the more traditional IRC name (mIRC, irssi, weechat
+				// all use it); /raw is the descriptive variant some clients prefer. Both
+				// are supported so muscle memory from any other client works here.
 				val line = parts.drop(1).joinToString(" ")
 				if (line.isNotBlank()) sendRaw(line)
 			}
 			// IRCv3 MONITOR: watch list management
-			// /monitor + nick[,nick...]   - add to watch list
+			// /monitor + nick[,nick...]   - add to watch list  (or /monitor +nick)
 			// /monitor - nick[,nick...]   - remove from watch list
 			// /monitor C                  - clear watch list
 			// /monitor L                  - list current watch list
 			// /monitor S                  - request status of all watched nicks
 			"monitor" -> {
+				// Surface unsupported MONITOR up-front instead of letting the user discover
+				// it via a raw "421 Unknown command" line. monitorLimit stays at -1 until we
+				// see a MONITOR token in 005; if the server didn't advertise it after
+				// registration completed (RPL_WELCOME received) we treat it as unsupported.
+				// This is the common case on legacy IRCds (e.g. ircu without the
+				// watch-monitor patch).
+				if (registered && monitorLimit == -1) {
+					commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+						text = "MONITOR is not supported by this server.", isPrivate = false))
+					return
+				}
 				val arg = parts.drop(1).joinToString(" ").trim()
 				if (arg.isBlank()) {
+					val limitMsg = when {
+						monitorLimit == -1 -> ""
+						monitorLimit == Int.MAX_VALUE -> "  (server advertises no limit)"
+						else -> "  (server limit: $monitorLimit entries)"
+					}
 					commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
-						text = "Usage: /monitor +nick[,nick] | -nick[,nick] | C | L | S", isPrivate = false))
+						text = "Usage: /monitor +nick[,nick] | -nick[,nick] | C | L | S$limitMsg", isPrivate = false))
 				} else {
 					sendRaw("MONITOR $arg")
 				}
@@ -2809,6 +3235,14 @@ class IrcClient(val config: IrcConfig) {
             send(IrcEvent.TlsFingerprintLearned(fp))
         }
 
+        // Same drain pattern for the soft hostname-mismatch warning. Cleared so a reconnect
+        // on the same IrcClient against a re-issued cert doesn't keep re-emitting the warning
+        // when the new cert actually does match.
+        pendingHostnameMismatchSans?.let { sans ->
+            pendingHostnameMismatchSans = null
+            send(IrcEvent.TlsHostnameMismatch(expected = config.host, sans = sans))
+        }
+
         // If TLS is enabled put TLS session info in the server buffer.
         tlsInfo()?.takeIf { it.isNotBlank() }?.let { info ->
             send(IrcEvent.ServerText("*** TLS: $info"))
@@ -2817,6 +3251,11 @@ class IrcClient(val config: IrcConfig) {
         // Set up encoding-aware I/O using EncodingHelper
         val inputStream = s.getInputStream()
         val outputStream = s.getOutputStream()
+
+        // Serialises every write to [outputStream]. See writeLine() below for why this is
+        // needed. Local to this events() invocation so each new connection gets a fresh
+        // mutex and we can't accidentally hold a stale lock across reconnects.
+        val writeMutex = Mutex()
 
         // Wrap the raw socket InputStream in a BufferedInputStream so EncodingLineReader's
         // byte-by-byte read() loop draws from an 8 KB in-memory buffer instead of issuing
@@ -2845,8 +3284,19 @@ class IrcClient(val config: IrcConfig) {
             val packet = ByteArray(bytes.size + CRLF.size)
             bytes.copyInto(packet)
             CRLF.copyInto(packet, destinationOffset = bytes.size)
-            outputStream.write(packet)
-            outputStream.flush()
+            // Serialise with a mutex: writeLine() is invoked from the writerJob, the PING
+            // coroutine, the read loop's PONG handler, and the inline registration sequence
+            // (PASS / CAP LS / NICK / USER) on different IO-pool threads. Without
+            // serialisation, two concurrent write() calls on the same SSLOutputStream can
+            // interleave their byte arrays - producing a malformed IRC line on the wire that
+            // some servers tolerate (Libera, soju) and others kill the connection on. SSL
+            // makes this even worse: a half-written TLS record corrupts the stream and the
+            // peer drops with "decryption_failed". The mutex is fair-FIFO under contention,
+            // so PINGs don't get starved by a flood of PRIVMSG traffic.
+            writeMutex.withLock {
+                outputStream.write(packet)
+                outputStream.flush()
+            }
         }
 
         val writerJob = launch(Dispatchers.IO) {
@@ -2932,6 +3382,9 @@ class IrcClient(val config: IrcConfig) {
         openPlaybackBatches.clear()
         openNetsplitBatches.clear()
         netsplitBuffer.clear()
+        monitorListBuffer.clear()
+        monitorLimit = -1
+        openMultilineBatches.clear()
 
 // Numeric dispatch table (RFC + common de-facto numerics)
 //
@@ -3008,6 +3461,15 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                 "LINELEN" -> v?.toIntOrNull()?.takeIf { it in 512..65535 }?.let { ll = it }
                 // WHOX is a flag token (no value): server supports extended WHO %fields,querytype
                 "WHOX" -> whoxSupported = true
+                // MONITOR=<n> declares the maximum watch list size per client. Empty value
+                // means "no limit". Stored so that the /monitor dispatcher can report a
+                // useful "limit reached" message instead of "0 monitors available" - which
+                // is what the user saw when monitorLimit defaulted to 0 and the dispatch
+                // path treated the missing value as the limit itself.
+                "MONITOR" -> {
+                    monitorLimit = if (v.isNullOrBlank()) Int.MAX_VALUE
+                                   else v.toIntOrNull()?.takeIf { it >= 0 } ?: Int.MAX_VALUE
+                }
             }
         }
 
@@ -3193,11 +3655,15 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
     },
 
     // IRCv3 MONITOR - online/offline notifications for watched nicks.
-    // 730 MONONLINE  <nick>[!user@host] [account][,...]  - nick(s) came online
+    // 730 RPL_MONONLINE       <client> :target[!user@host] [account][,...]
     //   With draft/extended-monitor, each entry is nick!user@host or nick!user@host account.
-    // 731 MONOFFLINE <nick>[,<nick>...]  - nick(s) went offline
-    // 732 MONLIST    <nick>[,<nick>...]  - list entry (may span multiple 732 lines)
-    // 733 MONLISTFULL                   - watch list is full
+    // 731 RPL_MONOFFLINE      <client> :target[,target...]
+    // 732 RPL_MONLIST         <client> :target[,target...]   - list page; multiple 732s
+    //   may arrive in sequence before the terminating 733.
+    // 733 RPL_ENDOFMONLIST    <client> :End of MONITOR list  - terminates the 732 stream.
+    // 734 ERR_MONLISTFULL     <client> <limit> <targets> :Monitor list is full.
+    //   Sent when /monitor + tries to add nicks beyond the server's limit; <targets> lists
+    //   the names that could NOT be added, NOT the entire watch list.
     "730" to handler@{ msg, serverTime, _, _ ->
         val raw = (msg.trailing ?: msg.params.drop(1).joinToString(","))
         for (entry in raw.split(",").map { it.trim() }.filter { it.isNotBlank() }) {
@@ -3217,17 +3683,39 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
             .split(",").map { it.trim().substringBefore("!") }.filter { it.isNotBlank() }
         for (nick in nicks) send(IrcEvent.MonitorStatus(nick, online = false, timeMs = serverTime))
     },
-    "732" to handler@{ msg, serverTime, _, _ ->
+    "732" to handler@{ msg, _, _, _ ->
+        // Accumulate entries across multiple 732 lines instead of emitting "MONITOR list:"
+        // once per page. The terminating 733 flushes the buffer in one ServerText line.
+        // Without this, /monitor L on a server that sends one nick per 732 produced one
+        // ServerText line per nick - cluttering the server buffer for a watch list of any
+        // meaningful size.
         val nicks = (msg.trailing ?: msg.params.drop(1).joinToString(","))
             .split(",").map { it.trim().substringBefore("!") }.filter { it.isNotBlank() }
-        // 732 = MONLIST reply - treat as online (we only know they're watched, not their status)
-        // Surface in server buffer as a status text so the user can see their list.
-        val listStr = nicks.joinToString(", ")
-        if (listStr.isNotBlank()) send(IrcEvent.ServerText("MONITOR list: $listStr"))
+        if (nicks.isNotEmpty()) monitorListBuffer.addAll(nicks)
     },
-    "733" to handler@{ msg, _, _, _ ->
+    "733" to handler@{ _, _, _, _ ->
+        // RPL_ENDOFMONLIST: flush the accumulated 732 entries.
+        val collected = monitorListBuffer.toList()
+        monitorListBuffer.clear()
+        if (collected.isEmpty()) {
+            send(IrcEvent.ServerText("MONITOR list is empty"))
+        } else {
+            send(IrcEvent.ServerText("MONITOR list (${collected.size}): ${collected.joinToString(", ")}"))
+        }
+    },
+    "734" to handler@{ msg, _, _, _ ->
+        // ERR_MONLISTFULL: <client> <limit> <targets> :Monitor list is full.
+        // params[0] is our nick; params[1] is the numeric limit; params[2] is the
+        // CSV of nicks the server refused to add. Surface the limit AND the nicks so
+        // the user can see what got dropped, not just that "the list" is full.
         val limit = msg.params.getOrNull(1) ?: "?"
-        send(IrcEvent.ServerText("MONITOR list is full (limit: $limit)"))
+        val rejected = msg.params.getOrNull(2)?.takeIf { it.isNotBlank() }
+        val msgText = if (rejected != null) {
+            "MONITOR list is full (limit: $limit) — could not add: $rejected"
+        } else {
+            "MONITOR list is full (limit: $limit)"
+        }
+        send(IrcEvent.ServerText(msgText))
     },
 )
 
@@ -3245,7 +3733,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// require a server-wide PASS independently of per-user SASL authentication.
 			val skipPass = config.sasl is SaslConfig.Enabled && config.isBouncer
 			if (!skipPass) {
-				config.serverPassword?.takeIf { it.isNotBlank() }?.let { writeLine("PASS :$it") }
+				// effectivePassLine prepends the bouncer username + network selector when
+				// applicable (e.g. "alice/libera:secret") so the bouncer can route the
+				// connection to the right upstream. For non-bouncer profiles or already-
+				// hand-formatted passwords, this is a no-op pass-through.
+				config.effectivePassLine(config.serverPassword)?.let { writeLine("PASS :$it") }
 			}
 			writeLine("CAP LS 302")
 			writeLine("NICK ${config.nick}")
@@ -3370,6 +3862,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					is IrcAction.EmitError -> send(IrcEvent.Error(a.text))
 					is IrcAction.EmitCapNew -> send(IrcEvent.CapNew(a.caps))
 					is IrcAction.EmitCapDel -> send(IrcEvent.CapDel(a.caps))
+					is IrcAction.EmitAuthFailed -> send(IrcEvent.AuthFailed(reason = a.reason, source = "SASL"))
 				}
 
 				// BATCH tracking (used for draft/chathistory, draft/event-playback, labeled-response).
@@ -3388,6 +3881,24 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						if (type.equals("netsplit", ignoreCase = true) || type.equals("netjoin", ignoreCase = true)) {
 							openNetsplitBatches[id] = type.lowercase()
 						}
+						// IRCv3 multiline: BATCH +<id> draft/multiline <target>
+						// Captures the target and the BATCH-level tags (server-time, msgid,
+						// account, etc.); inner PRIVMSG/NOTICE lines tagged with batch=<id>
+						// will be buffered instead of emitted, and flushed together when
+						// BATCH -<id> closes.
+						if (type.equals("draft/multiline", ignoreCase = true) ||
+							type.equals("multiline", ignoreCase = true)
+						) {
+							val target = msg.params.getOrNull(2) ?: ""
+							if (target.isNotBlank()) {
+								openMultilineBatches[id] = MultilineBatchState(
+									target = target,
+									command = "PRIVMSG",  // overwritten on first inner line
+									openTags = msg.tags,
+									openSenderPrefix = msg.prefix,
+								)
+							}
+						}
 						// labeled-response: BATCH +<id> labeled-response - the reply batch for
 						// a labeled outbound command (e.g. CHATHISTORY or PRIVMSG with echo-message).
 						// We don't need to open any special state for it; incoming messages within
@@ -3398,6 +3909,65 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					} else if (idToken.startsWith("-")) {
 						val id = idToken.drop(1)
 						openPlaybackBatches.remove(id)
+						// Flush a closing multiline batch as a single ChatMessage / Notice
+						// event with the joined body. Per spec: lines without
+						// +draft/multiline-concat get a "\n" separator; lines WITH it get
+						// no separator (handles flood-control mid-paragraph splits).
+						val mlState = openMultilineBatches.remove(id)
+						if (mlState != null) {
+							val joined = buildString {
+								for ((idx, part) in mlState.parts.withIndex()) {
+									if (idx > 0 && !part.second) append('\n')
+									append(part.first)
+								}
+							}
+							// Per spec, the BATCH command MAY carry a prefix but the
+							// authoritative sender lives on each inner PRIVMSG/NOTICE line.
+							// Prefer the inner-line prefix; fall back to the BATCH-line
+							// prefix if for some reason the inner lines arrived unprefixed
+							// (which would be a server bug, but we degrade gracefully).
+							val effectivePrefix = mlState.innerSenderPrefix ?: mlState.openSenderPrefix
+							val from = effectivePrefix?.substringBefore('!') ?: ""
+							if (from.isNotBlank() && joined.isNotEmpty()) {
+								val tagsTime = parseServerTimeMs(mlState.openTags)
+								val msgid = mlState.openTags["msgid"]
+								val account = mlState.openTags["account"]
+								val replyTo = mlState.openTags["+draft/reply"] ?: mlState.openTags["+reply"]
+								val isChan = isChannelName(mlState.target)
+								val nowMs2 = System.currentTimeMillis()
+								// Reuse the same is-history determination the per-message
+								// path uses (msg-time + heuristic) so a multiline message
+								// replayed via chathistory is still classified correctly.
+								val isHistMl = isPlaybackHistory(mlState.openTags) ||
+									isHeuristicHistory(mlState.target, tagsTime, nowMs2)
+								if (mlState.command.equals("NOTICE", ignoreCase = true)) {
+									send(IrcEvent.Notice(
+										from = from,
+										target = mlState.target,
+										text = joined,
+										isPrivate = !isChan,
+										isServer = false,
+										timeMs = tagsTime,
+										isHistory = isHistMl,
+										msgId = msgid,
+										replyToMsgId = replyTo,
+									))
+								} else {
+									send(IrcEvent.ChatMessage(
+										from = from,
+										target = mlState.target,
+										text = joined,
+										isPrivate = !isChan,
+										isAction = false,  // multiline never carries CTCP wrapping
+										timeMs = tagsTime,
+										isHistory = isHistMl,
+										msgId = msgid,
+										replyToMsgId = replyTo,
+										senderAccount = account,
+									))
+								}
+							}
+						}
 						// Flush buffered netsplit/netjoin events as a single collapsed status line.
 						val batchType = openNetsplitBatches.remove(id)
 						if (batchType != null) {
@@ -3425,6 +3995,19 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 				// server numerics (MOTD/WHOIS/errors/etc)
 				val numericText = formatNumeric(msg)
+
+				// 464 ERR_PASSWDMISMATCH: server-PASS rejected. Emit a typed AuthFailed
+				// event so the viewmodel can halt auto-reconnect — without this, the
+				// retry loop will keep firing the same wrong password and either flood
+				// the server log or hit fail2ban / connect-throttle. Numeric still falls
+				// through to the normal ServerText render below so the user sees what
+				// happened in the buffer.
+				if (msg.command == "464") {
+					send(IrcEvent.AuthFailed(
+						reason = msg.trailing ?: "Password incorrect",
+						source = "PASS"
+					))
+				}
 
 				// Pending-ban completion: extracted to keep the events() channelFlow body
 				// under the JVM 64KB method-size limit. The handler reads pendingBansByNick
@@ -3635,26 +4218,83 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			soTimeout = config.readTimeoutMs
 		}
 
+		// Resolve every address the host has (both A/IPv4 and AAAA/IPv6). InetSocketAddress(host, port)
+		// resolves once and binds to a single address (usually the first AAAA) which means an IRC
+		// server with an AAAA record but no working IPv6 path (very common on mobile carriers, hotel
+		// Wi-Fi, and dual-stack networks where v6 routing is broken) just gives "Connection refused"
+		// or a connect-timeout with no fallback. RFC 8305 Happy Eyeballs would race v6 + v4 in
+		// parallel; we use the simpler sequential-fallback variant; try each resolved address in
+		// turn, accept the first that connects, surface only the last error if all fail. This is
+		// the same approach OkHttp / curl / SSH default to.
+		val resolved: Array<InetAddress> = try {
+			InetAddress.getAllByName(config.host)
+		} catch (uhe: java.net.UnknownHostException) {
+			// Re-throw with the host name in the message so the friendly-error mapper can show
+			// the user something more useful than the bare exception message.
+			throw java.net.UnknownHostException("Unable to resolve ${config.host}: ${uhe.message ?: "no DNS record"}")
+		}
+		require(resolved.isNotEmpty()) { "No addresses resolved for ${config.host}" }
+
+		/**
+		 * Connect [s] to one resolved address, throwing on failure. Caller is responsible for
+		 * closing [s] if this throws. Wrapped here so the TLS and plaintext branches can share
+		 * the per-address connect logic without duplicating the address-iteration loop.
+		 */
+		fun connectTo(s: Socket, addr: InetAddress) {
+			s.connect(InetSocketAddress(addr, config.port), config.connectTimeoutMs)
+		}
+
 		return if (!config.useTls) {
-			val s = baseSocket()
-			s.connect(InetSocketAddress(config.host, config.port), config.connectTimeoutMs)
-			s
+			var lastError: Throwable? = null
+			for (addr in resolved) {
+				val s = baseSocket()
+				try {
+					connectTo(s, addr)
+					return s
+				} catch (t: Throwable) {
+					runCatching { s.close() }
+					lastError = t
+					// Continue to the next resolved address. Common cases for the loop continuing:
+					// AAAA returned but the carrier blackholes IPv6 traffic (Connect timed out);
+					// IPv6 reachable but the server doesn't listen on it (Connection refused);
+					// firewall path-MTU issues that show up as connect-time RST.
+				}
+			}
+			throw lastError ?: java.net.ConnectException("All resolved addresses failed for ${config.host}")
 		} else {
 			// Shared SSLContext cache: reconnects to the same profile reuse the same context
 			// and therefore the same JSSE session cache, letting the platform perform TLS
 			// session resumption (abbreviated handshake). Cuts a round-trip on reconnects.
 			//
 			// SSLContext.init() may only be called ONCE per context instance, so the cache key
-			// must encode every aspect of the context's behaviour — see SslContextKey above.
+			// must encode every aspect of the context's behaviour, see SslContextKey above.
 			val cacheKey = SslContextKey(
 				allowInvalidCerts = config.allowInvalidCerts,
 				clientCertContentHash = config.clientCert?.pkcs12?.let { java.util.Arrays.hashCode(it) } ?: 0,
 				clientCertPasswordHash = config.clientCert?.password?.hashCode() ?: 0,
 				tlsTofuFingerprint = config.tlsTofuFingerprint,
 			)
+			// "Pin mode" is tied to allowInvalidCerts. The pin layer exists to
+			// substitute for chain validation when the cert is self-signed or otherwise can't
+			// be CA-verified, i.e. exactly the case the user opted into via "Allow invalid
+			// certificates".
+			//
+			//   allowInvalidCerts = false: standard JSSE trust path (CA chain + RFC 6125),
+			//                              pin field IGNORED on verify, learning IGNORED on
+			//                              first connect. Any stored pin on this profile is
+			//                              dormant data, only consulted if the user ever
+			//                              flips invalid-certs on again.
+			//   allowInvalidCerts = true:  permissive trust manager + post-handshake pin
+			//                              check (verify if pin stored, learn otherwise).
+			//
+			// This matches what the user expects from the "Allow invalid certificates"
+			// checkbox: it's the master switch that activates the TOFU layer. With it off,
+			// the cert is being validated by the system's CAs and there's nothing for TOFU
+			// to add.
+			val pinMode = config.allowInvalidCerts
 			val sslContext = sslContextCache.getOrPut(cacheKey) {
 				val ctx = SSLContext.getInstance("TLS")
-				val tm = if (config.allowInvalidCerts) arrayOf<TrustManager>(InsecureTrustManager()) else null
+				val tm = if (pinMode) arrayOf<TrustManager>(InsecureTrustManager()) else null
 				val km: Array<KeyManager>? = config.clientCert?.let { cert ->
 					try {
 						val ks = KeyStore.getInstance("PKCS12")
@@ -3674,13 +4314,43 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				ctx
 			}
 
-			val raw = baseSocket().apply {
-				connect(InetSocketAddress(config.host, config.port), config.connectTimeoutMs)
+			// Try each resolved address until one connects (or all fail). The TCP connect happens
+			// per-address; the TLS handshake is only attempted on the address whose TCP connect
+			// succeeded. If the TLS handshake itself fails, we do NOT try the next address —
+			// TLS failures are configuration issues (cert mismatch, protocol mismatch, etc.) and
+			// retrying against a different IP is unlikely to help and would obscure the real cause.
+			var lastError: Throwable? = null
+			var raw: Socket? = null
+			for (addr in resolved) {
+				val candidate = baseSocket()
+				try {
+					connectTo(candidate, addr)
+					raw = candidate
+					break
+				} catch (t: Throwable) {
+					runCatching { candidate.close() }
+					lastError = t
+				}
 			}
+			val rawSocket = raw ?: throw (lastError
+				?: java.net.ConnectException("All resolved addresses failed for ${config.host}"))
 
-			val ss = sslContext.socketFactory.createSocket(raw, config.host, config.port, true) as SSLSocket
+			val ss = sslContext.socketFactory.createSocket(rawSocket, config.host, config.port, true) as SSLSocket
 			val allowed = ss.supportedProtocols.filter { it == "TLSv1.3" || it == "TLSv1.2" }
 			if (allowed.isNotEmpty()) ss.enabledProtocols = allowed.toTypedArray()
+
+			// Hostname verification (RFC 6125) is performed AFTER the handshake instead of
+			// during it. Conscrypt's setEndpointIdentificationAlgorithm("HTTPS") would refuse
+			// the connection on mismatch, but in practice many small IRC networks run certs
+			// with legacy CNs that don't match the connect host; failing closed there caused
+			// a regression. Instead, the post-handshake check below extracts the SAN list,
+			// matches it against [config.host], and emits a soft warning event on miss while
+			// letting the connection proceed. Users who want strict identity have TOFU pinning
+			// available as a separate, explicit opt-in.
+			//
+			// Note: chain validation (the cert chains to a system CA, isn't expired, etc.) is
+			// still enforced by the default JSSE trust manager in non-pin mode. Only the
+			// hostname-binds-to-cert step is downgraded to a warning.
 
 			// Apply a bounded soTimeout during startHandshake() so TLS negotiation cannot hang
 			// forever. On some devices (MediaTek SoCs, certain MIUI/OneUI builds) BoringSSL
@@ -3696,65 +4366,126 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				ss.startHandshake()
 			} catch (e: Exception) {
 				runCatching { ss.close() }
-				runCatching { raw.close() }
+				runCatching { rawSocket.close() }
 				throw e
 			}
 			ss.soTimeout = config.readTimeoutMs  // restore post-handshake timeout
 
-			// TOFU certificate pinning — performed AFTER the handshake so we have access to
-			// the peer cert chain. Strategy:
-			//   1. Compute SHA-256 of the leaf (peer) cert.
-			//   2. If no fingerprint is stored on this config, capture the computed one into
-			//      [learnedFingerprint] — the events flow will emit TlsFingerprintLearned so
-			//      the caller can persist it. This ONLY fires when allowInvalidCerts = true
-			//      (otherwise the standard trust chain already vouched for the cert and TOFU
-			//      pinning would add no value).
-			//   3. If a fingerprint IS stored, compare (after [normaliseFingerprint]). On
-			//      mismatch, throw [TlsFingerprintMismatchException] so the connect flow
-			//      surfaces TlsFingerprintChanged and refuses the connection.
-			//   4. On match, proceed silently.
-			//
-			// Any exception during cert extraction is logged-and-ignored: the fallback is
-			// the standard JSSE trust decision that already happened during the handshake,
-			// so TOFU failures on edge-case peers don't break connectivity.
-			runCatching {
-				val peerCerts = ss.session.peerCertificates
-				val leaf = peerCerts.firstOrNull() as? java.security.cert.X509Certificate
-				if (leaf != null) {
-					val actualFp = computeFingerprintSha256(leaf)
-					val storedRaw = config.tlsTofuFingerprint?.takeIf { it.isNotBlank() }
-					if (storedRaw == null) {
-						// First-seen: only "learn" a fingerprint when we were trusting
-						// everything anyway. Pinning a CA-issued cert would just double-lock
-						// the user out on legitimate renewals for no security gain.
-						if (config.allowInvalidCerts) {
-							learnedFingerprint = actualFp
-						}
-					} else {
-						val storedNorm = normaliseFingerprint(storedRaw)
-						if (!storedNorm.equals(actualFp, ignoreCase = true)) {
-							runCatching { ss.close() }
-							runCatching { raw.close() }
-							throw TlsFingerprintMismatchException(
-								stored = storedNorm,
-								actual = actualFp,
-							)
-						}
+			// Soft hostname check (skipped in pin mode: TOFU pinning is the identity proof in
+			// that case, and self-signed bouncer certs commonly have CNs that won't match the
+			// connect host). Stages the SAN list into [pendingHostnameMismatchSans]; the events
+			// flow scope picks it up and emits IrcEvent.TlsHostnameMismatch (we can't send()
+			// from here because openSocket is not inside the channelFlow's ProducerScope).
+			if (!pinMode) {
+				runCatching {
+					val peerCerts = ss.session.peerCertificates
+					val leaf = peerCerts.firstOrNull() as? java.security.cert.X509Certificate
+					if (leaf != null && !hostnameMatchesCert(config.host, leaf)) {
+						val sans = leaf.subjectAlternativeNames?.mapNotNull { entry ->
+							// SAN entries are List<Any> where [0] is the type code (2 = DNS,
+							// 7 = IP) and [1] is the value. We only surface DNS and IP for the
+							// warning; other types (URI, RFC822) aren't relevant to IRC.
+							val type = entry.getOrNull(0) as? Int ?: return@mapNotNull null
+							val value = entry.getOrNull(1) as? String ?: return@mapNotNull null
+							if (type == 2 || type == 7) value else null
+						} ?: emptyList()
+						pendingHostnameMismatchSans = sans
 					}
 				}
-			}.onFailure { t ->
-				// Re-throw the sentinel; swallow anything else (cert-extraction quirks
-				// shouldn't break an already-successfully-handshook connection).
-				if (t is TlsFingerprintMismatchException) throw t
 			}
 
-			// Capture basic session info for UI (cipher/protocol/cert subject)
+			// TOFU certificate pinning, performed AFTER the handshake so we have access to
+			// the peer cert chain.
+			//
+			// The whole TOFU layer is gated on allowInvalidCerts. With invalid-certs OFF,
+			// the standard JSSE trust path (CA chain + RFC 6125 hostname check) already
+			// validated the cert during the handshake, and TOFU has nothing to add.
+			//
+			// Strategy when invalid-certs is ON:
+			//   1. Compute SHA-256 of the leaf (peer) cert.
+			//   2. If no fingerprint is stored on this config, capture the computed one into
+			//      [learnedFingerprint] - the events flow will emit TlsFingerprintLearned so
+			//      the caller can persist it.
+			//   3. If a fingerprint IS stored, compare (after [normaliseFingerprint]) against
+			//      the union of (primary + extras set). On mismatch, throw
+			//      [TlsFingerprintMismatchException]. On match, proceed silently.
+			//
+			// Failure handling differs by whether a pin is configured: when a pin is stored,
+			// any failure to extract/compare the cert is a hard error (fail closed, pinning
+			// is a security guarantee the user opted into; a "couldn't check" outcome silently
+			// proceeding would defeat the point). When NO pin is stored we're only trying to
+			// learn - a fingerprint we couldn't extract is not catastrophic, so we log-and-skip.
+			val storedRaw = config.tlsTofuFingerprint?.takeIf { it.isNotBlank() }
+			if (!config.allowInvalidCerts) {
+				// CA-validated connection. TOFU is dormant: any stored fingerprint stays in
+				// the profile (so flipping invalid-certs back on later picks up where it left
+				// off), but is neither verified against nor learned from this connection.
+				// The handshake's standard trust path is the authority here.
+			} else if (storedRaw != null) {
+				// Pin enforcement path: any failure here closes the socket and propagates.
+				val actualFp = try {
+					val peerCerts = ss.session.peerCertificates
+					val leaf = peerCerts.firstOrNull() as? java.security.cert.X509Certificate
+						?: throw java.io.IOException("TLS pin enforcement: peer presented no X.509 certificate")
+					computeFingerprintSha256(leaf)
+				} catch (t: Throwable) {
+					runCatching { ss.close() }
+					runCatching { rawSocket.close() }
+					if (t is java.io.IOException) throw t
+					throw java.io.IOException("TLS pin enforcement failed: ${t.message ?: t::class.java.simpleName}", t)
+				}
+				val storedNorm = normaliseFingerprint(storedRaw)
+				// Round-robin DNS support: build the union of (primary fingerprint + extra set)
+				// and accept the connection if the actual fingerprint matches ANY of them.
+				// Without this, every cycle position on irc.libera.chat / irc.oftc.net / etc.
+				// would fire TlsFingerprintChanged forcing a pin reset on every other connect.
+				val acceptedNormSet = config.tlsTofuFingerprints
+					.asSequence()
+					.map { normaliseFingerprint(it) }
+					.toSet() + storedNorm
+				if (!acceptedNormSet.any { it.equals(actualFp, ignoreCase = true) }) {
+					runCatching { ss.close() }
+					runCatching { rawSocket.close() }
+					throw TlsFingerprintMismatchException(
+						stored = storedNorm,
+						actual = actualFp,
+					)
+				}
+			} else {
+				// Learning path: best-effort. Only reached when allowInvalidCerts is on AND
+				// no pin is stored yet - exactly the "first connect to a self-signed bouncer"
+				// case TOFU is designed for.
+				runCatching {
+					val peerCerts = ss.session.peerCertificates
+					val leaf = peerCerts.firstOrNull() as? java.security.cert.X509Certificate
+					if (leaf != null) {
+						learnedFingerprint = computeFingerprintSha256(leaf)
+					}
+				}
+			}
+
+			// Capture basic session info for UI (cipher/protocol/cert subject).
+			// Three trust modes are surfaced distinctly: pinned (cert matched stored fingerprint),
+			// unverified (allowInvalidCerts on, no pin — full trust-everything mode), and verified
+			// (standard CA chain + RFC 6125 hostname check both passed).
 			lastTlsInfo = runCatching {
 				val sess = ss.session
 				val proto = sess.protocol ?: "?"
 				val cipher = sess.cipherSuite ?: "?"
 				val peer = runCatching { sess.peerPrincipal?.name }.getOrNull()
-				val verified = if (config.allowInvalidCerts) "(unverified)" else "(verified)"
+				// Trust-mode label reflects what actually verified the connection:
+				//   - allowInvalidCerts ON  + pin stored = "(pinned)" - TOFU was the auth.
+				//   - allowInvalidCerts ON  + no pin     = "(unverified)" - first connect,
+				//                                          chain was bypassed, no pin yet.
+				//   - allowInvalidCerts OFF                = "(verified)" - CA chain + RFC 6125.
+				//                                          A stored pin (if any) is dormant
+				//                                          and ignored.
+				val pinned = config.allowInvalidCerts && !config.tlsTofuFingerprint.isNullOrBlank()
+				val verified = when {
+					pinned -> "(pinned)"
+					config.allowInvalidCerts -> "(unverified)"
+					else -> "(verified)"
+				}
 				val peerShort = peer?.substringAfter("CN=")?.substringBefore(',')?.takeIf { it.isNotBlank() }
 					?: peer
 					?: "peer"
@@ -3790,7 +4521,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			.ifBlank { t::class.java.simpleName }
 		val anyIs: (Class<out Throwable>) -> Boolean = { cls -> chain.any { cls.isInstance(it) } }
 
-		// SSL handshake failures (certificate problems, protocol mismatch)
+		// SSL handshake failures (certificate problems, protocol mismatch).
+		// Note: hostname mismatch is NOT here - we now perform RFC 6125 verification
+		// post-handshake as a soft warning (TlsHostnameMismatch event) rather than as a
+		// hard failure, so SAN/CN mismatches never produce an SSLHandshakeException.
 		if (anyIs(SSLHandshakeException::class.java)) {
 			return when {
 				raw.contains("CERTIFICATE_VERIFY_FAILED", ignoreCase = true) ||
@@ -3905,6 +4639,54 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			sb.append(String.format("%02x", b.toInt() and 0xFF))
 		}
 		return sb.toString()
+	}
+
+	/**
+	 * RFC 6125 hostname check against a certificate's SAN extension. Returns true when [host]
+	 * matches at least one DNS or IP entry in the cert's subjectAltNames.
+	 *
+	 * Wildcards: a left-most `*` in a DNS SAN matches a single label, and only at the left-
+	 * most position (e.g. `*.example.com` matches `irc.example.com` but not `a.b.example.com`
+	 * and not `irc.foo.example.com`). This is the modern interpretation everyone agrees on;
+	 * we deliberately do NOT support wildcard-in-the-middle (`a*.example.com`) since the spec
+	 * deprecates it and accepting it would defeat the warning's purpose.
+	 *
+	 * IPs: matched as plain strings against the cert's IP-type SAN entries. We don't try to
+	 * canonicalise IPv6 here (`::1` vs `0:0:0:0:0:0:0:1`) - real IRC certs essentially never
+	 * pin to bare IPs, and a false-warning on an IP literal is harmless given the soft-warn
+	 * semantics.
+	 *
+	 * CN-as-fallback: NOT supported. Modern verifiers (Chrome, Firefox, OkHttp, Conscrypt
+	 * with HTTPS endpoint identification) all dropped CN-fallback years ago; matching it
+	 * would just produce false-negatives on the warning for certs that should have been
+	 * flagged.
+	 */
+	private fun hostnameMatchesCert(host: String, cert: java.security.cert.X509Certificate): Boolean {
+		val hostLower = host.lowercase()
+		val sans = runCatching { cert.subjectAlternativeNames }.getOrNull() ?: return false
+		for (entry in sans) {
+			val type = entry.getOrNull(0) as? Int ?: continue
+			val value = (entry.getOrNull(1) as? String)?.lowercase() ?: continue
+			when (type) {
+				2 /* dNSName */ -> if (dnsNameMatches(hostLower, value)) return true
+				7 /* iPAddress */ -> if (hostLower == value) return true
+			}
+		}
+		return false
+	}
+
+	private fun dnsNameMatches(host: String, pattern: String): Boolean {
+		if (host == pattern) return true
+		// Leftmost-only wildcard: "*.example.com" matches "irc.example.com" but not
+		// "a.b.example.com" and not "example.com" itself.
+		if (pattern.startsWith("*.")) {
+			val suffix = pattern.substring(1) // ".example.com"
+			if (!host.endsWith(suffix)) return false
+			val prefix = host.dropLast(suffix.length)
+			// Prefix must be exactly one label: non-empty and no dots.
+			return prefix.isNotEmpty() && !prefix.contains('.')
+		}
+		return false
 	}
 
 	/**
@@ -4051,9 +4833,45 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				val nick = p(1) ?: return null
 				t ?: "$nick has special/registered status"
 			}
+			"330" -> {
+				// RPL_WHOISACCOUNT: <client> <nick> <account> :is logged in as
+				// (Trailing differs across IRCds — InspIRCd/UnrealIRCd say "is logged in as",
+				// ircd-seven says "is signed in as". Either way, account is in params[2].)
+				val nick = p(1) ?: return null
+				val account = p(2) ?: return null
+				val verb = t?.takeIf { it.isNotBlank() } ?: "is logged in as"
+				"$nick $verb $account"
+			}
 			"335" -> {
 				val nick = p(1) ?: return null
 				t ?: "$nick is marked as a bot/service"
+			}
+			"338" -> {
+				// RPL_WHOISACTUALLY: <client> <nick> <ip> :Actual IP/host (varies by IRCd).
+				// Most IRCds put the resolved IP in params[2] and a description in trailing.
+				val nick = p(1) ?: return null
+				val info = (msg.params.drop(2) + listOfNotNull(t))
+					.filter { it.isNotBlank() }
+					.joinToString(" ")
+				if (info.isBlank()) "$nick: actual host info" else "$nick $info"
+			}
+			"378" -> {
+				// RPL_WHOISHOST: <client> <nick> :is connecting from <user>@<host> <ip>
+				val nick = p(1) ?: return null
+				t ?: return null
+				"$nick $t"
+			}
+			"379" -> {
+				// RPL_WHOISMODES: <client> <nick> :is using modes +<modes>
+				val nick = p(1) ?: return null
+				t ?: return null
+				"$nick $t"
+			}
+			"671" -> {
+				// RPL_WHOISSECURE: <client> <nick> :is using a secure connection [cipher info]
+				val nick = p(1) ?: return null
+				val tail = t?.takeIf { it.isNotBlank() } ?: "is connected via SSL"
+				"$nick $tail"
 			}
 
 			// Common errors

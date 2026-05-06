@@ -102,25 +102,25 @@
     <string name="networks_add">إضافة شبكة</string>
 
     <string name="tour_add_network_title">شبكاتك</string>
-    <string name="tour_add_network_body">اضغط على + لإضافة شبكة جديدة أو تعديل شبكة موجودة. يتضمن HexDroid بعض الشبكات الافتراضية للبدء بسرعة.</string>
+    <string name="tour_add_network_body">اضغط + لإضافة خادم، أو عدّل الموجود. يأتي HexDroid مع بعض الشبكات الافتراضية.</string>
     <string name="tour_connect_title">اتصال</string>
-    <string name="tour_connect_body">اتصل بالشبكة المحددة. بعد الاتصال، افتح المحادثة للانضمام إلى القنوات.</string>
+    <string name="tour_connect_body">اضغط اتصال لفتح اتصال. يمكنك الاتصال بعدة شبكات في الوقت نفسه.</string>
     <string name="tour_settings_title">المظهر والإعدادات</string>
-    <string name="tour_settings_body">اضبط المظهر والخطوط والتفضيلات الأخرى هنا.</string>
-    <string name="tour_switcher_title">قائمة المخازن المؤقتة</string>
-    <string name="tour_switcher_body">يعرض هذا الشريط الجانبي الخادم والقنوات والرسائل الخاصة. اضغط للتبديل.</string>
-    <string name="tour_more_title">مزيد من الإجراءات</string>
-    <string name="tour_more_body">تحتوي هذه القائمة على قائمة القنوات ونقل الملفات والإعدادات والشبكات والمزيد.</string>
+    <string name="tour_settings_body">اختر نسقاً، اضبط حجم الخط، أصوات الإشعارات، خيارات الخصوصية وأكثر بكثير. تُطبَّق التغييرات فوراً.</string>
+    <string name="tour_switcher_title">قائمة المخازن</string>
+    <string name="tour_switcher_body">تعرض هذه اللوحة كل الخوادم والقنوات والرسائل الخاصة المفتوحة. اسحب أو اضغط ☰ لإظهارها. اضغط على أي عنصر للتبديل إليه</string>
+    <string name="tour_more_title">إجراءات إضافية</string>
+    <string name="tour_more_body">تصل هذه القائمة إلى قائمة القنوات، نقل الملفات، قائمة التجاهل، إعدادات الشبكة وأكثر. كما تُظهر إدارة وضع القناة والموضوع عندما تكون مشرفاً.</string>
     <string name="tour_send_title">إرسال الرسائل</string>
-    <string name="tour_send_body">اكتب هنا للمحادثة. يمكنك أيضًا استخدام أوامر مثل /join #قناة و /msg اسم مرحبا وغيرها.</string>
+    <string name="tour_send_body">اكتب هنا للدردشة. أوامر السلاش تعمل أيضاً: ‎/join #channel، ‎/msg nick text، ‎/part، ‎/whois nick، ‎/me action text، وغيرها.</string>
     <string name="tour_dcc_title">نقل الملفات (DCC)</string>
-    <string name="tour_dcc_body">فعّل DCC لإرسال/استقبال الملفات. إذا كنت خلف NAT فالوضع السلبي قد يساعد.</string>
-    <string name="tour_support_title">تحتاج مساعدة؟</string>
-    <string name="tour_support_body">يمكنك الاتصال هنا للحصول على الدعم في #HexDroid.</string>
-    <string name="tour_support_fallback">إذا لم تجد AfterNET في قائمتك، اضغط على إضافة AfterNET (أو +) لإضافتها مجددًا.</string>
+    <string name="tour_dcc_body">فعّل DCC لإرسال واستقبال الملفات مباشرةً بين المستخدمين. إذا كنت خلف موجّه، فإن DCC السلبي يتجنب متاعب توجيه المنافذ. ‏SDCC مدعوم أيضاً.</string>
+    <string name="tour_support_title">تحتاج إلى مساعدة؟</string>
+    <string name="tour_support_body">اتصل بـ AfterNET وانضم إلى ‎#HexDroid للدعم أو طلبات الميزات أو مجرد الدردشة مع مستخدمي HexDroid الآخرين.</string>
+    <string name="tour_support_fallback">AfterNET ليست في قائمتك بعد: اضغط على إضافة AfterNET لإضافتها، ثم اتصل وانضم إلى ‎#HexDroid للدعم.</string>
     <string name="tour_support_action">إضافة AfterNET</string>
-    <string name="tour_replay_title">إعادة الجولة</string>
-    <string name="tour_replay_body">يمكنك إعادة الجولة في أي وقت من الإعدادات.</string>
+    <string name="tour_replay_title">إعادة تشغيل الجولة</string>
+    <string name="tour_replay_body">يمكنك تشغيل الجولة التعريفية مجدداً في أي وقت من الإعدادات ← حول. اضغط تم للإنهاء.</string>
 
     <string name="about_title">حول</string>
     <string name="transfers_title">عمليات النقل</string>
@@ -135,8 +135,8 @@
     <string name="network_port">المنفذ</string>
     <string name="network_use_tls">استخدام TLS (SSL)</string>
     <string name="network_allow_invalid_certs">السماح بالشهادات غير الصالحة</string>
-    <string name="network_pinned_cert_label">بصمة الشهادة المثبتة (TOFU)</string>
-    <string name="network_reset_pinned_cert">إعادة تعيين الشهادة المثبتة</string>
+    <string name="network_pinned_cert_label">بصمات الشهادات المثبتة (TOFU)</string>
+    <string name="network_reset_pinned_cert">إعادة الضبط وإعادة التثبيت (يمسح الكل)</string>
     <string name="network_nick">الاسم المستعار</string>
     <string name="network_alt_nick">الاسم البديل</string>
     <string name="network_username">اسم المستخدم</string>
@@ -212,7 +212,7 @@
     <string name="setting_keep_alive">الحفاظ على الاتصال نشطًا</string>
     <string name="setting_open_app_settings">فتح إعدادات التطبيق</string>
     <string name="tour_send_file_title">إرسال ملف</string>
-    <string name="tour_send_file_body">أدخل الاسم المستعار للهدف ثم اختر ملفًا للإرسال. (يتطلب تفعيل DCC.) تظهر العروض الواردة في هذه الشاشة أيضًا.</string>
+    <string name="tour_send_file_body">أدخل اللقب المستهدف، ثم اختر ملفاً من التخزين. تصل عروض DCC الواردة هنا أيضاً، اقبلها أو ارفضها من الإشعارات.</string>
     <!-- Network Edit IRCv3 cap section labels -->
     <string name="network_edit_advanced_caps">إمكانيات IRCv3 المتقدمة</string>
     <string name="network_edit_caps_hint">ميزات IRCv3 الأساسية مفعلة افتراضياً. شغّل لرؤية الخيارات المتقدمة.</string>
@@ -496,4 +496,47 @@
     <string name="topic_edit_title">تعديل الموضوع</string>
     <string name="topic_edit_label">الموضوع</string>
     <string name="topic_set">تعيين</string>
+
+    <!-- Bouncer multinetwork (soju + ZNC) -->
+    <string name="bouncer_networks_section_title">شبكات Bouncer</string>
+    <string name="bouncer_networks_section_subtitle">‏Upstreams المُبلَّغ عنها بواسطة %1$s</string>
+    <string name="bouncer_networks_refresh">تحديث</string>
+    <string name="bouncer_networks_empty">لم يتم الإبلاغ عن أي upstream بعد. اضغط تحديث بعد تسجيل الـ bouncer.</string>
+    <string name="bouncer_networks_state_connected">متصل</string>
+    <string name="bouncer_networks_state_connecting">جاري الاتصال</string>
+    <string name="bouncer_networks_state_disconnected">غير متصل</string>
+    <string name="bouncer_networks_state_unknown">غير معروف</string>
+    <string name="bouncer_networks_import">استيراد</string>
+    <string name="bouncer_networks_already_imported">مستورد بالفعل</string>
+    <string name="bouncer_networks_unnamed">‏(upstream بلا اسم)</string>
+    <string name="bouncer_networks_clone_dismiss">تجاهل</string>
+    <string name="network_server_password_bouncer_hint">للـ bouncer، يُفضل تفعيل SASL أدناه — فهو طريقة المصادقة الحديثة. إذا كنت ستستخدم حقل PASS هذا بدلاً من ذلك، أدخل كلمة المرور فقط؛ يُضاف اسم مستخدم الـ bouncer والشبكة من الحقول أعلاه تلقائياً (تُرسل بصيغة <b>username/network:password</b>، أو <b>username@clientid/network:password</b> لـ ZNC). إذا كنت تفضل كتابة <b>username/network:password</b> الكاملة بنفسك، فهذا يعمل أيضاً.</string>
+    <string name="network_bouncer_network_help">أي شبكة upstream على الـ bouncer يستهدفها هذا الملف الشخصي (مثل \"libera\"، \"oftc\"). يُجمع مع حقل اسم مستخدم الـ bouncer أعلاه على السلك — يُرسل في USER، واعتماداً على طريقة المصادقة التي تختارها، في SASL أو سطر PASS — باستخدام صياغة نوع الـ bouncer المختار.</string>
+    <string name="network_username_bouncer_hint">بالنسبة لملفات تعريف الـ bouncer، هذا هو <b>اسم تسجيل الدخول الخاص بك على الـ bouncer</b> — نفس الاسم الذي أنشأت به حساب الـ bouncer. ليس لقبك على IRC.</string>
+    <string name="network_sasl_recommended_for_bouncers">موصى به للـ bouncer — اترك حقل اسم المستخدم فارغاً لاستخدام اسم مستخدم الـ bouncer من قسم "عام" أعلاه.</string>
+    <string name="setting_color_channel_events">أحداث القناة الملونة</string>
+    <string name="network_bouncer_username_label">اسم المستخدم</string>
+    <string name="setting_hide_away_notify">إخفاء إشعارات الغياب/العودة</string>
+    <!-- HexDroid 1.6.2 additions: bouncer fields, rejoin-on-kick setting,
+         buffer-list sidepanel toolbar (collapse all / mark all read / search). -->
+    <string name="buffer_toolbar_collapse_all">طيّ كل الشبكات</string>
+    <string name="buffer_toolbar_mark_all_read">تحديد الكل كمقروء</string>
+    <string name="buffer_toolbar_search">البحث في المخزن</string>
+    <string name="buffer_toolbar_search_dialog_title">البحث في المخزن</string>
+    <string name="buffer_toolbar_search_placeholder">نص أو مرسل…</string>
+    <string name="buffer_toolbar_search_global">البحث في كل مخازن هذه الشبكة</string>
+    <string name="buffer_toolbar_search_action">بحث</string>
+    <string name="network_bouncer_clientid_help">معرّف قصير لهذا الجهاز، مثل \"phone\" أو \"hexdroid\". يُمكّن المخازن وسجل المحادثات لكل عميل عندما يدعم الـ bouncer ذلك (ZNC clientbuffer، سجل المحادثات لكل عميل في soju). اتركه فارغاً لمشاركة مخزن واحد بين جميع العملاء.</string>
+    <string name="network_bouncer_clientid_label">معرّف العميل (اختياري)</string>
+    <string name="network_bouncer_kind_generic">عام  (user/network)</string>
+    <string name="network_bouncer_kind_label">نوع الـ bouncer</string>
+    <string name="network_bouncer_kind_none">لا شيء / غير محدد</string>
+    <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
+    <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
+    <string name="network_bouncer_network_label">اسم الشبكة (اختياري)</string>
+    <string name="setting_rejoin_on_kick">إعادة الانضمام بعد الطرد</string>
+    <string name="setting_rejoin_on_kick_desc">يعيد الانضمام تلقائياً إلى قناة بعد الطرد. الطرد الثاني من نفس القناة خلال 60 ثانية لا يُتبع بإعادة انضمام، لتجنب الحلقات مع أوضاع +i/+k/+b.</string>
+    <string name="network_trust_extra_pinned_cert">ثق أيضاً بهذا الخادم (DNS بالتناوب)</string>
+    <string name="network_pinned_cert_dormant">خامل — تثبيت TOFU يعمل فقط عند تفعيل \"السماح بالشهادات غير الصالحة\". البصمات أدناه محفوظة للمرجعية؛ يتم التحقق من الاتصال الحالي عبر سلسلة CA الخاصة بالنظام.</string>
+
 </resources>

@@ -127,7 +127,7 @@ fun AppRoot(
 		}
 	}
 
-	// Keep navigation in sync with the active tour step (fixes "Back" and external navigation).
+	// Keep navigation in sync with the active tour step.
 	LaunchedEffect(tourActive, tourStepIndex, state.screen) {
 		if (!tourActive) return@LaunchedEffect
 		val desired = currentTourStep?.screen ?: return@LaunchedEffect
@@ -283,6 +283,9 @@ fun AppRoot(
                     onCloseFindOverlay = vm::closeFindOverlay,
                     onFindNavigate = vm::findNavigate,
                     onShareTextConsumed = vm::consumeShareText,
+                    onCollapseAllNetworks = vm::collapseOrExpandAllNetworks,
+                    onMarkAllBuffersRead = vm::markAllBuffersRead,
+                    onSearchFromToolbar = vm::searchFromToolbar,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )
@@ -307,6 +310,9 @@ fun AppRoot(
                     onOpenSettings = { vm.goTo(AppScreen.SETTINGS) },
                     onReorder = vm::reorderNetworks,
                     onToggleFavourite = vm::toggleFavourite,
+                    onRefreshBouncerNetworks = vm::refreshBouncerNetworks,
+                    onCloneBouncerNetwork = vm::cloneBouncerNetwork,
+                    onDismissBouncerCloneMessage = vm::clearBouncerCloneMessage,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )

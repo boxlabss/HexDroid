@@ -621,7 +621,7 @@ fun SettingsScreen(
             item {
                 SettingToggle(stringResource(R.string.setting_ansi_colours), s.ansiColorsEnabled) { onUpdate { copy(ansiColorsEnabled = !ansiColorsEnabled) } }
             }
-
+            item { SettingToggle(stringResource(R.string.setting_color_channel_events), s.colorChannelEvents) { onUpdate { copy(colorChannelEvents = !colorChannelEvents) } } }
             item { SettingToggle(stringResource(R.string.setting_show_topic_bar), s.showTopicBar) { onUpdate { copy(showTopicBar = !showTopicBar) } } }
             item { SettingToggle(stringResource(R.string.setting_show_timestamps), s.showTimestamps) { onUpdate { copy(showTimestamps = !showTimestamps) } } }
             item {
@@ -635,6 +635,7 @@ fun SettingsScreen(
             }
             item { SettingToggle(stringResource(R.string.setting_hide_motd), s.hideMotdOnConnect) { onUpdate { copy(hideMotdOnConnect = !hideMotdOnConnect) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_joinpartquit), s.hideJoinPartQuit) { onUpdate { copy(hideJoinPartQuit = !hideJoinPartQuit) } } }
+            item { SettingToggle(stringResource(R.string.setting_hide_away_notify), s.hideAwayNotify) { onUpdate { copy(hideAwayNotify = !hideAwayNotify) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_topic_on_entry), s.hideTopicOnEntry) { onUpdate { copy(hideTopicOnEntry = !hideTopicOnEntry) } } }
             item { SectionTitle(stringResource(R.string.section_landscape)) }
             item { SettingToggle(stringResource(R.string.setting_show_buffers_default), s.defaultShowBufferList) { onUpdate { copy(defaultShowBufferList = !defaultShowBufferList) } } }

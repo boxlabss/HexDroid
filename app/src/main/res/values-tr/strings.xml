@@ -102,25 +102,25 @@
     <string name="networks_add">Ağ ekle</string>
 
     <string name="tour_add_network_title">Ağlarınız</string>
-    <string name="tour_add_network_body">Yeni bir ağ eklemek veya mevcut birini düzenlemek için + simgesine dokunun. HexDroid hızlı başlangıç için birkaç varsayılan ağ içerir.</string>
+    <string name="tour_add_network_body">Bir sunucu eklemek için + simgesine dokunun veya mevcut olanları düzenleyin. HexDroid birkaç varsayılanla birlikte gelir.</string>
     <string name="tour_connect_title">Bağlan</string>
-    <string name="tour_connect_body">Seçilen ağa bağlanın. Bağlandıktan sonra kanallara katılmak için sohbeti açın.</string>
+    <string name="tour_connect_body">Bağlantı açmak için Bağlan\'a dokunun. Aynı anda birden fazla ağa bağlanabilirsiniz.</string>
     <string name="tour_settings_title">Görünüm ve ayarlar</string>
-    <string name="tour_settings_body">Görünüm, yazı tipleri ve diğer tercihleri buradan ayarlayın.</string>
-    <string name="tour_switcher_title">Arabellek listesi</string>
-    <string name="tour_switcher_body">Bu kenar çubuğu sunucunuzu, kanallarınızı ve özel mesajlarınızı gösterir. Geçiş yapmak için dokunun.</string>
+    <string name="tour_settings_body">Bir tema seçin, yazı tipi boyutunu, bildirim seslerini, gizlilik seçeneklerini ve çok daha fazlasını ayarlayın. Değişiklikler anında uygulanır.</string>
+    <string name="tour_switcher_title">Tampon listesi</string>
+    <string name="tour_switcher_body">Bu panel açık olan tüm sunucuları, kanalları ve özel mesajları listeler. Göstermek için kaydırın veya ☰ düğmesine dokunun. Geçiş yapmak için herhangi bir öğeye dokunun</string>
     <string name="tour_more_title">Daha fazla eylem</string>
-    <string name="tour_more_body">Bu menü kanal listesi, dosya aktarımları, ayarlar, ağlar ve daha fazlasını içerir.</string>
+    <string name="tour_more_body">Bu menü kanal listesi, dosya transferleri, yoksayma listesi, ağ ayarları ve daha fazlasına ulaşır. Op olduğunuzda kanal modu ve konu yönetimini de gösterir.</string>
     <string name="tour_send_title">Mesaj gönder</string>
-    <string name="tour_send_body">Sohbet etmek için buraya yazın. /join #kanal, /msg takmaad merhaba, /whois takmaad gibi komutlar da kullanabilirsiniz.</string>
-    <string name="tour_dcc_title">Dosya aktarımları (DCC)</string>
-    <string name="tour_dcc_body">Dosya göndermek/almak için DCC\'yi açın. NAT arkasındaysanız Pasif modu yardımcı olabilir.</string>
-    <string name="tour_support_title">Yardıma mı ihtiyacınız var?</string>
-    <string name="tour_support_body">#HexDroid\'de destek almak için buraya bağlanabilirsiniz.</string>
-    <string name="tour_support_fallback">Listenizde AfterNET görmüyorsanız, tekrar eklemek için AfterNET Ekle (veya +) düğmesine dokunun.</string>
+    <string name="tour_send_body">Sohbet etmek için buraya yazın. Slash komutları da çalışır: /join #kanal, /msg nick metin, /part, /whois nick, /me eylem metni ve daha fazlası.</string>
+    <string name="tour_dcc_title">Dosya transferleri (DCC)</string>
+    <string name="tour_dcc_body">Kullanıcılar arasında doğrudan dosya göndermek ve almak için DCC\'yi etkinleştirin. Bir yönlendiricinin arkasındaysanız, Pasif DCC port yönlendirme sorunlarını önler. SDCC de desteklenir.</string>
+    <string name="tour_support_title">Yardım mı lazım?</string>
+    <string name="tour_support_body">AfterNET\'e bağlanın ve destek, özellik istekleri için veya diğer HexDroid kullanıcılarıyla sohbet etmek için #HexDroid kanalına katılın.</string>
+    <string name="tour_support_fallback">AfterNET henüz listenizde değil: AfterNET Ekle\'ye dokunun, ardından bağlanıp destek için #HexDroid kanalına katılın.</string>
     <string name="tour_support_action">AfterNET Ekle</string>
-    <string name="tour_replay_title">Turu tekrarla</string>
-    <string name="tour_replay_body">Turu istediğiniz zaman Ayarlar\'dan tekrarlayabilirsiniz.</string>
+    <string name="tour_replay_title">Bu turu tekrar oynat</string>
+    <string name="tour_replay_body">Tanıtımı istediğiniz zaman Ayarlar → Hakkında üzerinden tekrar başlatabilirsiniz. Bitirmek için Bitti\'ye dokunun.</string>
 
     <string name="about_title">Hakkında</string>
     <string name="transfers_title">Aktarımlar</string>
@@ -135,8 +135,8 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">TLS (SSL) kullan</string>
     <string name="network_allow_invalid_certs">Geçersiz sertifikalara izin ver</string>
-    <string name="network_pinned_cert_label">Sabitlenmiş sertifika parmak izi (TOFU)</string>
-    <string name="network_reset_pinned_cert">Sabitlenmiş sertifikayı sıfırla</string>
+    <string name="network_pinned_cert_label">Sabitlenmiş sertifika parmak izleri (TOFU)</string>
+    <string name="network_reset_pinned_cert">Sıfırla ve yeniden sabitle (tümünü temizler)</string>
     <string name="network_nick">Takma ad</string>
     <string name="network_alt_nick">Alternatif takma ad</string>
     <string name="network_username">Kullanıcı adı</string>
@@ -212,7 +212,7 @@
     <string name="setting_keep_alive">Bağlantıyı canlı tut</string>
     <string name="setting_open_app_settings">Uygulama ayarlarını aç</string>
     <string name="tour_send_file_title">Dosya gönder</string>
-    <string name="tour_send_file_body">Hedef nick\'i girin, ardından gönderilecek dosyayı seçin. (DCC etkin olmalıdır.) Gelen teklifler de bu ekranda görünür.</string>
+    <string name="tour_send_file_body">Hedef nick\'i girin, ardından depolamadan bir dosya seçin. Gelen DCC teklifleri de burada gelir, bildirimlerden kabul edin veya reddedin.</string>
     <!-- Network Edit IRCv3 cap section labels -->
     <string name="network_edit_advanced_caps">Gelişmiş IRCv3 caps</string>
     <string name="network_edit_caps_hint">Temel IRCv3 özellikleri varsayılan olarak etkin. Gelişmiş seçenekler için açın.</string>
@@ -496,4 +496,47 @@ Bu işlem geri alınamaz.</string>
     <string name="topic_edit_title">Konuyu düzenle</string>
     <string name="topic_edit_label">Konu</string>
     <string name="topic_set">Ayarla</string>
+
+    <!-- Bouncer multinetwork (soju + ZNC) -->
+    <string name="bouncer_networks_section_title">Bouncer ağları</string>
+    <string name="bouncer_networks_section_subtitle">%1$s tarafından bildirilen yukarı akışlar</string>
+    <string name="bouncer_networks_refresh">Yenile</string>
+    <string name="bouncer_networks_empty">Henüz yukarı akış bildirilmedi. Bouncer kaydolduktan sonra yenile düğmesine dokunun.</string>
+    <string name="bouncer_networks_state_connected">bağlı</string>
+    <string name="bouncer_networks_state_connecting">bağlanıyor</string>
+    <string name="bouncer_networks_state_disconnected">bağlantı kesildi</string>
+    <string name="bouncer_networks_state_unknown">bilinmiyor</string>
+    <string name="bouncer_networks_import">İçe aktar</string>
+    <string name="bouncer_networks_already_imported">Zaten içe aktarıldı</string>
+    <string name="bouncer_networks_unnamed">(adsız yukarı akış)</string>
+    <string name="bouncer_networks_clone_dismiss">Kapat</string>
+    <string name="network_server_password_bouncer_hint">Bouncer\'lar için aşağıdaki SASL\'ı etkinleştirmeyi tercih edin — modern kimlik doğrulama yoludur. Bunun yerine bu PASS alanını kullanırsanız sadece parolayı girin; yukarıdaki alanlardaki bouncer kullanıcı adı ve ağ otomatik olarak öne eklenir (<b>username/network:password</b> olarak veya ZNC için <b>username@clientid/network:password</b> olarak gönderilir). <b>username/network:password</b>\'yi kendiniz yazmayı tercih ederseniz, bu da çalışır.</string>
+    <string name="network_bouncer_network_help">Bu profilin bouncer\'da hedeflediği yukarı akış ağı (ör. \"libera\", \"oftc\"). Hat üzerinde yukarıdaki bouncer kullanıcı adı alanıyla birleştirilir — USER\'da ve seçtiğiniz kimlik doğrulama yöntemine bağlı olarak SASL veya PASS satırında — seçili bouncer türünün sözdizimi kullanılarak gönderilir.</string>
+    <string name="network_username_bouncer_hint">Bouncer profilleri için bu, <b>bouncer\'daki giriş adınızdır</b> — bouncer hesabını kurduğunuz adın aynısı. IRC takma adınız değil.</string>
+    <string name="network_sasl_recommended_for_bouncers">Bouncer\'lar için önerilir — yukarıdaki Genel bölümünden bouncer kullanıcı adını kullanmak için kullanıcı adı alanını boş bırakın.</string>
+    <string name="setting_color_channel_events">Renkli kanal olayları</string>
+    <string name="network_bouncer_username_label">Kullanıcı adı</string>
+    <string name="setting_hide_away_notify">Uzakta/geri döndü bildirimlerini gizle</string>
+    <!-- HexDroid 1.6.2 additions: bouncer fields, rejoin-on-kick setting,
+         buffer-list sidepanel toolbar (collapse all / mark all read / search). -->
+    <string name="buffer_toolbar_collapse_all">Tüm ağları daralt</string>
+    <string name="buffer_toolbar_mark_all_read">Tümünü okundu olarak işaretle</string>
+    <string name="buffer_toolbar_search">Tamponda ara</string>
+    <string name="buffer_toolbar_search_dialog_title">Tamponda ara</string>
+    <string name="buffer_toolbar_search_placeholder">Metin veya gönderen…</string>
+    <string name="buffer_toolbar_search_global">Bu ağdaki tüm tamponlarda ara</string>
+    <string name="buffer_toolbar_search_action">Ara</string>
+    <string name="network_bouncer_clientid_help">Bu cihaz için kısa bir tanımlayıcı, ör. \"phone\" veya \"hexdroid\". Bouncer destekliyorsa (ZNC clientbuffer, soju istemci başına geçmiş) istemci başına tampon ve geçmişi etkinleştirir. Tüm istemciler arasında tek bir tamponu paylaşmak için boş bırakın.</string>
+    <string name="network_bouncer_clientid_label">İstemci kimliği (isteğe bağlı)</string>
+    <string name="network_bouncer_kind_generic">Genel  (user/network)</string>
+    <string name="network_bouncer_kind_label">Bouncer türü</string>
+    <string name="network_bouncer_kind_none">Yok / belirtilmemiş</string>
+    <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
+    <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
+    <string name="network_bouncer_network_label">Ağ adı (isteğe bağlı)</string>
+    <string name="setting_rejoin_on_kick">Atılınca yeniden katıl</string>
+    <string name="setting_rejoin_on_kick_desc">Bir kanaldan atıldıktan sonra otomatik olarak yeniden katılır. +i/+k/+b modlarına karşı döngüleri önlemek için aynı kanaldan 60 saniye içinde alınan ikinci atılma yeniden katılma denemesi yapmaz.</string>
+    <string name="network_trust_extra_pinned_cert">Bu sunucuya da güven (round-robin DNS)</string>
+    <string name="network_pinned_cert_dormant">Uyku modunda — TOFU sabitlemesi yalnızca \"Geçersiz sertifikalara izin ver\" açıkken etkindir. Aşağıdaki parmak izleri referans olarak saklanır; mevcut bağlantı sistem CA zinciri ile doğrulanır.</string>
+
 </resources>

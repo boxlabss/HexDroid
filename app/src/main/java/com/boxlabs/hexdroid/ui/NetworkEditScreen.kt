@@ -186,6 +186,13 @@ fun NetworkEditScreen(
     var capPreAway by remember(n0.id) { mutableStateOf(n0.caps.preAway) }
     var capMessageIds by remember(n0.id) { mutableStateOf(n0.caps.messageIds) }
     var capWhox by remember(n0.id) { mutableStateOf(n0.caps.whox) }
+    // Caps that previously had no UI toggle and were silently reset to their CapPrefs defaults
+    // on every save. Now exposed in the advanced section so the user's choice round-trips.
+    var capChannelRename by remember(n0.id) { mutableStateOf(n0.caps.channelRename) }
+    var capExtendedMonitor by remember(n0.id) { mutableStateOf(n0.caps.extendedMonitor) }
+    var capMessageReactions by remember(n0.id) { mutableStateOf(n0.caps.messageReactions) }
+    var capNoImplicitNames by remember(n0.id) { mutableStateOf(n0.caps.noImplicitNames) }
+    var capMultiline by remember(n0.id) { mutableStateOf(n0.caps.multiline) }
     // Bouncer-specific caps
     var capSojuRead by remember(n0.id) { mutableStateOf(n0.caps.sojuRead) }
     var capSojuNoImplicitNames by remember(n0.id) { mutableStateOf(n0.caps.sojuNoImplicitNames) }
@@ -263,7 +270,16 @@ fun NetworkEditScreen(
                             messageIds = capMessageIds,
                             whox = capWhox,
                             sojuRead = capSojuRead,
-                            sojuNoImplicitNames = capSojuNoImplicitNames
+                            sojuNoImplicitNames = capSojuNoImplicitNames,
+                            // Pre-r10 these five fields were not threaded through the save
+                            // constructor, so any user choice silently reverted to the
+                            // CapPrefs default on every save. Threading them now means a
+                            // disabled cap stays disabled across edits.
+                            channelRename = capChannelRename,
+                            extendedMonitor = capExtendedMonitor,
+                            messageReactions = capMessageReactions,
+                            noImplicitNames = capNoImplicitNames,
+                            multiline = capMultiline,
                         )
 
                         clientCertUiError = null
@@ -467,33 +483,99 @@ fun NetworkEditScreen(
                         Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it })
                     }
 
-                    // Show the pinned TOFU fingerprint and a reset button if one is stored.
+                    // Show every pinned TOFU fingerprint when at least one is stored. The
+                    // "Reset & re-pin" button is destructive (it discards every trust anchor
+                    // the user has established, including any round-robin-DNS extras), so it
+                    // only surfaces when the connection is in a known mismatch state. The
+                    // "Trust this server too" button alongside it is the round-robin-friendly
+                    // alternative, adds the new fingerprint to the trust set without clearing
+                    // the others, so a user pinning the N servers behind an irc.* rr
+                    // doesn't have to choose between starting over and giving up on TOFU.
                     val storedFp = n0.tlsTofuFingerprint
-                    if (storedFp != null) {
+                    val extraFps = n0.tlsTofuFingerprints
+                    if (storedFp != null || extraFps.isNotEmpty()) {
                         HorizontalDivider()
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
                                 stringResource(R.string.network_pinned_cert_label),
                                 style = MaterialTheme.typography.labelMedium
                             )
-                            Text(
-                                storedFp,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    onSave(
-                                        n0.copy(tlsTofuFingerprint = null),
-                                        null,
-                                        false
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.network_reset_pinned_cert))
+                            // TOFU is gated on allowInvalidCerts: the pin layer only engages
+                            // when the user has opted out of CA validation. With invalid-certs
+                            // off, any stored fingerprints are dormant (kept on the profile
+                            // for if the user flips invalid-certs back on, but not consulted
+                            // during this connection). Surface that explicitly so the user
+                            // isn't confused why the fingerprints look "live" but the connection
+                            // says "(verified)" - the CA chain is doing the work, not the pin.
+                            if (!allowInvalidCerts) {
+                                Text(
+                                    stringResource(R.string.network_pinned_cert_dormant),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            // Render the primary fingerprint first (normal weight) and any
+                            // extras below it (each on its own line). Mono font so the colon-
+                            // separated hex is easy to compare against an OpenSSL output.
+                            if (storedFp != null) {
+                                Text(
+                                    storedFp,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            for (fp in extraFps) {
+                                Text(
+                                    fp,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val conn = state.connections[n0.id]
+                            val mismatch = conn?.tlsPinMismatch == true
+                            val actualFp = conn?.tlsPinMismatchActualFp
+                            if (mismatch) {
+                                if (actualFp != null) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            // Add the actual-fp to the trust set without
+                                            // touching the primary or any other extras.
+                                            // Set semantics dedupe automatically.
+                                            onSave(
+                                                n0.copy(
+                                                    tlsTofuFingerprints = n0.tlsTofuFingerprints + actualFp
+                                                ),
+                                                null,
+                                                false
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(stringResource(R.string.network_trust_extra_pinned_cert))
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        // Reset & re-pin: clear EVERY pinned fingerprint
+                                        // (primary + extras). Next connect with allowInvalidCerts
+                                        // re-learns from scratch.
+                                        onSave(
+                                            n0.copy(
+                                                tlsTofuFingerprint = null,
+                                                tlsTofuFingerprints = emptySet()
+                                            ),
+                                            null,
+                                            false
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(stringResource(R.string.network_reset_pinned_cert))
+                                }
                             }
                         }
                     }
@@ -513,12 +595,21 @@ fun NetworkEditScreen(
                     label = { Text(stringResource(R.string.network_alt_nick_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text(stringResource(R.string.network_username_label)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // Username (ident) is the IRC USER command's third field. for direct IRCd
+                // connections this is the local "ident" name. For bouncer profiles the
+                // bouncer-account login serves a completely different role (auth identity,
+                // not local-user-name) so we move that input into the Bouncer section
+                // below to avoid two fields fighting for the same conceptual slot. When
+                // [isBouncer] is on the field is hidden here and the Bouncer section
+                // exposes the same underlying state via a clearly-labeled "Username" field.
+                AnimatedVisibility(visible = !isBouncer) {
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text(stringResource(R.string.network_username_label)) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 OutlinedTextField(
                     value = realname,
                     onValueChange = { realname = it },
@@ -605,16 +696,27 @@ fun NetworkEditScreen(
                                 }
                             }
                         }
-                        // Network name + Client ID. Shown for all kinds except NONE.
-                        // ClientId only for SOJU/ZNC since the per-client convention isn't
-                        // standard for generic bouncers.
+                        // Bouncer fields. Layout when bouncer mode is on:
+                        //   Username		repurposed `username` state (bouncer login)
+                        //   Network		bouncerNetworkName
+                        //   Client ID		bouncerClientId
+                        //
+                        // The same `username` state binds to the General-section ident field
+                        // when bouncer mode is OFF; the field is mutually exclusive between
+                        // the two sections so there's only ever one input for the value.
                         AnimatedVisibility(visible = bouncerKind != com.boxlabs.hexdroid.BouncerKind.NONE) {
                             Column {
+                                OutlinedTextField(
+                                    value = username,
+                                    onValueChange = { username = it },
+                                    label = { Text(stringResource(R.string.network_bouncer_username_label)) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                )
                                 OutlinedTextField(
                                     value = bouncerNetworkName,
                                     onValueChange = { bouncerNetworkName = it },
                                     label = { Text(stringResource(R.string.network_bouncer_network_label)) },
-                                    supportingText = { Text(stringResource(R.string.network_bouncer_network_help)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                 )
@@ -626,17 +728,19 @@ fun NetworkEditScreen(
                                         value = bouncerClientId,
                                         onValueChange = { bouncerClientId = it },
                                         label = { Text(stringResource(R.string.network_bouncer_clientid_label)) },
-                                        supportingText = { Text(stringResource(R.string.network_bouncer_clientid_help)) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                     )
                                 }
                             }
                         }
+						Text(
+							stringResource(R.string.network_server_password_bouncer_hint),
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
                     }
                 }
-
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
                 OutlinedTextField(
                     value = serverPassword,
@@ -655,6 +759,18 @@ fun NetworkEditScreen(
                 ) {
                     Text(stringResource(R.string.network_enable_sasl))
                     Switch(checked = saslEnabled, onCheckedChange = { saslEnabled = it })
+                }
+                // Nudge bouncer users towards SASL, it's the structured auth path that
+                // works regardless of which bouncer the user has, whereas PASS requires
+                // them to know the exact `user[/network][@cid]:password` format their
+                // bouncer expects. Only shown for bouncer profiles with SASL off, since
+                // that's the configuration most likely to fail in confusing ways.
+                if (isBouncer && !saslEnabled) {
+                    Text(
+                        stringResource(R.string.network_sasl_recommended_for_bouncers),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 AnimatedVisibility(visible = saslEnabled) {
@@ -988,6 +1104,11 @@ fun NetworkEditScreen(
                         CapSwitch("draft/event-playback", capDraftPlayback) { capDraftPlayback = it }
                         CapSwitch("draft/relaymsg", capDraftRelaymsg) { capDraftRelaymsg = it }
                         CapSwitch("draft/read-marker", capDraftReadMarker) { capDraftReadMarker = it }
+                        CapSwitch("draft/multiline", capMultiline) { capMultiline = it }
+                        CapSwitch("draft/channel-rename", capChannelRename) { capChannelRename = it }
+                        CapSwitch("draft/extended-monitor", capExtendedMonitor) { capExtendedMonitor = it }
+                        CapSwitch("draft/message-reactions", capMessageReactions) { capMessageReactions = it }
+                        CapSwitch("draft/no-implicit-names", capNoImplicitNames) { capNoImplicitNames = it }
 
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
 

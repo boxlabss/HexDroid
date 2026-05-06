@@ -137,9 +137,29 @@ data class UiBuffer(
      * set is rebuilt from the retained messages so evicted entries don't accumulate forever.
      *
      * Not part of equals/hashCode (it is derived from [messages]) and excluded from Compose
-     * stability checks — it is an internal performance cache, not observable UI state.
+     * stability checks - it is an internal performance cache, not observable UI state.
      */
-    val seenMsgIds: Set<String> = emptySet()
+    val seenMsgIds: Set<String> = emptySet(),
+
+    /**
+     * Content-fingerprint dedup for messages whose msgid path can't dedupe.
+     *
+     * [seenMsgIds] handles the modern path (IRCv3 message-tags `msgid=…`) but several real-world
+     * cases break it: ZNC's `*playback` module replays buffered messages with `time=` tags but
+     * no `msgid`; modern bouncers replay the same message via two paths (e.g. their automatic
+     * buffer dump on connect plus a subsequent CHATHISTORY LATEST) which can carry different
+     * msgids; and our own isHistory heuristic doesn't always classify the first delivery of a
+     * replayed line as history. Without a content-level dedup the user sees the same message
+     * twice with the same timestamp.
+     *
+     * Each entry is `"${timeMs}|${from}|${text.hashCode()}"`. Computed for every message with a
+     * sender — live messages too, because the millisecond `ts` resolution makes false collisions
+     * effectively impossible on real human-typed traffic, and this way replays dedupe against
+     * the original delivery regardless of which path delivered it.
+     *
+     * Sized identically to [seenMsgIds] and rebuilt the same way on scrollback trim.
+     */
+    val seenHistoryFingerprints: Set<String> = emptySet()
 )
 
 enum class FontChoice { OPEN_SANS, INTER, MONOSPACE, CUSTOM }
@@ -168,6 +188,25 @@ data class UiSettings(
     val showTopicBar: Boolean = true,
     val hideMotdOnConnect: Boolean = false,
     val hideJoinPartQuit: Boolean = false,
+    /**
+     * Render channel-event lines (joins / parts / quits / kicks / nick changes / mode
+     * changes) with mIRC colour codes so they pop out against regular conversation:
+     * green for joins, orange for parts/quits, red for kicks, etc. Only affects display;
+     * the underlying log files store the raw codes (which most log-readers strip), and
+     * text copy preserves them too. Toggleable so users on monochrome themes or those
+     * who prefer plain output can opt out without disabling joins entirely.
+     */
+    val colorChannelEvents: Boolean = true,
+    /**
+     * Suppress "* user is away" / "* user is back" lines emitted by the away-notify
+     * IRCv3 capability. Bouncers (ZNC, soju) typically forward away-notify downstream
+     * regardless of which caps the client itself negotiates, and away/back scripts in
+     * the user's other clients can produce a constant trickle of these on busy networks.
+     * The away/back state tracking continues even when this is on — only the inline
+     * announcement is suppressed; the nicklist still reflects each nick's away status
+     * (typically by dimming the entry).
+     */
+    val hideAwayNotify: Boolean = false,
     val hideTopicOnEntry: Boolean = false,
     val defaultShowNickList: Boolean = true,
     val defaultShowBufferList: Boolean = true,
@@ -222,7 +261,7 @@ data class UiSettings(
     val colorizeNicks: Boolean = true,
     /**
      * Custom colour for your own nick, stored as ARGB int (e.g. 0xFF_FF6600.toInt()).
-     * Null means "Auto" — let [NickColors.colorForNick] pick a colour from the hash,
+     * Null means "Auto" - let [NickColors.colorForNick] pick a colour from the hash,
      * the same as any other nick.
      */
     val ownNickColorInt: Int? = null,
@@ -263,6 +302,18 @@ data class NetConnState(
     /** True when the message-tags or draft/message-reactions cap is negotiated.
      *  Used by ChatScreen to decide whether to offer emoji reactions. */
     val hasReactionSupport: Boolean = false,
+    /**
+     * True from the moment a [IrcEvent.TlsFingerprintChanged] fires until the next successful
+     * connection (or until the pin is cleared by the user). Drives the "Reset & re-pin" button
+     * in NetworkEditScreen
+     */
+    val tlsPinMismatch: Boolean = false,
+    /**
+     * The actual fingerprint the server presented at the most recent mismatch, stashed so
+     * the edit screen can offer "Trust this server too" without re-deriving it. Cleared on
+     * next successful connect alongside [tlsPinMismatch]. Null when no mismatch is active.
+     */
+    val tlsPinMismatchActualFp: String? = null,
 )
 
 data class BanEntry(
@@ -272,8 +323,8 @@ data class BanEntry(
 )
 
 /**
- * Snapshot of one upstream network reported by a soju/pounce bouncer via the
- * `soju.im/bouncer-networks` extension. Distinct from [NetworkProfile] — this is what the
+ * Snapshot of one upstream network reported by a soju bouncer via the
+ * `soju.im/bouncer-networks` extension. Distinct from [NetworkProfile] - this is what the
  * bouncer *says* exists, not what HexDroid is configured to connect to. The difference is
  * what lets the UI offer "bouncer has a network you haven't added" hints.
  *
@@ -281,9 +332,10 @@ data class BanEntry(
  * not change during the lifetime of the network, so it's safe to use as a map key.
  *
  * [state] mirrors the spec values: "connected" | "connecting" | "disconnected". Null until
- * the bouncer has told us, or when an update message omits the attribute (spec rule: a
- * missing attribute means "preserve the previous value"; we honour that by keeping non-null
- * state when a later message doesn't include one, via the merge logic in the handler).
+ * the bouncer has told us, when an update message omits the attribute (spec rule: a missing
+ * attribute means "preserve the previous value"; we honour that via the merge logic in the
+ * BouncerNetwork handler), or when the bouncer explicitly cleared it via `state=` with an
+ * empty value (signalled in BouncerNetwork.clearedKeys).
  */
 data class BouncerUpstreamInfo(
     val id: String,
@@ -393,6 +445,13 @@ data class UiState(
     val dccTransfers: List<DccTransferState> = emptyList(),
 
     val backupMessage: String? = null,
+
+    /**
+     * Transient toast/feedback after a bouncer-network discover-and-clone import attempt.
+     * Set by [IrcViewModel.cloneBouncerNetwork] / [IrcViewModel.refreshBouncerNetworks];
+     * cleared by the screen via [IrcViewModel.clearBouncerCloneMessage] once shown.
+     */
+    val bouncerCloneMessage: String? = null,
 )
 
 class IrcViewModel(
@@ -407,6 +466,35 @@ class IrcViewModel(
     private val scrollbackLoadStartedAtMs: MutableMap<String, Long> =
         java.util.concurrent.ConcurrentHashMap()
 
+    /**
+     * Per-buffer "newest server-history message timestamp seen since the last live message".
+     *
+     * Populated as messages with `isHistory = true` flow through [append]. Read on the FIRST
+     * subsequent live (`isHistory = false`) message for the same buffer: if a meaningful gap
+     * exists between the newest history line and the live one, [append] inserts a "── Chat
+     * history • Last message: <ts> ──" separator just before the live message and clears the
+     * entry. Mirrors the [scrollbackLoadStartedAtMs]-driven scrollback marker, but for
+     * server-replayed history (CHATHISTORY, znc.in/playback, soju buffer playback) instead of
+     * disk logs — the user gets the same visual cue at both kinds of catch-up boundary.
+     *
+     * ConcurrentHashMap because [append] runs on Main but isHistory updates can race with
+     * dispatcher-bounded log loads that also touch other parts of [append].
+     */
+    private val pendingChathistoryMarkerMs: MutableMap<String, Long> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * "Catch-up window" for the chathistory marker, keyed by buffer. Set when a self-JOIN
+     * fires (or the bouncer playback batch on a fresh connect), holding the wall-clock
+     * deadline by which the marker must fire, after that, it's discarded silently and any
+     * subsequent live message in that buffer renders without a separator.
+     *
+     * Window length matches the upstream history-expect window (15 s for znc.in/playback,
+     * 7 s for IRCv3 CHATHISTORY) plus a 30 s grace for the first live message to arrive.
+     */
+    private val chathistoryMarkerArmedUntilMs: MutableMap<String, Long> =
+        java.util.concurrent.ConcurrentHashMap()
+
     @SuppressLint("StaticFieldLeak")
     private val appContext: Context = context.applicationContext
 
@@ -417,7 +505,7 @@ class IrcViewModel(
      * Accumulation buffer for incoming 322 LIST replies.
      *
      * Large servers (e.g. Libera) send 10 000+ channel entries. If we update [_state] on
-     * every entry the entire UiState — including all message buffers — is copied O(n) times
+     * every entry the entire UiState - including all message buffers - is copied O(n) times
      * and the UI re-renders for each one. Instead we collect entries here and flush to
      * [_state] in batches of [CHANNEL_LIST_BATCH_SIZE], with a final flush on 323 (ListEnd).
      * The buffer is cleared on ListStart so back-to-back /list calls are safe.
@@ -434,7 +522,7 @@ class IrcViewModel(
         const val CONNECT_FAN_OUT_DELAY_MS = 500L
         /**
          * Suppression window for auto-rejoin after a kick. A second kick on the same channel
-         * within this window will NOT trigger another rejoin attempt — protects against
+         * within this window will NOT trigger another rejoin attempt - protects against
          * loops when the user can't satisfy a channel mode (+i, +k, +b) or is being
          * deliberately kick-banned by an op.
          */
@@ -505,6 +593,19 @@ class IrcViewModel(
     private val manualDisconnecting = mutableSetOf<String>()
     private val noNetworkNotice = mutableSetOf<String>()
 
+    /**
+     * Networks where the last connection attempt failed with an authentication error
+     * (server PASS rejected via 464 ERR_PASSWDMISMATCH, or SASL aborted via 904/905/906).
+     * scheduleAutoReconnect bails when a netId is in this set, so the client doesn't
+     * re-fire the same wrong credentials every few seconds and either flood the bouncer
+     * UI or trip rate-limits / IP bans on the IRCd.
+     *
+     * Cleared when the user explicitly reconnects, edits the profile, or toggles
+     * autoConnect — i.e. anywhere they've had a chance to fix the credentials.
+     * NOT cleared on routine disconnects.
+     */
+    private val authBlockedReconnect = mutableSetOf<String>()
+
     // Flap detection: track timestamps (ms) of ping-timeout disconnects per network.
     // If ≥ FLAP_THRESHOLD occur within FLAP_WINDOW_MS the connection is deemed unstable
     // and auto-reconnect is suspended until the user manually reconnects.
@@ -562,9 +663,94 @@ class IrcViewModel(
 
     // Not persisted; resets to all-expanded on process restart.
     private val _collapsedNetworkIds = MutableStateFlow<Set<String>>(emptySet())
+    /**
+     * Programmatic entry point for the buffer-list toolbar's search button. Equivalent to
+     * the user typing `/find <query>` in the currently-selected buffer. Kept separate from
+     * the slash-command dispatch path so the dispatcher can stay focused on parsing chat
+     * input; the toolbar already knows it wants to search and has the query in hand.
+     *
+     * If [global] is true, searches across all loaded buffers on the current network
+     * (mirroring `/gsearch`); otherwise only the active buffer.
+     */
+    fun searchFromToolbar(query: String, global: Boolean = false) {
+        val q = query.trim()
+        if (q.isBlank()) return
+        val st = _state.value
+        val currentKey = st.selectedBuffer.takeIf { it.isNotBlank() } ?: return
+        val (netId, _) = splitKey(currentKey)
+        val matches: List<UiMessage> = if (global) {
+            st.buffers
+                .filter { (k, _) -> splitKey(k).first == netId }
+                .flatMap { (_, buf) ->
+                    buf.messages.filter {
+                        it.text.contains(q, ignoreCase = true) ||
+                            it.from?.contains(q, ignoreCase = true) == true
+                    }
+                }
+                .sortedBy { it.timeMs }
+        } else {
+            (st.buffers[currentKey]?.messages.orEmpty()).filter {
+                it.text.contains(q, ignoreCase = true) ||
+                    it.from?.contains(q, ignoreCase = true) == true
+            }
+        }
+        if (matches.isEmpty()) {
+            append(currentKey, from = null, text = "*** No matches for \"$q\"", isLocal = true, doNotify = false)
+            return
+        }
+        _state.value = st.copy(
+            findOverlay = FindOverlay(
+                query = q,
+                matchIds = matches.map { it.id },
+                currentIndex = matches.lastIndex,
+                bufferKey = if (global) "GLOBAL:$netId" else currentKey,
+            )
+        )
+    }
+
     fun toggleNetworkExpanded(netId: String) {
         _collapsedNetworkIds.update { current ->
             if (current.contains(netId)) current - netId else current + netId
+        }
+    }
+
+    /**
+     * Collapse every network in the buffer drawer in one action. Triggered by the drawer's
+     * top-bar "collapse all" button. If every network is already collapsed, expand them all
+     * instead (toggle behaviour) so the same button does the right thing on a second tap.
+     */
+    fun collapseOrExpandAllNetworks() {
+        val st = _state.value
+        val allIds = st.networks.map { it.id }.toSet()
+        if (allIds.isEmpty()) return
+        _collapsedNetworkIds.update { current ->
+            // If every network is currently collapsed, expand them all; otherwise collapse all.
+            if (allIds.all { it in current }) emptySet() else allIds
+        }
+    }
+
+    /**
+     * Mark every buffer (across every network) as read: clear the unread + highlight counters
+     * and stamp a fresh lastReadTimestamp matching the newest message in each buffer so the
+     * unread separator lands at the bottom on next view. Triggered by the drawer's "clear
+     * unread" button. No server-side MARKREAD is sent here, that's only emitted when the
+     * user actually views a buffer; this is purely a local "I've seen everything" sweep.
+     */
+    fun markAllBuffersRead() {
+        _state.update { st ->
+            if (st.buffers.isEmpty()) return@update st
+            val nowIso = java.time.Instant.ofEpochMilli(System.currentTimeMillis() + 1L).toString()
+            val newBuffers = st.buffers.mapValues { (_, buf) ->
+                if (buf.unread == 0 && buf.highlights == 0) buf
+                else {
+                    val lastTs = buf.messages.lastOrNull()?.timeMs
+                    val newLastRead = if (lastTs != null) {
+                        java.time.Instant.ofEpochMilli(lastTs + 1L).toString()
+                    } else nowIso
+                    buf.copy(unread = 0, highlights = 0, lastReadTimestamp = newLastRead)
+                }
+            }
+            st.copy(buffers = newBuffers)
         }
     }
 
@@ -654,7 +840,24 @@ class IrcViewModel(
 
         desiredNetworkIdsApplied = true
         val existing = st.networks.map { it.id }.toSet()
-        val targets = desiredConnected.filter { existing.contains(it) }.toList()
+        // Only restore networks that BOTH were previously desired AND have autoConnect on.
+        // desiredConnected captures "was connected at last process death" which is the
+        // correct intent for "reconnect after network loss within a session", but for
+        // process-restart restoration it must be intersected with the per-network
+        // autoConnect flag. Otherwise toggling autoConnect off has no effect on a
+        // network that's currently connected
+        val autoConnectIds = st.networks.filter { it.autoConnect }.map { it.id }.toSet()
+        val targets = desiredConnected
+            .filter { existing.contains(it) && autoConnectIds.contains(it) }
+            .toList()
+
+        // Drop any persisted desired-connect entries that no longer correspond to an
+        // existing+autoConnect network so they don't re-trigger on subsequent launches.
+        // (Networks deleted entirely are also pruned here.)
+        val before = desiredConnected.size
+        desiredConnected.retainAll { existing.contains(it) && autoConnectIds.contains(it) }
+        if (desiredConnected.size != before) persistDesiredNetworkIds()
+
         if (targets.isEmpty()) return
         // Same rationale as maybeAutoConnect: stagger to avoid bouncer rate-limit bounces.
         viewModelScope.launch {
@@ -663,9 +866,6 @@ class IrcViewModel(
                 connectNetwork(id)
             }
         }
-        val before = desiredConnected.size
-        desiredConnected.retainAll(existing)
-        if (desiredConnected.size != before) persistDesiredNetworkIds()
     }
 
 
@@ -728,6 +928,16 @@ class IrcViewModel(
     // immediate kick → rejoin → kick loop. One auto-rejoin per minute per channel is plenty.
     private val recentKickRejoins: MutableMap<String, Long> = mutableMapOf()
 
+    /**
+     * Per-buffer-key timestamp of our most recent self-JOIN. Read by the notice routing
+     * to attribute a service-bot welcome NOTICE that arrived within ~5 s of the join to
+     * the channel we just joined - even when the notice body doesn't mention the channel
+     * name (e.g. Anope BotServ-assigned bots that send "Welcome, $nick!" with no channel
+     * reference). Bounded by an opportunistic eviction in the JOIN handler; never holds
+     * entries longer than the read window cares about.
+     */
+    private val recentJoinAtMs: MutableMap<String, Long> = mutableMapOf()
+
     private var autoConnectAttempted = false
 
     private val notifier = NotificationHelper(appContext)
@@ -769,7 +979,7 @@ class IrcViewModel(
         val t = stripIrcFormatting(text)
         val body = when {
             from == null -> t
-            // *nick* text — asterisk-wrapped nick is unambiguous: server-status lines always
+            // *nick* text - asterisk-wrapped nick is unambiguous: server-status lines always
             // use "* word …" (asterisk-space) and can never produce this pattern.
             // Old logs used "* nick text"; the parser below handles both for backward compat.
             isAction -> "*$from* $t"
@@ -782,6 +992,24 @@ class IrcViewModel(
     private val pendingSendsByNet = mutableMapOf<String, ArrayDeque<SentSig>>()
 
     private fun bufKey(netId: String, bufferName: String): String = "$netId::$bufferName"
+
+    /**
+     * Wrap [text] in mIRC colour-code framing (`\u0003<code>` + text + `\u0003`) when the
+     * `colorChannelEvents` setting is on. The renderer's existing mIRC parser turns this
+     * into a Compose SpanStyle on display: log files, copy-to-clipboard, and any other
+     * sink that strips formatting will see the unwrapped text.
+     *
+     * Colour code conventions (mIRC palette indices):
+     *   3  green   joins (positive event)
+     *   7  orange  parts (neutral departure, client-initiated)
+     *   5  brown   quits (server-initiated departure, distinct from parts)
+     *   4  red     kicks (forced removal, demands attention)
+     *   10 cyan    nick changes (informational, low-priority)
+     */
+    private fun colorEvent(text: String, code: Int): String {
+        if (!_state.value.settings.colorChannelEvents) return text
+        return "\u0003$code$text\u0003"
+    }
 
     // Case-fold aware lookup; merges duplicate buffers if the server changes name casing.
     private fun resolveBufferKey(netId: String, bufferName: String): String {
@@ -872,6 +1100,7 @@ class IrcViewModel(
         }
 
         scrollbackRequested.removeAll(dropKeys.toSet())
+        for (k in dropKeys) pendingChathistoryMarkerMs.remove(k)
 
         var newBuffers = st0.buffers + (keepKey to keepBuf)
         for (k in dropKeys) newBuffers = newBuffers - k
@@ -1092,7 +1321,12 @@ class IrcViewModel(
                 viewModelScope.launch {
                     delay(1000) // Brief delay to let the network stabilize
                     val st = _state.value
-                    for (netId in desiredConnected) {
+                    // Snapshot before iterating: connectNetwork() inside the loop body adds
+                    // to desiredConnected (and the auth-fail path may also remove from it
+                    // via downstream disconnect handlers), so iterating the live set risks
+                    // ConcurrentModificationException on any background ramp-up.
+                    val snapshot = desiredConnected.toList()
+                    for (netId in snapshot) {
                         val conn = st.connections[netId]
                         if (conn?.connected != true && conn?.connecting != true) {
                             val serverKey = bufKey(netId, "*server*")
@@ -1120,7 +1354,13 @@ class IrcViewModel(
                         // disconnectNetwork() honours desiredConnected, so onAvailable()
                         // will reconnect everything once the network returns.
                         val st = _state.value
-                        for (netId in desiredConnected) {
+                        // Snapshot before iterating: disconnectNetwork() removes from
+                        // desiredConnected (via the viewModelScope.launch inside it),
+                        // and on rapid network flaps that mutation can race against this
+                        // iteration. Snapshotting also stops re-entrant onLost callbacks
+                        // from each modifying the live view in place.
+                        val snapshot = desiredConnected.toList()
+                        for (netId in snapshot) {
                             val conn = st.connections[netId]
                             if (conn?.connected == true || conn?.connecting == true) {
                                 val serverKey = bufKey(netId, "*server*")
@@ -1147,7 +1387,7 @@ class IrcViewModel(
             // Registration can fail on some OEM ROMs (e.g. missing permission, broken
             // ConnectivityManager implementation). Log it to every server buffer so the
             // user knows auto-reconnect on network change won't work.
-            val msg = "*** Network callback registration failed: ${e.message ?: e.javaClass.simpleName} — " +
+            val msg = "*** Network callback registration failed: ${e.message ?: e.javaClass.simpleName} - " +
                 "auto-reconnect on network change may not work on this device"
             viewModelScope.launch {
                 for (netId in _state.value.networks.map { it.id }) {
@@ -1179,6 +1419,25 @@ class IrcViewModel(
     fun setNetworkAutoConnect(netId: String, enabled: Boolean) {
         val n = _state.value.networks.firstOrNull { it.id == netId } ?: return
         viewModelScope.launch { repo.upsertNetwork(n.copy(autoConnect = enabled)) }
+
+        // When autoConnect is being turned OFF, also clear any pending auto-reconnect
+        // state for this network. Without this, a network that's currently connected
+        // (or in reconnect-backoff) keeps its slot in [desiredConnected], so it gets
+        // restored on the next process restart and the in-flight reconnect coroutine
+        // keeps trying - both directly contradicting the toggle the user just flipped.
+        // The user can still manually connect; they just won't get implicit reconnects.
+        //
+        // We do NOT immediately disconnect: if the network is currently connected the
+        // user is using it, and turning off autoConnect shouldn't drop them. They're
+        // saying "don't bring this back automatically", not "kill the connection now".
+        if (!enabled) {
+            val removed = desiredConnected.remove(netId)
+            if (removed) persistDesiredNetworkIds()
+            // Cancel any backoff coroutine waiting to retry. If it's currently sleeping,
+            // its next wake-up will see desiredConnected no longer contains netId and exit.
+            autoReconnectJobs.remove(netId)?.cancel()
+            reconnectAttempts.remove(netId)
+        }
     }
 
     // ── IRC URI deep-link support ─────────────────────────────────────────────────
@@ -1197,7 +1456,7 @@ class IrcViewModel(
      *
      * Handles every form seen in the wild:
      *   irc://host/channel           plain, port 6667
-     *   irc://host:+6697/channel     TLS via +port convention (mIRC/ZNC) — note: Chrome
+     *   irc://host:+6697/channel     TLS via +port convention (mIRC/ZNC) - note: Chrome
      *                                rejects this as an invalid URI; ircs:// or irc+ssl:// are
      *                                the browser-safe alternatives
      *   ircs://host:6697/channel     TLS via scheme (standard)
@@ -1287,7 +1546,7 @@ class IrcViewModel(
                     _state.value = _state.value.copy(screen = AppScreen.CHAT)
                 }
             } else {
-                // New server — pre-fill from URI and open the edit screen for review.
+                // New server - pre-fill from URI and open the edit screen for review.
                 val n = NetworkProfile(
                     id = "net_" + java.util.UUID.randomUUID().toString().replace("-", ""),
                     name = ircUri.host,
@@ -1301,7 +1560,7 @@ class IrcViewModel(
                     realname = "HexDroid IRC",
                     serverPassword = ircUri.serverPassword,
                     saslEnabled = false,
-                    saslMechanism = SaslMechanism.SCRAM_SHA_256,
+                    saslMechanism = SaslMechanism.PLAIN,
                     caps = CapPrefs(),
                     autoJoin = newAutoJoin,
                 )
@@ -1701,7 +1960,7 @@ class IrcViewModel(
                 username = "hexdroid",
                 realname = "HexDroid IRC for Android",
                 saslEnabled = false,
-                saslMechanism = SaslMechanism.SCRAM_SHA_256,
+                saslMechanism = SaslMechanism.PLAIN,
                 caps = CapPrefs(),
                 autoJoin = listOf(AutoJoinChannel("#HexDroid", null))
             )
@@ -1761,7 +2020,7 @@ fun startAddNetwork() {
 		username = "hexdroid",
 		realname = "HexDroid IRC",
 		saslEnabled = false,
-		saslMechanism = SaslMechanism.SCRAM_SHA_256,
+		saslMechanism = SaslMechanism.PLAIN,
 		caps = CapPrefs(),
 		autoJoin = emptyList()
 	)
@@ -1797,7 +2056,7 @@ fun startAddNetwork() {
         _state.value = _state.value.copy(localNetworkWarningNetworkId = null)
     }
 
-    /** Called after the user has granted ACCESS_LOCAL_NETWORK — retry the connection. */
+    /** Called after the user has granted ACCESS_LOCAL_NETWORK - retry the connection. */
     fun retryAfterLocalNetworkPermission(netId: String) {
         _state.value = _state.value.copy(localNetworkWarningNetworkId = null)
         connectNetwork(netId)
@@ -1829,7 +2088,7 @@ fun startAddNetwork() {
                 if (!p.isNullOrBlank()) {
                     repo.secretStore.setSaslPassword(profile.id, p)
                 } else {
-                    // SASL is enabled but the password field was cleared — remove the
+                    // SASL is enabled but the password field was cleared - remove the
                     // stored secret so the old password does not persist in SecretStore.
                     repo.secretStore.clearSaslPassword(profile.id)
                 }
@@ -1875,6 +2134,11 @@ fun startAddNetwork() {
 
             repo.upsertNetwork(updated)
             repo.setLastNetworkId(updated.id)
+            // Editing the profile gives the user a chance to fix bad credentials, so
+            // clear the auth-failure block. Even if they didn't actually touch the
+            // password fields, the next manual reconnect deserves the same one-shot
+            // policy as connectNetwork().
+            authBlockedReconnect.remove(updated.id)
 
             _state.value = _state.value.copy(
                 screen = AppScreen.NETWORKS,
@@ -1911,6 +2175,21 @@ fun startAddNetwork() {
         // Typing expiry jobs: cancel and remove all for this network
         val typingKeys = receivedTypingExpiryJobs.keys.filter { it.startsWith(chanPrefix) }
         typingKeys.forEach { receivedTypingExpiryJobs.remove(it)?.cancel() }
+        // Notice-routing recently-joined fallback: drop entries for buffers on this network.
+        // The opportunistic eviction in the JOIN handler already prunes by the 5-second
+        // window cutoff, but if a user disconnects from a network without joining anything
+        // afterwards, those entries linger until the cap eviction fires later. Cleaning
+        // here is purely an upper bound on the leak.
+        recentJoinAtMs.keys.filter { it.startsWith(chanPrefix) }.toList()
+            .forEach { recentJoinAtMs.remove(it) }
+        // Same per-network sweep for the chathistory marker armed window.
+        chathistoryMarkerArmedUntilMs.keys.filter { it.startsWith(chanPrefix) }.toList()
+            .forEach { chathistoryMarkerArmedUntilMs.remove(it) }
+        // PING timeout history: was previously only removed by reconnectNetwork(), so
+        // disconnectNetwork-without-reconnect (the user backgrounding a network) left
+        // stale ArrayDeques behind. Removing here aligns the lifecycle with the rest
+        // of the per-network state.
+        pingTimeoutTimestamps.remove(netId)
         // Reconnect state
         reconnectAttempts.remove(netId)
         autoReconnectJobs.remove(netId)?.cancel()
@@ -1927,6 +2206,11 @@ fun startAddNetwork() {
             if (!st.bouncerNetworks.containsKey(netId)) st
             else st.copy(bouncerNetworks = st.bouncerNetworks - netId)
         }
+        // NOTE: authBlockedReconnect is deliberately NOT cleared here — cleanupNetworkMaps
+        // runs on every disconnect (including the auth-failure-induced disconnect that
+        // SET the block), and clearing here would defeat the block entirely. Cleared
+        // explicitly in connectNetwork(), reconnectNetwork(), saveEditingNetwork(), and
+        // deleteNetwork() instead.
     }
 
     fun deleteNetwork(id: String) {
@@ -1937,8 +2221,32 @@ fun startAddNetwork() {
         }
         disconnectNetwork(id)
         cleanupNetworkMaps(id)
-        val st = _state.value
-        if (st.activeNetworkId == id) _state.value = syncActiveNetworkSummary(st.copy(activeNetworkId = st.networks.firstOrNull { it.id != id }?.id))
+        // Profile is gone; drop any auth-failure block that pinned it. (cleanupNetworkMaps
+        // doesn't touch authBlockedReconnect, see the note there.)
+        authBlockedReconnect.remove(id)
+        // Purge orphan state for the deleted network: buffers, the connection record, and
+        // the per-buffer chathistory marker tracker. Without this, buffer messages and
+        // associated state stay in memory until the process is killed - a real leak in
+        // long-running sessions where the user is provisioning/deprovisioning networks.
+        // (cleanupNetworkMaps clears per-channel maps but deliberately doesn't touch
+        // _state, since most of its callers want to keep buffer history across reconnects.)
+        val prefix = "$id::"
+        _state.update { st ->
+            val orphanKeys = st.buffers.keys.filter { it.startsWith(prefix) }
+            for (k in orphanKeys) pendingChathistoryMarkerMs.remove(k)
+            val newBuffers = if (orphanKeys.isEmpty()) st.buffers else st.buffers - orphanKeys.toSet()
+            val newConns = if (st.connections.containsKey(id)) st.connections - id else st.connections
+            val newSelected = if (st.selectedBuffer.startsWith(prefix)) "" else st.selectedBuffer
+            val newActive = if (st.activeNetworkId == id) {
+                st.networks.firstOrNull { it.id != id }?.id
+            } else st.activeNetworkId
+            syncActiveNetworkSummary(st.copy(
+                buffers = newBuffers,
+                connections = newConns,
+                selectedBuffer = newSelected,
+                activeNetworkId = newActive,
+            ))
+        }
     }
 
     /** Clear the transient backup/restore result message (called after the UI has shown it). */
@@ -1985,7 +2293,7 @@ fun startAddNetwork() {
                 // Clear encrypted secrets for profiles that existed locally before the restore
                 // but are absent from the imported backup. Without this, SASL passwords / server
                 // passwords / TLS client certs for deleted profiles linger in SecretStore
-                // indefinitely — a data-hygiene issue rather than an active security bug, but
+                // indefinitely - a data-hygiene issue rather than an active security bug, but
                 // worth closing because the material is encrypted credential data.
                 for (id in orphanedIds) {
                     runCatching { repo.secretStore.clearSaslPassword(id) }
@@ -1996,7 +2304,46 @@ fun startAddNetwork() {
                     // remain. They'll never be used (loadTlsClientCert requires both netId and
                     // certId), but a follow-up housekeeping pass could walk the directory.
                 }
-                "Backup restored successfully.\nPasswords were not restored — please re-enter them in each network's settings."
+                // Disconnect any live runtimes for profiles that were deleted by the import.
+                // Without this, the IrcClient keeps running against the now-orphan profile,
+                // would auto-reconnect with stale credentials on next disconnect, and pollutes
+                // the connection notification with a network the user can no longer see in the
+                // sidebar. Switch to the Main dispatcher because disconnectNetwork mutates state.
+                if (orphanedIds.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        for (id in orphanedIds) {
+                            // disconnectNetwork is idempotent and safe to call on a netId that
+                            // isn't currently connected, so we don't need a connection check.
+                            disconnectNetwork(id)
+                            // Drop in-memory state for the orphan: buffers, connection record,
+                            // chathistory marker tracker. Same purge pattern as deleteNetwork()
+                            // — the profile is gone from disk; its UI state should follow.
+                            authBlockedReconnect.remove(id)
+                            cleanupNetworkMaps(id)
+                            val prefix = "$id::"
+                            _state.update { st ->
+                                val orphanKeys = st.buffers.keys.filter { it.startsWith(prefix) }
+                                for (k in orphanKeys) pendingChathistoryMarkerMs.remove(k)
+                                val newBuffers = if (orphanKeys.isEmpty()) st.buffers
+                                                 else st.buffers - orphanKeys.toSet()
+                                val newConns = if (st.connections.containsKey(id)) st.connections - id
+                                               else st.connections
+                                val newSelected = if (st.selectedBuffer.startsWith(prefix)) ""
+                                                  else st.selectedBuffer
+                                val newActive = if (st.activeNetworkId == id) {
+                                    st.networks.firstOrNull { it.id != id }?.id
+                                } else st.activeNetworkId
+                                syncActiveNetworkSummary(st.copy(
+                                    buffers = newBuffers,
+                                    connections = newConns,
+                                    selectedBuffer = newSelected,
+                                    activeNetworkId = newActive,
+                                ))
+                            }
+                        }
+                    }
+                }
+                "Backup restored successfully.\nPasswords were not restored - please re-enter them in each network's settings."
             }
             val msg = result.getOrElse { e -> "Restore failed: ${e.message}" }
             _state.update { it.copy(backupMessage = msg) }
@@ -2031,7 +2378,213 @@ fun startAddNetwork() {
         }
     }
 
+    /**
+     * Ask a bouncer to (re-)send its current upstream-network list. Per-kind dispatch:
+     *
+     *  - SOJU: sends `BOUNCER LISTNETWORKS`. The bouncer replies with one
+     *    `BOUNCER NETWORK <id> <attrs>` per known upstream, terminated by
+     *    `BOUNCER NETWORK *`. Feeds the existing structured handler. Soju emits explicit
+     *    `BOUNCER NETWORK <id> *` deletion sentinels so the cache stays consistent
+     *    without explicit eviction.
+     *  - ZNC: sends `PRIVMSG *status :ListNetworks`. The reply is a free-text NOTICE
+     *    table that is scraped opportunistically by [parseZncListNetworksLine] and
+     *    surfaced as the same `BouncerNetwork` events soju produces — so the UI and
+     *    cache code paths are shared. Because ZNC has NO deletion sentinel (a removed
+     *    network simply doesn't appear in the next ListNetworks output), we wipe the
+     *    cache for this profile before issuing the command so the rebuild is authoritative.
+     *    A brief UI flicker is the cost; permanently-stale entries are the alternative.
+     *  - GENERIC / NONE: no-op. Generic bouncers have no standardised list command.
+     *
+     * Idempotent: re-receiving the same upstream attrs produces no visible change in
+     * the cache (the merge logic is value-based) so we don't need a per-request marker.
+     */
+    fun refreshBouncerNetworks(parentNetId: String) {
+        val rt = runtimes[parentNetId] ?: return
+        val profile = _state.value.networks.firstOrNull { it.id == parentNetId } ?: return
+        val cmd = when (profile.bouncerKind) {
+            BouncerKind.SOJU -> "BOUNCER LISTNETWORKS"
+            BouncerKind.ZNC -> {
+                // Wipe the cache for this profile so the table-scrape rebuild is
+                // authoritative. Without this, a network removed via ZNC's `DelNetwork`
+                // would linger in our UI forever because no row referencing it would
+                // arrive in the new reply.
+                _state.update { st ->
+                    if (!st.bouncerNetworks.containsKey(parentNetId)) st
+                    else st.copy(bouncerNetworks = st.bouncerNetworks + (parentNetId to emptyMap()))
+                }
+                "PRIVMSG *status :ListNetworks"
+            }
+            BouncerKind.GENERIC, BouncerKind.NONE -> return  // no equivalent command
+        }
+        viewModelScope.launch { runCatching { rt.client.sendRaw(cmd) } }
+    }
+
+    /**
+     * "Discover-and-clone" import: take a bouncer-reported upstream and create a local
+     * NetworkProfile for it that copies the bouncer connection details (host, port, TLS,
+     * SASL) from [parentNetId] but binds to the discovered upstream via [bouncerNetworkName].
+     *
+     * Why clone the parent rather than ask the user to fill in a fresh form: the bouncer-
+     * facing connection details (host/port/TLS/credentials) are identical for every upstream
+     * served by the same bouncer instance. only the per-upstream `bouncerNetworkName`
+     * differs. Re-typing those is the painful part of bouncer onboarding and the entire
+     * reason the discover-and-clone flow exists.
+     *
+     * The clone inherits the **parent's bouncerKind** so the SASL authcid / USER suffix is
+     * composed with the right syntax (soju's `user/network[@cid]` vs ZNC's
+     * `user[@cid]/network`). Parent kinds other than SOJU/ZNC are rejected, generic
+     * bouncers don't expose a discoverable upstream list and there's nothing meaningful
+     * to clone from.
+     *
+     * The new profile:
+     *  - inherits everything bouncer-side (host, port, useTls, allowInvalidCerts, nick,
+     *    username, realname, SASL config + secrets, server password + secret, caps)
+     *  - inherits the parent's bouncerKind (so SOJU stays SOJU, ZNC stays ZNC)
+     *  - overrides bouncerNetworkName = [bouncerNetworkName]
+     *  - clears clientId (per-client buffers are device-local, copying it would create
+     *    two profiles fighting over the same client buffer slot on the bouncer)
+     *  - clears autoJoin (the upstream may have its own server-side autojoin list and
+     *    the user usually wants to opt in to autoConnect deliberately on a fresh profile)
+     *  - autoConnect = false; user enables explicitly
+     *  - new UUID id; sortOrder placed at the end of the list
+     *
+     * On success, [bouncerCloneMessage] is set so the screen can surface a brief toast.
+     * Idempotency: if a profile already exists with the same bouncerKind+host+port
+     * targeting this upstream name, no clone is created and the existing profile is
+     * surfaced via the message instead.
+     */
+    fun cloneBouncerNetwork(parentNetId: String, bouncerNetworkName: String) {
+        viewModelScope.launch {
+            val st = _state.value
+            val parent = st.networks.firstOrNull { it.id == parentNetId } ?: run {
+                _state.update { it.copy(bouncerCloneMessage = "Parent profile not found.") }
+                return@launch
+            }
+            if (parent.bouncerKind != BouncerKind.SOJU && parent.bouncerKind != BouncerKind.ZNC) {
+                // Defensive: the UI only shows the section for SOJU/ZNC, but the action could
+                // be invoked through other paths (deep links, future automation). Reject so
+                // the resulting clone can't end up with a misconfigured authcid syntax.
+                _state.update { it.copy(bouncerCloneMessage = "Discover-and-clone is only available for soju and ZNC.") }
+                return@launch
+            }
+            val targetName = bouncerNetworkName.trim()
+            if (targetName.isEmpty()) {
+                _state.update { it.copy(bouncerCloneMessage = "Bouncer network has no name yet. try refresh.") }
+                return@launch
+            }
+
+            // Idempotency: scope by parent host+port AND bouncerKind so two bouncers of
+            // different kinds that happen to expose a network of the same name don't collide,
+            // and so a soju profile and a ZNC profile pointing at "libera" on the same host
+            // (e.g. during a migration) are treated as distinct imports.
+            val existing = st.networks.firstOrNull {
+                it.bouncerKind == parent.bouncerKind &&
+                    it.bouncerNetworkName.equals(targetName, ignoreCase = true) &&
+                    it.host.equals(parent.host, ignoreCase = true) &&
+                    it.port == parent.port
+            }
+            if (existing != null) {
+                _state.update { it.copy(bouncerCloneMessage = "Already imported as \"${existing.name}\".") }
+                return@launch
+            }
+
+            // Pull credentials out of SecretStore so the clone gets a working copy. Without
+            // this the new profile would silently fall back to plaintext PASS / abort SASL
+            // on first connect.
+            val parentServerPass = runCatching { repo.secretStore.getServerPassword(parentNetId) }.getOrNull()
+            val parentSaslPass = runCatching { repo.secretStore.getSaslPassword(parentNetId) }.getOrNull()
+
+            val newId = "net_" + java.util.UUID.randomUUID().toString().replace("-", "")
+            val maxSort = st.networks.maxOfOrNull { it.sortOrder } ?: -1
+
+            // Prefer SASL for the cloned profile.
+            //
+            // Why: SASL PLAIN is the modern, structured auth path supported by all current
+            // soju and ZNC versions; the PASS line is a legacy fallback that requires the
+            // user to know the exact format their bouncer wants (and the format differs
+            // across bouncers). When the parent already has SASL enabled, inherit it.
+            // When the parent has no SASL but does have a server password, opportunistically
+            // upgrade the clone to SASL using the same credential, this is the path users
+            // almost always want when migrating a PASS-only setup to per-network profiles.
+            //
+            // SASL authcid format follows effectiveAuthIdentity (e.g. "eck/afternet" for
+            // soju, "eck@hexdroid/afternet" for ZNC), so inheriting `username` from the parent
+            // and adding bouncerNetworkName=targetName produces the right wire format
+            // automatically.
+            //
+            // If the parent has neither SASL nor a server password, we leave SASL off. the
+            // user clearly hasn't set credentials yet and the clone shouldn't pretend to
+            // have them.
+            val parentHasSasl = parent.saslEnabled && !parentSaslPass.isNullOrEmpty()
+            val parentHasPass = !parentServerPass.isNullOrEmpty()
+            val cloneShouldUseSasl = parentHasSasl || parentHasPass
+            val cloneSaslPassword = when {
+                parentHasSasl -> parentSaslPass
+                parentHasPass -> parentServerPass
+                else -> null
+            }
+            // Mechanism choice for the clone:
+            //  - parent already had SASL enabled -> inherit verbatim (user picked it knowingly).
+            //  - parent was PASS-only -> force PLAIN. The SCRAM-* mechanisms negotiate a salted
+            //    challenge-response specific to how the bouncer stored the password, and a
+            //    server-PASS string almost certainly wasn't stored that way; trying SCRAM
+            //    with a PASS credential produces a 904 SASL fail. Worse, parent.saslMechanism
+            //    may be set to SCRAM as a leftover from a previous experiment that the user
+            //    abandoned by disabling SASL. copying it blindly would mean the clone
+            //    silently uses a mechanism the credential can't satisfy.
+            val cloneSaslMechanism = if (parentHasSasl) parent.saslMechanism else SaslMechanism.PLAIN
+
+            val clone = parent.copy(
+                id = newId,
+                name = "${parent.name} – $targetName",
+                isBouncer = true,
+                // bouncerKind inherited from parent.copy() - soju stays soju, ZNC stays ZNC.
+                bouncerNetworkName = targetName,
+                bouncerClientId = null,
+                autoJoin = emptyList(),
+                autoConnect = false,
+                isFavourite = false,
+                sortOrder = maxSort + 1,
+                // Promote to SASL when we have a credential to put there. authcid is left
+                // null so toIrcConfig falls back to `username` (which effectiveAuthIdentity
+                // then suffixes with /network at send time).
+                saslEnabled = cloneShouldUseSasl,
+                saslMechanism = cloneSaslMechanism,
+                saslAuthcid = if (cloneShouldUseSasl) parent.saslAuthcid else null,
+                // tlsTofuFingerprint carries over (same bouncer host, same cert).
+                // Don't carry serverPassword / saslPassword through the JSON profile; those
+                // live in SecretStore and are written below.
+                serverPassword = null,
+                saslPassword = null,
+            )
+            repo.upsertNetwork(clone)
+            // Write the chosen SASL secret (if any). Always leave server password empty on
+            // the clone when SASL is the active auth path, having a stray serverPassword
+            // around could trip the bouncer's "two auth attempts" warning.
+            if (cloneShouldUseSasl && !cloneSaslPassword.isNullOrEmpty()) {
+                runCatching { repo.secretStore.setSaslPassword(newId, cloneSaslPassword) }
+            } else if (parentHasPass && !parentServerPass.isNullOrEmpty()) {
+                // No SASL credential and no SASL upgrade — fall back to copying server PASS
+                // verbatim. The user wanted credentials migrated; if neither path is viable
+                // they can edit the clone to fix it manually.
+                runCatching { repo.secretStore.setServerPassword(newId, parentServerPass) }
+            }
+            _state.update { it.copy(bouncerCloneMessage = "Imported \"$targetName\" (enable auto-connect to use it.)") }
+        }
+    }
+
+    /** Clear the transient bouncer-clone status message after the UI has consumed it. */
+    fun clearBouncerCloneMessage() {
+        _state.update { it.copy(bouncerCloneMessage = null) }
+    }
+
     fun connectNetwork(netId: String, force: Boolean = false) {
+        // Manual connect attempt: clear the auth-failure block so the scheduled reconnect
+        // (which scheduleAutoReconnect would otherwise short-circuit on) can run again.
+        // We don't validate that the user actually fixed the credentials, they may
+        // re-trip the same 464/SASL fail and the block reapplies. This is the right
+        // contract: every manual reconnect gets one shot.
+        authBlockedReconnect.remove(netId)
         viewModelScope.launch {
             // Ensure flap state is loaded from DataStore before checking it.
             // In the normal case this is a no-op (init already loaded it); this guards
@@ -2105,7 +2658,7 @@ fun startAddNetwork() {
                 append(
                     bufKey(netId, "*server*"),
                     from = null,
-                    text = "*** ⚠ SASL credentials unavailable — the Android Keystore key was " +
+                    text = "*** ⚠ SASL credentials unavailable - the Android Keystore key was " +
                         "invalidated (this can happen after a biometric or screen-lock change). " +
                         "Please re-enter your SASL password in Network Settings.",
                     isHighlight = true,
@@ -2187,7 +2740,7 @@ fun startAddNetwork() {
         }
 		
         // If the collector exits without emitting Disconnected, clean up and maybe reconnect.
-        // Guard: if the job was *cancelled* (intentional teardown — force-close, manual
+        // Guard: if the job was *cancelled* (intentional teardown - force-close, manual
         // disconnect, reconnect replacing this runtime) we must not treat it as an unexpected
         // drop. CancellationException means someone called job.cancel() on purpose.
         rt.job?.invokeOnCompletion { cause ->
@@ -2235,6 +2788,10 @@ fun startAddNetwork() {
             // so we give the connection a fresh start.
             clearFlapPaused(netId)
             pingTimeoutTimestamps.remove(netId)
+            // Manual reconnect also clears the auth-failure block (see connectNetwork
+            // for rationale). Reaches the user-facing "reconnect" button via
+            // reconnectActive() and the bouncer-side reconnect via this path.
+            authBlockedReconnect.remove(netId)
 
             val oldRt = runtimes.remove(netId)
             runCatching { oldRt?.client?.disconnect(quitMsg) }
@@ -2326,6 +2883,19 @@ fun startAddNetwork() {
         if (!st0.settings.autoReconnectEnabled) return
         // Per-network override.
         if (st0.networks.firstOrNull { it.id == netId }?.autoReconnect == false) return
+        // Auth failure on the previous attempt: do nothing. Reconnecting with the same
+        // (wrong) credentials would just trigger the same 464 / SASL fail in a tight
+        // loop, flooding the server log and hitting bouncer rate limits or IRCd bans.
+        // The user must explicitly reconnect (or fix the profile) to clear the block.
+        if (netId in authBlockedReconnect) {
+            val serverKey = bufKey(netId, "*server*")
+            append(serverKey, from = null,
+                text = "*** Auto-reconnect halted: authentication failed. " +
+                       "Fix credentials, then reconnect manually.",
+                doNotify = false)
+            setNetConn(netId) { it.copy(status = "Auth failed — reconnect halted") }
+            return
+        }
         // One job per network.
         autoReconnectJobs.remove(netId)?.cancel()
         val serverKey = bufKey(netId, "*server*")
@@ -2341,23 +2911,37 @@ fun startAddNetwork() {
                     val planned = (baseDelaySec.toLong() * (1L shl exp)).coerceAtMost(ConnectionConstants.RECONNECT_MAX_DELAY_SEC)
                     val jitter = (planned * ConnectionConstants.RECONNECT_JITTER_FACTOR).toLong()
                     val actual = if (jitter > 0) planned - jitter + Random.nextLong(jitter * 2 + 1) else planned
-                    // Show countdown in the server buffer, updating every 5s for long delays.
-                    val tickInterval = when {
-                        actual > 30 -> 5L
-                        actual > 10 -> 2L
-                        else -> 1L
-                    }
-                    var remaining = actual
-                    setNetConn(netId) { it.copy(status = "Reconnecting in ${remaining}s…") }
+                    setNetConn(netId) { it.copy(status = "Reconnecting in ${actual}s…") }
                     append(serverKey, from = null,
-                        text = "*** Reconnecting in ${remaining}s (attempt ${attempt + 1})…",
+                        text = "*** Reconnecting in ${actual}s (attempt ${attempt + 1})…",
                         doNotify = false)
-                    while (remaining > 0 && isActive) {
-                        val tick = remaining.coerceAtMost(tickInterval)
-                        delay(tick * 1000L)
-                        remaining -= tick
-                        if (remaining > 0) {
-                            setNetConn(netId) { it.copy(status = "Reconnecting in ${remaining}s…") }
+                    // While backgrounded, no one's looking at the countdown — skip the tick
+                    // loop and just wait the full duration in one delay() call. Avoids waking
+                    // the CPU every 1-5 s purely to update a status string the user can't see.
+                    if (!AppVisibility.isForeground) {
+                        delay(actual * 1000L)
+                    } else {
+                        // Show countdown in the server buffer, updating every 5s for long delays.
+                        val tickInterval = when {
+                            actual > 30 -> 5L
+                            actual > 10 -> 2L
+                            else -> 1L
+                        }
+                        var remaining = actual
+                        while (remaining > 0 && isActive) {
+                            val tick = remaining.coerceAtMost(tickInterval)
+                            delay(tick * 1000L)
+                            remaining -= tick
+                            if (remaining > 0) {
+                                // Re-check foreground state on every tick: if the user backgrounds the
+                                // app mid-countdown, swallow the rest of the wait without further updates.
+                                if (!AppVisibility.isForeground) {
+                                    delay(remaining * 1000L)
+                                    remaining = 0
+                                } else {
+                                    setNetConn(netId) { it.copy(status = "Reconnecting in ${remaining}s…") }
+                                }
+                            }
                         }
                     }
                     if (!isActive) break
@@ -2444,7 +3028,7 @@ fun startAddNetwork() {
      * Also triggers reconnection for networks that should be connected but went down while backgrounded.
      *
      * Important: we skip any network that is actively connecting or already has a reconnect job
-     * queued — isConnectedNow() can transiently return false during the handshake window, and
+     * queued - isConnectedNow() can transiently return false during the handshake window, and
      * interfering with an in-flight attempt would cause a duplicate reconnect race.
      */
     fun resyncConnectionsOnResume() {
@@ -2457,27 +3041,27 @@ fun startAddNetwork() {
             val rt = runtimes[net.id]
             val cur = newMap[net.id] ?: NetConnState()
 
-            // Don't touch anything that is already mid-connect or has a reconnect scheduled —
+            // Don't touch anything that is already mid-connect or has a reconnect scheduled -
             // isConnectedNow() is unreliable during the handshake and we'd create a double-reconnect.
             if (cur.connecting) continue
             if (autoReconnectJobs.containsKey(net.id)) continue
 
             val actual = rt?.client?.isConnectedNow() == true
 
-            // Socket is alive but UI thinks we're disconnected — correct the UI.
+            // Socket is alive but UI thinks we're disconnected - correct the UI.
             if (actual && !cur.connected) {
                 newMap[net.id] = cur.copy(connected = true, connecting = false, status = "Connected")
                 changed = true
             }
 
-            // Socket is gone but UI thinks we're connected — correct the UI and maybe reconnect.
+            // Socket is gone but UI thinks we're connected - correct the UI and maybe reconnect.
             if (!actual && cur.connected) {
                 newMap[net.id] = cur.copy(connected = false, connecting = false, status = "Disconnected")
                 changed = true
                 if (desiredConnected.contains(net.id)) networksToReconnect.add(net.id)
             }
 
-            // Not connected, not connecting, but should be — reconnect.
+            // Not connected, not connecting, but should be - reconnect.
             if (!actual && !cur.connected && desiredConnected.contains(net.id)) {
                 if (!networksToReconnect.contains(net.id)) networksToReconnect.add(net.id)
             }
@@ -2591,7 +3175,7 @@ fun startAddNetwork() {
         if (!rt.client.hasCap("draft/typing") && !rt.client.hasCap("typing")
             && !rt.client.hasCap("message-tags")) return
         if (bufferName == "*server*") return
-        // DCC chat buffers are peer-to-peer and don't speak IRC — sending a TAGMSG with
+        // DCC chat buffers are peer-to-peer and don't speak IRC - sending a TAGMSG with
         // a DCC buffer name as the target routes it to the IRC server, which bounces it
         // back as ERR_NOSUCHNICK. Skip silently.
         if (isDccChatBufferName(bufferName)) return
@@ -2599,7 +3183,7 @@ fun startAddNetwork() {
         typingDoneJob?.cancel()
 
         if (text.isEmpty()) {
-            // User cleared input — send "done" immediately to the correct network.
+            // User cleared input - send "done" immediately to the correct network.
             // look up the client at send time rather than capturing
             // `rt` here. If the user reconnected between keystrokes, `rt` would be the old
             // disconnected client; runtimes[prevNet] gives the live one.
@@ -2667,7 +3251,7 @@ fun startAddNetwork() {
             val strippedForCommandCheck = trimmed.trimStart(
                 '\u0002', '\u0003', '\u000f', '\u0016', '\u001d', '\u001e', '\u001f'
             ).let {
-                // \u0003 may be followed by colour digits — skip them too
+                // \u0003 may be followed by colour digits - skip them too
                 it.replace(Regex("^\u0003\\d{0,2}(?:,\\d{0,2})?"), "")
             }
 
@@ -2700,8 +3284,8 @@ fun startAddNetwork() {
                     }
 
                     "react", "unreact" -> {
-                        // /react <emoji> [n]   — react to the n-th most recent message (n=1, default)
-                        // /unreact <emoji> [n] — remove a reaction from the n-th most recent message
+                        // /react <emoji> [n]   - react to the n-th most recent message (n=1, default)
+                        // /unreact <emoji> [n] - remove a reaction from the n-th most recent message
                         // Examples: /react 👍   /react :tada: 3   /unreact ❤️
                         //
                         // Reacting requires a server msgId on the target message (IRCv3 message-tags),
@@ -2713,7 +3297,7 @@ fun startAddNetwork() {
                         val emoji = args.getOrNull(0)?.takeIf { it.isNotBlank() }
                         if (emoji == null) {
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** Usage: /${cmd} <emoji> [n]   — n is how many messages back, default 1")
+                                text = "*** Usage: /${cmd} <emoji> [n]   - n is how many messages back, default 1")
                             return@launch
                         }
                         if (bufferName == "*server*" || c == null) {
@@ -2740,7 +3324,7 @@ fun startAddNetwork() {
                         if (target?.msgId == null) {
                             val noun = if (nBack == 1) "the latest message" else "message #$nBack back"
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** /${cmd} couldn't find $noun with a server msgId — the server may not support message-tags")
+                                text = "*** /${cmd} couldn't find $noun with a server msgId - the server may not support message-tags")
                             return@launch
                         }
                         c.sendReaction(bufferName, target.msgId, emoji, remove = remove)
@@ -3273,7 +3857,7 @@ fun startAddNetwork() {
         val fullMask = if (userHost != null) "$base!$userHost" else base
         return list.any { pattern ->
             if (pattern.contains('*') || pattern.contains('?') || pattern.contains('!')) {
-                // Wildcard pattern — convert IRC glob to regex and match against full mask.
+                // Wildcard pattern - convert IRC glob to regex and match against full mask.
                 matchIrcGlob(pattern, fullMask)
             } else {
                 // Simple exact nick match (original behaviour).
@@ -3346,14 +3930,39 @@ fun startAddNetwork() {
             }
             is IrcEvent.Connected -> {
                 manualDisconnecting.remove(netId)
-                // Do NOT reset reconnectAttempts here — the connection may be dropped
+                // Do NOT reset reconnectAttempts here - the connection may be dropped
                 // immediately (Z-line, cert error, etc.).  The backoff is only cleared
                 // after STABLE_CONNECTION_MS of uptime (see IrcEvent.Registered).
                 stableConnectionJobs.remove(netId)?.cancel() // cancel any leftover timer
                 runtimes[netId]?.apply { suppressMotd = _state.value.settings.hideMotdOnConnect; manualMotdAtMs = 0L }
                 autoReconnectJobs.remove(netId)?.cancel()
                 setNetConn(netId) {
-                    it.copy(connecting = false, connected = true, status = "Connected to ${ev.server}", lagMs = null)
+                    // Clear tlsPinMismatch: a Connected event means the TLS handshake AND
+                    // the post-handshake pin check both passed (a mismatch would have thrown
+                    // during openSocket and we'd never see Connected). The "Reset & re-pin"
+                    // and "Trust this server too" buttons hide on the next render. Stashed
+                    // actual-fp is dropped because it's now either in the trust set or has
+                    // been superseded by a full reset.
+                    it.copy(connecting = false, connected = true, status = "Connected to ${ev.server}", lagMs = null, tlsPinMismatch = false, tlsPinMismatchActualFp = null)
+                }
+                // Arm chathistory marker windows for known PM-style buffers on this network.
+                // Bouncer playback delivers PRIVMSGs to query buffers without a corresponding
+                // JOIN event, so the JOIN-handler arm in the channel case doesn't cover them.
+                // We arm any buffer we already know about that isn't a channel — those are
+                // exactly the PM/query buffers that bouncer playback will likely re-deliver.
+                // Channel buffers don't need arming here: the bouncer replays our prior
+                // session's JOINs, which fire the JOIN handler's arm. 45 s window matches
+                // the upstream history-expect ceiling.
+                val nowMsArm = System.currentTimeMillis()
+                val armDeadline = nowMsArm + 45_000L
+                val chantypes = runtimes[netId]?.support?.chantypes ?: "#&+!"
+                val pmKeys = _state.value.buffers.keys.filter { k ->
+                    val (nid, bn) = splitKey(k)
+                    nid == netId && bn != "*server*" && (bn.firstOrNull() !in chantypes.toSet())
+                }
+                for (k in pmKeys) chathistoryMarkerArmedUntilMs[k] = armDeadline
+                if (chathistoryMarkerArmedUntilMs.size > 64) {
+                    chathistoryMarkerArmedUntilMs.entries.removeAll { it.value < nowMsArm }
                 }
                 if (_state.value.activeNetworkId == netId) updateConnectionNotification("Connected")
             }
@@ -3361,7 +3970,7 @@ fun startAddNetwork() {
                 if (!AppVisibility.isForeground) {
                     // Backgrounded: skip the startService() IPC call (notification text
                     // never shows lag values) and skip the state write entirely if the
-                    // lag value hasn't changed — every PING/PONG would otherwise trigger
+                    // lag value hasn't changed - every PING/PONG would otherwise trigger
                     // a full Compose recomposition for no visible benefit.
                     val current = _state.value.connections[netId]?.lagMs
                     if (current != ev.lagMs) {
@@ -3430,12 +4039,59 @@ fun startAddNetwork() {
                     return
                 }
 
+                // TLS handshake failures that won't recover by retrying: halt auto-reconnect
+                // for the same reason as auth failures. Without this, a network with an
+                // expired/mismatched-CA cert (and no TOFU pin and allowInvalidCerts=false)
+                // would cycle through the exponential backoff forever, hitting the same
+                // failure each time and burning battery. Cleared by manual reconnect, like
+                // authBlockedReconnect.
+                if (r != null) {
+                    val unrecoverable =
+                        r.contains("TLS certificate verification failed", ignoreCase = true) ||
+                        r.contains("TLS handshake rejected by server", ignoreCase = true) ||
+                        r.contains("TLS pin enforcement failed", ignoreCase = true) ||
+                        r.contains("server may not support TLS", ignoreCase = true)
+                    if (unrecoverable && netId !in authBlockedReconnect) {
+                        authBlockedReconnect.add(netId)
+                        append(
+                            bufKey(netId, "*server*"), from = null,
+                            text = "*** Auto-reconnect halted: TLS error is unlikely to fix itself. " +
+                                   "Adjust certificate trust settings, then reconnect manually.",
+                            doNotify = false
+                        )
+                        setNetConn(netId) { it.copy(status = "TLS error — reconnect halted") }
+                        return
+                    }
+                }
+
                 if (desiredConnected.contains(netId)) scheduleAutoReconnect(netId)
             }
             is IrcEvent.Error -> {
                 val msg = ev.message
                 val isConnectFail = msg.startsWith("Connect failed", ignoreCase = true) || msg.startsWith("Connection failed", ignoreCase = true)
                 append(bufKey(netId, "*server*"), from = "ERROR", text = msg, isHighlight = !isConnectFail, doNotify = !isConnectFail)
+            }
+            is IrcEvent.AuthFailed -> {
+                // Server-side credential rejection (PASS or SASL). Halt auto-reconnect for
+                // this network; scheduleAutoReconnect checks authBlockedReconnect on entry.
+                // The block is cleared when the user takes manual action (manual reconnect,
+                // profile edit, autoConnect toggle) see those call sites.
+                authBlockedReconnect.add(netId)
+                val hint = when (ev.source) {
+                    "PASS" -> "Server password (PASS) rejected. " +
+                        "If this is a bouncer profile, the password format is usually " +
+                        "user:password or user/network:password."
+                    "SASL" -> "SASL authentication rejected. Check the SASL username/password " +
+                        "(or client certificate) on this profile."
+                    else -> "Authentication rejected."
+                }
+                append(
+                    bufKey(netId, "*server*"),
+                    from = "AUTH",
+                    text = "*** ${ev.reason} — $hint Auto-reconnect halted; tap reconnect after fixing credentials.",
+                    isHighlight = true,
+                    doNotify = false
+                )
             }
 
             is IrcEvent.TlsFingerprintLearned -> {
@@ -3458,15 +4114,51 @@ fun startAddNetwork() {
                 }
             }
 
+            is IrcEvent.TlsHostnameMismatch -> {
+                // Soft warning: the cert chains to a CA but its SAN list doesn't cover the
+                // host we connected to. Connection has already been allowed to proceed - the
+                // user's choice of cert-trust posture is "best-effort with TOFU as the strict
+                // option", not "refuse on every SAN typo". Surface it once per session so the
+                // user can spot it and decide whether to pin.
+                val sansStr = if (ev.sans.isEmpty()) "(none)" else ev.sans.joinToString(", ")
+                append(
+                    bufKey(netId, "*server*"), from = "TLS",
+                    text = "*** Certificate hostname mismatch: connected to ${ev.expected} but cert SANs are: $sansStr. " +
+                           "Connection allowed. To enforce strict identity, set a TOFU pin in Network Settings.",
+                    doNotify = false
+                )
+            }
+
             is IrcEvent.TlsFingerprintChanged -> {
-                // The server is presenting a DIFFERENT certificate than the one we pinned.
-                // This is a serious warning - could be a certificate rotation or a MITM attack.
+                // The server is presenting a DIFFERENT certificate than the ones we trust.
+                // Two distinct legitimate cases:
+                //   - Cert renewal/rotation. The whole pin set is stale; the user resets and
+                //     re-pins.
+                //   - Round-robin DNS landed on a different server with its own cert. The
+                //     user grows the trust set with "Trust this server too" - the previous
+                //     fingerprints stay, the new one is added, and future connects to either
+                //     server succeed without further intervention.
+                //
+                // Halt auto-reconnect either way: silently retrying every few seconds against
+                // a possibly-malicious endpoint floods the server buffer with TLS WARNING
+                // lines and risks the user missing the original alert. Block clears on the
+                // next manual reconnect, like authBlockedReconnect.
+                authBlockedReconnect.add(netId)
+                // Stash the actual fingerprint so NetworkEditScreen can offer the "Trust
+                // this server too" action without re-deriving the value from somewhere.
+                setNetConn(netId) {
+                    it.copy(tlsPinMismatch = true, tlsPinMismatchActualFp = ev.actual)
+                }
                 append(
                     bufKey(netId, "*server*"), from = "TLS WARNING", isHighlight = true,
                     text = "⚠️  Server certificate fingerprint has CHANGED! " +
-                           "Expected: ${ev.stored}  •  Got: ${ev.actual}  — " +
-                           "Connection refused. If this is a legitimate cert renewal, go to " +
-                           "Network Settings → Allow invalid certificates and reconnect once to re-pin."
+                           "Expected: ${ev.stored}  •  Got: ${ev.actual}  - " +
+                           "Connection refused. Auto-reconnect halted. " +
+                           "If this server uses round-robin DNS (irc.libera.chat, irc.oftc.net, etc.), " +
+                           "open Network Settings and tap 'Trust this server too' to add the new " +
+                           "fingerprint without losing the others. " +
+                           "If the cert was rotated/renewed, tap 'Reset & re-pin' instead - " +
+                           "that discards every previously-trusted fingerprint and re-learns from scratch."
                 )
             }
             is IrcEvent.ServerLine -> {
@@ -3809,11 +4501,12 @@ if (code == "442") {
                     else -> emptyList()
                 }
 
+                val lineColoured = colorEvent(line, 10)  // cyan
                 for (k in targets) {
                     append(
                         k,
                         from = null,
-                        text = line,
+                        text = lineColoured,
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
                         doNotify = false
@@ -3825,7 +4518,7 @@ if (targets.isEmpty()) {
     append(
         bufKey(netId, "*server*"),
         from = null,
-        text = line,
+        text = lineColoured,
         isLocal = suppressUnread,
         timeMs = ev.timeMs,
         doNotify = false
@@ -3945,7 +4638,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     append(
                         bufKey(netId, "*server*"),
                         from = null,
-                        text = "*** Incoming DCC CHAT from ${offer0.from} — tap 'DCCCHAT:${offer0.from}' buffer, or open Transfers to accept",
+                        text = "*** Incoming DCC CHAT from ${offer0.from} - tap 'DCCCHAT:${offer0.from}' buffer, or open Transfers to accept",
                         doNotify = false
                     )
                     // Show the offer inline inside the dedicated buffer with a clear prompt.
@@ -4023,6 +4716,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     doNotify = allowNotify,
                     msgId = ev.msgId,
                     replyToMsgId = ev.replyToMsgId,
+                    isHistory = ev.isHistory,
                 )
             }
             is IrcEvent.Notice -> {
@@ -4033,51 +4727,148 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                 val normTarget = stripStatusMsgPrefix(netId, normTarget0)
                 val isChanTarget = isChannelOnNet(netId, normTarget)
 
-                // Route notices to the current buffer on this network (or *server*)
-                // instead of spawning a new buffer for services like NickServ.
+                // Notice routing rules:
+                //
+                //  1. Server notices (prefix is a hostname, not nick!user@host) →
+                //     *server* buffer. These are auth notices, MOTD-adjacent, network
+                //     announcements; they belong in the server log.
+                //  2. Notice targeted at a channel we have a buffer for → that channel.
+                //     This is the normal NOTICE-to-channel case.
+                //  3. Channel-mention rule: if the notice text contains a channel
+                //     name AND we have an open buffer for that channel, route there.
+                //     This catches the on-join welcome from service bots: ChanServ
+                //     ("[#chan] Welcome to #chan, ..."), X3 ("Welcome to #chan!"),
+                //     Anope BotServ-assigned bots with arbitrary names (since we
+                //     match on the body, not the sender), and similar. The notice
+                //     was a PM-target NOTICE so rule 2 didn't fire, but the user
+                //     clearly wants to see the greeting in the channel they just
+                //     walked into.
+                //
+                //     Note: Anope BotServ entry messages typically arrive as PRIVMSG
+                //     to the channel (so they don't even reach this notice handler).
+                //     The mention rule still helps for ChanServ-style PM greetings
+                //     and for custom service bots that send to-nick NOTICEs.
+                //
+                //  4. Recently-joined-channel rule: if rule 3 didn't match but the
+                //     notice arrived within ~5 s of us joining a channel on this
+                //     network, route to that channel. Catches BotServ greetings
+                //     whose body doesn't mention the channel name (e.g.
+                //     "Welcome, alice!"). Time-bounded to avoid catching unrelated
+                //     later notices. Only fires when there's exactly one recent
+                //     join — multiple recent joins are ambiguous.
+                //  5. Everything else → the currently selected buffer on this
+                //     network. If nothing is selected, fall back to *server*.
+                //
+                // The mention rule is conservative on purpose: it only routes when we
+                // ALREADY have a buffer for that channel name. A notice that mentions
+                // "#somechan" we never joined still goes to the selected buffer / server,
+                // because creating a buffer for a channel we're not in would be misleading.
+                // Multiple mentions: pick the first that resolves to an existing buffer
+                // (services typically only mention one channel per notice anyway).
+                fun firstMentionedKnownChannelKey(): String? {
+                    val chantypes = runtimes[netId]?.support?.chantypes ?: "#&"
+                    val text = ev.text
+                    var i = 0
+                    while (i < text.length) {
+                        val c = text[i]
+                        if (c in chantypes) {
+                            // Walk forward over channel-name characters. RFC 2812 forbids
+                            // space, control chars, comma, BEL, NUL inside channel names;
+                            // we stop at any non-name char.
+                            var j = i + 1
+                            while (j < text.length) {
+                                val ch = text[j]
+                                if (ch == ' ' || ch == ',' || ch == '\u0007' || ch == '\u0000' ||
+                                    ch == '\r' || ch == '\n' || ch == ':') break
+                                j++
+                            }
+                            // Trim trailing punctuation that's grammatically part of the
+                            // sentence, not the channel name: ".", ",", "!", "?", ")", "]",
+                            // ":", ";", and quotes. Don't strip "-" or "_" (legitimate in
+                            // channel names like #foo-bar / #foo_bar).
+                            var end = j
+                            while (end > i + 1) {
+                                val tail = text[end - 1]
+                                if (tail in ".,!?)]:;\"'") end-- else break
+                            }
+                            if (end > i + 1) {
+                                val candidate = text.substring(i, end)
+                                val key = bufKey(netId, candidate)
+                                val foldCandidate = casefoldText(netId, candidate)
+                                val match = st.buffers.keys.firstOrNull { k ->
+                                    val (nid, bn) = splitKey(k)
+                                    nid == netId && casefoldText(netId, bn) == foldCandidate
+                                }
+                                if (match != null) return match
+                                // Also accept an exact bufKey match (covers freshly-ensured
+                                // buffers not yet in the casefold sweep).
+                                if (st.buffers.containsKey(key)) return key
+                            }
+                            i = j
+                        } else {
+                            i++
+                        }
+                    }
+                    return null
+                }
+
+                fun recentlyJoinedChannelKey(): String? {
+                    val now = System.currentTimeMillis()
+                    val cutoff = now - 5_000L
+                    // Find channels we joined in the last 5 s on this network. Multiple
+                    // matches: bail (ambiguous) — better to fall through to the selected
+                    // buffer than guess wrong.
+                    val matches = recentJoinAtMs.entries
+                        .filter { (key, ts) ->
+                            ts >= cutoff && key.startsWith("$netId::")
+                        }
+                        .map { it.key }
+                    return if (matches.size == 1) matches.single() else null
+                }
+
                 val destKey = when {
                     ev.isServer -> bufKey(netId, "*server*")
                     isChanTarget -> resolveBufferKey(netId, normTarget)
                     else -> {
-                        // If the sender is in exactly one channel we're in, route there.
-                        // This handles bots that send a notice to our nick on join (e.g. ChanServ
-                        // greeting), which arrive before or just after the buffer is selected.
-                        val senderFold = casefoldText(netId, ev.from)
-                        val sharedChannels = st.nicklists.entries
-                            .filter { (key, list) ->
-                                key.startsWith("$netId::") &&
-                                list.any { entry ->
-                                    casefoldText(netId, parseNickWithPrefixes(netId, entry).first) == senderFold
-                                }
-                            }
-                            .map { it.key }
-
-                        when {
-                            // Sender is in exactly one channel - route there unambiguously.
-                            sharedChannels.size == 1 -> sharedChannels.first()
-                            // Sender is in multiple shared channels - prefer the currently
-                            // selected buffer if it's one of them, otherwise *server*.
-                            sharedChannels.size > 1 -> {
+                        firstMentionedKnownChannelKey()
+                            ?: recentlyJoinedChannelKey()
+                            ?: run {
                                 val sel = st.selectedBuffer
-                                if (sel in sharedChannels) sel else bufKey(netId, "*server*")
-                            }
-                            // Sender not in any known channel - use current selected channel
-                            // buffer on this network if available, otherwise *server*.
-                            else -> {
-                                val sel = st.selectedBuffer
-                                val (selNet, selBuf) = splitKey(sel)
-                                if (sel.isNotBlank() && selNet == netId && isChannelOnNet(netId, selBuf)) sel
+                                val (selNet, _) = splitKey(sel)
+                                if (sel.isNotBlank() && selNet == netId) sel
                                 else bufKey(netId, "*server*")
                             }
-                        }
                     }
                 }
 
                 ensureBuffer(destKey)
+                // Notice rendering: `* <nick> text` is the deliberate visual marker that
+                // distinguishes a notice from a channel message — the leading `* ` is what
+                // the user is looking for to know "this is a NOTICE, not a PRIVMSG".
+                //
+                // Exception: bouncer pseudo-users (`*status`, `*controlpanel`, `BouncerServ`,
+                // etc.) whose nicks already start with `*` produce a confusing `* <*status>`
+                // pile-up. For those, render as `<nick> text` — the pseudo-user prefix
+                // already signals "this is bouncer output, not a real user", which is the
+                // job the leading `* ` would have done.
+                //
+                // Detection mirrors IrcCore.isBouncerPseudoUser:
+                //  - ZNC convention: any nick starting with '*' (loaded modules)
+                //  - soju convention: the named pseudo-user "BouncerServ"
+                val fromNick = ev.from
+                val isBouncerPseudo = ev.isServer && (
+                    fromNick.startsWith("*") ||
+                    fromNick.equals("BouncerServ", ignoreCase = true)
+                )
+                val rendered = if (isBouncerPseudo) {
+                    "<$fromNick> ${ev.text}"
+                } else {
+                    "* <${ev.from}> ${ev.text}"
+                }
                 append(
                     destKey,
                     from = null,
-                    text = "* <${ev.from}> ${ev.text}",
+                    text = rendered,
                     isLocal = suppressUnread,
                     timeMs = ev.timeMs,
                     doNotify = false,
@@ -4190,7 +4981,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     append(
                         chanKey,
                         from = null,
-                        text = msg,
+                        text = colorEvent(msg, 3),  // green
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
                         doNotify = false
@@ -4200,6 +4991,38 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                 
                 val myNickNow = st0.connections[netId]?.myNick ?: st0.myNick
                 val isMeNow = casefoldText(netId, ev.nick) == casefoldText(netId, myNickNow)
+
+                // Track our own join times for the notice-routing recently-joined-channel
+                // fallback. Stamps the per-buffer key when WE join (not when other users
+                // join), and only for live joins (history replays don't represent a "we
+                // just walked into this channel" moment that bots would greet on).
+                if (isMeNow && !ev.isHistory) {
+                    val now = System.currentTimeMillis()
+                    recentJoinAtMs[chanKey] = now
+                    // Cap map size: we only ever read entries within a 5 s window in the
+                    // notice handler, so there's no point holding older ones around. A
+                    // user who join-spams 32+ channels back-to-back would otherwise grow
+                    // this map unbounded.
+                    if (recentJoinAtMs.size > 32) {
+                        val cutoff = now - 5_000L
+                        recentJoinAtMs.entries.removeAll { it.value < cutoff }
+                    }
+                    // Arm the chathistory marker window for THIS join. If the bouncer or
+                    // CHATHISTORY response delivers replay messages within the next 45 s,
+                    // and the next live message arrives within that window, we'll insert
+                    // the "── Chat history • Last message: <ts> ──" separator. Outside the
+                    // window, history messages will not arm the marker - so a bouncer that
+                    // happens to deliver a delayed playback batch (or a manual /chathistory
+                    // call hours later) won't cause the marker to fire when the user
+                    // eventually types something. Window matches upstream history-expect
+                    // (15 s for znc.in/playback, 7 s for IRCv3 CHATHISTORY) plus a 30 s
+                    // grace for the first live message after the burst.
+                    chathistoryMarkerArmedUntilMs[chanKey] = now + 45_000L
+                    // Cap map size for the same reason recentJoinAtMs is capped.
+                    if (chathistoryMarkerArmedUntilMs.size > 64) {
+                        chathistoryMarkerArmedUntilMs.entries.removeAll { it.value < now }
+                    }
+                }
 
                 if (isMeNow || shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
                     // Re-read state after append/ensureBuffer so we don't overwrite newly appended messages.
@@ -4294,7 +5117,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     append(
                         chanKey,
                         from = null,
-                        text = msg,
+                        text = colorEvent(msg, 7),  // orange
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
                         doNotify = false
@@ -4337,7 +5160,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     append(
                         chanKey,
                         from = null,
-                        text = msg,
+                        text = colorEvent(msg, 4),  // red
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
                         doNotify = false
@@ -4422,11 +5245,12 @@ if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
                 if (!st0.settings.hideJoinPartQuit) {
                     val host = ev.userHost ?: "*!*@*"
                     val msg = "* ${ev.nick} ($host) has quit" + (reason?.let { " [$it]" } ?: "")
+                    val coloured = colorEvent(msg, 5)  // brown — distinguishes server-side QUIT from client-side PART
                     for (k in targets) {
                         append(
                             k,
                             from = null,
-                            text = msg,
+                            text = coloured,
                             isLocal = suppressUnread,
                             timeMs = ev.timeMs,
                             doNotify = false
@@ -4514,7 +5338,7 @@ if (affectLive) {
             is IrcEvent.Topic -> {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
-                // Always update the topic bar — isHistory only gates the chat line below.
+                // Always update the topic bar - isHistory only gates the chat line below.
                 // A live TOPIC command whose server-time tag is >15 s in the past (clock
                 // drift, or topic set just before you joined) was being flagged as history
                 // and setTopic was skipped, leaving the bar showing the old topic.
@@ -4641,17 +5465,25 @@ if (affectLive) {
 
             // AWAY status change for another user (away-notify CAP).
             // Track away state per-nick so the nicklist can reflect it.
+            //
+            // Note: we always update the nickAwayState map (so the nicklist can dim away
+            // users), but only emit the inline "* foo is away/back" announcement when the
+            // user hasn't suppressed it via hideAwayNotify. Bouncers can forward
+            // away-notify regardless of which caps the client itself negotiates, so the
+            // suppression has to happen at render time — disabling the cap on our side
+            // doesn't stop the bouncer from sending these.
             is IrcEvent.AwayChanged -> {
                 val awayMap = nickAwayState.getOrPut(netId) { mutableMapOf() }
                 // On large servers with away-notify, every away transition adds an entry.
-                // Nicks are evicted on QUIT but not on PART — cap to prevent unbounded growth.
+                // Nicks are evicted on QUIT but not on PART - cap to prevent unbounded growth.
                 if (awayMap.size >= 2000) awayMap.clear()
                 val fold = casefoldText(netId, ev.nick)
                 val wasAway = awayMap.containsKey(fold)
+                val suppressAnnouncement = _state.value.settings.hideAwayNotify
                 if (ev.awayMessage != null) {
                     // Nick set or changed away message.
                     awayMap[fold] = ev.awayMessage
-                    if (!wasAway) {
+                    if (!wasAway && !suppressAnnouncement) {
                         // Only print "went away" on transition (not on away-message updates).
                         val msg = if (ev.awayMessage.isBlank()) "* ${ev.nick} is now away"
                                   else "* ${ev.nick} is now away (${ev.awayMessage})"
@@ -4669,15 +5501,17 @@ if (affectLive) {
                     // Nick returned from away.
                     if (wasAway) {
                         awayMap.remove(fold)
-                        val msg = "* ${ev.nick} is back"
-                        val affected = _state.value.nicklists
-                            .filterKeys { it.startsWith("$netId::") }
-                            .filter { (_, list) ->
-                                list.any { parseNickWithPrefixes(netId, it).first
-                                    .let { b -> casefoldText(netId, b) == fold } }
-                            }.map { it.key }
-                        for (k in affected) {
-                            append(k, from = null, text = msg, timeMs = ev.timeMs, doNotify = false, isLocal = true)
+                        if (!suppressAnnouncement) {
+                            val msg = "* ${ev.nick} is back"
+                            val affected = _state.value.nicklists
+                                .filterKeys { it.startsWith("$netId::") }
+                                .filter { (_, list) ->
+                                    list.any { parseNickWithPrefixes(netId, it).first
+                                        .let { b -> casefoldText(netId, b) == fold } }
+                                }.map { it.key }
+                            for (k in affected) {
+                                append(k, from = null, text = msg, timeMs = ev.timeMs, doNotify = false, isLocal = true)
+                            }
                         }
                     }
                 }
@@ -4697,7 +5531,7 @@ if (affectLive) {
             is IrcEvent.BouncerNetwork -> {
                 val serverKey = bufKey(netId, "*server*")
 
-                // Deletion path — spec: `BOUNCER NETWORK <id> *`
+                // Deletion path - spec: `BOUNCER NETWORK <id> *`
                 if (ev.removed) {
                     val stillPresent = _state.value.bouncerNetworks[netId]?.get(ev.networkId)
                     _state.update { st ->
@@ -4713,14 +5547,23 @@ if (affectLive) {
                     return
                 }
 
-                // Upsert path — per spec, a missing attribute means "preserve the prior value".
-                // Only overwrite fields for which ev supplied a non-null value.
+                // Upsert path - per spec, a missing attribute means "preserve the prior value",
+                // an explicitly cleared attribute (`key=` with empty value, surfaced via
+                // ev.clearedKeys) means "drop the prior value". The three-way merge:
+                //   ev.X non-null              → use ev.X
+                //   ev.X null + key cleared    → null (drop)
+                //   ev.X null + key not cleared → keep prev.X
                 val prev = _state.value.bouncerNetworks[netId]?.get(ev.networkId)
+                fun pick(field: String, evVal: String?, prevVal: String?): String? = when {
+                    evVal != null -> evVal
+                    field in ev.clearedKeys -> null
+                    else -> prevVal
+                }
                 val merged = BouncerUpstreamInfo(
                     id = ev.networkId,
-                    name = ev.name ?: prev?.name,
-                    host = ev.host ?: prev?.host,
-                    state = ev.state ?: prev?.state,
+                    name = pick("name", ev.name, prev?.name),
+                    host = pick("host", ev.host, prev?.host),
+                    state = pick("state", ev.state, prev?.state),
                     lastSeenMs = System.currentTimeMillis(),
                 )
                 _state.update { st ->
@@ -4728,7 +5571,7 @@ if (affectLive) {
                     st.copy(bouncerNetworks = st.bouncerNetworks + (netId to (inner + (ev.networkId to merged))))
                 }
 
-                // User-visible status — only on genuine change (first-seen or state transition)
+                // User-visible status - only on genuine change (first-seen or state transition)
                 // to avoid the server buffer filling with "network [connected]" repeats on
                 // every reconnect when soju re-sends the whole list.
                 val isNew = prev == null
@@ -4744,7 +5587,7 @@ if (affectLive) {
 
                     // Hint for first-seen upstreams that don't correspond to any local profile.
                     // Match on the bouncer-reported host (upstream hostname, e.g. "irc.libera.chat")
-                    // against our configured profile hosts — a user who's already set up a profile
+                    // against our configured profile hosts - a user who's already set up a profile
                     // for libera.chat shouldn't be nagged. This is conservative: if the bouncer
                     // doesn't report a host, we skip the hint rather than risk a false positive.
                     if (isNew && !merged.host.isNullOrBlank()) {
@@ -4752,7 +5595,7 @@ if (affectLive) {
                         if (merged.host.lowercase() !in profileHosts) {
                             val displayName = merged.name ?: merged.host
                             append(serverKey, from = null,
-                                text = "    → no local profile for \"$displayName\" — add one to connect to this upstream.",
+                                text = "    → no local profile for \"$displayName\" - add one to connect to this upstream.",
                                 doNotify = false, isLocal = true)
                         }
                     }
@@ -4890,14 +5733,18 @@ if (affectLive) {
 
     private fun setNetConn(netId: String, f: (NetConnState) -> NetConnState) {
         var shouldRefresh = false
+        var changed = false
         _state.update { st: UiState ->
             val old = st.connections[netId] ?: NetConnState()
-            val newConns = st.connections + (netId to f(old))
+            val next = f(old)
+            if (next == old) return@update st  // no-op: skip the state copy and notification refresh
+            changed = true
+            val newConns = st.connections + (netId to next)
             val updated = syncActiveNetworkSummary(st.copy(connections = newConns))
             shouldRefresh = updated.settings.showConnectionStatusNotification || updated.settings.keepAliveInBackground
             updated
         }
-        if (shouldRefresh) {
+        if (changed && shouldRefresh) {
             refreshConnectionNotification()
         }
     }
@@ -4971,7 +5818,7 @@ if (affectLive) {
                 val firstLiveTime = liveDuringLoad.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
 
                 // Build a set of live message signatures for deduplication.
-                // Primary: use msgid when available (IRCv3 message-ids) — exact, no false positives.
+                // Primary: use msgid when available (IRCv3 message-ids) - exact, no false positives.
                 // Fallback: fuzzy match with ±3 second window. Chathistory delivers server-time in
                 // milliseconds; disk logs store second-precision timestamps. A 1–2 second skew is
                 // common (log written at :30, server says :31). 3 seconds catches this reliably
@@ -5066,6 +5913,7 @@ if (affectLive) {
 
         scrollbackRequested.remove(key)
         scrollbackLoadStartedAtMs.remove(key)
+        pendingChathistoryMarkerMs.remove(key)
 
         // Use atomic update to prevent race conditions
         _state.update { st0: UiState ->
@@ -5139,9 +5987,9 @@ if (affectLive) {
         var text = body
         var isAction = false
 
-        // Common IRC log line styles — tried in priority order:
+        // Common IRC log line styles - tried in priority order:
         //
-        //   "*nick* action text"      NEW action format (unambiguous — written by this client
+        //   "*nick* action text"      NEW action format (unambiguous - written by this client
         //                             going forward).  Server-status lines use "* word …"
         //                             (asterisk-SPACE) and can never produce this pattern.
         //
@@ -5150,7 +5998,7 @@ if (affectLive) {
         //   "* nick action text"      OLD action format written by earlier versions of this
         //                             client, and by HexChat/irssi/etc.  Treated as an action
         //                             only when the first word passes IRC nick validation AND
-        //                             is not a known server-status sentinel word — otherwise
+        //                             is not a known server-status sentinel word - otherwise
         //                             the line is kept as a plain server message (from = null).
         //
         //   Anything else             Server/status line, rendered as plain text (from = null).
@@ -5170,7 +6018,7 @@ if (affectLive) {
             s.all { isValidNickChar(it, first = false) }
 
         // Exact first words that HexDroid itself writes in server-status lines that start
-        // with "* " — these must never be misidentified as action nicks from old-format logs.
+        // with "* " - these must never be misidentified as action nicks from old-format logs.
         // (e.g. "* Now talking on #channel", "* Topic for #channel is: …", "* Mode #ch +n")
         val serverStatusFirstWords = setOf("Now", "Topic", "Mode")
 
@@ -5195,7 +6043,7 @@ if (affectLive) {
                 text = body.substring(end + 2)
             }
         } else if (body.startsWith("* ") && body.length > 2) {
-            // Old action format — guard against server-status lines.
+            // Old action format - guard against server-status lines.
             val rest = body.substring(2)
             val sp = rest.indexOf(' ')
             if (sp > 0) {
@@ -5205,7 +6053,7 @@ if (affectLive) {
                     text = rest.substring(sp + 1)
                     isAction = true
                 }
-                // else: server-status line — leave from=null, text=body (full line)
+                // else: server-status line - leave from=null, text=body (full line)
             }
         }
 
@@ -5263,6 +6111,13 @@ if (affectLive) {
         isMotd: Boolean = false,
         msgId: String? = null,
         replyToMsgId: String? = null,
+        /**
+         * True when this line is being replayed from a server- or bouncer-side history
+         * source (chathistory, znc.in/playback, soju buffer playback). Drives the content-
+         * fingerprint dedup path that catches duplicate replays without a msgid; live
+         * messages skip that path entirely.
+         */
+        isHistory: Boolean = false,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         val msg = UiMessage(
@@ -5276,6 +6131,71 @@ if (affectLive) {
             replyToMsgId = replyToMsgId,
         )
 
+        // Content-fingerprint dedup. `time=` is server-stamped on replayed messages so two
+        // replays of the same line produce identical fingerprints. The hashCode of text is
+        // sufficient — these are best-effort dedup keys, not a security boundary, and the
+        // false-collision odds (same epoch ms, same nick, same text-hashCode, same buffer,
+        // different real text) are vanishingly small in practice.
+        //
+        // We compute this for every message with a sender, NOT just messages we've classified
+        // as history. Reason: bouncer replays don't always carry markers we recognise — ZNC's
+        // legacy `*playback` module dumps stamped lines without a BATCH wrapper, and our
+        // isHistory heuristic returns false for them when [historyExpectUntil] hasn't been set
+        // (which it isn't, on a fresh JOIN before our own CHATHISTORY request fires). Without
+        // a fingerprint on that first delivery, the subsequent CHATHISTORY reply for the same
+        // line — which IS classified as history — has nothing to match against, and the user
+        // sees the same `[03:13:52] <nick> message` twice.
+        //
+        // Live messages register a fingerprint too. They effectively never collide because the
+        // local-now `ts` has millisecond resolution and human typing can't produce two messages
+        // in the same millisecond.
+        val historyFingerprint: String? = if (from != null) {
+            "$ts|$from|${text.hashCode()}"
+        } else null
+
+        // Chathistory marker: when the FIRST live message for this buffer arrives after one
+        // or more isHistory=true messages, emit a "── Chat history • Last message: <ts> ──"
+        // separator just before it. Mirrors the scrollback marker (which marks the boundary
+        // between disk logs and the current session) — same visual cue at both kinds of
+        // catch-up boundary.
+        //
+        // The 5 s gap requirement avoids false-firing during the rare race where a live PRIVMSG
+        // arrives mid-replay. In that case the live ts is essentially the same as the latest
+        // history ts and inserting a marker would put the rest of the still-arriving history
+        // *after* the boundary — confusing.
+        //
+        // Computed outside the state.update block so the read of pendingChathistoryMarkerMs
+        // doesn't get re-run on a state.update retry. The map is cleared lazily inside the
+        // update only if we actually emit the marker.
+        val markerToEmit: UiMessage? = run {
+            if (isHistory) return@run null
+            val pending = pendingChathistoryMarkerMs[bufferKey] ?: return@run null
+            // Only emit when the buffer is currently in its "catch-up" window — armed by
+            // a self-JOIN or by Connected (for bouncer-playback PMs). Outside that window,
+            // a pending history timestamp is from an unrelated catch-up that already
+            // happened and should not insert a marker into the user's typing flow.
+            val armedUntil = chathistoryMarkerArmedUntilMs[bufferKey] ?: 0L
+            val nowMs = System.currentTimeMillis()
+            if (armedUntil < nowMs) {
+                // Window expired: discard the stale pending timestamp so a future arm
+                // (re-join, reconnect) starts clean.
+                pendingChathistoryMarkerMs.remove(bufferKey)
+                return@run null
+            }
+            if (ts <= pending + 5_000L) return@run null
+            val newestStr = runCatching {
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                    .withZone(ZoneId.systemDefault())
+                    .format(Instant.ofEpochMilli(pending))
+            }.getOrElse { java.util.Date(pending).toString() }
+            UiMessage(
+                id = nextUiMsgId.getAndIncrement(),
+                timeMs = (pending + 1L).coerceAtMost(ts - 1L),
+                from = null,
+                text = "── Chat history • Last message: $newestStr ──",
+            )
+        }
+
         // Atomic update, then read the committed state for logging/notifications.
         var msgWasDuplicate = false
         _state.update { st: UiState ->
@@ -5286,12 +6206,18 @@ if (affectLive) {
                 msgWasDuplicate = true
                 return@update st
             }
+            // Fallback content-fingerprint dedup for history messages without msgid.
+            // Catches the ZNC *playback + chathistory overlap that the msgid path misses.
+            if (historyFingerprint != null && buf.seenHistoryFingerprints.contains(historyFingerprint)) {
+                msgWasDuplicate = true
+                return@update st
+            }
 
             // A buffer is only "selected" (suppressing unread tracking) when the user can
             // actually see it: right screen, right buffer, AND the app is in the foreground.
             // Without the foreground check, messages arriving while the app is backgrounded
             // mark themselves as read and advance lastReadTimestamp, so the unread bar never
-            // appears when the user returns — even though a notification fired for the message.
+            // appears when the user returns - even though a notification fired for the message.
             val isSelected = (bufferKey == st.selectedBuffer
                 && st.screen == AppScreen.CHAT
                 && AppVisibility.isForeground)
@@ -5299,7 +6225,11 @@ if (affectLive) {
             val highlightInc = if (!isSelected && isHighlight && !isLocal) 1 else 0
 
             val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000)
-            val combined = buf.messages + msg
+            // Splice in the chathistory marker (if any) before the new live message, in a
+            // single state update. The marker is a system line (from = null) and does not
+            // affect dedup — its from is null so historyFingerprint isn't computed for it.
+            val toAppend: List<UiMessage> = if (markerToEmit != null) listOf(markerToEmit, msg) else listOf(msg)
+            val combined = buf.messages + toAppend
             val newMessages = if (combined.size > maxLines) combined.takeLast(maxLines) else combined
 
             // Rebuild seenMsgIds from retained messages so evicted entries don't accumulate.
@@ -5311,6 +6241,24 @@ if (affectLive) {
                 else -> newMessages.mapNotNullTo(HashSet()) { it.msgId }
             }
 
+            // Content fingerprints: only added when we computed one for this message; rebuilt
+            // from scratch on trim. The set is bounded by maxLines (one entry per retained
+            // message with a sender) and is cleared whenever the buffer is.
+            val newSeenHistoryFingerprints: Set<String> = when {
+                historyFingerprint == null && combined.size <= maxLines -> buf.seenHistoryFingerprints
+                historyFingerprint != null && combined.size <= maxLines -> buf.seenHistoryFingerprints + historyFingerprint
+                else -> {
+                    // After a trim we recompute fingerprints for the retained messages. The gate
+                    // here mirrors the gate at the top of [append] — every message with a sender
+                    // gets a fingerprint, so a future replay of any retained line dedupes against
+                    // it regardless of which path delivered the original.
+                    newMessages.mapNotNullTo(HashSet()) { m ->
+                        if (m.from != null) "${m.timeMs}|${m.from}|${m.text.hashCode()}"
+                        else null
+                    }
+                }
+            }
+
             // Advance lastReadTimestamp for every message on the selected buffer so the
             // unread separator never appears for messages the user is actively watching.
             val newLastRead = if (isSelected)
@@ -5320,6 +6268,7 @@ if (affectLive) {
             val newBuf = buf.copy(
                 messages = newMessages,
                 seenMsgIds = newSeenMsgIds,
+                seenHistoryFingerprints = newSeenHistoryFingerprints,
                 unread = buf.unread + unreadInc,
                 highlights = buf.highlights + highlightInc,
                 lastReadTimestamp = newLastRead
@@ -5328,6 +6277,32 @@ if (affectLive) {
         }
         val st = _state.value
         if (msgWasDuplicate) return
+
+        // Maintain the chathistory marker tracker. Done after a non-duplicate state update so a
+        // dedup'd replay doesn't move the "last history" pointer forward — only newly committed
+        // history messages do. Order matters: clear-on-emit must run BEFORE the isHistory write
+        // so a history message that arrives with a still-pending marker (rare, but possible if a
+        // mixed batch interleaves) doesn't immediately re-arm the marker for itself.
+        if (markerToEmit != null) {
+            // We just inserted the separator; the boundary it marked is now drawn. Also
+            // disarm the window so a second history burst from the same catch-up doesn't
+            // re-arm and fire again on the next live message after that.
+            pendingChathistoryMarkerMs.remove(bufferKey)
+            chathistoryMarkerArmedUntilMs.remove(bufferKey)
+        }
+        if (isHistory) {
+            // Only track the newest history ts when the buffer's marker window is armed.
+            // Armed = "user just joined this channel" or "we're in the bouncer playback
+            // window after Connected" — i.e. a known catch-up, not a delayed playback
+            // burst hours later. Without this gate, any history-flagged message at any
+            // time would arm the marker, and the next live message (the user typing)
+            // would fire it. That was the "marker randomly appears whilst typing" bug.
+            val armedUntil = chathistoryMarkerArmedUntilMs[bufferKey] ?: 0L
+            if (armedUntil >= System.currentTimeMillis()) {
+                val prev = pendingChathistoryMarkerMs[bufferKey] ?: 0L
+                if (ts > prev) pendingChathistoryMarkerMs[bufferKey] = ts
+            }
+        }
 
         // logging
         if (st.settings.loggingEnabled) {
@@ -5343,7 +6318,7 @@ if (affectLive) {
         }
 
         // notifications
-        // Suppress only when the buffer is actively visible to the user — i.e. it's the
+        // Suppress only when the buffer is actively visible to the user - i.e. it's the
         // selected buffer on the CHAT screen AND the app is in the foreground.
         // If the app is backgrounded, always notify regardless of which buffer is "selected",
         // because the user can't see the message.
@@ -5474,9 +6449,9 @@ private fun isHighlight(netId: String, text: String, isPrivate: Boolean): Boolea
  * Mirrors IrcClient.casefold() exactly so that buffer-key comparisons in the ViewModel
  * are consistent with the comparisons IrcCore makes when routing incoming messages.
  *
- * rfc1459 / strict-rfc1459 — map the four extended ASCII special-char pairs.
- * ascii                     — ASCII A-Z only.
- * anything else             — full Unicode lowercase + RFC1459 special-char pairs.
+ * rfc1459 / strict-rfc1459 - map the four extended ASCII special-char pairs.
+ * ascii                     - ASCII A-Z only.
+ * anything else             - full Unicode lowercase + RFC1459 special-char pairs.
  *   (Covers "BulgarianCyrillic+EnglishAlphabet" and any other non-standard token.)
  */
 private fun casefoldText(netId: String, s: String): String {
@@ -5755,7 +6730,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         }
 
         if (st.settings.keepAliveInBackground) {
-            // Skip the Binder IPC if the visible text hasn't changed — avoids waking
+            // Skip the Binder IPC if the visible text hasn't changed - avoids waking
             // NotificationManager on every lag update / ping cycle (once per minute).
             if (label == lastNotifLabel && status == lastNotifStatus && KeepAliveService.isRunning) return
             lastNotifLabel = label
@@ -5802,7 +6777,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
         // Android 17+: DCC connections to LAN peers require ACCESS_LOCAL_NETWORK.
         // Active DCC connects to the sender's IP; passive DCC binds a local port (that's fine,
-        // but the sender then connects back to us over the LAN — still needs the permission).
+        // but the sender then connects back to us over the LAN - still needs the permission).
         if (!offer.isPassive && isLocalHost(offer.ip) && !hasLocalNetworkPermission()) {
             append(bufKey(offer.netId.ifBlank { st.activeNetworkId ?: "" }, "*server*"),
                 from = null,
@@ -6182,7 +7157,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         } catch (t: TimeoutCancellationException) {
                             // Re-throw as a plain IOException so the outer catch marks the
                             // transfer as an error rather than falling through to the success path.
-                            throw IOException("No response from $target — DCC timed out")
+                            throw IOException("No response from $target - DCC timed out")
                         }
                     }
                 }
@@ -6294,10 +7269,10 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
 
     fun shareFile(path: String) {
         val uri: android.net.Uri = if (path.startsWith("content://")) {
-            // MediaStore or SAF path — already a content URI, use directly.
+            // MediaStore or SAF path - already a content URI, use directly.
             android.net.Uri.parse(path)
         } else {
-            // Filesystem path — wrap with FileProvider so other apps can read it.
+            // Filesystem path - wrap with FileProvider so other apps can read it.
             val f = File(path)
             if (!f.exists()) return
             FileProvider.getUriForFile(appContext, appContext.packageName + ".fileprovider", f)
@@ -6315,7 +7290,7 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
         try {
             appContext.startActivity(viewIntent)
         } catch (_: android.content.ActivityNotFoundException) {
-            // No app can handle this type directly — show a chooser.
+            // No app can handle this type directly - show a chooser.
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = mime
                 putExtra(Intent.EXTRA_STREAM, uri)

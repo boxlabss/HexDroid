@@ -29,6 +29,15 @@
     <string name="not_now">Not now</string>
     <string name="copy_text">Copy</string>
 
+    <!-- Buffer-list sidepanel toolbar -->
+    <string name="buffer_toolbar_collapse_all">Collapse all networks</string>
+    <string name="buffer_toolbar_mark_all_read">Mark all as read</string>
+    <string name="buffer_toolbar_search">Search buffer</string>
+    <string name="buffer_toolbar_search_dialog_title">Search buffer</string>
+    <string name="buffer_toolbar_search_placeholder">Text or sender…</string>
+    <string name="buffer_toolbar_search_global">Search across all buffers on this network</string>
+    <string name="buffer_toolbar_search_action">Search</string>
+
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_intro_tour">Intro tour</string>
@@ -44,7 +53,6 @@
     <string name="section_privacy">Privacy</string>
     <string name="section_ircv3_history">IRCv3 History</string>
     <string name="section_file_transfers">File transfers</string>
-
     <string name="setting_font_size">Font size</string>
     <string name="setting_colorise_nicks">Colourise nicks</string>
     <string name="setting_own_nick_colour_title">My nick colour</string>
@@ -59,21 +67,20 @@
     <string name="setting_timestamp_format">Timestamp format (Java)</string>
     <string name="setting_hide_motd">Hide MOTD on connect</string>
     <string name="setting_hide_joinpartquit">Hide join/part/quit messages</string>
+    <string name="setting_hide_away_notify">Hide away/back messages</string>
+    <string name="setting_color_channel_events">Coloured channel events</string>
     <string name="setting_hide_topic_on_entry">Hide topic on entry</string>
     <string name="setting_show_buffers_default">Show network/chans by default</string>
     <string name="setting_show_nicklist_default">Show nicklist by default</string>
     <string name="setting_highlight_on_nick">Highlight on nick</string>
     <string name="setting_extra_highlights">Extra highlight words (one per line)</string>
     <string name="setting_compact_mode">Compact mode</string>
-
     <string name="setting_portrait_nicklist_overlay">Side pane nicklist</string>
     <string name="setting_portrait_nicklist_overlay_desc">Show the nicklist as a resizable side pane instead of a popup. When enabled, the nicklist toggle acts as a persistent show/hide.</string>
-
     <string name="setting_ignore_list">Ignore list</string>
     <string name="setting_ignore_list_desc">Hide messages and DCC offers from specific nicks (per network).</string>
     <string name="setting_quit_message">Quit message</string>
     <string name="setting_part_message">Part message</string>
-
     <string name="setting_auto_reconnect">Auto-reconnect</string>
     <string name="setting_reconnect_interval">Reconnect interval (seconds)</string>
     <string name="setting_reconnect_interval_desc">How often to retry when the connection drops.</string>
@@ -81,31 +88,26 @@
     <string name="setting_auto_connect_startup">Auto-connect on startup</string>
     <string name="setting_rejoin_on_kick">Rejoin on kick</string>
     <string name="setting_rejoin_on_kick_desc">Automatically rejoin a channel after being kicked. A second kick on the same channel within 60 seconds is not rejoined, to avoid loops against +i/+k/+b modes.</string>
-
     <string name="setting_enable_notifications">Enable notifications</string>
     <string name="setting_notify_highlights">Highlight notifications</string>
     <string name="setting_notify_pm">Private message notifications</string>
     <string name="setting_connection_status">Show connection status notification</string>
     <string name="setting_sound_highlight">Sound on highlight</string>
     <string name="setting_vibrate_highlight">Vibrate on highlight</string>
-
     <string name="setting_enable_logging">Enable logging</string>
     <string name="setting_log_server">Log server buffer</string>
     <string name="setting_log_folder">Log folder</string>
     <string name="setting_choose_folder">Choose folder</string>
     <string name="setting_retention_days">Retention days</string>
     <string name="setting_max_scrollback">Max scrollback lines</string>
-
     <string name="setting_history_limit">History fetch limit</string>
     <string name="setting_history_limit_desc">Number of messages to request per channel on join (CHATHISTORY LATEST). Set to 0 to disable.</string>
     <string name="setting_messages">Messages</string>
     <string name="setting_count_unread">Count fetched history as unread</string>
     <string name="setting_trigger_notif">Trigger notifications for fetched history</string>
-
     <string name="setting_download_folder">Download folder</string>
     <string name="setting_incoming_port_min">Incoming port min</string>
     <string name="setting_incoming_port_max">Incoming port max</string>
-
     <string name="setting_keep_alive">Keep the connection alive</string>
     <string name="setting_enable_dcc">Enable DCC</string>
     <string name="setting_open_app_settings">Open app settings</string>
@@ -159,7 +161,6 @@
     <string name="networks_edit">Edit</string>
     <string name="networks_add">Add network</string>
     <string name="networks_auto_connect">Auto-connect</string>
-
     <string name="network_edit_title">Edit network</string>
     <string name="network_add_title">Add network</string>
     <string name="network_name">Name</string>
@@ -167,8 +168,10 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">Use TLS (SSL)</string>
     <string name="network_allow_invalid_certs">Allow invalid certificates</string>
-    <string name="network_pinned_cert_label">Pinned certificate fingerprint (TOFU)</string>
-    <string name="network_reset_pinned_cert">Reset pinned certificate</string>
+    <string name="network_pinned_cert_label">Pinned certificate fingerprints (TOFU)</string>
+    <string name="network_pinned_cert_dormant">TOFU pinning only engages when \"Allow invalid certificates\" is on. The fingerprints below are kept for reference; the current connection is verified by the system CA chain instead.</string>
+    <string name="network_reset_pinned_cert">Reset &amp; re-pin (clears all)</string>
+    <string name="network_trust_extra_pinned_cert">Trust this server too (round-robin DNS)</string>
     <string name="network_nick">Nickname</string>
     <string name="network_alt_nick">Alt nickname</string>
     <string name="network_username">Username</string>
@@ -176,24 +179,24 @@
 
     <!-- Tour steps -->
     <string name="tour_add_network_title">Your networks</string>
-    <string name="tour_add_network_body">Tap + to add a server, or edit the ones already here. HexDroid ships with a few defaults — Libera, Freenode, and AfterNET — so you can connect straight away.</string>
+    <string name="tour_add_network_body">Tap + to add a server, or edit the ones already here. HexDroid ships with a few defaults.</string>
     <string name="tour_connect_title">Connect</string>
-    <string name="tour_connect_body">Tap Connect to open a connection. The button turns green when you\'re online. You can have multiple networks connected at once.</string>
+    <string name="tour_connect_body">Tap Connect to open a connection. You can have multiple networks connected at once.</string>
     <string name="tour_switcher_title">Buffer list</string>
-    <string name="tour_switcher_body">This panel lists every server, channel, and private message you have open. Swipe or tap the ☰ button to show it. Tap any item to switch to it — unread counts are shown here too.</string>
+    <string name="tour_switcher_body">This panel lists every server, channel, and private message you have open. Swipe or tap the ☰ button to show it. Tap any item to switch to it</string>
     <string name="tour_send_title">Send messages</string>
     <string name="tour_send_body">Type here to chat. Slash commands work too: /join #channel, /msg nick text, /part, /whois nick, /me action text, and more.</string>
     <string name="tour_more_title">More actions</string>
     <string name="tour_more_body">This menu reaches channel list, file transfers, ignore list, network settings, and more. It also shows channel mode and topic management when you\'re an op.</string>
     <string name="tour_settings_title">Appearance &amp; settings</string>
-    <string name="tour_settings_body">Choose a theme, adjust font size, tweak notification sounds, privacy options, and much more. Changes apply instantly — no restart needed.</string>
+    <string name="tour_settings_body">Choose a theme, adjust font size, tweak notification sounds, privacy options, and much more. Changes apply instantly.</string>
     <string name="tour_dcc_title">File transfers (DCC)</string>
-    <string name="tour_dcc_body">Enable DCC to send and receive files directly between users. If you\'re behind a router, Passive DCC avoids port-forwarding headaches.</string>
+    <string name="tour_dcc_body">Enable DCC to send and receive files directly between users. If you\'re behind a router, Passive DCC avoids port-forwarding headaches. SDCC is also supported.</string>
     <string name="tour_send_file_title">Send a file</string>
-    <string name="tour_send_file_body">Enter the target nick, then pick a file from storage. Incoming DCC offers also arrive here — accept or reject them from this screen.</string>
+    <string name="tour_send_file_body">Enter the target nick, then pick a file from storage. Incoming DCC offers also arrive here, accept or reject them from notifications.</string>
     <string name="tour_support_title">Need help?</string>
     <string name="tour_support_body">Connect to AfterNET and join #HexDroid for support, feature requests, or just to chat with other HexDroid users.</string>
-    <string name="tour_support_fallback">AfterNET isn\'t in your list yet — tap Add AfterNET to add it, then connect and join #HexDroid for support.</string>
+    <string name="tour_support_fallback">AfterNET isn\'t in your list yet: tap Add AfterNET to add it, then connect and join #HexDroid for support.</string>
     <string name="tour_support_action">Add AfterNET</string>
     <string name="tour_replay_title">Replay this tour</string>
     <string name="tour_replay_body">You can run the walkthrough again any time from Settings → About. Tap Done to finish.</string>
@@ -210,7 +213,7 @@
     <!-- List -->
     <string name="list_title">Channel list</string>
 
-    <!-- Language names (native) – not translated -->
+    <!-- Language names -->
     <string name="lang_en" translatable="false">English</string>
     <string name="lang_de" translatable="false">Deutsch</string>
     <string name="lang_es" translatable="false">Español</string>
@@ -225,16 +228,10 @@
     <string name="lang_ja" translatable="false">日本語</string>
     <string name="lang_ko" translatable="false">한국어</string>
     <string name="lang_zh" translatable="false">中文</string>
-
+	
     <string name="network_edit_advanced_caps">Advanced IRCv3 caps</string>
     <string name="network_edit_caps_hint">Basic IRCv3 features enabled by default. Switch on to see advanced options.</string>
-    <string name="network_edit_bouncer_caps">Bouncer caps (soju/pounce)</string>
-
-    <!-- Chat kick/ban (was missing from translations) -->
-
-    <!-- Font / style pickers (was missing from translations) -->
-
-    <!-- Vibration (was missing from translations) -->
+    <string name="network_edit_bouncer_caps">Bouncer caps</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_enable_dcc">Enable DCC</string>
@@ -301,26 +298,29 @@
     <string name="network_nickname_label">Nickname</string>
     <string name="network_alt_nick_label">Alternate Nick</string>
     <string name="network_username_label">Username (ident)</string>
+    <string name="network_bouncer_username_label">Username</string>
+    <string name="network_username_bouncer_hint">For bouncer profiles, this is your <b>login name on the bouncer</b></string>
     <string name="network_realname_label">Real Name</string>
     <string name="network_use_tls_label">Use TLS</string>
     <string name="network_allow_plaintext">Allow insecure plaintext</string>
     <string name="network_auto_connect_label">Connect on app start</string>
     <string name="network_auto_reconnect_label">Auto-reconnect on disconnect</string>
-    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_bouncer_label">Bouncer Mode</string>
     <string name="network_bouncer_kind_label">Bouncer type</string>
     <string name="network_bouncer_kind_none">None / unspecified</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">Generic  (user/network)</string>
     <string name="network_bouncer_network_label">Network name (optional)</string>
-    <string name="network_bouncer_network_help">The upstream network this profile targets on the bouncer (e.g. \"libera\", \"oftc\"). Appended to your SASL username using the syntax for the selected bouncer type.</string>
+    <string name="network_bouncer_network_help">Which upstream network on the bouncer this profile targets (e.g. \"afternet\", \"libera\"). Combined with the bouncer username field above and, depending on which auth method you choose, in SASL or the PASS line.</string>
     <string name="network_bouncer_clientid_label">Client ID (optional)</string>
-    <string name="network_bouncer_clientid_help">A short identifier for this device, e.g. \"phone\" or \"desktop\". Enables per-client buffers and history when the bouncer supports it (ZNC clientbuffer, soju per-client history). Leave blank to share a single buffer across all clients.</string>
+    <string name="network_bouncer_clientid_help">A short identifier for this device, e.g. \"phone\" or \"hexdroid\". Enables per-client buffers and history when the bouncer supports it (ZNC clientbuffer, soju per-client history). Leave blank to share a single buffer across all clients.</string>
     <string name="network_server_password_label">Server password (PASS)</string>
     <string name="network_enable_sasl">Enable SASL</string>
     <string name="network_sasl_mechanism_label">Mechanism</string>
     <string name="network_sasl_username_label">Username (authcid)</string>
     <string name="network_sasl_password_label">Password</string>
+    <string name="network_sasl_recommended_for_bouncers">Recommended for bouncers (leave the username field blank to use the bouncer username from the General section above.)</string>
     <string name="network_cert_format_label">Certificate format</string>
     <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
@@ -608,4 +608,21 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="topic_edit_title">Edit topic</string>
     <string name="topic_edit_label">Topic</string>
     <string name="topic_set">Set</string>
+
+    <!-- Bouncer multinetwork UI -->
+    <string name="bouncer_networks_section_title">Bouncer networks</string>
+    <string name="bouncer_networks_section_subtitle">Upstreams reported by %1$s</string>
+    <string name="bouncer_networks_refresh">Refresh</string>
+    <string name="bouncer_networks_empty">No upstreams reported yet. Tap refresh once the bouncer has registered.</string>
+    <string name="bouncer_networks_state_connected">connected</string>
+    <string name="bouncer_networks_state_connecting">connecting</string>
+    <string name="bouncer_networks_state_disconnected">disconnected</string>
+    <string name="bouncer_networks_state_unknown">unknown</string>
+    <string name="bouncer_networks_import">Import</string>
+    <string name="bouncer_networks_already_imported">Imported</string>
+    <string name="bouncer_networks_unnamed">(unnamed upstream)</string>
+    <string name="bouncer_networks_clone_dismiss">Dismiss</string>
+
+    <!-- Bouncer-aware password field hint -->
+    <string name="network_server_password_bouncer_hint">For bouncers, SASL is recommended. If you do use this PASS field instead, just enter the password; the bouncer username and network from the fields above are prepended automatically. Typing the full <b>username/network:password</b> also works.</string>
 </resources>

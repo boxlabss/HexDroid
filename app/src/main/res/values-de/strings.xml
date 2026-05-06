@@ -123,24 +123,24 @@
     <string name="networks_add">Netzwerk hinzufügen</string>
 
     <string name="tour_add_network_title">Deine Netzwerke</string>
-    <string name="tour_add_network_body">Tippe auf +, um einen Server hinzuzufügen, oder bearbeite vorhandene. HexDroid wird mit einigen Standards geliefert — Libera, Freenode und AfterNET.</string>
+    <string name="tour_add_network_body">Tippe auf +, um einen Server hinzuzufügen, oder bearbeite vorhandene. HexDroid wird mit einigen Standards geliefert.</string>
     <string name="tour_connect_title">Verbinden</string>
-    <string name="tour_connect_body">Tippe auf Verbinden, um eine Verbindung herzustellen. Der Knopf wird grün, wenn du online bist. Du kannst mehrere Netzwerke gleichzeitig verbinden.</string>
+    <string name="tour_connect_body">Tippe auf Verbinden, um eine Verbindung herzustellen. Du kannst mehrere Netzwerke gleichzeitig verbinden.</string>
     <string name="tour_settings_title">Erscheinungsbild &amp; Einstellungen</string>
-    <string name="tour_settings_body">Wähle ein Theme, passe Schriftgröße und Benachrichtigungen an. Änderungen werden sofort übernommen.</string>
+    <string name="tour_settings_body">Wähle ein Theme, passe Schriftgröße, Benachrichtigungstöne und Datenschutzoptionen an, und vieles mehr. Änderungen werden sofort übernommen.</string>
     <string name="tour_switcher_title">Pufferliste</string>
-    <string name="tour_switcher_body">Diese Leiste zeigt alle offenen Server, Kanäle und Privatnachrichten. Wische oder tippe ☰ zum Einblenden. Tippe ein Element an, um dorthin zu wechseln.</string>
+    <string name="tour_switcher_body">Diese Leiste zeigt alle offenen Server, Kanäle und Privatnachrichten. Wische oder tippe ☰ zum Einblenden. Tippe ein Element an, um dorthin zu wechseln</string>
     <string name="tour_more_title">Mehr Aktionen</string>
-    <string name="tour_more_body">Dieses Menü öffnet Kanalliste, Dateiübertragungen, Ignorierliste, Netzwerkeinstellungen und mehr.</string>
+    <string name="tour_more_body">Dieses Menü öffnet Kanalliste, Dateiübertragungen, Ignorierliste, Netzwerkeinstellungen und mehr. Es zeigt auch Kanalmodus- und Themenverwaltung, wenn du Op bist.</string>
     <string name="tour_send_title">Nachrichten senden</string>
-    <string name="tour_send_body">Tippe hier zum Chatten. Slash-Befehle funktionieren auch: /join #kanal, /msg nick text, /part, /whois nick, /me Aktion.</string>
+    <string name="tour_send_body">Tippe hier zum Chatten. Slash-Befehle funktionieren auch: /join #kanal, /msg nick text, /part, /whois nick, /me Aktion und mehr.</string>
     <string name="tour_dcc_title">Dateiübertragungen (DCC)</string>
-    <string name="tour_dcc_body">Aktiviere DCC, um Dateien direkt zwischen Benutzern zu senden und zu empfangen. Passives DCC hilft bei Routern.</string>
+    <string name="tour_dcc_body">Aktiviere DCC, um Dateien direkt zwischen Benutzern zu senden und zu empfangen. Passives DCC hilft bei Routern. SDCC wird ebenfalls unterstützt.</string>
     <string name="tour_send_file_title">Datei senden</string>
-    <string name="tour_send_file_body">Gib den Zielnick ein und wähle eine Datei. Eingehende DCC-Angebote erscheinen ebenfalls hier.</string>
+    <string name="tour_send_file_body">Gib den Zielnick ein und wähle eine Datei. Eingehende DCC-Angebote erscheinen ebenfalls hier, akzeptiere oder lehne sie über Benachrichtigungen ab.</string>
     <string name="tour_support_title">Hilfe benötigt?</string>
     <string name="tour_support_body">Verbinde mit AfterNET und tritt #HexDroid für Support, Funktionswünsche oder zum Chatten bei.</string>
-    <string name="tour_support_fallback">AfterNET ist noch nicht in deiner Liste — tippe auf AfterNET hinzufügen und tritt #HexDroid bei.</string>
+    <string name="tour_support_fallback">AfterNET ist noch nicht in deiner Liste: tippe auf AfterNET hinzufügen, dann verbinde dich und tritt #HexDroid bei.</string>
     <string name="tour_support_action">AfterNET hinzufügen</string>
     <string name="tour_replay_title">Tour wiederholen</string>
     <string name="tour_replay_body">Du kannst die Einführung jederzeit in Einstellungen → Über erneut starten. Tippe auf Fertig zum Beenden.</string>
@@ -158,8 +158,8 @@
     <string name="network_port">Port</string>
     <string name="network_use_tls">TLS (SSL) verwenden</string>
     <string name="network_allow_invalid_certs">Ungültige Zertifikate erlauben</string>
-    <string name="network_pinned_cert_label">Gespeicherter Zertifikat-Fingerabdruck (TOFU)</string>
-    <string name="network_reset_pinned_cert">Gespeichertes Zertifikat zurücksetzen</string>
+    <string name="network_pinned_cert_label">Angeheftete Zertifikat-Fingerabdrücke (TOFU)</string>
+    <string name="network_reset_pinned_cert">Zurücksetzen und neu anheften (alle löschen)</string>
     <string name="network_nick">Spitzname</string>
     <string name="network_alt_nick">Alt-Spitzname</string>
     <string name="network_username">Benutzername</string>
@@ -497,4 +497,47 @@ Dies kann nicht rückgängig gemacht werden.</string>
     <string name="topic_edit_title">Thema bearbeiten</string>
     <string name="topic_edit_label">Thema</string>
     <string name="topic_set">Setzen</string>
+
+    <!-- Bouncer multinetwork (soju + ZNC) -->
+    <string name="bouncer_networks_section_title">Bouncer-Netzwerke</string>
+    <string name="bouncer_networks_section_subtitle">Von %1$s gemeldete Upstreams</string>
+    <string name="bouncer_networks_refresh">Aktualisieren</string>
+    <string name="bouncer_networks_empty">Noch keine Upstreams gemeldet. Tippe auf Aktualisieren, sobald der Bouncer registriert ist.</string>
+    <string name="bouncer_networks_state_connected">verbunden</string>
+    <string name="bouncer_networks_state_connecting">verbindet</string>
+    <string name="bouncer_networks_state_disconnected">getrennt</string>
+    <string name="bouncer_networks_state_unknown">unbekannt</string>
+    <string name="bouncer_networks_import">Importieren</string>
+    <string name="bouncer_networks_already_imported">Bereits importiert</string>
+    <string name="bouncer_networks_unnamed">(unbenannter Upstream)</string>
+    <string name="bouncer_networks_clone_dismiss">Verwerfen</string>
+    <string name="network_server_password_bouncer_hint">Für Bouncer SASL unten bevorzugen — es ist der moderne Auth-Pfad. Wenn du stattdessen dieses PASS-Feld nutzt, gib nur das Passwort ein; Bouncer-Benutzername und Netzwerk aus den Feldern oben werden automatisch vorangestellt (gesendet als <b>username/network:password</b> bzw. <b>username@clientid/network:password</b> für ZNC). Wenn du lieber <b>username/network:password</b> selbst eingibst, funktioniert das auch.</string>
+    <string name="network_bouncer_network_help">Welches Upstream-Netzwerk am Bouncer dieses Profil ansprechen soll (z. B. \"libera\", \"oftc\"). Wird auf der Leitung mit dem Bouncer-Benutzernamen oben kombiniert — gesendet in USER und, je nach gewählter Auth-Methode, in SASL oder der PASS-Zeile — gemäß der Syntax des gewählten Bouncer-Typs.</string>
+    <string name="network_username_bouncer_hint">Bei Bouncer-Profilen ist dies dein <b>Login-Name am Bouncer</b> — derselbe Name, mit dem du das Bouncer-Konto eingerichtet hast. Nicht dein IRC-Spitzname.</string>
+    <string name="network_sasl_recommended_for_bouncers">Empfohlen für Bouncer — lass das Benutzername-Feld leer, um den Bouncer-Benutzernamen aus dem Abschnitt „Allgemein“ oben zu verwenden.</string>
+    <string name="setting_color_channel_events">Farbige Kanalereignisse</string>
+    <string name="network_bouncer_username_label">Benutzername</string>
+    <string name="setting_hide_away_notify">Abwesenheits-/Rückkehrbenachrichtigungen ausblenden</string>
+    <!-- HexDroid 1.6.2 additions: bouncer fields, rejoin-on-kick setting,
+         buffer-list sidepanel toolbar (collapse all / mark all read / search). -->
+    <string name="buffer_toolbar_collapse_all">Alle Netzwerke einklappen</string>
+    <string name="buffer_toolbar_mark_all_read">Alle als gelesen markieren</string>
+    <string name="buffer_toolbar_search">Puffer durchsuchen</string>
+    <string name="buffer_toolbar_search_dialog_title">Puffer durchsuchen</string>
+    <string name="buffer_toolbar_search_placeholder">Text oder Absender…</string>
+    <string name="buffer_toolbar_search_global">Alle Puffer in diesem Netzwerk durchsuchen</string>
+    <string name="buffer_toolbar_search_action">Suchen</string>
+    <string name="network_bouncer_clientid_help">Eine kurze Kennung für dieses Gerät, z. B. \"phone\" oder \"hexdroid\". Aktiviert pro-Client-Puffer und Verlauf, wenn der Bouncer dies unterstützt (ZNC clientbuffer, soju per-client history). Lass das Feld leer, um einen einzigen Puffer zwischen allen Clients zu teilen.</string>
+    <string name="network_bouncer_clientid_label">Client-ID (optional)</string>
+    <string name="network_bouncer_kind_generic">Allgemein  (user/network)</string>
+    <string name="network_bouncer_kind_label">Bouncer-Typ</string>
+    <string name="network_bouncer_kind_none">Keiner / nicht angegeben</string>
+    <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
+    <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
+    <string name="network_bouncer_network_label">Netzwerkname (optional)</string>
+    <string name="setting_rejoin_on_kick">Bei Kick erneut beitreten</string>
+    <string name="setting_rejoin_on_kick_desc">Automatisch wieder einem Kanal beitreten nach einem Kick. Ein zweiter Kick aus demselben Kanal innerhalb von 60 Sekunden wird ignoriert, um Schleifen mit +i/+k/+b-Modi zu vermeiden.</string>
+    <string name="network_trust_extra_pinned_cert">Auch diesem Server vertrauen (Round-Robin-DNS)</string>
+    <string name="network_pinned_cert_dormant">Inaktiv — TOFU-Anheftung wird nur aktiviert, wenn \"Ungültige Zertifikate erlauben\" eingeschaltet ist. Die unten aufgeführten Fingerabdrücke sind als Referenz gespeichert; die aktuelle Verbindung wird stattdessen durch die System-CA-Kette verifiziert.</string>
+
 </resources>

@@ -246,6 +246,8 @@ class SettingsRepository(private val ctx: Context) {
                 nickPaneFracLandscape = o.optDouble("nickPaneFracLandscape", 0.18).toFloat(),
 
                 hideJoinPartQuit = o.optBoolean("hideJoinPartQuit", false),
+                colorChannelEvents = o.optBoolean("colorChannelEvents", true),
+                hideAwayNotify = o.optBoolean("hideAwayNotify", false),
 
                 highlightOnNick = o.optBoolean("highlightOnNick", true),
                 extraHighlightWords = o.optJSONArray("extraHighlightWords")?.let { arr ->
@@ -332,6 +334,8 @@ class SettingsRepository(private val ctx: Context) {
         o.put("nickPaneFracLandscape", s.nickPaneFracLandscape.toDouble())
 
         o.put("hideJoinPartQuit", s.hideJoinPartQuit)
+        o.put("colorChannelEvents", s.colorChannelEvents)
+        o.put("hideAwayNotify", s.hideAwayNotify)
 
         o.put("highlightOnNick", s.highlightOnNick)
         o.put("extraHighlightWords", JSONArray(s.extraHighlightWords))
@@ -426,17 +430,38 @@ class SettingsRepository(private val ctx: Context) {
                         draftChathistory = o.optBoolean("cap_draftChathistory", true),
                         draftEventPlayback = o.optBoolean("cap_draftEventPlayback", true),
                         utf8Only = o.optBoolean("cap_utf8Only", true),
-						accountNotify = o.optBoolean("cap_accountNotify", true),
-						awayNotify = o.optBoolean("cap_awayNotify", true),
-						chghost = o.optBoolean("cap_chghost", true),
-						extendedJoin = o.optBoolean("cap_extendedJoin", true),
-						inviteNotify = o.optBoolean("cap_inviteNotify", true),
-						multiPrefix = o.optBoolean("cap_multiPrefix", true),
-						sasl = o.optBoolean("cap_sasl", true),
-						setname = o.optBoolean("cap_setname", false),
-						userhostInNames = o.optBoolean("cap_userhostInNames", false),
-						draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
-						draftReadMarker = o.optBoolean("cap_draftReadMarker", false)
+                        accountNotify = o.optBoolean("cap_accountNotify", true),
+                        awayNotify = o.optBoolean("cap_awayNotify", true),
+                        chghost = o.optBoolean("cap_chghost", true),
+                        extendedJoin = o.optBoolean("cap_extendedJoin", true),
+                        inviteNotify = o.optBoolean("cap_inviteNotify", true),
+                        multiPrefix = o.optBoolean("cap_multiPrefix", true),
+                        sasl = o.optBoolean("cap_sasl", true),
+                        setname = o.optBoolean("cap_setname", false),
+                        userhostInNames = o.optBoolean("cap_userhostInNames", false),
+                        draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
+                        draftReadMarker = o.optBoolean("cap_draftReadMarker", true),
+                        // Caps added after the original v1 set. Pre-r10 these were neither
+                        // read nor written, so every load reverted to the CapPrefs default
+                        // and the per-network UI toggle (where one existed) had no effect
+                        // across app restarts. Defaults match the CapPrefs field defaults
+                        // so existing profiles silently inherit the same behaviour they had
+                        // before; anyone who'd disabled a cap in the UI gets it disabled
+                        // again from this release onward.
+                        monitor = o.optBoolean("cap_monitor", true),
+                        accountTag = o.optBoolean("cap_accountTag", true),
+                        typingIndicator = o.optBoolean("cap_typingIndicator", true),
+                        sojuNoImplicitNames = o.optBoolean("cap_sojuNoImplicitNames", true),
+                        standardReplies = o.optBoolean("cap_standardReplies", true),
+                        preAway = o.optBoolean("cap_preAway", true),
+                        messageIds = o.optBoolean("cap_messageIds", true),
+                        sojuRead = o.optBoolean("cap_sojuRead", true),
+                        whox = o.optBoolean("cap_whox", true),
+                        channelRename = o.optBoolean("cap_channelRename", true),
+                        extendedMonitor = o.optBoolean("cap_extendedMonitor", true),
+                        messageReactions = o.optBoolean("cap_messageReactions", true),
+                        noImplicitNames = o.optBoolean("cap_noImplicitNames", false),
+                        multiline = o.optBoolean("cap_multiline", true),
                     ),
 
                     autoJoin = o.optJSONArray("autoJoin")?.let { aj ->
@@ -482,6 +507,17 @@ class SettingsRepository(private val ctx: Context) {
                     bouncerNetworkName = o.optString("bouncerNetworkName", "").takeIf { it.isNotBlank() },
                     bouncerClientId = o.optString("bouncerClientId", "").takeIf { it.isNotBlank() },
                     tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
+                    tlsTofuFingerprints = run {
+                        // v4: additional fingerprints for round-robin DNS hosts. Missing on
+                        // pre-v4 profiles; defaults to empty (the legacy single-fingerprint
+                        // field carries the pin on its own for those).
+                        val arr = o.optJSONArray("tlsTofuFingerprints") ?: return@run emptySet()
+                        val s = LinkedHashSet<String>(arr.length())
+                        for (i in 0 until arr.length()) {
+                            arr.optString(i, "").takeIf { it.isNotBlank() }?.let(s::add)
+                        }
+                        s
+                    },
                 )
             }
             out
@@ -520,17 +556,33 @@ class SettingsRepository(private val ctx: Context) {
             o.put("cap_draftChathistory", n.caps.draftChathistory)
             o.put("cap_draftEventPlayback", n.caps.draftEventPlayback)
             o.put("cap_utf8Only", n.caps.utf8Only)
-			o.put("cap_accountNotify", n.caps.accountNotify)
-			o.put("cap_awayNotify", n.caps.awayNotify)
-			o.put("cap_chghost", n.caps.chghost)
-			o.put("cap_extendedJoin", n.caps.extendedJoin)
-			o.put("cap_inviteNotify", n.caps.inviteNotify)
-			o.put("cap_multiPrefix", n.caps.multiPrefix)
-			o.put("cap_sasl", n.caps.sasl)
-			o.put("cap_setname", n.caps.setname)
-			o.put("cap_userhostInNames", n.caps.userhostInNames)
-			o.put("cap_draftRelaymsg", n.caps.draftRelaymsg)
-			o.put("cap_draftReadMarker", n.caps.draftReadMarker)
+            o.put("cap_accountNotify", n.caps.accountNotify)
+            o.put("cap_awayNotify", n.caps.awayNotify)
+            o.put("cap_chghost", n.caps.chghost)
+            o.put("cap_extendedJoin", n.caps.extendedJoin)
+            o.put("cap_inviteNotify", n.caps.inviteNotify)
+            o.put("cap_multiPrefix", n.caps.multiPrefix)
+            o.put("cap_sasl", n.caps.sasl)
+            o.put("cap_setname", n.caps.setname)
+            o.put("cap_userhostInNames", n.caps.userhostInNames)
+            o.put("cap_draftRelaymsg", n.caps.draftRelaymsg)
+            o.put("cap_draftReadMarker", n.caps.draftReadMarker)
+            // Persist every cap, including the 14 added since the original v1 set. See the
+            // matching note on the deserializer above for context on why this was missing.
+            o.put("cap_monitor", n.caps.monitor)
+            o.put("cap_accountTag", n.caps.accountTag)
+            o.put("cap_typingIndicator", n.caps.typingIndicator)
+            o.put("cap_sojuNoImplicitNames", n.caps.sojuNoImplicitNames)
+            o.put("cap_standardReplies", n.caps.standardReplies)
+            o.put("cap_preAway", n.caps.preAway)
+            o.put("cap_messageIds", n.caps.messageIds)
+            o.put("cap_sojuRead", n.caps.sojuRead)
+            o.put("cap_whox", n.caps.whox)
+            o.put("cap_channelRename", n.caps.channelRename)
+            o.put("cap_extendedMonitor", n.caps.extendedMonitor)
+            o.put("cap_messageReactions", n.caps.messageReactions)
+            o.put("cap_noImplicitNames", n.caps.noImplicitNames)
+            o.put("cap_multiline", n.caps.multiline)
 
             o.put("autoJoin", JSONArray(n.autoJoin.map { it.toLine() }))
             o.put("autoConnect", n.autoConnect)
@@ -550,6 +602,11 @@ class SettingsRepository(private val ctx: Context) {
             if (!n.bouncerNetworkName.isNullOrBlank()) o.put("bouncerNetworkName", n.bouncerNetworkName)
             if (!n.bouncerClientId.isNullOrBlank()) o.put("bouncerClientId", n.bouncerClientId)
             if (n.tlsTofuFingerprint != null) o.put("tlsTofuFingerprint", n.tlsTofuFingerprint)
+            if (n.tlsTofuFingerprints.isNotEmpty()) {
+                val arr = JSONArray()
+                for (fp in n.tlsTofuFingerprints) arr.put(fp)
+                o.put("tlsTofuFingerprints", arr)
+            }
             arr.put(o)
         }
         return arr
@@ -844,11 +901,11 @@ class SettingsRepository(private val ctx: Context) {
         return orphanedIds
     }
 
-    // FIX #11: Flap detection state — migrated from SharedPreferences to DataStore so it is
+    // Flap detection state, migrated from SharedPreferences to DataStore so it is
     // consistent with the rest of the persistence layer and immune to the data-loss issues
     // that SharedPreferences can exhibit under process death on some OEM ROMs.
     //
-    // Stored as a JSON object mapping netId → epoch-ms-when-paused, matching the previous
+    // Stored as a JSON object mapping netId > epoch-ms-when-paused, matching the previous
     // SharedPreferences layout so existing paused-state is naturally superseded on first write.
 
     private fun flapKey() = stringPreferencesKey("flap_paused_v2_json")
@@ -982,8 +1039,26 @@ data class NetworkProfile(
      *   server's certificate and this field should be persisted ([IrcEvent.TlsFingerprintLearned]).
      * - non-null: fingerprint is pinned. Connection is aborted if the server presents a different
      *   certificate ([IrcEvent.TlsFingerprintChanged]), protecting against MITM / cert replacement.
+     *
+     * On round-robin DNS hosts (e.g. irc.libera.chat) the user can grow the trust set via
+     * [tlsTofuFingerprints]; the union of (this single field + that set) is the accepted
+     * fingerprint list for verification. The single field is preserved across the migration
+     * to avoid silently changing pin semantics on existing profiles.
      */
     val tlsTofuFingerprint: String? = null,
+    /**
+     * Additional accepted TOFU fingerprints, used for round-robin DNS hosts where each
+     * cycle position has its own certificate (irc.libera.chat, irc.oftc.net, etc.). Empty
+     * for the common single-server case. The verifier accepts the connection when the peer
+     * fingerprint matches [tlsTofuFingerprint] OR any entry in this set.
+     *
+     * Populated by the user opting "Trust this server too" on a [TlsFingerprintChanged]
+     * mismatch, OR via the lower-friction "Reset & re-pin" which writes the new fingerprint
+     * into [tlsTofuFingerprint] and clears this set.
+     *
+     * Storing as Set guarantees no duplicates; serialised as a JSON array.
+     */
+    val tlsTofuFingerprints: Set<String> = emptySet(),
 ) {
     fun toIrcConfig(
         saslPasswordOverride: String? = null,
@@ -1015,7 +1090,8 @@ data class NetworkProfile(
             bouncerKind = bouncerKind,
             bouncerNetworkName = bouncerNetworkName?.takeIf { it.isNotBlank() },
             bouncerClientId = bouncerClientId?.takeIf { it.isNotBlank() },
-            tlsTofuFingerprint = tlsTofuFingerprint
+            tlsTofuFingerprint = tlsTofuFingerprint,
+            tlsTofuFingerprints = tlsTofuFingerprints,
         )
     }
 }

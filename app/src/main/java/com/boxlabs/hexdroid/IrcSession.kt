@@ -29,6 +29,12 @@ sealed class IrcAction {
     data class EmitCapNew(val caps: List<String>) : IrcAction()
     /** CAP DEL: server withdrew previously negotiated capabilities. */
     data class EmitCapDel(val caps: List<String>) : IrcAction()
+    /**
+     * SASL authentication failed in a way that won't recover by retrying with the
+     * same credentials. Surfaces as IrcEvent.AuthFailed downstream so the viewmodel
+     * can halt auto-reconnect (see authBlockedReconnect).
+     */
+    data class EmitAuthFailed(val reason: String) : IrcAction()
 }
 
 class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
@@ -42,6 +48,14 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     private val wantSasl = config.sasl is SaslConfig.Enabled
     private var saslInProgress = false
     private var saslDone = false
+    /**
+     * True once we've emitted [IrcAction.EmitAuthFailed] for this session. Bouncers (notably
+     * soju forwarding upstream-IRC SASL outcomes after MOTD) can deliver a 90x SASL-fail
+     * numeric a second time for the same conceptual auth failure; without dedup the user
+     * sees the auth-fail buffer line twice. Reset isn't needed - one IrcSession is created
+     * per connect, so a new session starts fresh.
+     */
+    private var saslAuthFailedEmitted = false
 
     private val serverCaps = mutableSetOf<String>()
     private val enabledCaps = mutableSetOf<String>()
@@ -153,7 +167,27 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             }
             "904", "905", "906", "907" -> {
                 saslDone = true; saslInProgress = false
-                out += IrcAction.EmitError("SASL failed (${m.command}): ${m.trailing ?: ""}")
+                val reason = m.trailing ?: ""
+                // 904/905/906 are credential-rejection or aborted-auth — retrying with the
+                // same creds yields the same result. 907 ("already authenticated") is benign
+                // and is excluded from the AuthFailed signal so we don't accidentally halt
+                // reconnect after a successful re-auth race.
+                //
+                // We emit ONLY EmitAuthFailed (not also EmitError as before): the viewmodel's
+                // AuthFailed handler already prints a buffer line that includes the SASL
+                // reason and an actionable hint, so adding a separate EmitError just produces
+                // a redundant pair of red lines for one conceptual failure.
+                //
+                // Dedup via saslAuthFailedEmitted: bouncers sometimes deliver a second 906
+                // post-MOTD when relaying upstream-IRC SASL outcomes (soju does this if the
+                // bouncer's upstream auth also fails). The second numeric is the same logical
+                // event from the user's perspective.
+                if (m.command != "907" && !saslAuthFailedEmitted) {
+                    saslAuthFailedEmitted = true
+                    out += IrcAction.EmitAuthFailed(
+                        if (reason.isNotBlank()) "SASL: $reason" else "SASL authentication failed"
+                    )
+                }
                 if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
                 return out
             }
@@ -293,6 +327,17 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         // draft/no-implicit-names: generic graduated form (not just soju).
         if (config.capPrefs.noImplicitNames) req += "draft/no-implicit-names"
 
+        // multiline: receive messages longer than 512 bytes / containing line breaks
+        // as a single grouped BATCH. Request both the draft and the (forward-compat)
+        // graduated name. Per the spec, software implementing the work-in-progress
+        // version MUST use the draft/ prefix; the graduated name will be used once
+        // the spec finalizes. Requesting both means the cap negotiates against
+        // whichever form the server advertises today.
+        if (config.capPrefs.multiline) {
+            req += "draft/multiline"
+            req += "multiline"
+        }
+
         return req
     }
 
@@ -380,12 +425,24 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         saslAbort(out)
                         return out
                     }
-                    // Fall back to the connection nick when no explicit authcid is set.
-                    // Sending an empty authcid (\u0000\u0000pass) is rejected by most servers including ZNC.
-                    // For soju bouncers, apply the `user/network` suffix so the bouncer can route
-                    // this connection to the right upstream network without the user having to
-                    // manually embed the slash in their authcid field.
-                    val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    // Fall back to the connection username (bouncer login) or nick when no
+                    // explicit authcid is set. Sending an empty authcid (\u0000\u0000pass)
+                    // is rejected by most servers including ZNC.
+                    //
+                    // For bouncer profiles the authcid must be the *bouncer username*, not
+                    // the IRC nick — they're conceptually different (one is "how the
+                    // bouncer knows you", the other is "how IRC users see you") and using
+                    // the nick produces a 904 SASL fail with bouncers that have a separate
+                    // login. config.username is the field the user fills with their bouncer
+                    // account name, so prefer it for bouncer profiles. For direct IRCd the
+                    // two are usually the same; we still prefer username since IRCv3 SASL
+                    // PLAIN expects a stable identity, not a transient nickname.
+                    //
+                    // effectiveAuthIdentity then suffixes the result with /network and/or
+                    // @clientid per the bouncer kind so the bouncer can route the connection.
+                    val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() }
+                        ?: config.username.takeIf { it.isNotBlank() }
+                        ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
                     val pass = s.password ?: ""
                     val msg = "\u0000$authcid\u0000$pass"
@@ -421,10 +478,11 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.SCRAM_SHA_256 -> {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
-                    // Same soju suffix treatment as PLAIN: if the user has named an upstream
-                    // network, encode it into the authcid as `user/network` so the bouncer
-                    // knows which upstream to route this downstream connection through.
-                    val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() } ?: config.nick
+                    // Authcid fallback: prefer the username field (bouncer login) over nick.
+                    // Same rationale as PLAIN — see the comment there for the full reasoning.
+                    val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() }
+                        ?: config.username.takeIf { it.isNotBlank() }
+                        ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
                     val pass = s.password ?: ""
                     val clientNonce = randomNonce()

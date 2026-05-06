@@ -395,9 +395,19 @@ class LogWriter(private val ctx: Context) {
 
     // Filename helpers
     private fun safeNetworkDirName(networkName: String): String {
+        // Network names usually come from the user's profile-name field which is hand-typed
+        // and rarely contains FAT/NTFS-illegal characters, but a paranoid pass costs nothing.
+        // See safeBufferFileName below for the rationale on the wider character set.
         val cleaned = networkName.trim()
             .replace("\\", "_")
             .replace("/", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("?", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
             .replace("\u0000", "")
             .trim()
             .take(80)
@@ -407,9 +417,25 @@ class LogWriter(private val ctx: Context) {
     /** Canonical filename for internal storage. '#' is valid on EXT4/F2FS. */
     private fun safeBufferFileName(buffer: String): String {
         val name = if (buffer == "*server*") "server" else buffer
+        // Strip characters that are illegal on FAT/NTFS-based filesystems. Android internal
+        // storage is ext4/f2fs and accepts almost anything except '/' and NUL, but the same
+        // sanitiser path serves SAF-backed external storage too — and SAF providers backed
+        // by removable SD cards (vfat) or by Windows-hosted cloud sync (Google Drive's
+        // Windows client, OneDrive, Dropbox) reject these. Buffer names commonly contain
+        // them: ZNC pseudo-users like `*status`, `*controlpanel`, BouncerServ; soju queries
+        // with `?` in nicks; punctuation in PM nicks. Stripping makes the same sanitiser
+        // safe across every storage backend so a user who later switches log location
+        // doesn't suddenly start losing lines.
         val cleaned = name.trim()
             .replace("\\", "_")
             .replace("/", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("?", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
             .replace("\u0000", "")
             .trim()
             .take(120)

@@ -1,1 +1,1 @@
-Improved bouncer support & bug fixes.
+Added Discover and clone for ZNC bouncer profiles, Chathistory marker. Suppress away/back notifications. Coloured channel events. UI improvements

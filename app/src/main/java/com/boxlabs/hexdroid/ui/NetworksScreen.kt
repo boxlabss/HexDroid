@@ -22,12 +22,15 @@ package com.boxlabs.hexdroid.ui
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
@@ -46,6 +49,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -67,11 +73,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.boxlabs.hexdroid.BouncerKind
+import com.boxlabs.hexdroid.BouncerUpstreamInfo
 import com.boxlabs.hexdroid.UiState
 import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
+import com.boxlabs.hexdroid.data.NetworkProfile
 
 @Composable
 fun NetworksScreen(
@@ -91,6 +101,12 @@ fun NetworksScreen(
     onOpenSettings: () -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onToggleFavourite: (String) -> Unit = {},
+    /** Re-request the bouncer's upstream-network list (sends BOUNCER LISTNETWORKS). */
+    onRefreshBouncerNetworks: (parentNetId: String) -> Unit = {},
+    /** Clone a discovered upstream into a new local profile bound to that upstream. */
+    onCloneBouncerNetwork: (parentNetId: String, bouncerNetworkName: String) -> Unit = { _, _ -> },
+    /** Acknowledge the transient clone-result message so the snackbar can dismiss. */
+    onDismissBouncerCloneMessage: () -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
@@ -99,6 +115,23 @@ fun NetworksScreen(
     // Sort: favourites first, then by sortOrder, then alphabetically
     val sortedNetworks = state.networks
         .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Surface bouncer-clone results as a snackbar. The viewmodel sets
+    // bouncerCloneMessage on success / failure / "already imported"; we show it
+    // once and then clear so re-navigating doesn't re-trigger. LaunchedEffect is
+    // already a coroutine scope, so showSnackbar can be called directly — no
+    // nested launch (which would otherwise survive the LaunchedEffect's cancel
+    // and double-fire if the message changes mid-display).
+    LaunchedEffect(state.bouncerCloneMessage) {
+        val msg = state.bouncerCloneMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = msg,
+            duration = SnackbarDuration.Short
+        )
+        onDismissBouncerCloneMessage()
+    }
 
     Scaffold(
         topBar = {
@@ -118,7 +151,8 @@ fun NetworksScreen(
                 onClick = onAdd,
                 modifier = Modifier.tourTarget(TourTarget.NETWORKS_ADD_FAB)
             ) { Text("+") }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         val listState = rememberLazyListState()
 
@@ -363,6 +397,44 @@ fun NetworksScreen(
                         }
                     }
                     }
+
+                    // Bouncer multinetwork (soju + ZNC) sections.
+                    //
+                    // We render one section per LIVE *root* bouncer-profile connection. A
+                    // "root" connection is one that talks to the bouncer without binding to
+                    // a specific upstream — i.e. bouncerNetworkName is empty/null. Those are
+                    // the ones that see the global BOUNCER NETWORK / ListNetworks output.
+                    //
+                    // Imported per-upstream clones (e.g. parent="Bouncer" + clone="Bouncer –
+                    // libera") are themselves bouncerKind=ZNC/SOJU, but they bind directly to
+                    // one upstream via bouncerNetworkName, so they receive their own upstream's
+                    // traffic — not the discovery list. Showing a "Bouncer networks" section
+                    // for them duplicates the parent's section with the same content.
+                    //
+                    // Eligibility:
+                    //  - bouncerKind ∈ {SOJU, ZNC} (the kinds that expose a discoverable list)
+                    //  - bouncerNetworkName blank/null (the root, not an imported clone)
+                    //  - connection is currently registered (without a live connection there's
+                    //    no current upstream list; cached entries were cleared on disconnect).
+                    val bouncerConnections = state.networks.filter { profile ->
+                        (profile.bouncerKind == BouncerKind.SOJU || profile.bouncerKind == BouncerKind.ZNC) &&
+                            profile.bouncerNetworkName.isNullOrBlank() &&
+                            state.connections[profile.id]?.connected == true
+                    }
+                    items(bouncerConnections, key = { "bouncer-section:${it.id}" }) { profile ->
+                        BouncerNetworksSection(
+                            parentNetworkName = profile.name,
+                            parentHost = profile.host,
+                            parentPort = profile.port,
+                            parentKind = profile.bouncerKind,
+                            upstreams = state.bouncerNetworks[profile.id] ?: emptyMap(),
+                            existingProfiles = state.networks,
+                            onRefresh = { onRefreshBouncerNetworks(profile.id) },
+                            onClone = { upstreamName ->
+                                onCloneBouncerNetwork(profile.id, upstreamName)
+                            }
+                        )
+                    }
             }
 
             if (active != null) {
@@ -425,5 +497,191 @@ fun NetworksScreen(
                 }
             }
         )
+    }
+}
+
+/**
+ * One bouncer multinetwork (soju) section per live SOJU profile.
+ *
+ * Lists every upstream the bouncer has reported via the soju.im/bouncer-networks extension,
+ * with name + host + state pill + Import (or "Already imported" if a local profile already
+ * targets this upstream on this bouncer host:port).
+ *
+ * The empty case (cap negotiated but no BOUNCER NETWORK frames received yet) is normal for
+ * very fresh connections and for soju versions that send the list lazily — show a hint
+ * pointing at the refresh button rather than hiding the section, so the user knows the
+ * machinery exists.
+ *
+ * Idempotency for "already imported": the predicate must match cloneBouncerNetwork's own
+ * dedupe predicate exactly (host + port + bouncerNetworkName, scoped to SOJU profiles),
+ * otherwise the button label and the action's behaviour can disagree.
+ */
+@Composable
+private fun BouncerNetworksSection(
+    parentNetworkName: String,
+    parentHost: String,
+    parentPort: Int,
+    parentKind: BouncerKind,
+    upstreams: Map<String, BouncerUpstreamInfo>,
+    existingProfiles: List<NetworkProfile>,
+    onRefresh: () -> Unit,
+    onClone: (bouncerNetworkName: String) -> Unit,
+) {
+    // Stable display order: by name (case-insensitive) then by id, so re-renders don't
+    // reshuffle entries when the bouncer re-emits push frames in a different order.
+    val sortedUpstreams = upstreams.values.sortedWith(
+        compareBy({ (it.name ?: it.id).lowercase() }, { it.id })
+    )
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.bouncer_networks_section_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        stringResource(R.string.bouncer_networks_section_subtitle, parentNetworkName),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = stringResource(R.string.bouncer_networks_refresh)
+                    )
+                }
+            }
+
+            if (sortedUpstreams.isEmpty()) {
+                Text(
+                    stringResource(R.string.bouncer_networks_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                sortedUpstreams.forEach { upstream ->
+                    // Compute "already imported" only when the upstream actually has a name —
+                    // a nameless upstream can't be cloned (cloneBouncerNetwork rejects empty
+                    // bouncerNetworkName) and there's no meaningful identity to dedupe against.
+                    // Without this gate, two nameless upstreams would compare equal via
+                    // String?.equals(null, null) = true and falsely show "Already imported".
+                    //
+                    // The dedupe matches cloneBouncerNetwork's idempotency predicate exactly:
+                    // host + port + bouncerKind + bouncerNetworkName. Scoping by parentKind
+                    // means a soju-imported "libera" and a ZNC-imported "libera" on the same
+                    // bouncer host (rare but possible during migrations) are treated as
+                    // distinct profiles, which is correct.
+                    val upstreamName = upstream.name?.takeIf { it.isNotBlank() }
+                    val alreadyImported = upstreamName != null && existingProfiles.any {
+                        it.bouncerKind == parentKind &&
+                            it.host.equals(parentHost, ignoreCase = true) &&
+                            it.port == parentPort &&
+                            it.bouncerNetworkName.equals(upstreamName, ignoreCase = true)
+                    }
+                    BouncerUpstreamRow(
+                        upstream = upstream,
+                        alreadyImported = alreadyImported,
+                        onClone = {
+                            // Pass the bouncer-reported name; the upstream id is opaque and
+                            // not what soju/ZNC expect on the client→bouncer authcid suffix.
+                            if (upstreamName != null) onClone(upstreamName)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BouncerUpstreamRow(
+    upstream: BouncerUpstreamInfo,
+    alreadyImported: Boolean,
+    onClone: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                upstream.name?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.bouncer_networks_unnamed),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold
+            )
+            if (!upstream.host.isNullOrBlank()) {
+                Text(
+                    upstream.host,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        BouncerStatePill(state = upstream.state)
+        // The clone action requires a non-empty bouncer-reported name (it becomes
+        // bouncerNetworkName on the cloned profile and the soju authcid suffix). When
+        // soju reports an unnamed upstream, rare but possible during a transient
+        // BOUNCER ADDNETWORK race. disable the button to surface the constraint.
+        val canClone = !upstream.name.isNullOrBlank()
+        if (alreadyImported) {
+            Text(
+                stringResource(R.string.bouncer_networks_already_imported),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            OutlinedButton(onClick = onClone, enabled = canClone) {
+                Text(stringResource(R.string.bouncer_networks_import))
+            }
+        }
+    }
+}
+
+/**
+ * Coloured pill rendering of an upstream's connection state. The colour mapping mirrors
+ * what users expect from familiar dashboards: green = up, amber = working, grey = down,
+ * neutral = unknown / not yet announced. We deliberately don't use Material's error red
+ * for "disconnected" because the bouncer being intentionally detached from an upstream
+ * is normal operation, not an error.
+ */
+@Composable
+private fun BouncerStatePill(state: String?) {
+    val (label, bg, fg) = when (state?.lowercase()) {
+        "connected" -> Triple(
+            stringResource(R.string.bouncer_networks_state_connected),
+            Color(0xFF1B5E20),
+            Color.White
+        )
+        "connecting" -> Triple(
+            stringResource(R.string.bouncer_networks_state_connecting),
+            Color(0xFFF9A825),
+            Color.Black
+        )
+        "disconnected" -> Triple(
+            stringResource(R.string.bouncer_networks_state_disconnected),
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        else -> Triple(
+            stringResource(R.string.bouncer_networks_state_unknown),
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Box(
+        modifier = Modifier
+            .background(bg, RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = fg)
     }
 }

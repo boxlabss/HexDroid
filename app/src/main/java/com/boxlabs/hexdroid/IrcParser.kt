@@ -28,6 +28,42 @@ data class IrcMessage(
     fun prefixNick(): String? = prefix?.substringBefore('!')?.takeIf { it.isNotBlank() }
 }
 
+/**
+ * Decode an IRCv3 message-tag-escaped value per the message-tags spec:
+ *   \: → ;   \s → space   \\ → \   \r → CR   \n → LF   trailing \ → dropped.
+ *
+ * Exposed at top level so other parsers that share the tag-escape grammar
+ * (notably the BOUNCER NETWORK attribute parser in IrcCore) can decode without
+ * re-implementing the state machine. Keep the two implementations in sync.
+ */
+internal fun unescapeIrcTagValue(s: String): String {
+    val out = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        if (c == '\\' && i + 1 < s.length) {
+            when (val n = s[i + 1]) {
+                ':' -> out.append(';')
+                's' -> out.append(' ')
+                '\\' -> out.append('\\')
+                'r' -> out.append('\r')
+                'n' -> out.append('\n')
+                else -> out.append(n)
+            }
+            i += 2
+        } else if (c == '\\') {
+            // Trailing backslash with no following character: the IRCv3 spec says
+            // tag values MUST NOT end with a backslash. Drop it silently rather
+            // than emitting a literal '\' which could confuse downstream consumers.
+            i++
+        } else {
+            out.append(c)
+            i++
+        }
+    }
+    return out.toString()
+}
+
 class IrcParser {
     fun parse(line: String): IrcMessage? {
         var i = 0
@@ -80,31 +116,5 @@ class IrcParser {
         return IrcMessage(tags, prefix, command, params, trailing)
     }
 
-    private fun unescapeTagValue(s: String): String {
-        val out = StringBuilder(s.length)
-        var i = 0
-        while (i < s.length) {
-            val c = s[i]
-            if (c == '\\' && i + 1 < s.length) {
-                when (val n = s[i + 1]) {
-                    ':' -> out.append(';')
-                    's' -> out.append(' ')
-                    '\\' -> out.append('\\')
-                    'r' -> out.append('\r')
-                    'n' -> out.append('\n')
-                    else -> out.append(n)
-                }
-                i += 2
-            } else if (c == '\\') {
-                // Trailing backslash with no following character: the IRCv3 spec says
-                // tag values MUST NOT end with a backslash. Drop it silently rather
-                // than emitting a literal '\' which could confuse downstream consumers.
-                i++
-            } else {
-                out.append(c)
-                i++
-            }
-        }
-        return out.toString()
-    }
+    private fun unescapeTagValue(s: String): String = unescapeIrcTagValue(s)
 }

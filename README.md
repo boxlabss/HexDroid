@@ -37,6 +37,7 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 ## Features
 
 - **Multi-network** — connect to multiple servers simultaneously, each with independent nick, SASL, TLS, autojoin, and encoding settings
+- **Bouncer support** supports ZNC and soju. Discover and clone profiles when connecting without a network profile.
 - **IRCv3** — 40+ capabilities including `chathistory`, `away-notify`, `server-time`, `echo-message`, `draft/typing`, MONITOR, bouncer-specific caps, and more
 - **Security** — TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates, Android Keystore credential storage
 - **irc:// and ircs://** — tapping IRC links in other apps opens HexDroid directly and connects to the target network and channel
@@ -56,7 +57,6 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 - Channel list with live search and typing indicators displayed per-buffer
 - Lag indicator, swipe gestures, compact mode, intro tour for new users
 - Backup/restore: network profiles and settings exported as JSON
-
 ### IRCv3
 
 HexDroid negotiates a comprehensive set of capabilities. All are enabled by default unless noted.
@@ -71,8 +71,9 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 | `echo-message` + `labeled-response` | Outbound message confirmation; deduplication via msgid |
 | `batch` | chathistory, event-playback, and labeled-response grouping |
 | `message-ids` | Unique msgid per message; prevents duplicates during chathistory overlap |
-| `standard-replies` | Structured FAIL/WARN/NOTE from Ergo, soju, InspIRCd |
+| `standard-replies` | Structured FAIL/WARN/NOTE |
 | `utf8only` | Signals UTF-8 intent to server |
+| `draft/multiline` | When the server supports multiline for messages over 512 bytes |
 
 </details>
 
