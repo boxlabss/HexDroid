@@ -104,6 +104,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonSearch
@@ -610,7 +611,7 @@ private fun CommandHints(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(matches, key = { it.name }) { cmd ->
+                    items(matches.distinctBy { it.name }, key = { it.name }) { cmd ->
                         val isHighlighted = highlighted?.name == cmd.name
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -732,7 +733,7 @@ private fun SubCommandHints(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(matches, key = { it.name }) { cmd ->
+                    items(matches.distinctBy { it.name }, key = { it.name }) { cmd ->
                         val isHighlighted = highlighted?.name == cmd.name
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -854,7 +855,7 @@ private fun NickHints(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(matches, key = { it }) { nick ->
+                    items(matches.distinct(), key = { it }) { nick ->
                         val isHighlighted = highlighted == nick
                         val baseNickText = base(nick)
                         Surface(
@@ -1098,6 +1099,14 @@ fun ChatScreen(
     onCollapseAllNetworks: () -> Unit = {},
     onMarkAllBuffersRead: () -> Unit = {},
     onSearchFromToolbar: (query: String, global: Boolean) -> Unit = { _, _ -> },
+    /**
+     * Optional reference to the ViewModel for features that need a richer API than
+     * fits in a callback list — currently the EncryptionDialog, which exposes
+     * generate/import/clear/snapshot calls. Nullable so previews and tests can
+     * construct ChatScreen without an IrcViewModel; the encryption menu entry is
+     * hidden when this is null.
+     */
+    viewModel: com.boxlabs.hexdroid.IrcViewModel? = null,
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
 ) {
@@ -1402,6 +1411,12 @@ fun ChatScreen(
     var opsReason by remember { mutableStateOf("") }
     var opsTopic by remember(selected, topic) { mutableStateOf(topic ?: "") }
     var showTopicQuickEdit by remember { mutableStateOf(false) }
+    /**
+     * Whether the EncryptionDialog is currently open. Owned at this scope so the
+     * dropdown menu item can flip it, and so the dialog auto-closes when the user
+     * switches buffer (the `remember(selected)` resets it to false).
+     */
+    var showEncryptionDialog by remember(selected) { mutableStateOf(false) }
     var topicExpanded by remember(selected, topic) { mutableStateOf(false) }
     var topicHasOverflow by remember(selected, topic) { mutableStateOf(false) }
 
@@ -1562,6 +1577,17 @@ fun ChatScreen(
 		) {
 			// Sidepanel toolbar: collapse-all, mark-all-read, search-current-buffer.
 			// HexDroid logo sits absolute-left in the same toolbar row.
+			//
+			// The control Row is anchored to CenterEnd, NOT to the Box's default
+			// contentAlignment = Center. Reason: when this drawer renders in landscape
+			// on a small phone, the buffer pane can drag down to a 130 dp min width,
+			// which after the 16 dp horizontal padding on each side leaves only ~98 dp
+			// of inner space. A Row of three 28 dp IconButtons + 4 dp spacings is ~92 dp
+			// wide; centering it in 98 dp puts its LEFT edge at ~3 dp, which is INSIDE
+			// the logo's 0-24 dp footprint at CenterStart. Anchoring the Row to
+			// CenterEnd keeps the controls glued to the right edge regardless of
+			// drawer width, so the gap between logo and controls only shrinks (and
+			// eventually disappears) but they never overlap.
 			var showSearchDialog by remember { mutableStateOf(false) }
 			Box(
 				modifier = Modifier.fillMaxWidth(),
@@ -1575,6 +1601,7 @@ fun ChatScreen(
 						.align(Alignment.CenterStart)
 				)
 				Row(
+					modifier = Modifier.align(Alignment.CenterEnd),
 					horizontalArrangement = Arrangement.spacedBy(4.dp),
 					verticalAlignment = Alignment.CenterVertically
 				) {
@@ -1694,7 +1721,7 @@ fun ChatScreen(
 					.tourTarget(TourTarget.CHAT_BUFFER_DRAWER),
 				contentPadding = PaddingValues(vertical = 6.dp)
 			) {
-				items(sidebarItems, key = { it.stableKey }) { item ->
+				items(sidebarItems.distinctBy { it.stableKey }, key = { it.stableKey }) { item ->
 					// Derive root netId directly from item properties - no index lookup needed
 					val rootNetId: String? = when {
 						item is SidebarItem.Header -> item.netId
@@ -2479,6 +2506,26 @@ fun ChatScreen(
                                 text = { Text(stringResource(R.string.menu_file_transfers)) },
                                 onClick = { overflowExpanded = false; onOpenTransfers() }
                             )
+                            // Encryption is only meaningful for channel/query buffers, not
+                            // for the *server* / *status* tab — there is no remote party
+                            // to share a key with. selNetId can also be blank if the user
+                            // hasn't created any networks yet, in which case the entry is
+                            // hidden entirely rather than shown disabled. viewModel can be
+                            // null in preview/test scenarios.
+                            if (viewModel != null &&
+                                selNetId.isNotBlank() &&
+                                selBufName.isNotBlank() &&
+                                selBufName != "*server*" &&
+                                selBufName != "*status*"
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Secure Chat") },
+                                                 onClick = {
+                                                     overflowExpanded = false
+                                                     showEncryptionDialog = true
+                                                 }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.menu_settings)) },
                                 onClick = { overflowExpanded = false; onOpenSettings() }
@@ -2600,11 +2647,21 @@ fun ChatScreen(
                 // (all its lines in one Column) so there are zero inter-line gaps.
                 // Font sizing uses one measurement + direct scale factor instead of
                 // per-line binary search — O(1) per block instead of O(N×8).
-                val displayItems = rememberDisplayItems(
+                val rawDisplayItems = rememberDisplayItems(
                     reversedMessages = reversedMessages,
                     availableWidthPx = motdAvailableWidthPx,
                     style = motdStyle,
                 )
+                // Final guard: drop any item whose key duplicates an earlier one. This
+                // should already be impossible (UiMessage ids are AtomicLong-generated and
+                // keys are type-tagged) but Compose throws an unrecoverable
+                // IllegalArgumentException from inside its measure pass if a duplicate
+                // ever slips through, so a one-line .distinctBy in front of it is much
+                // cheaper than a crash. List traversal here is O(n) and runs only when
+                // displayItems changes (i.e. once per buffer mutation), not per frame.
+                val displayItems = remember(rawDisplayItems) {
+                    rawDisplayItems.distinctBy { it.key }
+                }
                 // Map message ID → display item index for unread separator placement
                 // and highlight scrolling. Also synced to msgIdToDisplayIdxHoisted so
                 // resolveAnchor() (which lives outside BoxWithConstraints) can use it.
@@ -2764,12 +2821,25 @@ fun ChatScreen(
                         val m = item.msg
                         val ts =
                             if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
+                        // Per-scheme padlock glyph rendered just before the timestamp so
+                        // it's the first thing the eye lands on in the row. Inline unicode
+                        // keeps the rendering path identical to a plain text message (one
+                        // AnnotatedString, one Text node) - no Row/Icon restructuring
+                        // needed for the dev preview. The full UI in a later commit will
+                        // swap this for a proper Material Icon at the left edge.
+                        //   🔒  AGM  (AES-256-GCM, current modern scheme)
+                        //   🐟  +OK  (Blowfish / FiSH, legacy compat)
+                        val tsWithLock = when (m.encryption) {
+                            com.boxlabs.hexdroid.crypto.E2eScheme.AGM      -> "🔒 $ts"
+                            com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH -> "🐟 $ts"
+                            null                                           -> ts
+                        }
                         val isFindMatch = findOverlay != null &&
                             (findOverlay.bufferKey == selected || findOverlay.bufferKey.startsWith("GLOBAL:")) &&
                             findOverlay.matchIds.contains(m.id)
                         SingleMessageItem(
                             m = m,
-                            ts = ts,
+                            ts = tsWithLock,
                             isFlickering = flickerMsgId == m.id,
                             flickerAlphaValue = flickerAlpha.value,
                             isFindMatch = isFindMatch,
@@ -3215,6 +3285,34 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // E2E lock badge. Shown at the start of the input row whenever the
+                // currently-selected buffer has a key configured. The badge is a
+                // single Icon, tapping it opens the EncryptionDialog so the user
+                // can verify the safety number / regenerate / clear without
+                // having to reach for the overflow menu. The check derives from
+                // state.e2eKeyVersion so a key add/remove triggers recomposition
+                // automatically. We re-derive via getE2eKeyInfo on each render -
+                // it's a single ConcurrentHashMap lookup, no measurable cost.
+                if (viewModel != null && selNetId.isNotBlank() &&
+                    selBufName.isNotBlank() && selBufName != "*server*" && selBufName != "*status*"
+                ) {
+                    val keyInfo = remember(selNetId, selBufName, state.e2eKeyVersion) {
+                        viewModel.getE2eKeyInfo(selNetId, selBufName)
+                    }
+                    if (keyInfo != null) {
+                        IconButton(
+                            onClick = { showEncryptionDialog = true },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Encryption configured (${keyInfo.scheme.displayName}, ${keyInfo.fingerprint})",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
                 // Build the text style for the input based on active formatting
                 val defaultTextColor = MaterialTheme.colorScheme.onSurface
                 val inputTextStyle = chatTextStyle.copy(
@@ -4645,7 +4743,7 @@ fun ChatScreen(
                             .weight(1f, fill = true),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(ui.entries, key = { it.mask }) { e ->
+                        items(ui.entries.distinctBy { it.mask }, key = { it.mask }) { e ->
                             Surface(
                                 tonalElevation = 1.dp,
                                 shape = MaterialTheme.shapes.medium,
@@ -4692,6 +4790,21 @@ fun ChatScreen(
     }
 
 
+
+    // Per-target end-to-end encryption dialog. Reached from the overflow menu when
+    // the active buffer is a channel or query (the menu entry hides itself on the
+    // server buffer because it has no remote correspondent). The dialog itself
+    // handles its full lifecycle - generate/import/clear/share/clear - and we just
+    // own the open/close state here so that switching buffers auto-closes it via
+    // the remember(selected) reset above.
+    if (showEncryptionDialog && viewModel != null && selNetId.isNotBlank() && selBufName.isNotBlank()) {
+        EncryptionDialog(
+            networkId = selNetId,
+            target = selBufName,
+            viewModel = viewModel,
+            onDismiss = { showEncryptionDialog = false },
+        )
+    }
 
     // Topic quick-edit dialog appears when an op long-presses the topic bar.
     if (showTopicQuickEdit && canTopic) {
@@ -5841,15 +5954,25 @@ private sealed class RawItem {
 }
 
 private sealed class DisplayItem {
-    abstract val key: Long
+    abstract val key: Any
     data class Single(val msg: UiMessage) : DisplayItem() {
-        override val key: Long = msg.id * 2L
+        // Type-tagged string keys are collision-proof by construction: every Single
+        // gets "S:<id>", every Art gets "A:<firstId>:<size>". Previously the code
+        // used Long arithmetic (msg.id * 2 vs first().id * 2 + 1) which is unique
+        // for distinct ids but vulnerable to stale-cache scenarios where two
+        // RawItem.Art blocks built from different reversedMessages snapshots could
+        // briefly coexist with overlapping ids in flight; the type tag prevents
+        // any cross-type collision and the size suffix on Art makes the key change
+        // whenever the block grows or shrinks. Bug surfaced as
+        // "Key was already used" crashes on fling-driven measure passes
+        // (LayoutNodeSubcompositionsState.subcompose).
+        override val key: Any = "S:${msg.id}"
     }
     data class Art(
         val msgs: List<UiMessage>,  // chronological: oldest first
         val fontSizeSp: Float,
     ) : DisplayItem() {
-        override val key: Long = msgs.first().id * 2L + 1L
+        override val key: Any = "A:${msgs.first().id}:${msgs.size}"
     }
 }
 

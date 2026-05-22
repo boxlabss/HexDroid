@@ -286,6 +286,7 @@ fun AppRoot(
                     onCollapseAllNetworks = vm::collapseOrExpandAllNetworks,
                     onMarkAllBuffersRead = vm::markAllBuffersRead,
                     onSearchFromToolbar = vm::searchFromToolbar,
+                    viewModel = vm,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                 )

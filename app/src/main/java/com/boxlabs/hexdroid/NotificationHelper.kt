@@ -83,12 +83,44 @@ class NotificationHelper(private val ctx: Context) {
         private val notifIdCounter = java.util.concurrent.atomic.AtomicInteger(2000)
         fun nextNotifId(): Int = notifIdCounter.incrementAndGet()
 
-        // Monotonically-increasing PendingIntent request code counter.
-        // String.hashCode() is a 32-bit signed integer with known collision pairs;
+        // Monotonically-increasing PendingIntent request code counter, used ONLY for
+        // notifications that must remain individually addressable (highlights, PMs, inline
+        // replies). String.hashCode() is a 32-bit signed integer with known collision pairs;
         // two different buffer/network combos can produce the same request code, which
         // causes one buffer's tap intent to silently overwrite another's in the system.
+        //
+        // Note: the connection notification's tap intent uses a STABLE code instead - see
+        // [CONNECTION_PI_REQUEST_CODE] below. The counter is reserved for one-shot
+        // notifications that genuinely need their own PendingIntent.
         private val piRequestCounter = java.util.concurrent.atomic.AtomicInteger(0)
         fun nextPiRequestCode(): Int = piRequestCounter.incrementAndGet()
+
+        /**
+         * Stable request code for the connection (foreground service) notification's tap
+         * intent. The connection notification is updated frequently (every server status
+         * change), and each update was previously allocating a fresh PendingIntent via
+         * [nextPiRequestCode]. On Samsung One UI 6 / Android 14 the system imposes a
+         * per-UID rate limit on PendingIntent creation and throws SecurityException once
+         * the limit is hit (~PendingIntentController.incrementUidStatLocked) - which then
+         * crashes the foreground service via [KeepAliveService.onStartCommand]. Using a
+         * stable code together with FLAG_UPDATE_CURRENT updates the existing PendingIntent
+         * in place rather than allocating a new one each time.
+         */
+        const val CONNECTION_PI_REQUEST_CODE = 100
+        const val CONNECTION_TRANSFERS_PI_REQUEST_CODE = 101
+        const val CONNECTION_QUIT_PI_REQUEST_CODE = 102
+        const val CONNECTION_EXIT_PI_REQUEST_CODE = 103
+
+        /**
+         * Wrap [PendingIntent.getActivity] / [PendingIntent.getBroadcast] in a try/catch
+         * that swallows SecurityException. On certain Samsung firmware builds the
+         * ActivityManager imposes a per-UID PendingIntent rate limit and throws when
+         * exceeded - we don't want that to crash the foreground service we are in the
+         * middle of starting. Returning null lets the caller skip the action gracefully
+         * (NotificationCompat tolerates a null contentIntent).
+         */
+        internal inline fun safePi(block: () -> PendingIntent): PendingIntent? =
+            runCatching(block).getOrNull()
     }
 
     /** Create (or no-op if already exists) per-network notification channels for [networkName].
@@ -152,16 +184,17 @@ class NotificationHelper(private val ctx: Context) {
         } catch (_: Throwable) {}
     }
 
-    private fun actionPendingIntent(networkId: String, action: String): PendingIntent {
+    private fun actionPendingIntent(networkId: String, action: String, stableRequestCode: Int = -1): PendingIntent? {
         val i = Intent(ctx, MainActivity::class.java)
             .putExtra(EXTRA_NETWORK_ID, networkId)
             .putExtra(EXTRA_ACTION, action)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        return PendingIntent.getActivity(ctx, nextPiRequestCode(), i, flags)
+        val rc = if (stableRequestCode >= 0) stableRequestCode else nextPiRequestCode()
+        return safePi { PendingIntent.getActivity(ctx, rc, i, flags) }
     }
 
-    private fun openBufferPendingIntent(networkId: String, buffer: String, msgId: Long = -1L, msgAnchor: String? = null): PendingIntent {
+    private fun openBufferPendingIntent(networkId: String, buffer: String, msgId: Long = -1L, msgAnchor: String? = null, stableRequestCode: Int = -1): PendingIntent? {
         val i = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_NETWORK_ID, networkId)
@@ -171,10 +204,11 @@ class NotificationHelper(private val ctx: Context) {
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        return PendingIntent.getActivity(ctx, nextPiRequestCode(), i, flags)
+        val rc = if (stableRequestCode >= 0) stableRequestCode else nextPiRequestCode()
+        return safePi { PendingIntent.getActivity(ctx, rc, i, flags) }
     }
 
-    private fun openTransfersPendingIntent(networkId: String): PendingIntent {
+    private fun openTransfersPendingIntent(networkId: String, stableRequestCode: Int = -1): PendingIntent? {
         val i = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_NETWORK_ID, networkId)
@@ -182,7 +216,8 @@ class NotificationHelper(private val ctx: Context) {
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        return PendingIntent.getActivity(ctx, nextPiRequestCode(), i, flags)
+        val rc = if (stableRequestCode >= 0) stableRequestCode else nextPiRequestCode()
+        return safePi { PendingIntent.getActivity(ctx, rc, i, flags) }
     }
 
     /**
@@ -194,7 +229,7 @@ class NotificationHelper(private val ctx: Context) {
      * Must be FLAG_MUTABLE: Android requires RemoteInput reply intents to be mutable
      * so the system can attach the RemoteInput results bundle before delivery.
      */
-    private fun replyPendingIntent(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): PendingIntent {
+    private fun replyPendingIntent(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): PendingIntent? {
         val i = Intent(ctx, NotificationReplyReceiver::class.java).apply {
             action = ACTION_INLINE_REPLY
             putExtra(EXTRA_NETWORK_ID, networkId)
@@ -210,7 +245,7 @@ class NotificationHelper(private val ctx: Context) {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0x02000000
         // Use a unique request code so different buffers get independent pending intents.
-        return PendingIntent.getBroadcast(ctx, nextPiRequestCode(), i, flags)
+        return safePi { PendingIntent.getBroadcast(ctx, nextPiRequestCode(), i, flags) }
     }
 
     private fun buildReplyAction(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): NotificationCompat.Action? {
@@ -231,17 +266,26 @@ class NotificationHelper(private val ctx: Context) {
 
     fun buildConnectionNotification(networkId: String, serverLabel: String, status: String): Notification {
         ensureChannels()
-        return NotificationCompat.Builder(ctx, CH_CONNECTION)
+        val b = NotificationCompat.Builder(ctx, CH_CONNECTION)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("Connected to $serverLabel")
             .setContentText(status)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setContentIntent(openBufferPendingIntent(networkId, "*server*"))
-            .addAction(0, "Quit", actionPendingIntent(networkId, ACTION_QUIT))
-            .addAction(0, "Exit", actionPendingIntent(networkId, ACTION_EXIT))
-            .build()
+        // Stable request codes: this notification is rebuilt on every status change, so
+        // allocating a fresh PendingIntent per build burns through Samsung's per-UID
+        // PendingIntent allowance and eventually throws SecurityException. Reusing a stable
+        // code with FLAG_UPDATE_CURRENT updates the existing entry in place instead.
+        // If PendingIntent creation fails (rate-limited firmware), the notification still
+        // shows; only its tap targets are skipped, which beats a crash.
+        openBufferPendingIntent(networkId, "*server*", stableRequestCode = CONNECTION_PI_REQUEST_CODE)
+            ?.let { b.setContentIntent(it) }
+        actionPendingIntent(networkId, ACTION_QUIT, stableRequestCode = CONNECTION_QUIT_PI_REQUEST_CODE)
+            ?.let { b.addAction(0, "Quit", it) }
+        actionPendingIntent(networkId, ACTION_EXIT, stableRequestCode = CONNECTION_EXIT_PI_REQUEST_CODE)
+            ?.let { b.addAction(0, "Exit", it) }
+        return b.build()
     }
 
     fun showConnection(networkId: String, serverLabel: String, status: String) {
@@ -256,16 +300,15 @@ class NotificationHelper(private val ctx: Context) {
         ensureNetworkChannels(netName)
         val channelId = networkHighlightChannelId(netName, playSound)
         val notifId = nextNotifId()
-        val n = NotificationCompat.Builder(ctx, channelId)
+        val builder = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(displayTitle)
             .setContentText(text)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setContentIntent(openBufferPendingIntent(networkId, buffer, msgId, msgAnchor))
-            .apply { buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { addAction(it) } }
-            .build()
-        NotificationManagerCompat.from(ctx).notify(notifId, n)
+        openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
+        buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+        NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
     }
 
     fun notifyPm(networkId: String, buffer: String, text: String, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = "") {
@@ -274,28 +317,26 @@ class NotificationHelper(private val ctx: Context) {
         ensureNetworkChannels(netName)
         val channelId = networkPmChannelId(netName)
         val notifId = nextNotifId()
-        val n = NotificationCompat.Builder(ctx, channelId)
+        val builder = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(displayTitle)
             .setContentText(text)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setContentIntent(openBufferPendingIntent(networkId, buffer, msgId, msgAnchor))
-            .apply { buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { addAction(it) } }
-            .build()
-        NotificationManagerCompat.from(ctx).notify(notifId, n)
+        openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
+        buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+        NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
     }
 
     fun notifyFileDone(networkId: String, filename: String, where: String) {
         ensureChannels()
-        val n = NotificationCompat.Builder(ctx, CH_DCC)
+        val builder = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("DCC complete")
             .setContentText("$filename saved to $where")
             .setAutoCancel(true)
-            .setContentIntent(openTransfersPendingIntent(networkId))
-            .build()
-        NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
+        openTransfersPendingIntent(networkId)?.let { builder.setContentIntent(it) }
+        NotificationManagerCompat.from(ctx).notify(nextNotifId(), builder.build())
     }
 
     fun notifyDccIncomingFile(networkId: String, from: String, filename: String) {
@@ -311,16 +352,15 @@ class NotificationHelper(private val ctx: Context) {
         }
         val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        val acceptPi = PendingIntent.getActivity(ctx, nextPiRequestCode(), acceptIntent, piFlags)
-        val n = NotificationCompat.Builder(ctx, CH_DCC)
+        val acceptPi = safePi { PendingIntent.getActivity(ctx, nextPiRequestCode(), acceptIntent, piFlags) }
+        val builder = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Incoming file from $from")
             .setContentText(filename)
             .setAutoCancel(true)
-            .setContentIntent(openTransfersPendingIntent(networkId))
-            .addAction(0, "Accept", acceptPi)
-            .build()
-        NotificationManagerCompat.from(ctx).notify(notifId, n)
+        openTransfersPendingIntent(networkId)?.let { builder.setContentIntent(it) }
+        if (acceptPi != null) builder.addAction(0, "Accept", acceptPi)
+        NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
     }
 
     fun notifyDccIncomingChat(networkId: String, from: String, dccBufferKey: String? = null) {
@@ -330,14 +370,13 @@ class NotificationHelper(private val ctx: Context) {
         else
             openTransfersPendingIntent(networkId)
 
-        val n = NotificationCompat.Builder(ctx, CH_DCC)
+        val builder = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle("Incoming DCC chat from $from")
             .setContentText("Tap to open — or use Transfers to accept / reject")
             .setAutoCancel(true)
-            .setContentIntent(contentIntent)
-            .addAction(0, "Open Transfers", openTransfersPendingIntent(networkId))
-            .build()
-        NotificationManagerCompat.from(ctx).notify(nextNotifId(), n)
+        contentIntent?.let { builder.setContentIntent(it) }
+        openTransfersPendingIntent(networkId)?.let { builder.addAction(0, "Open Transfers", it) }
+        NotificationManagerCompat.from(ctx).notify(nextNotifId(), builder.build())
     }
 }

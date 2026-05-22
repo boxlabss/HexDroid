@@ -531,7 +531,15 @@ sealed class IrcEvent {
          * IRCv3 account-tag: services account name of the sender, when available.
          * Requires the account-tag CAP to be negotiated.
          */
-        val senderAccount: String? = null
+        val senderAccount: String? = null,
+        /**
+         * End-to-end encryption scheme this message arrived under. Non-null when
+         * the wire payload was prefixed with a scheme indicator AND decryption
+         * succeeded; the UI renders a per-scheme padlock annotation in this case.
+         * Null for cleartext messages and for failed-decrypt attempts (the wire
+         * text is shown verbatim in the latter case so the user can investigate).
+         */
+        val encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
     ) : IrcEvent()
 
     data class Notice(
@@ -550,7 +558,9 @@ sealed class IrcEvent {
          * IRCv3 +draft/reply / +reply tag: the msgid of the message this NOTICE replies to.
          * Non-null when the sender attached a reply tag.
          */
-        val replyToMsgId: String? = null
+        val replyToMsgId: String? = null,
+        /** E2E scheme; see [ChatMessage.encryption]. */
+        val encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
     ) : IrcEvent()
 
     data class DccOfferEvent(val offer: DccOffer) : IrcEvent()
@@ -945,6 +955,18 @@ class IrcClient(val config: IrcConfig) {
     private val parser = IrcParser()
     private val outbound = Channel<String>(capacity = 300)
     private val rng = SecureRandom()
+
+    /**
+     * End-to-end encryption codec. When set, outgoing PRIVMSG/NOTICE/ACTION text
+     * is encrypted via the configured per-target scheme, and incoming PRIVMSG/
+     * NOTICE text is auto-decrypted before being emitted as IrcEvent.ChatMessage
+     * or .Notice. Setting this is the ViewModel's responsibility; the codec
+     * itself is constructed once per network and held for the client's lifetime.
+     *
+     * Nullable so a network with no keys configured anywhere pays zero per-message
+     * overhead (one null-check, no method dispatch).
+     */
+    @Volatile var e2eCodec: com.boxlabs.hexdroid.crypto.E2eCodec? = null
 
     companion object {
         /** Pre-allocated CRLF terminator reused on every line send to avoid a ByteArray allocation per write. */
@@ -1838,11 +1860,37 @@ class IrcClient(val config: IrcConfig) {
 						}
 
 						val isAction = textRaw.startsWith("\u0001ACTION ") && textRaw.endsWith("\u0001")
-						val text = if (isAction) {
+						val rawText = if (isAction) {
 							textRaw.removePrefix("\u0001ACTION ").removeSuffix("\u0001")
 						} else {
 							textRaw
 						}
+
+						// E2E decrypt hook. Runs after CTCP unwrap so a /me with E2E payload
+						// (\u0001ACTION +AGM …\u0001) lands here as a "+AGM …" string with the
+						// ACTION framing already stripped. The codec is null when no key is
+						// configured for any target on this network; in that case the message
+						// passes through with encryption = null. Failed decrypts (bad key,
+						// tampered tag, or a non-E2E wire format that happens to start with a
+						// scheme prefix) keep the wire text visible so the user can copy/paste
+						// it for diagnosis rather than seeing a confusing empty line.
+						val codecResult = e2eCodec?.decryptIncoming(buf, rawText, currentNick)
+						val text = codecResult?.text ?: rawText
+						val encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = codecResult?.let { r ->
+							when (r.outcome) {
+								com.boxlabs.hexdroid.crypto.E2eCodec.Outcome.PASSTHROUGH -> null
+								com.boxlabs.hexdroid.crypto.E2eCodec.Outcome.DECRYPTED -> r.scheme
+								com.boxlabs.hexdroid.crypto.E2eCodec.Outcome.FAILED -> null
+							}
+						}
+
+						// Suppress messages whose body is literally empty (e.g. an empty
+						// PRIVMSG trailing, or a stray "\u0001ACTION \u0001" with no payload
+						// whose ACTION unwrap leaves "" behind). Otherwise the UI renders a
+						// bare "<nick> " line. We do NOT filter messages that merely look
+						// blank because of encoding misdecoding - that text is real content
+						// and the user needs to see it to know to fix their encoding setting.
+						if (text.isEmpty()) return
 
 						// Keep raw formatting codes. UI chooses to strip or render them.
 						send(
@@ -1858,7 +1906,8 @@ class IrcClient(val config: IrcConfig) {
 								// IRCv3 +draft/reply / +reply tag: msgid of message being replied to.
 								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
 								// IRCv3 account-tag: services account of the sender.
-								senderAccount = msg.tags["account"]?.takeIf { it.isNotBlank() && it != "*" }
+								senderAccount = msg.tags["account"]?.takeIf { it.isNotBlank() && it != "*" },
+								encryption = encryption,
 							)
 						)
 					}
@@ -1944,17 +1993,45 @@ class IrcClient(val config: IrcConfig) {
 						// Keep the IRC target intact and let the UI decide routing.
 						// Use a stable buffer name for history heuristics.
 						val histBuf = if (isChannel) target else "*server*"
+						// E2E decrypt hook for NOTICE. Same pattern as PRIVMSG above: the
+						// decrypted text replaces the wire text so downstream routing
+						// (notice-to-channel rules, etc.) sees the plaintext content.
+						// For non-channel NOTICE targets the key lookup uses the SENDER's
+						// nick (since per-target keys for queries are keyed by remote
+						// nick), so a NickServ NOTICE is never accidentally decrypted
+						// against a #channel's key.
+						val rawNoticeText = text
+						val noticeLookupTarget = if (isChannel) target else from
+						val noticeCodecResult = e2eCodec?.decryptIncoming(noticeLookupTarget, rawNoticeText, currentNick)
+						val noticeText = noticeCodecResult?.text ?: rawNoticeText
+						val noticeEncryption: com.boxlabs.hexdroid.crypto.E2eScheme? = noticeCodecResult?.let { r ->
+							when (r.outcome) {
+								com.boxlabs.hexdroid.crypto.E2eCodec.Outcome.PASSTHROUGH -> null
+								com.boxlabs.hexdroid.crypto.E2eCodec.Outcome.DECRYPTED -> r.scheme
+								com.boxlabs.hexdroid.crypto.E2eCodec.Outcome.FAILED -> null
+							}
+						}
+						// Source-level filter for empty notices. The PRIVMSG branch above
+						// has the matching guard at line 1853 - the rationale is identical:
+						// a literally-empty trailing is almost always a server / bouncer
+						// quirk (bootstrap probe, services ping) that the user has no
+						// content to read. Dropping at the emit step keeps the empty-body
+						// IrcEvent.Notice from ever reaching the viewmodel, which avoids
+						// the blank-from-line rendering path and matches the symmetry
+						// between PRIVMSG and NOTICE handling everywhere else in the file.
+						if (noticeText.isEmpty()) return
 						send(
 							IrcEvent.Notice(
 								from = from,
 								target = target,
-								text = text,
+								text = noticeText,
 								isPrivate = !isChannel && !isServerPrefix,
 								isServer = isServerPrefix,
 								timeMs = serverTimeMs,
 								isHistory = (playbackHistory || isHeuristicHistory(histBuf, serverTimeMs, nowMs)),
 								msgId = msg.tags["msgid"],
-								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"]
+								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
+								encryption = noticeEncryption,
 							)
 						)
 					}
@@ -2612,13 +2689,57 @@ class IrcClient(val config: IrcConfig) {
         sendRaw("${labelTag()}CHATHISTORY AFTER $target timestamp=$afterTimestamp $limit")
     }
 
-    suspend fun privmsg(target: String, text: String) {
+    suspend fun privmsg(target: String, text: String, replyToMsgId: String? = null) {
         // This is a safeguard in case callers don't pre-split multiline messages.
         val sanitizedText = text.replace("\r", "").replace("\n", " ")
-        // Attach a label when echo-message + labeled-response are both active so we can
-        // correlate the echoed reply back to our outbound message for deduplication.
-        val tag = if (hasCap("echo-message") && hasCap("labeled-response")) labelTag() else ""
-        sendRaw("${tag}PRIVMSG $target :$sanitizedText")
+
+        // E2E encryption hook. The codec is null when no per-target key has been
+        // configured for this network, in which case the call is a no-op and the
+        // text is unchanged. CTCP framing (\u0001…\u0001) is detected and the
+        // CTCP-internal payload is encrypted while the framing bytes stay clear -
+        // otherwise non-E2E clients would see a malformed CTCP (the most common
+        // case being /me, which arrives wrapped in \u0001ACTION …\u0001 from
+        // ctcpAction()). For non-CTCP messages we encrypt the whole sanitised
+        // string.
+        val payload = e2eCodec?.let { codec ->
+            if (sanitizedText.startsWith("\u0001") && sanitizedText.endsWith("\u0001") && sanitizedText.length > 2) {
+                // CTCP. Split on the first space inside the framing: command stays clear,
+                // arguments get encrypted. ACTION is the common case ("ACTION hello"); other
+                // CTCP queries (VERSION, PING) typically have no user-content payload to
+                // hide so encrypting them adds noise without benefit, but doing it
+                // uniformly keeps the wire pattern less revealing than a "this client
+                // encrypts ACTION but not VERSION" fingerprint would be.
+                val inner = sanitizedText.substring(1, sanitizedText.length - 1)
+                val spaceIdx = inner.indexOf(' ')
+                if (spaceIdx > 0) {
+                    val cmd = inner.substring(0, spaceIdx)
+                    val args = inner.substring(spaceIdx + 1)
+                    val encArgs = codec.encryptOutgoing(target, args, currentNick)
+                    if (encArgs === args) sanitizedText // no key, pass through
+                    else "\u0001$cmd $encArgs\u0001"
+                } else {
+                    // CTCP with no args (e.g. \u0001VERSION\u0001) - nothing to encrypt.
+                    sanitizedText
+                }
+            } else {
+                codec.encryptOutgoing(target, sanitizedText, currentNick)
+            }
+        } ?: sanitizedText
+
+        // Build a single IRCv3 message-tags group ("@k1=v1;k2=v2 "). It must be ONE
+        // '@'-prefixed, semicolon-separated group - emitting two separate '@...'
+        // segments (e.g. "@label=x @+draft/reply=y") is malformed and strict servers
+        // reject it. Tags included:
+        //   - label:        echo-message + labeled-response correlation (same as a
+        //                   normal send, so dedup behaves identically).
+        //   - +draft/reply: present only for a reply, and only when message-tags is
+        //                   negotiated.
+        val tagPairs = buildList {
+            if (hasCap("echo-message") && hasCap("labeled-response")) add("label=${nextLabel()}")
+            if (replyToMsgId != null && hasCap("message-tags")) add("+draft/reply=$replyToMsgId")
+        }
+        val tag = if (tagPairs.isEmpty()) "" else tagPairs.joinToString(";", prefix = "@", postfix = " ")
+        sendRaw("${tag}PRIVMSG $target :$payload")
     }
 
     /**
@@ -2650,8 +2771,15 @@ class IrcClient(val config: IrcConfig) {
     suspend fun sendReaction(target: String, msgId: String, emoji: String, remove: Boolean = false) {
         if (!hasCap("message-tags") && !hasCap("draft/message-reactions")) return
         val tagName = if (remove) "+draft/react-removed" else "+draft/react"
-        val labelPart = if (hasCap("labeled-response")) "@label=${nextLabel()} " else ""
-        sendRaw("${labelPart}@$tagName=${emoji.trim()};+draft/reply=$msgId TAGMSG $target")
+        // Single IRCv3 tag group - the optional label, the react tag, and the reply
+        // tag must share one '@...' prefix joined by ';'. Emitting "@label=… @+draft/…"
+        // as two groups is malformed and strict servers reject it.
+        val tagPairs = buildList {
+            if (hasCap("labeled-response")) add("label=${nextLabel()}")
+            add("$tagName=${emoji.trim()}")
+            add("+draft/reply=$msgId")
+        }
+        sendRaw(tagPairs.joinToString(";", prefix = "@", postfix = " ") + "TAGMSG $target")
     }
 
     /**
@@ -3220,8 +3348,19 @@ class IrcClient(val config: IrcConfig) {
                 return@channelFlow
             }
             val msg = friendlyErrorMessage(t)
-            send(IrcEvent.Error("Connect failed: $msg"))
-            send(IrcEvent.Disconnected(msg))
+            // Emit a single Disconnected event prefixed with "Connect failed: …" instead
+            // of the previous Error + Disconnected pair. The two-event pattern produced
+            // duplicate visible lines in the server buffer
+            //     <ERROR> Connect failed: Could not resolve hostname
+            //     *** Disconnected: Could not resolve hostname
+            // because both Error and Disconnected handlers run an append() against the
+            // same buffer. The ViewModel's Disconnected handler now detects the
+            // "Connect failed:" prefix and renders the line with the same ERROR styling
+            // (from = "ERROR", isHighlight = false to keep tray-notifications quiet for
+            // a routine failure), so we keep the visual error treatment without the
+            // duplicate line. Mid-stream socket errors (the line-4128 branch below) use
+            // the same approach with a "Connection error: …" prefix.
+            send(IrcEvent.Disconnected("Connect failed: $msg"))
             return@channelFlow
         }
 
@@ -3855,7 +3994,19 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					continue
 				}
 
-				val hsActions = irc.onMessage(msg)
+				// The IrcSession state machine is mostly pure data shuffling, but the SASL
+				// SCRAM path delegates to ScramSha256Client which calls into JCE primitives
+				// (PBKDF2, HMAC) that can throw IllegalArgumentException / GeneralSecurityException
+				// on degenerate inputs. The known one - empty password from a backup-restored
+				// profile - is already filtered out inside handleAuthenticate, but a defensive
+				// outer guard here keeps any future addition to IrcSession from being able to
+				// kill the whole connect coroutine via an uncaught throw. We surface the failure
+				// as an Error event (visible in the server buffer) rather than swallowing it
+				// silently, so unexpected SASL-layer bugs are still diagnosable.
+				val hsActions = runCatching { irc.onMessage(msg) }.getOrElse { t ->
+					send(IrcEvent.Error("SASL handler error: ${t.message ?: t.javaClass.simpleName}"))
+					emptyList()
+				}
 				for (a in hsActions) when (a) {
 					is IrcAction.Send -> writeLine(a.line)
 					is IrcAction.EmitStatus -> send(IrcEvent.Status(a.text))
@@ -4096,8 +4247,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				// Reconnect quietly without showing a red error banner.
 				send(IrcEvent.Disconnected("Connection timed out"))
 			} else {
-				send(IrcEvent.Error("Connection error: $msg"))
-				send(IrcEvent.Disconnected(msg))
+				// Same deduplication as the connect-failure path above: emit a single
+				// Disconnected event prefixed with "Connection error: …". The previous
+				// Error + Disconnected pair produced duplicate lines for the user.
+				send(IrcEvent.Disconnected("Connection error: $msg"))
 			}
 		} finally {
 			joinedChannelCases.clear()

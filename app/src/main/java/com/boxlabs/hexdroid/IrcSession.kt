@@ -21,6 +21,16 @@ package com.boxlabs.hexdroid
 import android.util.Base64
 import java.security.SecureRandom
 
+/**
+ * Literal default value of [IrcConfig.username] when a new profile is created with no
+ * user input. Treated as "unset" by the SASL authcid fallback in [IrcSession] so that
+ * 1.6.1-era profiles, which commonly carry this value because the old UI didn't visibly
+ * tie the field to SASL, continue to SASL as the IRC nick instead of as the literal
+ * placeholder. Must stay in sync with the default sprinkled across
+ * data/SettingsRepository.kt (every NetworkProfile() constructor call site).
+ */
+private const val DEFAULT_USERNAME = "hexdroid"
+
 sealed class IrcAction {
     data class Send(val line: String) : IrcAction()
     data class EmitStatus(val text: String) : IrcAction()
@@ -425,6 +435,17 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         saslAbort(out)
                         return out
                     }
+                    // Pre-flight: refuse to send PLAIN when we have no password. Sending an
+                    // empty pass would just earn a 904 from the server, but failing fast here
+                    // with a clear actionable message is much better UX than the cryptic
+                    // "SASL: Authentication failed" the server returns. Common trigger: backup
+                    // restore on a fresh install (secrets don't survive uninstall by design).
+                    if (s.password.isNullOrEmpty()) {
+                        out += IrcAction.EmitError("SASL PLAIN aborted: no password set for this profile. Open Network Settings and re-enter the SASL password (passwords are not included in backups for security reasons).")
+                        out += IrcAction.Send("AUTHENTICATE *")
+                        saslAbort(out)
+                        return out
+                    }
                     // Fall back to the connection username (bouncer login) or nick when no
                     // explicit authcid is set. Sending an empty authcid (\u0000\u0000pass)
                     // is rejected by most servers including ZNC.
@@ -438,10 +459,20 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     // two are usually the same; we still prefer username since IRCv3 SASL
                     // PLAIN expects a stable identity, not a transient nickname.
                     //
+                    // Migration guard: 1.6.1 used the IRC nick as the only fallback (no
+                    // username preference). Profiles created or last edited under 1.6.1
+                    // commonly carry username = "hexdroid" (the literal default) because the
+                    // old UI didn't visibly tie that field to SASL auth. If we blindly
+                    // preferred username here, those profiles would silently SASL as
+                    // "hexdroid/<network>" and the bouncer would reject the unknown account.
+                    // So we treat the literal default value as "unset" for the purpose of
+                    // authcid fallback - users who genuinely want their bouncer login to
+                    // be the string "hexdroid" can set the explicit saslAuthcid field.
+                    //
                     // effectiveAuthIdentity then suffixes the result with /network and/or
                     // @clientid per the bouncer kind so the bouncer can route the connection.
                     val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() }
-                        ?: config.username.takeIf { it.isNotBlank() }
+                        ?: config.username.takeIf { it.isNotBlank() && it != DEFAULT_USERNAME }
                         ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
                     val pass = s.password ?: ""
@@ -478,13 +509,38 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.SCRAM_SHA_256 -> {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
+                    // Pre-flight: refuse to start the exchange at all if we have no password.
+                    // ScramSha256Client.hi() ultimately calls PBEKeySpec(password.toCharArray(),
+                    // ...) which throws IllegalArgumentException("Password empty") on an empty
+                    // char array. That exception propagates out of onServerMessage() at the
+                    // bottom of this when-branch and crashes the connection coroutine.
+                    //
+                    // The empty-password case is real: after a backup-restore on a fresh
+                    // install, the SecretStore is empty (secrets are device-keystore-encrypted
+                    // and intentionally don't survive an uninstall), but the imported profile
+                    // still carries saslEnabled = true and saslMechanism = SCRAM_SHA_256. The
+                    // user hits Connect without re-entering their password and the app dies.
+                    //
+                    // Emit a clear error so the user knows what to do, then abort SASL the
+                    // same way the PLAIN-over-plaintext refusal does. Registration continues
+                    // without SASL (CAP END is sent), letting the user reach the server buffer
+                    // and read the diagnostic.
+                    val pass = s.password
+                    if (pass.isNullOrEmpty()) {
+                        out += IrcAction.EmitError("SASL SCRAM-SHA-256 aborted: no password set for this profile. Open Network Settings and re-enter the SASL password (passwords are not included in backups for security reasons).")
+                        out += IrcAction.Send("AUTHENTICATE *")
+                        saslAbort(out)
+                        return out
+                    }
                     // Authcid fallback: prefer the username field (bouncer login) over nick.
-                    // Same rationale as PLAIN — see the comment there for the full reasoning.
+                    // Same rationale as PLAIN — see the comment there for the full reasoning,
+                    // including the migration guard that treats the literal default username
+                    // ("hexdroid") as unset so 1.6.1-era profiles continue to SASL as their
+                    // nick rather than as the placeholder default value.
                     val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() }
-                        ?: config.username.takeIf { it.isNotBlank() }
+                        ?: config.username.takeIf { it.isNotBlank() && it != DEFAULT_USERNAME }
                         ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
-                    val pass = s.password ?: ""
                     val clientNonce = randomNonce()
                     scram = ScramSha256Client(authcid, pass, clientNonce)
                     val first = scram!!.clientFirstMessage()
@@ -508,7 +564,22 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 }
 
                 val sc = scram ?: return listOf(IrcAction.EmitError("SCRAM state missing"))
-                val next = sc.onServerMessage(decoded)
+                // Defensive try/catch around the SCRAM state machine: hi() can throw
+                // IllegalArgumentException on degenerate inputs (empty password — which
+                // the pre-flight above already filters, but belt-and-braces), and
+                // PBKDF2/HMAC providers can throw GeneralSecurityException for invalid
+                // algorithm parameters in rare device-specific cases. Without this
+                // catch, any such throw kills the connection coroutine via an
+                // uncaught exception, taking the whole connect down with it instead
+                // of degrading to a clean 904-style failure path.
+                val next = try {
+                    sc.onServerMessage(decoded)
+                } catch (t: Throwable) {
+                    out += IrcAction.EmitError("SASL SCRAM-SHA-256 aborted: ${t.message ?: t.javaClass.simpleName}")
+                    out += IrcAction.Send("AUTHENTICATE *")
+                    saslAbort(out)
+                    return out
+                }
                 when (next) {
                     is ScramNext.SendClientFinal -> {
                         val b64 = Base64.encodeToString(next.clientFinal.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)

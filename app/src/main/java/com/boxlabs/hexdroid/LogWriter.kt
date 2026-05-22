@@ -131,7 +131,13 @@ class LogWriter(private val ctx: Context) {
                 lastFlushMs[key] = now
             }
         }
-        for ((_, stream) in safWriters) runCatching { stream.flush() }
+        // Lock SAF flushes the same way appendSaf is locked - otherwise a concurrent
+        // appendSaf() and flush() race the BufferedOutputStream's internal state.
+        for ((key, stream) in safWriters) {
+            synchronized(writeLockFor(key)) {
+                runCatching { stream.flush() }
+            }
+        }
     }
 
     /** Flush and close all open log file handles (internal and SAF). Call when logging is disabled or app exits. */
@@ -170,7 +176,13 @@ class LogWriter(private val ctx: Context) {
         )
         if (!f.exists() || !f.isFile) return emptyList()
         // Flush any buffered writer for this file before reading so the tail is up-to-date.
-        openWriters[f.absolutePath]?.flush()
+        // Lock to match the appendInternal write side - BufferedWriter is not thread-safe,
+        // and a flush() concurrent with a write() can corrupt the writer's internal buffer
+        // counter and produce malformed log output.
+        val absPath = f.absolutePath
+        openWriters[absPath]?.let { w ->
+            synchronized(writeLockFor(absPath)) { runCatching { w.flush() } }
+        }
         return f.inputStream().use { readTailFromStream(it, maxLines) }
     }
 
@@ -179,7 +191,10 @@ class LogWriter(private val ctx: Context) {
         val netDirName = safeNetworkDirName(networkName)
         val fileName = safBufferFileName(buffer)
         val cacheKey = "$treeUri|$netDirName|$fileName"
-        safWriters[cacheKey]?.runCatching { flush() }
+        // Same locking rationale as readTailInternal above.
+        safWriters[cacheKey]?.let { s ->
+            synchronized(writeLockFor(cacheKey)) { runCatching { s.flush() } }
+        }
 
         val resolver = ctx.contentResolver
         val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
@@ -210,8 +225,11 @@ class LogWriter(private val ctx: Context) {
             // Internal storage: walk the file tree and delete old files.
             internalRoot().walkTopDown().forEach { f ->
                 if (f.isFile && f.lastModified() < cutoff) {
+                    val absPath = f.absolutePath
                     // Close the cached writer for this file before deleting it.
-                    openWriters.remove(f.absolutePath)?.runCatching { close() }
+                    openWriters.remove(absPath)?.runCatching { close() }
+                    lastFlushMs.remove(absPath)
+                    writeLocks.remove(absPath)
                     runCatching { f.delete() }
                 }
             }
@@ -246,6 +264,9 @@ class LogWriter(private val ctx: Context) {
                     // cache entry is removed, safFileCache[key] == fileUri will never match.
                     val writerKey = safWriters.keys.firstOrNull { safFileCache[it] == fileUri }
                     safWriters.remove(writerKey)?.runCatching { close() }
+                    // Also drop the corresponding writeLocks entry so the lock map can't
+                    // grow unboundedly across long sessions that churn through many files.
+                    if (writerKey != null) writeLocks.remove(writerKey)
                     safFileCache.entries.removeIf { it.value == fileUri }
                     runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
                 }
@@ -260,44 +281,54 @@ class LogWriter(private val ctx: Context) {
         val fileName = safBufferFileName(buffer)
         val cacheKey = "$treeUri|$netDirName|$fileName"
 
-        // Fast path: use cached stream if available.
-        safWriters[cacheKey]?.let { cached ->
-            val writeOk = runCatching {
-                val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
-                cached.write(bytes)
-                cached.flush()
-            }.isSuccess
-            if (writeOk) return
-            // Write failed (file likely deleted externally); close, evict both caches and
-            // fall through to re-resolve so the file is re-created on the next call.
-            safWriters.remove(cacheKey)?.runCatching { close() }
-            safFileCache.remove(cacheKey)
-        }
+        // Per-file lock: SAF writes are NOT thread-safe at the OutputStream level - two
+        // coroutines writing the same line concurrently can interleave bytes mid-message,
+        // produce garbled logs, and corrupt the cached BufferedOutputStream's internal
+        // state. We use the same writeLockFor() map as the internal path; the keys live
+        // in distinct namespaces (absolute paths vs "$treeUri|…" composites) so there's
+        // no cross-collision.
+        synchronized(writeLockFor(cacheKey)) {
+            // Fast path: use cached stream if available.
+            safWriters[cacheKey]?.let { cached ->
+                val writeOk = runCatching {
+                    val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
+                    cached.write(bytes)
+                    cached.flush()
+                }.isSuccess
+                if (writeOk) return
+                // Write failed (file likely deleted externally); close, evict both caches and
+                // fall through to re-resolve so the file is re-created on the next call.
+                safWriters.remove(cacheKey)?.runCatching { close() }
+                safFileCache.remove(cacheKey)
+            }
 
-        // Slow path: resolve (or create) the document URI, open and cache a new stream.
-        val fileUri = resolveOrCreateSafFile(resolver, treeUri, netDirName, fileName, cacheKey)
-            ?: return   // provider refused to create; silently drop this line
+            // Slow path: resolve (or create) the document URI, open and cache a new stream.
+            val fileUri = resolveOrCreateSafFile(resolver, treeUri, netDirName, fileName, cacheKey)
+                ?: return   // provider refused to create; silently drop this line
 
-        val stream = runCatching {
-            resolver.openOutputStream(fileUri, "wa")
-                ?.let { java.io.BufferedOutputStream(it, 8192) }
-        }.getOrNull() ?: return  // couldn't open; drop this line
+            val stream = runCatching {
+                resolver.openOutputStream(fileUri, "wa")
+                    ?.let { java.io.BufferedOutputStream(it, 8192) }
+            }.getOrNull() ?: return  // couldn't open; drop this line
 
-        safWriters[cacheKey] = stream
+            safWriters[cacheKey] = stream
 
-        val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
-        val writeOk = runCatching { stream.write(bytes); stream.flush() }.isSuccess
-        if (!writeOk) {
-            // Opening succeeded but the first write failed — evict so next call retries.
-            safWriters.remove(cacheKey)?.runCatching { close() }
-            safFileCache.remove(cacheKey)
+            val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
+            val writeOk = runCatching { stream.write(bytes); stream.flush() }.isSuccess
+            if (!writeOk) {
+                // Opening succeeded but the first write failed — evict so next call retries.
+                safWriters.remove(cacheKey)?.runCatching { close() }
+                safFileCache.remove(cacheKey)
+            }
         }
     }
 
     /**
      * Resolve the SAF document URI for [fileName] inside the [netDirName] subdirectory of
      * [treeUri], creating the directory and/or file if they do not yet exist.
-     * Updates [safFileCache] on success. Returns null if the provider rejects creation.
+     * Updates [safFileCache] on success. Returns null if the provider rejects creation,
+     * or if the tree URI has been flagged unreadable for this install (e.g. after a
+     * backup-restore that brought over the URI string without its persisted permission).
      */
     private fun resolveOrCreateSafFile(
         resolver: ContentResolver,
@@ -306,15 +337,18 @@ class LogWriter(private val ctx: Context) {
         fileName: String,
         cacheKey: String,
     ): Uri? {
+        if (isTreeUriUnreadable(treeUri)) return null
         val rootDocId  = DocumentsContract.getTreeDocumentId(treeUri)
         val rootDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootDocId)
 
         val netDirUri  = findOrCreateChildDir(resolver, treeUri, rootDocUri, rootDocId, netDirName)
+            ?: return null
         val netDirDocId = DocumentsContract.getDocumentId(netDirUri)
 
         val fileUri = findChild(resolver, treeUri, netDirDocId, fileName)
             ?.let { (docId, _) -> DocumentsContract.buildDocumentUriUsingTree(treeUri, docId) }
             ?: findOrCreateChildFile(resolver, treeUri, netDirUri, netDirDocId, fileName)
+            ?: return null
 
         // netDirUri == fileUri only when createDocument returned null (provider error).
         if (fileUri == netDirUri) return null
@@ -329,12 +363,24 @@ class LogWriter(private val ctx: Context) {
         parentDocUri: Uri,
         parentDocId: String,
         displayName: String,
-    ): Uri {
+    ): Uri? {
+        if (isTreeUriUnreadable(treeUri)) return null
         findChild(resolver, treeUri, parentDocId, displayName)?.let { (docId, _) ->
             return DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
         }
-        return DocumentsContract.createDocument(resolver, parentDocUri, Document.MIME_TYPE_DIR, displayName)
-            ?: parentDocUri
+        // createDocument throws SecurityException for the same reason findChild does
+        // (the persisted SAF grant isn't valid for this process). Treat the URI as
+        // unreadable from now on so we don't keep hammering the provider.
+        return try {
+            DocumentsContract.createDocument(resolver, parentDocUri, Document.MIME_TYPE_DIR, displayName)
+                ?: parentDocUri
+        } catch (_: SecurityException) {
+            markTreeUriUnreadable(treeUri)
+            null
+        } catch (_: IllegalArgumentException) {
+            markTreeUriUnreadable(treeUri)
+            null
+        }
     }
 
     private fun findOrCreateChildFile(
@@ -343,12 +389,71 @@ class LogWriter(private val ctx: Context) {
         parentDocUri: Uri,
         parentDocId: String,
         displayName: String,
-    ): Uri {
+    ): Uri? {
+        if (isTreeUriUnreadable(treeUri)) return null
         findChild(resolver, treeUri, parentDocId, displayName)?.let { (docId, _) ->
             return DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
         }
-        return DocumentsContract.createDocument(resolver, parentDocUri, "text/plain", displayName)
-            ?: parentDocUri
+        return try {
+            DocumentsContract.createDocument(resolver, parentDocUri, "text/plain", displayName)
+                ?: parentDocUri
+        } catch (_: SecurityException) {
+            markTreeUriUnreadable(treeUri)
+            null
+        } catch (_: IllegalArgumentException) {
+            markTreeUriUnreadable(treeUri)
+            null
+        }
+    }
+
+    /**
+     * Tracks SAF tree URIs we've already discovered are unreadable in this process. When
+     * a backup restore brings over the user's chosen `logFolderUri` from a previous
+     * install, the new install doesn't inherit the persisted SAF permission grant
+     * (those are stored in the system per-package per-install, not in app data and so
+     * are not part of any backup). The first read attempt on that URI fails with a
+     * SecurityException; subsequent attempts would all fail the same way and just spam
+     * the log. We remember the URI here so [findChild] and [queryChildren] can
+     * short-circuit cheaply on every later call without re-issuing the doomed query.
+     * Bounded growth: there's only ever 1 or 2 entries (the user's old + new picks).
+     *
+     * Exposed publicly as [unreadableTreeUrisFlow] so the ViewModel can surface a
+     * "re-pick your log folder" badge in Settings when the user's currently-saved URI
+     * lands in here.
+     */
+    private val unreadableTreeUris = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val _unreadableTreeUrisFlow = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+
+    /** Observe the set of SAF tree URIs that the current install can't read. Updated
+     *  whenever [findChild] / [queryChildren] / [findOrCreateChildDir] / [findOrCreateChildFile]
+     *  hit SecurityException (or IllegalArgumentException on a malformed URI). */
+    val unreadableTreeUrisFlow: kotlinx.coroutines.flow.StateFlow<Set<String>>
+        get() = _unreadableTreeUrisFlow
+
+    /** Clear the unreadable flag for [treeUri]. Call when the user has re-picked the
+     *  log folder in Settings so the next read attempt actually tries the provider
+     *  again. Not strictly required (a re-pick almost always produces a NEW URI string
+     *  even for "the same" folder, because Android mints fresh tree-doc-ids), but
+     *  protects against the edge case where the URI happens to match. */
+    fun clearUnreadable(treeUri: String) {
+        if (unreadableTreeUris.remove(treeUri)) {
+            _unreadableTreeUrisFlow.value = unreadableTreeUris.toSet()
+        }
+    }
+
+    private fun isTreeUriUnreadable(treeUri: Uri): Boolean =
+        unreadableTreeUris.contains(treeUri.toString())
+
+    private fun markTreeUriUnreadable(treeUri: Uri) {
+        if (unreadableTreeUris.add(treeUri.toString())) {
+            android.util.Log.w(
+                "LogWriter",
+                "SAF tree URI is not readable by this install (probably a stale logFolderUri " +
+                    "after backup-restore - SAF permissions don't transfer across reinstalls). " +
+                    "Will silently skip log reads/writes for this URI: $treeUri"
+            )
+            _unreadableTreeUrisFlow.value = unreadableTreeUris.toSet()
+        }
     }
 
     private fun findChild(
@@ -357,17 +462,37 @@ class LogWriter(private val ctx: Context) {
         parentDocId: String,
         displayName: String,
     ): Pair<String, String>? {
+        if (isTreeUriUnreadable(treeUri)) return null
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         val projection = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
-        resolver.query(childrenUri, projection, null, null, null)?.use { c ->
-            val idCol   = c.getColumnIndex(Document.COLUMN_DOCUMENT_ID)
-            val nameCol = c.getColumnIndex(Document.COLUMN_DISPLAY_NAME)
-            val mimeCol = c.getColumnIndex(Document.COLUMN_MIME_TYPE)
-            while (c.moveToNext()) {
-                val name = c.getString(nameCol) ?: continue
-                if (name.trim().equals(displayName, ignoreCase = true))
-                    return c.getString(idCol) to c.getString(mimeCol)
+        // ContentResolver.query can throw SecurityException ("Permission Denial: opening
+        // provider ... requires that you obtain access using ACTION_OPEN_DOCUMENT") when
+        // the URI's persisted permission grant isn't valid for this process. The most
+        // common trigger is a backup-restore on a fresh install: the saved tree URI is in
+        // settings but the SAF grant isn't (those don't travel through Android Auto Backup
+        // / D2D transfer). Without this catch the throw propagates up through readTailSaf,
+        // through ensureBuffer's IO-dispatched scrollback launch, and crashes the whole
+        // process - the user sees the app close as soon as they tap Connect because
+        // ensureServerBuffer fires right at the start of every connect.
+        try {
+            resolver.query(childrenUri, projection, null, null, null)?.use { c ->
+                val idCol   = c.getColumnIndex(Document.COLUMN_DOCUMENT_ID)
+                val nameCol = c.getColumnIndex(Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = c.getColumnIndex(Document.COLUMN_MIME_TYPE)
+                while (c.moveToNext()) {
+                    val name = c.getString(nameCol) ?: continue
+                    if (name.trim().equals(displayName, ignoreCase = true))
+                        return c.getString(idCol) to c.getString(mimeCol)
+                }
             }
+        } catch (_: SecurityException) {
+            markTreeUriUnreadable(treeUri)
+            return null
+        } catch (_: IllegalArgumentException) {
+            // Provider rejected the URI shape (very rarely seen with malformed tree URIs
+            // after a corrupt restore). Treat the same as a missing folder.
+            markTreeUriUnreadable(treeUri)
+            return null
         }
         return null
     }
@@ -375,20 +500,30 @@ class LogWriter(private val ctx: Context) {
     /** Returns list of (docId, displayName, mimeType) triples for the direct children of [parentDocId]. */
     private data class DocEntry(val docId: String, val name: String, val mime: String)
     private fun queryChildren(resolver: ContentResolver, treeUri: Uri, parentDocId: String): List<DocEntry> {
+        if (isTreeUriUnreadable(treeUri)) return emptyList()
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         val projection = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
         val result = mutableListOf<DocEntry>()
-        resolver.query(childrenUri, projection, null, null, null)?.use { c ->
-            val idCol   = c.getColumnIndex(Document.COLUMN_DOCUMENT_ID)
-            val nameCol = c.getColumnIndex(Document.COLUMN_DISPLAY_NAME)
-            val mimeCol = c.getColumnIndex(Document.COLUMN_MIME_TYPE)
-            while (c.moveToNext()) {
-                result += DocEntry(
-                    c.getString(idCol) ?: continue,
-                    c.getString(nameCol) ?: "",
-                    c.getString(mimeCol) ?: ""
-                )
+        // Same SecurityException-catch rationale as findChild above.
+        try {
+            resolver.query(childrenUri, projection, null, null, null)?.use { c ->
+                val idCol   = c.getColumnIndex(Document.COLUMN_DOCUMENT_ID)
+                val nameCol = c.getColumnIndex(Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = c.getColumnIndex(Document.COLUMN_MIME_TYPE)
+                while (c.moveToNext()) {
+                    result += DocEntry(
+                        c.getString(idCol) ?: continue,
+                        c.getString(nameCol) ?: "",
+                        c.getString(mimeCol) ?: ""
+                    )
+                }
             }
+        } catch (_: SecurityException) {
+            markTreeUriUnreadable(treeUri)
+            return emptyList()
+        } catch (_: IllegalArgumentException) {
+            markTreeUriUnreadable(treeUri)
+            return emptyList()
         }
         return result
     }

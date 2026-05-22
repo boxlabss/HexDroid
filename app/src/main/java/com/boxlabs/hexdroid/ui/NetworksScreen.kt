@@ -124,13 +124,24 @@ fun NetworksScreen(
     // already a coroutine scope, so showSnackbar can be called directly — no
     // nested launch (which would otherwise survive the LaunchedEffect's cancel
     // and double-fire if the message changes mid-display).
+    //
+    // The clear is in `finally` so it runs even when the effect is cancelled
+    // mid-display by navigation away or by a fresh message replacing the key.
+    // Without that, navigating off NetworksScreen while a snackbar is up would
+    // leave state.bouncerCloneMessage non-null, and the snackbar would re-appear
+    // every time the user returned to the screen until the next clone message
+    // happened to land. onDismissBouncerCloneMessage() ultimately calls a
+    // non-suspending _state.update, so finally is safe to run during cancellation.
     LaunchedEffect(state.bouncerCloneMessage) {
         val msg = state.bouncerCloneMessage ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(
-            message = msg,
-            duration = SnackbarDuration.Short
-        )
-        onDismissBouncerCloneMessage()
+        try {
+            snackbarHostState.showSnackbar(
+                message = msg,
+                duration = SnackbarDuration.Short
+            )
+        } finally {
+            onDismissBouncerCloneMessage()
+        }
     }
 
     Scaffold(
@@ -529,8 +540,20 @@ private fun BouncerNetworksSection(
 ) {
     // Stable display order: by name (case-insensitive) then by id, so re-renders don't
     // reshuffle entries when the bouncer re-emits push frames in a different order.
+    //
+    // Treat blank names the same way the dedupe predicate below does (.takeIf
+    // { isNotBlank() }) so the two definitions of "no name" stay consistent - otherwise
+    // an upstream with name = "" sorts under the empty-string key (first alphabetically)
+    // but renders via the unnamed-string-resource fallback, making blank-named entries
+    // cluster at the top of the list for unrelated reasons. lowercase(Locale.ROOT) for
+    // locale-independent ordering: lowercase() defers to default locale, which on a
+    // Turkish locale folds "I" → "ı" and produces user-surprising ordering that depends
+    // on the OS language setting.
     val sortedUpstreams = upstreams.values.sortedWith(
-        compareBy({ (it.name ?: it.id).lowercase() }, { it.id })
+        compareBy(
+            { (it.name?.takeIf { n -> n.isNotBlank() } ?: it.id).lowercase(java.util.Locale.ROOT) },
+            { it.id }
+        )
     )
 
     Card(Modifier.fillMaxWidth()) {

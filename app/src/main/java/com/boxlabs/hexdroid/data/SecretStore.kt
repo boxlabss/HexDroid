@@ -441,4 +441,93 @@ class SecretStore(private val ctx: Context) {
     }
 
     data class StoredClientCert(val certId: String, val label: String?)
+
+    // -------------------------------------------------------------------------
+    // End-to-end encryption key storage
+    //
+    // Per-(networkId, target) symmetric keys for the +AGM and +OK wire schemes.
+    // Stored via the same Android-Keystore-wrapped AES-GCM envelope already used
+    // for SASL/server passwords - the on-device persistence layer is unchanged,
+    // only the namespace is new ("e2e:…" prefix). This means E2E keys benefit
+    // from the same KeyPermanentlyInvalidatedException handling: if the user
+    // changes their lock screen, key bytes become unrecoverable and the affected
+    // channels gracefully degrade to "no key configured" rather than misbehaving.
+    //
+    // Two preference entries per key:
+    //   e2e:<netId>:<target>:scheme    = "AGM" | "BLOWFISH"
+    //   e2e:<netId>:<target>:key       = encrypted base64
+    //
+    // The target component is the lowercase channel/nick. The IrcCore caller is
+    // expected to lowercase before calling - this layer does not casefold.
+    //
+    // E2E keys are intentionally NOT included in the backup payload (see
+    // SettingsRepository.exportBackup). A reinstall therefore re-pairs all
+    // channels, which matches the security expectation users have for E2E and
+    // mirrors how Signal/Whatsapp handle device-key portability.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Lightweight tuple returned by [listE2eKeys] for hydrating the in-memory
+     * keystore cache at first-touch.
+     */
+    data class StoredE2eKey(val target: String, val schemeName: String, val keyBytes: ByteArray)
+
+    private fun e2eKeyName(networkId: String, target: String) = "e2e:$networkId:$target:key"
+    private fun e2eSchemeName(networkId: String, target: String) = "e2e:$networkId:$target:scheme"
+
+    /**
+     * Store [keyBytes] for ([networkId], [target]) under [schemeName] (e.g. "AGM"
+     * or "BLOWFISH"). Overwrites any existing entry.
+     *
+     * The encryption envelope is the same AES-GCM-with-Keystore-master-key used
+     * by [setSaslPassword]; failure to encrypt throws the same exceptions
+     * (IllegalStateException / KeyPermanentlyInvalidatedException), to be
+     * handled by callers as in the SASL save path.
+     */
+    fun setE2eKey(networkId: String, target: String, schemeName: String, keyBytes: ByteArray) {
+        val enc = encryptToB64(keyBytes)
+        prefs.edit()
+            .putString(e2eKeyName(networkId, target), enc)
+            .putString(e2eSchemeName(networkId, target), schemeName)
+            .apply()
+    }
+
+    fun clearE2eKey(networkId: String, target: String) {
+        prefs.edit()
+            .remove(e2eKeyName(networkId, target))
+            .remove(e2eSchemeName(networkId, target))
+            .apply()
+    }
+
+    /**
+     * Returns every stored E2E key for [networkId]. Called once per network at
+     * first touch by [E2eKeyStore] to populate its in-memory cache; subsequent
+     * gets are pure memory. A single full scan is cheaper than per-key prefs
+     * lookups for the realistic case where a user has at most a few dozen
+     * encrypted targets.
+     */
+    fun listE2eKeys(networkId: String): List<StoredE2eKey> {
+        val keyPrefix = "e2e:$networkId:"
+        val keySuffix = ":key"
+        val out = mutableListOf<StoredE2eKey>()
+        for ((prefKey, _) in prefs.all) {
+            if (!prefKey.startsWith(keyPrefix) || !prefKey.endsWith(keySuffix)) continue
+            val target = prefKey.substring(keyPrefix.length, prefKey.length - keySuffix.length)
+            val schemeName = prefs.getString(e2eSchemeName(networkId, target), null) ?: continue
+            val encB64 = prefs.getString(prefKey, null) ?: continue
+            val keyBytes = decryptFromB64(encB64) ?: continue
+            out += StoredE2eKey(target, schemeName, keyBytes)
+        }
+        return out
+    }
+
+    /** Removes every E2E key for [networkId]; called when a network profile is deleted. */
+    fun clearAllE2eKeysForNetwork(networkId: String) {
+        val prefix = "e2e:$networkId:"
+        val toRemove = prefs.all.keys.filter { it.startsWith(prefix) }
+        if (toRemove.isEmpty()) return
+        val ed = prefs.edit()
+        for (k in toRemove) ed.remove(k)
+        ed.apply()
+    }
 }

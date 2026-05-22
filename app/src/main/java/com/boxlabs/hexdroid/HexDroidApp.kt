@@ -64,9 +64,22 @@ class HexDroidApp : Application() {
         //    skipped entirely. With debounce, transient blips are ignored.
         //    OEM app-lock screens typically put the Activity in onPause (not onStop) while
         //    the lock UI is showing, so they are unaffected by this debounce.
+        //
+        //    Background-only side effects (cancelTypingOnBackground, flushLogs) live INSIDE
+        //    goBackgroundRunnable for the same reason - firing them on every OEM overlay
+        //    blip would send "typing done" to the network every time the user swipes the
+        //    volume up, and flush a log buffer that's already going to be flushed properly
+        //    when the app is actually backgrounded a second later.
         val mainHandler = Handler(Looper.getMainLooper())
         val goBackgroundRunnable = Runnable {
             AppVisibility.isForeground = false
+            // Cancel any in-progress typing indicator so remote users don't see a stale
+            // "typing" state, and so the 30-second paused/done timer coroutine doesn't
+            // keep the CPU awake.
+            ircViewModel.cancelTypingOnBackground()
+            // Flush log file buffers so lines written since the last periodic flush
+            // reach disk before the OS might kill the process.
+            ircViewModel.flushLogs()
         }
 
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
@@ -76,6 +89,17 @@ class HexDroidApp : Application() {
                 mainHandler.removeCallbacks(goBackgroundRunnable)
                 started = (started + 1).coerceAtLeast(1)
                 AppVisibility.isForeground = true
+                // Clear the unread counter on the currently-selected buffer if any.
+                // Messages that arrived while the app was backgrounded increment unread
+                // (because isSelected uses isForeground in its predicate), and on
+                // foreground we want the user to land on a clean buffer - they're
+                // literally looking at it. Without this, the user sees a stale "1" on
+                // the channel they're actively viewing every time they switch away to
+                // another app and come back. Mirrors what openBuffer does when the
+                // user explicitly opens a buffer; here we apply the same logic to the
+                // existing selectedBuffer because the user is implicitly "re-opening"
+                // it by foregrounding the app.
+                ircViewModel.consumeUnreadOnForeground()
             }
 
             override fun onActivityStopped(activity: Activity) {
@@ -85,13 +109,6 @@ class HexDroidApp : Application() {
                     // a stop/start pair within milliseconds; we only go background if nothing
                     // restarts the activity within the debounce window.
                     mainHandler.postDelayed(goBackgroundRunnable, 500)
-                    // Cancel any in-progress typing indicator immediately when backgrounded
-                    // so remote users don't see a stale "typing" state, and so the
-                    // 30-second paused/done timer coroutine doesn't keep the CPU awake.
-                    ircViewModel.cancelTypingOnBackground()
-                    // Flush log file buffers so lines written since the last periodic
-                    // flush reach disk before the OS might kill the process.
-                    ircViewModel.flushLogs()
                 }
             }
 

@@ -126,22 +126,51 @@ class KeepAliveService : Service() {
         super.onCreate()
         isRunning = true
 
-        // Call startForeground() immediately to avoid ForegroundServiceDidNotStartInTimeException.
-        // Android requires startForeground() within 5 seconds of startForegroundService().
-        val initialNotification = NotificationHelper(applicationContext)
-            .buildConnectionNotification("", "HexDroid IRC", "Connecting...")
-        val fgsType = if (android.os.Build.VERSION.SDK_INT >= 34) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-        } else 0
-        ServiceCompat.startForeground(this, NotificationHelper.NOTIF_ID_CONNECTION, initialNotification, fgsType)
+        // startForeground() must be called within ~5s of the service being created, but on
+        // Android 12+ (API 31+) the system can REFUSE the foreground start with
+        // ForegroundServiceStartNotAllowedException when the service was created without a
+        // valid background-FGS exemption. The most common trigger is the OS itself
+        // restarting this service after killing it under memory pressure / Doze
+        // (START_STICKY) while the app is in the background — that restart path does NOT
+        // go through our guarded call sites in IrcViewModel, so the guard has to live
+        // here. An unguarded startForeground() throw in onCreate takes down the whole
+        // process (the reported FATAL EXCEPTION at KeepAliveService.onCreate).
+        //
+        // If we can't become a foreground service right now, stop cleanly and bail:
+        //   - swallowing the exception avoids the process crash, and
+        //   - stopSelf() avoids the follow-on ForegroundServiceDidNotStartInTimeException
+        //     that fires if a started service never reaches startForeground().
+        // Our own foregrounding logic (maybeStartKeepAlive / updateConnectionNotification)
+        // will start the service again, correctly, the next time the app is visible or a
+        // valid FGS exemption exists.
+        val startedForeground = runCatching {
+            val initialNotification = NotificationHelper(applicationContext)
+                .buildConnectionNotification("", "HexDroid IRC", "Connecting...")
+            val fgsType = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else 0
+            ServiceCompat.startForeground(this, NotificationHelper.NOTIF_ID_CONNECTION, initialNotification, fgsType)
+        }.isSuccess
 
-        // WifiLock to prevent Wi-Fi from going to sleep completely.
+        if (!startedForeground) {
+            isRunning = false
+            stopSelf()
+            return
+        }
+
+        // WifiLock to prevent Wi-Fi from going to sleep completely. Only acquired once we
+        // are genuinely a foreground service. Guarded because createWifiLock / acquire can
+        // throw on some OEM ROMs; onDestroy's ::wifiLock.isInitialized check tolerates the
+        // lock never being created.
+        //
         // Using WIFI_MODE_FULL (not HIGH_PERF) allows Wi-Fi power saving between packets,
         // which significantly improves battery life while still keeping the TCP connection alive.
-        val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-        @Suppress("DEPRECATION")
-        wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL, "HexDroid:IRCWifiLock")
-        wifiLock.acquire()
+        runCatching {
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL, "HexDroid:IRCWifiLock")
+            wifiLock.acquire()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -158,13 +187,35 @@ class KeepAliveService : Service() {
         val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL) ?: "HexDroid IRC"
         val status = intent?.getStringExtra(EXTRA_STATUS) ?: "Connected"
 
-        val n = NotificationHelper(applicationContext)
-            .buildConnectionNotification(networkId, serverLabel, status)
+        // Building the notification can throw on some Samsung firmware when the
+        // ActivityManager's per-UID PendingIntent rate limit fires. We've wrapped each
+        // PendingIntent.getActivity in NotificationHelper.safePi to swallow the
+        // SecurityException, but a final outer guard here protects against unrelated
+        // surprises (OOM during builder.build(), system-server transient errors, etc.).
+        // If building fails entirely we leave the existing foreground notification in
+        // place rather than crashing the service. START_STICKY ensures the OS will
+        // hand us another onStartCommand later, giving the rate limit time to clear.
+        val n = runCatching {
+            NotificationHelper(applicationContext)
+                .buildConnectionNotification(networkId, serverLabel, status)
+        }.getOrNull() ?: return START_STICKY
 
         val fgsType = if (android.os.Build.VERSION.SDK_INT >= 34) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else 0
-        ServiceCompat.startForeground(this, NotificationHelper.NOTIF_ID_CONNECTION, n, fgsType)
+        val foregroundOk = runCatching {
+            ServiceCompat.startForeground(this, NotificationHelper.NOTIF_ID_CONNECTION, n, fgsType)
+        }.isSuccess
+        if (!foregroundOk) {
+            // Same Android 12+/14+ background-FGS-start restriction as onCreate. Don't
+            // linger as a started-but-not-foreground service: that risks the
+            // ForegroundServiceDidNotStartInTimeException crash and, under START_STICKY,
+            // a restart loop where the OS keeps recreating a service that can't go
+            // foreground. Stop and return START_NOT_STICKY so the OS leaves us alone;
+            // the connection layer restarts us through the guarded path when allowed.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 

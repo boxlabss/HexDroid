@@ -45,8 +45,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -55,12 +58,14 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -797,6 +802,45 @@ fun SettingsScreen(
                     Text(label, style = MaterialTheme.typography.bodySmall)
                     if (!s.logFolderUri.isNullOrBlank()) {
                         Text(s.logFolderUri, style = MaterialTheme.typography.bodySmall)
+                    }
+                    // Permission-lost warning. Surfaces when LogWriter has flagged this
+                    // tree URI as unreadable - typically after a backup-restore on a fresh
+                    // install (SAF permission grants are stored per-install in the system
+                    // and don't travel through any backup format, so the URI string in
+                    // settings outlives the grant). Without this badge, the user sees no
+                    // scrollback after restoring and has no obvious cue why; logging
+                    // silently no-ops too. The "Choose folder" button right below this
+                    // box is the one-tap fix - re-picking the same (or a new) folder
+                    // grants a fresh persistable permission and the badge clears
+                    // immediately when settings update.
+                    if (state.logFolderUnreadable) {
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Permission lost — tap \"Choose folder\" to re-pick. " +
+                                        "SAF grants don't survive uninstall/reinstall, so the saved " +
+                                        "folder from your backup isn't accessible to this install. " +
+                                        "Logging and scrollback are silently skipped until you re-pick.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

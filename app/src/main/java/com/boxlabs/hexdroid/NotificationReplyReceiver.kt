@@ -41,6 +41,25 @@ import androidx.core.app.RemoteInput
 class NotificationReplyReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
+        // Outer guard. BroadcastReceivers are sandboxed by Android — a throw doesn't kill
+        // the host app process directly — but it does surface to the user as the
+        // "Unfortunately, <app> has stopped" system dialog and gets reported through
+        // Play Console's vitals as a crash. The body below touches a lot of fragile
+        // bridges (Intent extras, RemoteInput parsing, app-singleton lookup via cast,
+        // ViewModel calls that may have side-effect throws, NotificationManagerCompat
+        // calls that can fail on locked devices), so a single catch-all here keeps the
+        // worst-case "tap reply, see crash dialog" path from ever happening. Specific
+        // expected errors (missing extras, no live connection) are still handled
+        // structurally above with early returns; this is the safety net for the
+        // genuinely unexpected.
+        try {
+            handleReply(ctx, intent)
+        } catch (t: Throwable) {
+            android.util.Log.e("NotificationReplyReceiver", "Reply broadcast handler crashed", t)
+        }
+    }
+
+    private fun handleReply(ctx: Context, intent: Intent) {
         val netId        = intent.getStringExtra(NotificationHelper.EXTRA_NETWORK_ID)    ?: return
         val buffer       = intent.getStringExtra(NotificationHelper.EXTRA_BUFFER)         ?: return
         val notifId      = intent.getIntExtra(NotificationHelper.EXTRA_NOTIF_ID, -1)
@@ -61,7 +80,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
 
         if (hasLiveConnection) {
             vm.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
-            if (notifId >= 0) NotificationManagerCompat.from(ctx).cancel(notifId)
+            if (notifId >= 0) runCatching { NotificationManagerCompat.from(ctx).cancel(notifId) }
         } else {
             // No live connection. show an error notification so the reply is not lost silently.
             if (notifId >= 0) {
@@ -73,7 +92,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
                     .setContentText("Open HexDroid and reconnect to send your reply to $buffer")
                     .setAutoCancel(true)
                     .build()
-                NotificationManagerCompat.from(ctx).notify(notifId, errorNotif)
+                runCatching { NotificationManagerCompat.from(ctx).notify(notifId, errorNotif) }
             }
         }
     }

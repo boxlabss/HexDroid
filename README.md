@@ -18,7 +18,7 @@
 
 ---
 
-HexDroid is a free and open source IRC client for Android. It provides a clean, modern interface while supporting the features users expect from a desktop client — including IRCv3 capabilities, SASL authentication, TLS encryption, bouncer support, DCC file transfers, and an array of commands.
+HexDroid is a free and open source IRC client for Android. It provides a clean, modern interface while supporting the features users expect from a desktop client — including IRCv3 capabilities, SASL authentication, TLS encryption, bouncer support, DCC file transfers, end-to-end encrypted chat, and an array of commands.
 
 > **Requirements:** Android 8.0 (API 26) or higher &nbsp;·&nbsp; **License:** GPLv3
 
@@ -39,6 +39,7 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 - **Multi-network** — connect to multiple servers simultaneously, each with independent nick, SASL, TLS, autojoin, and encoding settings
 - **Bouncer support** supports ZNC and soju. Discover and clone profiles when connecting without a network profile.
 - **IRCv3** — 40+ capabilities including `chathistory`, `away-notify`, `server-time`, `echo-message`, `draft/typing`, MONITOR, bouncer-specific caps, and more
+- **Secure Chat** — optional end-to-end encryption per channel or PMs: AES-256-GCM (`+AGM`) for HexDroid-to-HexDroid, plus Blowfish/FiSH (`+OK`) for interoperability
 - **Security** — TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates, Android Keystore credential storage
 - **irc:// and ircs://** — tapping IRC links in other apps opens HexDroid directly and connects to the target network and channel
 - **Localisation** — Arabic, Chinese, Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish
@@ -57,6 +58,41 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 - Channel list with live search and typing indicators displayed per-buffer
 - Lag indicator, swipe gestures, compact mode, intro tour for new users
 - Backup/restore: network profiles and settings exported as JSON
+
+### Secure Chat (End-to-End Encryption)
+
+HexDroid can encrypt message **content** end-to-end, on top of your TLS connection to the server. TLS protects the link to the server; end-to-end encryption keeps the message text private from the server operator, any bouncer in between, and other channel members who don't hold the key. Configured per channel or per private conversation, off by default.
+
+**Two schemes**, selectable per target in the encryption dialog:
+
+| Scheme | Wire prefix | Indicator | Use it for |
+|---|---|---|---|
+| **AES-256-GCM** | `+AGM` | 🔒 | The modern default. HexDroid-to-HexDroid (or HexDroid-to-HexChat via the plugin). Authenticated encryption, fresh random nonce per message, channel-bound against cross-channel replay. **Recommended for new conversations.** |
+| **Blowfish (FiSH)** | `+OK` | 🐟 | interoperability with HexChat's `fishlim` and other FiSH clients. Reads both ECB and CBC FiSH formats, sends CBC. Use only when the other side can't speak `+AGM`. |
+
+**How it works**
+
+- Keys are **pre-shared** you generate a key on one device and share it with your contact out of band (the in-app **Share** sheet, in person, over another secure messenger). There is no automatic key exchange, so you control exactly who can read the conversation.
+- Each key has a short **safety number** (e.g. `K4XR-T9BS`) shown on every device that holds it. Compare it with your contact over a trusted channel to confirm you have the same key and no one tampered with it in transit.
+- Encrypted messages show a padlock indicator; a lock badge appears in the input while you're encrypting. Anyone without the key sees only `+AGM <ciphertext>` (or `+OK ...`).
+- `/me` actions are encrypted too, with the CTCP framing left intact so non-encrypting clients still render them correctly.
+
+**Key storage & portability**
+
+- Keys are stored on-device in `EncryptedSharedPreferences`, wrapped by the Android Keystore — the same protection used for SASL credentials.
+- Keys are **excluded from backups** by design, so they never leave the device in a portable form. After a reinstall or device move you re-share keys with your contacts.
+
+**HexChat interoperability**
+
+- `+AGM`: install the companion `hexdroid_agm.py` plugin (requires the Python `cryptography` package). Adds `/AGM-GEN`, `/AGM-SET`, `/AGM-INFO` and transparent encrypt/decrypt.
+- `+OK`: use HexChat's bundled `fishlim` plugin with the same passphrase on both sides.
+
+The plugin and the full `+AGM` wire-format specification are published in this repository so any client author can add `+AGM` support.
+
+> **What it protects:** passive eavesdropping by the server/bouncer/network, other channel members without the key, message tampering (a modified message fails its integrity check), and replay of a ciphertext into another channel.
+>
+> **What it does *not* protect:** identity (anyone with the key can read and send), forward secrecy (a compromised key exposes past messages), metadata (who talks to whom, and when), or a compromised device. It's a pragmatic upgrade over plaintext IRC and FiSH, not a replacement for Signal. See the [encryption guide](https://hexdroid.boxlabs.uk/encryption).
+
 ### IRCv3
 
 HexDroid negotiates a comprehensive set of capabilities. All are enabled by default unless noted.
@@ -195,6 +231,8 @@ cd hexdroid
 3. Save and tap **Connect**
 4. Use `/join #channel` or tap **Channel list** to browse
 
+**To encrypt a conversation:** open the channel or DM, tap the overflow menu (⋮) **Secure Chat**, generate a key, and share it with your contact. Import the same key on their device and confirm the safety numbers match. See the [encryption guide](https://hexdroid.boxlabs.uk/encryption.html) for step-by-step instructions.
+
 Full documentation at [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/).
 
 ---
@@ -212,7 +250,7 @@ The Play Store and IzzyOnDroid releases are [reproducibly buildable](https://rep
 
 ## Privacy
 
-No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app. See the full [privacy policy](https://hexdroid.boxlabs.uk/privacy).
+No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app. End-to-end encryption keys never leave the device. See the full [privacy policy](https://hexdroid.boxlabs.uk/privacy).
 
 ---
 
@@ -249,6 +287,8 @@ Bug reports and pull requests are welcome. Please open an issue before submittin
 2. Sync Gradle — no additional configuration required
 3. Run on a device or emulator with API 26+
 4. Tests: `./gradlew test` for unit tests, `./gradlew connectedAndroidTest` for instrumented tests
+
+The HexChat companion plugin and the `+AGM` wire-format specification live under `/aes-client-plugins/hexchat` and `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
 
 Translations are managed in the string resources under `app/src/main/res/values-*/`. If your language is missing or incomplete, a PR updating the relevant `strings.xml` is very welcome.
 

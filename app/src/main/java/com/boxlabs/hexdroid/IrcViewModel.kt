@@ -105,6 +105,13 @@ data class UiMessage(
      * this one.
      */
     val replyToMsgId: String? = null,
+    /**
+     * End-to-end encryption scheme used on the wire for this message, or null for
+     * cleartext. The UI renders a per-scheme padlock indicator when set so the user
+     * can verify at a glance that the message was actually encrypted (rather than
+     * sent in clear and merely *intended* to be encrypted).
+     */
+    val encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
 )
 data class UiBuffer(
     val name: String,
@@ -452,6 +459,31 @@ data class UiState(
      * cleared by the screen via [IrcViewModel.clearBouncerCloneMessage] once shown.
      */
     val bouncerCloneMessage: String? = null,
+
+    /**
+     * True when the currently-saved `settings.logFolderUri` is in [LogWriter]'s
+     * unreadable-URIs set - i.e. a read or write against it threw SecurityException
+     * earlier in the session and we're now silently skipping log I/O for it. Surfaced
+     * to the Settings screen as a warning badge with a re-pick CTA. The most common
+     * trigger is a backup restore on a fresh install: the saved URI string is in
+     * settings but the matching SAF permission grant didn't survive the reinstall
+     * (those grants are stored per-install in the system, not in app data, and so are
+     * not part of any backup or D2D transfer payload).
+     */
+    val logFolderUnreadable: Boolean = false,
+
+    /**
+     * Monotonic counter incremented every time an E2E key is added/changed/removed.
+     * The chat screen reads it (alongside selectedBuffer + activeNetworkId) to
+     * derive the current buffer's encryption state for the compose-input lock
+     * badge. We track a counter rather than putting the full key info into state
+     * because the keys themselves never belong in observable state (they're
+     * sensitive, and including them in UiState would have them flow through
+     * every recomposition snapshot, logcat dump, and any future state-debug
+     * tooling). The counter lets compose re-derive the answer on demand without
+     * surfacing the bytes.
+     */
+    val e2eKeyVersion: Int = 0,
 )
 
 class IrcViewModel(
@@ -529,6 +561,17 @@ class IrcViewModel(
         const val AUTO_REJOIN_SUPPRESS_MS = 60_000L
         /** Small delay before sending the rejoin so it doesn't feel adversarial to the kicker. */
         const val AUTO_REJOIN_DELAY_MS = 1500L
+        /**
+         * How long a locally-echoed outgoing message stays eligible to suppress a
+         * bouncer's history-replay of that same message after a reconnect. Generous
+         * enough to cover a reconnect that happens a few minutes after sending (the
+         * common "phone changed networks / woke from doze" case), short enough that a
+         * genuinely-repeated message typed much later isn't wrongly deduped. Only ever
+         * suppresses a replay (isHistory) line, never a live one, so the worst-case
+         * effect of the window being too long is that a deliberately repeated message
+         * shows once instead of twice after a reconnect.
+         */
+        const val SELF_SEND_RETAIN_MS = 15 * 60_000L
     }
 
     private data class NamesRequest(
@@ -570,28 +613,41 @@ class IrcViewModel(
         val manuallyJoinedChannels: MutableMap<String, String?> = mutableMapOf()
     )
 
-    private val runtimes = mutableMapOf<String, NetRuntime>()
+    // Many of the per-network maps and sets below are mutated and read from multiple
+    // coroutines simultaneously: each network's IRC events flow runs on its own
+    // Dispatchers.IO coroutine, so the moment the user has two networks active, every
+    // event handler touching these structures races against its sibling. Plain Java
+    // HashMap is documented as undefined-behaviour under concurrent mutation; on Android
+    // (OpenJDK 17 runtime) the failure mode ranges from silent data loss to internal
+    // table corruption that causes get() to loop forever (an ANR), and rarely throws
+    // ConcurrentModificationException outright when an iterator notices the structural
+    // mutation. ConcurrentHashMap is correct per-operation; the read-modify-write races
+    // that survive that fix are documented separately.
+    private val runtimes: MutableMap<String, NetRuntime> = java.util.concurrent.ConcurrentHashMap()
 
-    private val desiredConnected = mutableSetOf<String>()
+    private val desiredConnected: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var desiredNetworkIdsLoaded = false
     private var desiredNetworkIdsApplied = false
-    private val autoReconnectJobs = mutableMapOf<String, Job>()
-    private val reconnectAttempts = mutableMapOf<String, Int>()
+    private val autoReconnectJobs: MutableMap<String, Job> = java.util.concurrent.ConcurrentHashMap()
+    private val reconnectAttempts: MutableMap<String, Int> = java.util.concurrent.ConcurrentHashMap()
     /**
      * Per-network jobs that fire after STABLE_CONNECTION_MS of uptime to reset the
      * reconnect backoff counter. Cancelled on disconnect so a short-lived connection
      * (e.g. a Z-lined or immediately-dropped session) never clears the backoff,
      * preserving exponential back-off across rapid connect/disconnect cycles.
      */
-    private val stableConnectionJobs = mutableMapOf<String, Job>()
+    private val stableConnectionJobs: MutableMap<String, Job> = java.util.concurrent.ConcurrentHashMap()
     // Cache the last label/status sent to the foreground service notification so we can
     // skip the startService() Binder IPC when nothing has changed. Every setNetConn() call
     // (lag updates, status changes, etc.) goes through refreshConnectionNotification(),
     // which would otherwise fire an IPC and wake the NotificationManager on every ping.
     private var lastNotifLabel: String? = null
     private var lastNotifStatus: String? = null
-    private val manualDisconnecting = mutableSetOf<String>()
-    private val noNetworkNotice = mutableSetOf<String>()
+    private val manualDisconnecting: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val noNetworkNotice: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
      * Networks where the last connection attempt failed with an authentication error
@@ -604,12 +660,19 @@ class IrcViewModel(
      * autoConnect — i.e. anywhere they've had a chance to fix the credentials.
      * NOT cleared on routine disconnects.
      */
-    private val authBlockedReconnect = mutableSetOf<String>()
+    private val authBlockedReconnect: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     // Flap detection: track timestamps (ms) of ping-timeout disconnects per network.
     // If ≥ FLAP_THRESHOLD occur within FLAP_WINDOW_MS the connection is deemed unstable
     // and auto-reconnect is suspended until the user manually reconnects.
-    private val pingTimeoutTimestamps = mutableMapOf<String, ArrayDeque<Long>>()
+    //
+    // Outer map is concurrent. Inner ArrayDeque is intentionally not thread-safe because
+    // it's only read/mutated under per-key access patterns from the same coroutine
+    // sequence (the ping loop for a given network) so there's no concurrent inner access
+    // in practice.
+    private val pingTimeoutTimestamps: MutableMap<String, ArrayDeque<Long>> =
+        java.util.concurrent.ConcurrentHashMap()
 
     // Flap-paused state is persisted via DataStore
     // DataStore is the rest of the app's persistence layer and is immune to the data-loss
@@ -617,7 +680,7 @@ class IrcViewModel(
     //
     // In-memory set for fast synchronous checks during event handling; the DataStore copy
     // is the durable source of truth that survives process kills.
-    private val flapPaused: MutableSet<String> = mutableSetOf()
+    private val flapPaused: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var flapPausedLoaded = false
 
     /** Hydrate the in-memory flapPaused set from DataStore (called once, lazily, on first use). */
@@ -899,7 +962,8 @@ class IrcViewModel(
     }
 
     // PART is sent when the user closes a buffer; the buffer is removed when we receive our own PART back.
-    private val pendingCloseAfterPart = mutableSetOf<String>()
+    private val pendingCloseAfterPart: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     @Volatile private var appExitRequested: Boolean = false
 
@@ -916,17 +980,23 @@ class IrcViewModel(
 
 
     // Per-channel nick prefix tracking. Outer key = bufferKey, inner key = case-folded nick.
-    private val chanNickCase: MutableMap<String, MutableMap<String, String>> = mutableMapOf()
-    private val chanNickStatus: MutableMap<String, MutableMap<String, MutableSet<Char>>> = mutableMapOf()
+    // chanNickCase / chanNickStatus / nickAwayState: outer maps are concurrent. Inner
+    // maps stay as plain mutableMapOf because they're only mutated under per-channel
+    // event sequences (NAMES/JOIN/PART/QUIT for one channel arrive serially from one
+    // network's events flow, so the inner maps don't see concurrent writers in practice).
+    private val chanNickCase: MutableMap<String, MutableMap<String, String>> =
+        java.util.concurrent.ConcurrentHashMap()
+    private val chanNickStatus: MutableMap<String, MutableMap<String, MutableSet<Char>>> =
+        java.util.concurrent.ConcurrentHashMap()
 
-    // away-notify state. Outer key = netId, inner key = case-folded nick, value = away message ("" if away with no message). Absent = present.
-    private val nickAwayState: MutableMap<String, MutableMap<String, String>> = mutableMapOf()
+    private val nickAwayState: MutableMap<String, MutableMap<String, String>> =
+        java.util.concurrent.ConcurrentHashMap()
 
     // Auto-rejoin throttle. Key = "$netId::${chan.lowercase()}", value = epoch-ms of the last
     // auto-rejoin attempt. Used to suppress repeat rejoins within AUTO_REJOIN_SUPPRESS_MS so a
     // user who is being kick-banned (or who can't satisfy +i / +k) doesn't get into an
     // immediate kick → rejoin → kick loop. One auto-rejoin per minute per channel is plenty.
-    private val recentKickRejoins: MutableMap<String, Long> = mutableMapOf()
+    private val recentKickRejoins: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
 
     /**
      * Per-buffer-key timestamp of our most recent self-JOIN. Read by the notice routing
@@ -936,12 +1006,21 @@ class IrcViewModel(
      * reference). Bounded by an opportunistic eviction in the JOIN handler; never holds
      * entries longer than the read window cares about.
      */
-    private val recentJoinAtMs: MutableMap<String, Long> = mutableMapOf()
+    private val recentJoinAtMs: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
 
     private var autoConnectAttempted = false
 
     private val notifier = NotificationHelper(appContext)
     private val logs = LogWriter(appContext)
+
+    /**
+     * Shared E2E keystore. One instance per ViewModel (and therefore per app process),
+     * since per-target keys are persisted via SecretStore and need to be visible across
+     * every network's IrcClient. The keystore lazily hydrates per-network from the
+     * underlying SharedPreferences on first access, so networks that never use E2E
+     * pay zero startup cost.
+     */
+    val e2eKeyStore = com.boxlabs.hexdroid.crypto.E2eKeyStore(repo.secretStore)
     private val dcc = DccManager(appContext)
 
     private data class DccChatSession(
@@ -953,7 +1032,8 @@ class IrcViewModel(
         val readJob: Job
     )
 
-    private val dccChatSessions: MutableMap<String, DccChatSession> = mutableMapOf()
+    private val dccChatSessions: MutableMap<String, DccChatSession> =
+        java.util.concurrent.ConcurrentHashMap()
 
     private data class PendingPassiveDccSend(
         val target: String,
@@ -962,13 +1042,15 @@ class IrcViewModel(
         val reply: CompletableDeferred<DccOffer>
     )
 
-    private val pendingPassiveDccSends = mutableMapOf<Long, PendingPassiveDccSend>()
+    private val pendingPassiveDccSends: MutableMap<Long, PendingPassiveDccSend> =
+        java.util.concurrent.ConcurrentHashMap()
 
     /**
      * Jobs for in-progress outgoing DCC sends, keyed by "$target/$filename".
      * Stored so the user can cancel a send from the Transfers screen.
      */
-    private val outgoingSendJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+    private val outgoingSendJobs: MutableMap<String, kotlinx.coroutines.Job> =
+        java.util.concurrent.ConcurrentHashMap()
 
     private val nextUiMsgId = AtomicLong(1L)
 
@@ -989,7 +1071,70 @@ class IrcViewModel(
     }
 
     private data class SentSig(val bufferKey: String, val text: String, val isAction: Boolean, val ts: Long)
-    private val pendingSendsByNet = mutableMapOf<String, ArrayDeque<SentSig>>()
+    private val pendingSendsByNet: MutableMap<String, ArrayDeque<SentSig>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Per-buffer record of messages WE sent and locally echoed, used to dedup the
+     * bouncer's history replay of our own messages on reconnect.
+     *
+     * The problem this solves: a local echo is appended with `timeMs = local clock`,
+     * but when a bouncer (ZNC / soju) replays that same message via CHATHISTORY or
+     * buffer playback after a reconnect, it carries the SERVER's `time=` tag. The
+     * content-fingerprint dedup ([UiBuffer.seenHistoryFingerprints]) keys on
+     * `"$ts|$from|$hash"`, so the differing timestamps mean the replay never matches
+     * the echo and the user sees their last few messages twice.
+     *
+     * The echo-message dedup deque ([pendingSendsByNet]) can't help either: it's
+     * pruned to an 8-second window because it exists to catch the near-instant
+     * server reflection, not a reconnect that might happen minutes later.
+     *
+     * This map stores, per buffer, the (signature, insert-time) of each message we
+     * locally echoed. On a history replay attributed to our own nick we look for a
+     * matching un-expired signature; a hit means "already shown as a local echo" and
+     * we drop the replay. Entries expire after [SELF_SEND_RETAIN_MS] and are capped
+     * per buffer so a long-lived session can't grow this unbounded. Matching consumes
+     * the entry, so sending the identical text twice is reconciled correctly (two
+     * echoes, two entries, two replays each consume one).
+     */
+    private val recentSelfSends: MutableMap<String, ArrayDeque<Pair<Long, String>>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    private fun selfSendSig(text: String, isAction: Boolean): String = "${if (isAction) "A" else "M"}\u0000$text"
+
+    private fun recordSelfSend(bufferKey: String, text: String, isAction: Boolean) {
+        val now = System.currentTimeMillis()
+        val dq = recentSelfSends.getOrPut(bufferKey) { ArrayDeque(16) }
+        synchronized(dq) {
+            dq.addLast(now to selfSendSig(text, isAction))
+            // Prune by age and cap. The cap is generous (one entry per message we've
+            // sent in the retention window); a human can't realistically send 64
+            // messages to one buffer inside the window and then reconnect, but the
+            // cap guarantees boundedness regardless.
+            while (dq.isNotEmpty() && now - dq.first().first > SELF_SEND_RETAIN_MS) dq.removeFirst()
+            while (dq.size > 64) dq.removeFirst()
+        }
+    }
+
+    /**
+     * Returns true (and consumes the matching entry) if [text]/[isAction] matches a
+     * message we locally echoed to [bufferKey] within the retention window. Used to
+     * recognise the bouncer replaying our own message back to us after a reconnect.
+     */
+    private fun consumeSelfSendIfMatch(bufferKey: String, text: String, isAction: Boolean): Boolean {
+        val dq = recentSelfSends[bufferKey] ?: return false
+        val now = System.currentTimeMillis()
+        val sig = selfSendSig(text, isAction)
+        synchronized(dq) {
+            while (dq.isNotEmpty() && now - dq.first().first > SELF_SEND_RETAIN_MS) dq.removeFirst()
+            // Last match wins so the most recent echo of a repeated message is the one
+            // reconciled first, mirroring consumeEchoIfMatch's ordering.
+            val idx = dq.indexOfLast { it.second == sig }
+            if (idx < 0) return false
+            dq.removeAt(idx)
+            return true
+        }
+    }
 
     private fun bufKey(netId: String, bufferName: String): String = "$netId::$bufferName"
 
@@ -1243,14 +1388,52 @@ class IrcViewModel(
         // instantly (single DataStore read) and sets flapPausedLoaded=true so the lazy guard
         // in ensureFlapPausedLoaded() is a no-op on any subsequent call.
         viewModelScope.launch { runCatching { ensureFlapPausedLoaded() } }
+        // Surface "log folder is unreadable" to the UI. LogWriter populates its
+        // unreadableTreeUrisFlow whenever a SAF query against a tree URI throws
+        // SecurityException (most often: backup-restore brought the URI string into
+        // settings but the persisted SAF permission grant didn't transfer to this
+        // install). We combine that set with the currently-saved logFolderUri to
+        // produce a single boolean that the Settings screen renders as a "re-pick
+        // your log folder" warning row. Done as a separate collector (not folded
+        // into the settingsFlow one above) so the badge updates in real time when
+        // LogWriter discovers the URI is dead - the user doesn't need to navigate
+        // away and back to see the warning appear.
+        viewModelScope.launch {
+            logs.unreadableTreeUrisFlow.collect { unreadable ->
+                _state.update { st ->
+                    val current = st.settings.logFolderUri
+                    val isUnreadable = !current.isNullOrBlank() && unreadable.contains(current)
+                    if (st.logFolderUnreadable == isUnreadable) st
+                    else st.copy(logFolderUnreadable = isUnreadable)
+                }
+            }
+        }
         viewModelScope.launch {
             repo.migrateLegacySecretsIfNeeded()
+            var prevLogFolderUri: String? = null
             repo.settingsFlow.collect { s ->
                 val st = _state.value
                 val applyDefaults = st.settings == UiSettings()
+                // When the user re-picks the log folder (even to the same URI), give
+                // LogWriter's "unreadable" cache for that URI a fresh shot - re-picking
+                // grants a new persistable permission, so even if the URI string is the
+                // same the access situation has changed and we shouldn't keep returning
+                // empty results from the cached "this is dead" state.
+                val newLogUri = s.logFolderUri
+                if (newLogUri != prevLogFolderUri) {
+                    if (!newLogUri.isNullOrBlank()) logs.clearUnreadable(newLogUri)
+                    prevLogFolderUri = newLogUri
+                }
+                // Recompute the unreadable flag against the new settings.logFolderUri:
+                // when the user picks a fresh folder we want the warning to clear
+                // immediately, without waiting for the next LogWriter event.
+                val currentUnreadable = logs.unreadableTreeUrisFlow.value
+                val newUnreadable = !s.logFolderUri.isNullOrBlank() &&
+                    currentUnreadable.contains(s.logFolderUri)
                 _state.value = st.copy(
                     settings = s,
                     settingsLoaded = true,
+                    logFolderUnreadable = newUnreadable,
                     // Only sync pane visibility to the new default if the user hasn't overridden it manually.
                     showNickList = when {
                         applyDefaults -> s.defaultShowNickList
@@ -1543,7 +1726,7 @@ class IrcViewModel(
                 if (ircUri.channels.isNotEmpty()) {
                     openBuffer(bufKey(existing.id, ircUri.channels.first()))
                 } else {
-                    _state.value = _state.value.copy(screen = AppScreen.CHAT)
+                    backToChat()
                 }
             } else {
                 // New server - pre-fill from URI and open the edit screen for review.
@@ -1582,9 +1765,12 @@ class IrcViewModel(
             val sharedText = intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
                 ?.trim()?.takeIf { it.isNotBlank() }
             if (sharedText != null) {
-                // Navigate to chat screen if not already there.
+                // Navigate to chat screen if not already there. Use backToChat so
+                // unread/highlights on the previously-selected buffer get cleared
+                // along with the screen flip - the user is effectively going to
+                // read the chat now.
                 if (_state.value.screen != AppScreen.CHAT) {
-                    _state.value = _state.value.copy(screen = AppScreen.CHAT)
+                    backToChat()
                 }
                 _state.value = _state.value.copy(pendingShareText = sharedText)
             }
@@ -1673,7 +1859,17 @@ class IrcViewModel(
         _state.value = _state.value.copy(screen = screen)
         if (screen == AppScreen.LIST) requestList()
     }
-    fun backToChat() { _state.value = _state.value.copy(screen = AppScreen.CHAT) }
+    fun backToChat() {
+        _state.update { st ->
+            val key = st.selectedBuffer
+            val buf = if (key.isNotBlank()) st.buffers[key] else null
+            val needsClear = buf != null && (buf.unread > 0 || buf.highlights > 0)
+            val nextBuffers = if (needsClear) {
+                st.buffers + (key to buf.copy(unread = 0, highlights = 0))
+            } else st.buffers
+            st.copy(screen = AppScreen.CHAT, buffers = nextBuffers)
+        }
+    }
 
     fun openBuffer(key: String) {
         ensureBuffer(key)
@@ -1864,16 +2060,17 @@ class IrcViewModel(
             val isChannel      = buffer.isNotEmpty() && buffer[0] in "#&+!"
 
             val outText = when {
-                // Server supports draft/reply AND we have a real server msgId: send tagged.
-                // We still go through privmsg() so echo-message dedup (recordLocalSend /
-                // consumeEchoIfMatch) works correctly;just prepend the tag via sendRaw
-                // and skip the privmsg call, but record the send for dedup ourselves.
+                // Server supports draft/reply AND we have a real server msgId: send a
+                // reply-tagged message. Route through privmsg() (NOT a direct sendRaw)
+                // so the E2E encryption hook applies - a raw send here would ship the
+                // reply in cleartext while the local echo still shows a padlock. privmsg
+                // also builds a single well-formed tag group (@label=…;+draft/reply=…).
                 hasReplyTagCap && msgId != null -> {
                     val sanitised = text.replace("\r", "").replace("\n", " ")
-                    val labelTag = if (client.hasCap("echo-message") && client.hasCap("labeled-response"))
-                        "@label=${java.util.UUID.randomUUID()} " else ""
-                    client.sendRaw("${labelTag}@+draft/reply=$msgId PRIVMSG $buffer :$sanitised")
+                    client.privmsg(buffer, sanitised, replyToMsgId = msgId)
                     // Record so incoming echo-message is consumed rather than shown twice.
+                    // Dedup is content-based (buffer + decrypted text), so recording the
+                    // plaintext matches the decrypted echo regardless of wire encryption.
                     recordLocalSend(networkId, key, sanitised, isAction = false)
                     sanitised
                 }
@@ -1896,8 +2093,15 @@ class IrcViewModel(
 
             // Pass replyToMsgId so our own local echo shows the reply quote UI,
             // matching what other clients will see when the tagged message arrives.
+            // Mirror the wire-level encryption state into the local echo so the lock
+            // icon shows up immediately instead of waiting for the echo-message round
+            // trip. Look up the per-target key at send-time, NOT at append-time, so a
+            // key cleared between send and echo doesn't retroactively mark the local
+            // line as cleartext.
+            val localEncryption = e2eKeyStore.get(networkId, buffer)?.scheme
             append(key, from = myNick, text = outText, isLocal = true,
-                replyToMsgId = if (hasReplyTagCap && msgId != null) msgId else null)
+                replyToMsgId = if (hasReplyTagCap && msgId != null) msgId else null,
+                encryption = localEncryption)
         }
     }
     /**
@@ -2059,7 +2263,9 @@ fun startAddNetwork() {
     /** Called after the user has granted ACCESS_LOCAL_NETWORK - retry the connection. */
     fun retryAfterLocalNetworkPermission(netId: String) {
         _state.value = _state.value.copy(localNetworkWarningNetworkId = null)
-        connectNetwork(netId)
+        // User-initiated retry (they just acted on the permission prompt) - clear the
+        // auth block so a previously-halted reconnect can run again.
+        connectNetwork(netId, clearAuthBlock = true)
     }
 
     fun dismissPlaintextWarning() {
@@ -2076,31 +2282,55 @@ fun startAddNetwork() {
                 networks = st.networks.map { if (it.id == netId) updated else it },
                 plaintextWarningNetworkId = null
             )
-            connectNetwork(netId, force = true)
+            // User explicitly opted to connect insecurely; treat as manual retry and
+            // clear the auth block.
+            connectNetwork(netId, force = true, clearAuthBlock = true)
         }
     }
 
     fun saveEditingNetwork(profile: NetworkProfile, clientCertDraft: ClientCertDraft?, removeClientCert: Boolean) {
         viewModelScope.launch {
             _state.value = _state.value.copy(networkEditError = null)
-            if (profile.saslEnabled) {
-                val p = profile.saslPassword?.trim()
-                if (!p.isNullOrBlank()) {
-                    repo.secretStore.setSaslPassword(profile.id, p)
+            // SecretStore writes go through Android Keystore, which can throw
+            // IllegalStateException / KeyStoreException when the keystore has been
+            // invalidated (e.g. lock-screen change with a binding policy in effect,
+            // user fingerprint reset, OEM keystore corruption after an OTA). The
+            // encrypt path internally retries once with a regenerated key, but the
+            // second-attempt failure propagates. Without a guard here, that throw
+            // bubbles up the viewModelScope.launch and crashes the app exactly when
+            // the user tapped Save - a particularly bad failure mode because the
+            // user thinks they just saved their credentials and instead lost the
+            // app session. Catch, surface as an in-screen error on the edit screen,
+            // and leave the credential state untouched so the user can try again.
+            val secretsResult = runCatching {
+                if (profile.saslEnabled) {
+                    val p = profile.saslPassword?.trim()
+                    if (!p.isNullOrBlank()) {
+                        repo.secretStore.setSaslPassword(profile.id, p)
+                    } else {
+                        // SASL is enabled but the password field was cleared - remove the
+                        // stored secret so the old password does not persist in SecretStore.
+                        repo.secretStore.clearSaslPassword(profile.id)
+                    }
                 } else {
-                    // SASL is enabled but the password field was cleared - remove the
-                    // stored secret so the old password does not persist in SecretStore.
                     repo.secretStore.clearSaslPassword(profile.id)
                 }
-            } else {
-                repo.secretStore.clearSaslPassword(profile.id)
-            }
 
-            val sp = profile.serverPassword?.trim()
-            if (!sp.isNullOrBlank()) {
-                repo.secretStore.setServerPassword(profile.id, sp)
-            } else {
-                repo.secretStore.clearServerPassword(profile.id)
+                val sp = profile.serverPassword?.trim()
+                if (!sp.isNullOrBlank()) {
+                    repo.secretStore.setServerPassword(profile.id, sp)
+                } else {
+                    repo.secretStore.clearServerPassword(profile.id)
+                }
+            }
+            if (secretsResult.isFailure) {
+                val t = secretsResult.exceptionOrNull()
+                _state.value = _state.value.copy(
+                    screen = AppScreen.NETWORK_EDIT,
+                    editingNetwork = profile,
+                    networkEditError = "Failed to save credentials: ${t?.message ?: t?.javaClass?.simpleName ?: "keystore error"}. Try again, or restart the app if the problem persists."
+                )
+                return@launch
             }
 
             var updated = profile.copy(
@@ -2170,6 +2400,13 @@ fun startAddNetwork() {
         nickAwayState.remove(netId)
         // Echo dedup queue
         pendingSendsByNet.remove(netId)
+        // NOTE: recentSelfSends is deliberately NOT cleared here. cleanupNetworkMaps runs
+        // on every disconnect, including the unexpected-drop path that immediately auto-
+        // reconnects - and the whole point of recentSelfSends is to dedup our own messages
+        // when the bouncer replays them on that reconnect. Wiping it here would defeat the
+        // fix. It self-expires (SELF_SEND_RETAIN_MS) and is per-buffer size-capped, so
+        // leaving it across a reconnect is safe and bounded. It IS cleared in
+        // deleteNetwork() when the profile is removed entirely.
         // Pending close-after-part
         pendingCloseAfterPart.removeAll(pendingCloseAfterPart.filter { it.startsWith(chanPrefix) }.toSet())
         // Typing expiry jobs: cancel and remove all for this network
@@ -2218,6 +2455,14 @@ fun startAddNetwork() {
             repo.deleteNetwork(id)
             repo.secretStore.clearSaslPassword(id)
             repo.secretStore.clearServerPassword(id)
+            // Drop every E2E key configured for this network's targets - the profile
+            // is gone, the keys would dangle and leak storage (and confusing UI if
+            // the same network slug is later re-created).
+            runCatching { repo.secretStore.clearAllE2eKeysForNetwork(id) }
+            e2eKeyStore.forgetNetwork(id)
+            // Drop self-send replay-dedup signatures for this network's buffers.
+            val pfx = "$id::"
+            recentSelfSends.keys.filter { it.startsWith(pfx) }.forEach { recentSelfSends.remove(it) }
         }
         disconnectNetwork(id)
         cleanupNetworkMaps(id)
@@ -2402,7 +2647,22 @@ fun startAddNetwork() {
         val rt = runtimes[parentNetId] ?: return
         val profile = _state.value.networks.firstOrNull { it.id == parentNetId } ?: return
         val cmd = when (profile.bouncerKind) {
-            BouncerKind.SOJU -> "BOUNCER LISTNETWORKS"
+            BouncerKind.SOJU -> {
+                // Wipe the cache for this profile so the LISTNETWORKS response is
+                // authoritative. soju's `BOUNCER NETWORK <id> *` delete frames are only
+                // sent for networks the bouncer believes our session knows about; a
+                // network removed via `sojuctl` while this client was offline is dropped
+                // from soju's state without a delete frame ever being delivered to us.
+                // Without the pre-wipe the stale entry lingers in our UI even after the
+                // user explicitly hits Refresh - and worse, an Import button click on a
+                // stale entry would create a profile pointing at a network the bouncer
+                // no longer routes. ZNC takes the same approach for the same reason.
+                _state.update { st ->
+                    if (!st.bouncerNetworks.containsKey(parentNetId)) st
+                    else st.copy(bouncerNetworks = st.bouncerNetworks + (parentNetId to emptyMap()))
+                }
+                "BOUNCER LISTNETWORKS"
+            }
             BouncerKind.ZNC -> {
                 // Wipe the cache for this profile so the table-scrape rebuild is
                 // authoritative. Without this, a network removed via ZNC's `DelNetwork`
@@ -2516,11 +2776,24 @@ fun startAddNetwork() {
             // user clearly hasn't set credentials yet and the clone shouldn't pretend to
             // have them.
             val parentHasSasl = parent.saslEnabled && !parentSaslPass.isNullOrEmpty()
-            val parentHasPass = !parentServerPass.isNullOrEmpty()
-            val cloneShouldUseSasl = parentHasSasl || parentHasPass
+            // Refuse the PASS->SASL auto-upgrade if the parent's serverPassword looks like
+            // a hand-formatted bouncer PASS line (e.g. "alice/libera:secret" — same shape
+            // effectivePassLine produces). SASL PLAIN sends the password verbatim in the
+            // wire frame, so copying a colon-delimited PASS string into the SASL slot would
+            // try to authenticate with the password literally being "alice/libera:secret"
+            // and the bouncer would reject it. Detection mirrors effectivePassLine's own
+            // hand-assembly heuristic: a `/` before the first `:` is unambiguous because
+            // no real IRC username contains `/`, and `@` isn't used as a hint because it
+            // appears in real passwords routinely.
+            val parentPassLooksHandFormatted = parentServerPass?.let { pw ->
+                val firstColon = pw.indexOf(':')
+                firstColon > 0 && pw.substring(0, firstColon).contains('/')
+            } ?: false
+            val parentHasUsablePassForSasl = !parentServerPass.isNullOrEmpty() && !parentPassLooksHandFormatted
+            val cloneShouldUseSasl = parentHasSasl || parentHasUsablePassForSasl
             val cloneSaslPassword = when {
                 parentHasSasl -> parentSaslPass
-                parentHasPass -> parentServerPass
+                parentHasUsablePassForSasl -> parentServerPass
                 else -> null
             }
             // Mechanism choice for the clone:
@@ -2545,12 +2818,17 @@ fun startAddNetwork() {
                 autoConnect = false,
                 isFavourite = false,
                 sortOrder = maxSort + 1,
-                // Promote to SASL when we have a credential to put there. authcid is left
-                // null so toIrcConfig falls back to `username` (which effectiveAuthIdentity
-                // then suffixes with /network at send time).
+                // Promote to SASL when we have a credential to put there. saslAuthcid is
+                // copied from the parent only when the parent ALREADY had SASL enabled.
+                // For an auto-upgrade (parent was PASS-only) we deliberately clear it so
+                // effectiveAuthIdentity falls back to `username` and re-suffixes it with
+                // the *cloned* bouncerNetworkName. Without this clear, a stale legacy value
+                // like "alice/libera" on the parent would short-circuit effectiveAuthIdentity
+                // (which leaves identities containing '/' untouched) and the clone would
+                // silently SASL as the OLD network name instead of `targetName`.
                 saslEnabled = cloneShouldUseSasl,
                 saslMechanism = cloneSaslMechanism,
-                saslAuthcid = if (cloneShouldUseSasl) parent.saslAuthcid else null,
+                saslAuthcid = if (parentHasSasl) parent.saslAuthcid else null,
                 // tlsTofuFingerprint carries over (same bouncer host, same cert).
                 // Don't carry serverPassword / saslPassword through the JSON profile; those
                 // live in SecretStore and are written below.
@@ -2563,13 +2841,21 @@ fun startAddNetwork() {
             // around could trip the bouncer's "two auth attempts" warning.
             if (cloneShouldUseSasl && !cloneSaslPassword.isNullOrEmpty()) {
                 runCatching { repo.secretStore.setSaslPassword(newId, cloneSaslPassword) }
-            } else if (parentHasPass && !parentServerPass.isNullOrEmpty()) {
-                // No SASL credential and no SASL upgrade — fall back to copying server PASS
-                // verbatim. The user wanted credentials migrated; if neither path is viable
-                // they can edit the clone to fix it manually.
+            } else if (!parentServerPass.isNullOrEmpty()) {
+                // SASL upgrade declined (no SASL on parent and the parent's PASS looks
+                // hand-formatted, OR no usable credential at all). Fall back to copying
+                // the server PASS verbatim. The user wanted credentials migrated; if the
+                // PASS-line format is wrong for the new profile they can edit the clone
+                // to fix it manually.
                 runCatching { repo.secretStore.setServerPassword(newId, parentServerPass) }
             }
-            _state.update { it.copy(bouncerCloneMessage = "Imported \"$targetName\" (enable auto-connect to use it.)") }
+            val resultHint = when {
+                parentHasSasl -> "Imported \"$targetName\" (enable auto-connect to use it.)"
+                parentHasUsablePassForSasl -> "Imported \"$targetName\" with SASL PLAIN auth from server password. Enable auto-connect to use it."
+                parentPassLooksHandFormatted -> "Imported \"$targetName\". Parent password looks pre-formatted for the bouncer; review the clone's auth settings before enabling auto-connect."
+                else -> "Imported \"$targetName\". Set credentials and auto-connect on the new profile to use it."
+            }
+            _state.update { it.copy(bouncerCloneMessage = resultHint) }
         }
     }
 
@@ -2578,19 +2864,169 @@ fun startAddNetwork() {
         _state.update { it.copy(bouncerCloneMessage = null) }
     }
 
-    fun connectNetwork(netId: String, force: Boolean = false) {
-        // Manual connect attempt: clear the auth-failure block so the scheduled reconnect
-        // (which scheduleAutoReconnect would otherwise short-circuit on) can run again.
-        // We don't validate that the user actually fixed the credentials, they may
-        // re-trip the same 464/SASL fail and the block reapplies. This is the right
-        // contract: every manual reconnect gets one shot.
-        authBlockedReconnect.remove(netId)
+    // -------------------------------------------------------------------------
+    // E2E encryption: public API used by the EncryptionDialog and the compose-
+    // input lock badge. All operations are sync (cheap memory + SharedPreferences
+    // backed by SecretStore) so they can be called directly from Compose event
+    // handlers without launching a coroutine.
+    //
+    // The caller (UI) carries the responsibility for passing a sensible target -
+    // typically the active channel name or query nick. We lowercase internally
+    // through E2eKeyStore so casing inconsistency between callers (e.g. UI typed
+    // "#Foo" vs server-cased "#foo") still hits the same key.
+    // -------------------------------------------------------------------------
+
+    /** Snapshot of the current encryption state for a target, for UI rendering. */
+    data class E2eKeyInfo(
+        val scheme: com.boxlabs.hexdroid.crypto.E2eScheme,
+        val fingerprint: String,
+        /** Base64-encoded raw key bytes. Shown in the dialog so the user can copy/share. */
+        val keyB64: String,
+    )
+
+    fun getE2eKeyInfo(networkId: String, target: String): E2eKeyInfo? {
+        val entry = e2eKeyStore.get(networkId, target) ?: return null
+        val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(entry.scheme, entry.key)
+        val b64 = android.util.Base64.encodeToString(entry.key, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        return E2eKeyInfo(entry.scheme, fp, b64)
+    }
+
+    /**
+     * Generate a fresh 256-bit AES-GCM key for [target] on [networkId] and store it.
+     * Returns the key info so the dialog can display the fingerprint and copyable
+     * base64 immediately. Overwrites any existing key (the dialog confirms first).
+     */
+    fun generateE2eKey(networkId: String, target: String): E2eKeyInfo {
+        val key = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        e2eKeyStore.set(networkId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
+            com.boxlabs.hexdroid.crypto.E2eScheme.AGM, key))
+        bumpE2eKeyVersion()
+        return E2eKeyInfo(
+            com.boxlabs.hexdroid.crypto.E2eScheme.AGM,
+            com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.AGM, key),
+            android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING),
+        )
+    }
+
+    /** Result of attempting to install a key entered by the user. */
+    sealed class E2eImportResult {
+        data class Success(val info: E2eKeyInfo) : E2eImportResult()
+        data class Failure(val reason: String) : E2eImportResult()
+    }
+
+    fun importE2eKey(networkId: String, target: String, b64: String): E2eImportResult {
+        val cleaned = b64.trim().replace(Regex("\\s+"), "")
+        if (cleaned.isEmpty()) return E2eImportResult.Failure("Key is empty")
+        val keyBytes = try {
+            android.util.Base64.decode(cleaned, android.util.Base64.DEFAULT)
+        } catch (_: IllegalArgumentException) {
+            return E2eImportResult.Failure("Not a valid base64 string")
+        }
+        if (keyBytes.size != 32) {
+            return E2eImportResult.Failure("Expected 32 bytes after base64 decode, got ${keyBytes.size}")
+        }
+        return try {
+            e2eKeyStore.set(networkId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
+                com.boxlabs.hexdroid.crypto.E2eScheme.AGM, keyBytes))
+            bumpE2eKeyVersion()
+            val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.AGM, keyBytes)
+            E2eImportResult.Success(E2eKeyInfo(
+                com.boxlabs.hexdroid.crypto.E2eScheme.AGM, fp,
+                android.util.Base64.encodeToString(keyBytes, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING),
+            ))
+        } catch (t: Throwable) {
+            E2eImportResult.Failure("Failed to store key: ${t.message ?: t::class.java.simpleName}")
+        }
+    }
+
+    fun clearE2eKeyForTarget(networkId: String, target: String) {
+        e2eKeyStore.clear(networkId, target)
+        bumpE2eKeyVersion()
+    }
+
+    /**
+     * Set a Blowfish key for [target] from a passphrase. The passphrase bytes are
+     * used directly as the Blowfish key, matching HexChat fishlim's behaviour
+     * exactly so a passphrase shared between the two clients produces the same
+     * key on both sides without any client-specific salt/KDF.
+     *
+     * Returns Success with the new key info, or Failure with a human-readable
+     * reason (passphrase too short / too long / Blowfish init failed).
+     *
+     * Note that "passphrase too short" is a UX-level guard, not a security one
+     * the cipher itself accepts 4+ bytes, but the dialog warns users when the
+     * passphrase has fewer than 8 characters because anything shorter is
+     * trivially brute-forceable. The actual key cap is 56 bytes (Blowfish's
+     * theoretical maximum); longer passphrases are truncated by some fishlim
+     * implementations and not others, so we reject rather than silently
+     * truncate.
+     */
+    fun setE2eBlowfishPassphrase(networkId: String, target: String, passphrase: String): E2eImportResult {
+        val raw = passphrase.toByteArray(Charsets.UTF_8)
+        if (raw.isEmpty()) return E2eImportResult.Failure("Passphrase is empty")
+        if (raw.size < 4) return E2eImportResult.Failure("Passphrase must be at least 4 bytes")
+        if (raw.size > 56) return E2eImportResult.Failure("Passphrase must be at most 56 bytes (got ${raw.size})")
+        return try {
+            e2eKeyStore.set(networkId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
+                com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH, raw))
+            bumpE2eKeyVersion()
+            val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH, raw)
+            // The "key bytes" surfaced to the dialog for Blowfish are the
+            // passphrase the user typed. Showing them back is useful for the
+            // "reveal key" flow so the user can re-copy the passphrase for
+            // their HexChat-using friend later.
+            E2eImportResult.Success(E2eKeyInfo(
+                com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH, fp,
+                android.util.Base64.encodeToString(raw, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING),
+            ))
+        } catch (t: Throwable) {
+            E2eImportResult.Failure("Failed to store key: ${t.message ?: t::class.java.simpleName}")
+        }
+    }
+
+    /**
+     * Trivial recomposition trigger for the compose-input lock badge: bumped on
+     * every key set/clear so UI observers re-read getE2eKeyInfo from a stable
+     * snapshot. State-flow-driven so we don't need to plumb a separate event
+     * bus or expose the keystore directly to compose.
+     */
+    private fun bumpE2eKeyVersion() {
+        _state.update { it.copy(e2eKeyVersion = it.e2eKeyVersion + 1) }
+    }
+
+    /**
+     * Connect (or re-connect) a network.
+     *
+     * @param clearAuthBlock  Pass `true` only for user-initiated retries (manual button
+     *     tap, profile save, "retry after granting permission" flows, "allow plaintext
+     *     and connect" flow). The auth-failure block is then cleared so the scheduled
+     *     reconnect (which scheduleAutoReconnect would otherwise short-circuit on) can
+     *     run again - the user implicitly opted into one more attempt by reaching this
+     *     path. Pass `false` for automated callers (autoconnect on app start, restore-
+     *     desired-connections after process resume, the ConnectivityManager onAvailable
+     *     callback). Those paths must NOT clear the block, otherwise an auth-rejected
+     *     network will retry the same wrong credentials every time the WiFi reconnects
+     *     or the cell switches over - which is the "auto-reconnect halted but retries
+     *     again in 10 minutes" bug from 1.6.2: connectNetwork was unconditionally
+     *     clearing authBlockedReconnect, and the network callback fires roughly every
+     *     Doze cycle.
+     */
+    fun connectNetwork(netId: String, force: Boolean = false, clearAuthBlock: Boolean = false) {
+        if (clearAuthBlock) authBlockedReconnect.remove(netId)
         viewModelScope.launch {
             // Ensure flap state is loaded from DataStore before checking it.
             // In the normal case this is a no-op (init already loaded it); this guards
             // the race where a connect is requested before the init coroutine completes.
             ensureFlapPausedLoaded()
             withNetLock(netId) {
+                // Same gate as scheduleAutoReconnect's entry: if the network is auth-
+                // blocked and the caller didn't explicitly clear the block (i.e. this
+                // is an automated path), refuse to connect and leave the existing
+                // "Auth failed - reconnect halted" status in place. Without this gate,
+                // the connect would proceed, re-trip the same SASL/PASS rejection, and
+                // the user would see a flood of repeat auth-failure lines whenever
+                // network connectivity flapped.
+                if (!clearAuthBlock && netId in authBlockedReconnect) return@withNetLock
                 connectNetworkInternal(netId, force)
             }
         }
@@ -2713,6 +3149,13 @@ fun startAddNetwork() {
         )
 
         val client = IrcClient(cfg)
+        // Attach the E2E codec for this network. The codec wraps the per-process
+        // shared keystore (which lazily hydrates from SecretStore) and is held by
+        // the IrcClient for its lifetime - reconnecting the same network reuses
+        // the same client instance, so existing per-target keys carry over. A
+        // network with no keys configured pays only the per-message null-check
+        // since encryptOutgoing/decryptIncoming short-circuit on an empty cache.
+        client.e2eCodec = com.boxlabs.hexdroid.crypto.E2eCodec(netId, e2eKeyStore)
         val thisClient = client
         val rt = NetRuntime(netId = netId, client = client, myNick = cfg.nick, suppressMotd = _state.value.settings.hideMotdOnConnect)
         runtimes[netId] = rt
@@ -2727,12 +3170,90 @@ fun startAddNetwork() {
             // Pass netId so concurrent multi-network connects each get their own lock.
             KeepAliveService.acquireScopedWakeLock(appContext, netId)
             try {
-                client.events().collect { ev ->
-                    runCatching { handleEvent(netId, ev) }
-                        .onFailure { t ->
-                            val msg = (t.message ?: t::class.java.simpleName)
-                            append(bufKey(netId, "*server*"), from = "CLIENT", text = "Event handler error: $msg", isHighlight = true)
+                // Outer try around the flow collection itself, not just the per-event
+                // handler. The events() flow can throw mid-stream for several reasons:
+                //   - writeLine() called from the inline registration sequence (PASS / CAP
+                //     LS / NICK / USER) can raise IOException if the socket dropped between
+                //     openSocket and the first write (rare; fast network blips, server-side
+                //     instant-flood disconnects, midline TLS aborts on some bouncers).
+                //   - EncodingHelper.encode() can throw on degenerate input encodings.
+                //   - The IrcSession state machine reaches an assertion only triggered by
+                //     a very specific server-side malformed CAP / SASL sequence.
+                // Without this outer try, any such throw propagates out of collect, kills
+                // this viewModelScope.launch coroutine, and (because viewModelScope's default
+                // uncaught-exception handler re-throws on Android) crashes the whole process.
+                // The user-visible symptom is "app got to Negotiating capabilities, then
+                // crashed and closed" - exactly because the throw lands between sending the
+                // "Negotiating capabilities..." status and the first user-visible event of
+                // the new connection.
+                //
+                // Containment policy:
+                //   - CancellationException is re-thrown so coroutine cancellation still
+                //     works (this is what releases the wakelock via the finally block, and
+                //     what lets manual disconnect / reconnect cycles tear down cleanly).
+                //   - Any other Throwable is logged, surfaced in the server buffer, and
+                //     translated to a Disconnected handler invocation so the connection
+                //     state UI reaches a coherent terminal state (status pill, reconnect
+                //     scheduling, etc.) instead of being stuck at "Connecting".
+                try {
+                    client.events().collect { ev ->
+                        // Hop to Main.immediate before touching state. The dozens of
+                        //
+                        //     val st = _state.value
+                        //     ... compute ...
+                        //     _state.value = st.copy(...)
+                        //
+                        // patterns scattered through handleEvent are NOT atomic: between
+                        // the read and the write, a concurrent UI tap (which mutates
+                        // state on the Main thread) can land its own write, and the
+                        // event handler then clobbers it with a state value derived from
+                        // the pre-tap snapshot. The visible symptom is "I tapped a
+                        // buffer and the selection bounced back" / "my unread badge
+                        // cleared then came back" - rare per-tap, but the race window
+                        // grows with IRC event volume (busy channel = more handler runs
+                        // = more chances to clobber).
+                        //
+                        // Forcing event handling onto the Main thread serializes it with
+                        // UI mutations: there is now exactly one thread that ever writes
+                        // _state.value, so the read-modify-write sequence is atomic by
+                        // construction. We use Main.immediate so callers that are
+                        // already on Main don't pay an extra dispatch hop (in this code
+                        // path the collect runs on IO so we'll dispatch every time, but
+                        // .immediate is the right semantic - "be on Main, dispatch only
+                        // if necessary"). CPU cost per event is microseconds; the only
+                        // real concern would be a single slow handler blocking UI
+                        // frames, which doesn't happen in practice (scrollback-load and
+                        // similar heavy work already runs in a separate launch).
+                        //
+                        // Throws from handleEvent are caught here on Main; the outer
+                        // try below still catches anything that escapes from inside the
+                        // collect's flow emission (writeLine IOException, etc.).
+                        withContext(Dispatchers.Main.immediate) {
+                            runCatching { handleEvent(netId, ev) }
+                                .onFailure { t ->
+                                    val msg = (t.message ?: t::class.java.simpleName)
+                                    append(bufKey(netId, "*server*"), from = "CLIENT", text = "Event handler error: $msg", isHighlight = true)
+                                }
                         }
+                    }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (t: Throwable) {
+                    android.util.Log.e("IrcViewModel", "events() flow crashed for $netId", t)
+                    val msg = (t.message ?: t::class.java.simpleName)
+                    runCatching {
+                        append(
+                            bufKey(netId, "*server*"),
+                            from = "CLIENT",
+                            text = "*** Connection error: $msg (stack trace in logcat)",
+                            isHighlight = true,
+                        )
+                    }
+                    // Drive the connection back to a clean Disconnected state so the UI
+                    // doesn't get stuck on the pre-crash status. We can't rely on the
+                    // server side sending QUIT here - the throw probably happened before
+                    // any clean shutdown sequence ran.
+                    runCatching { handleEvent(netId, IrcEvent.Disconnected(msg)) }
                 }
             } finally {
                 KeepAliveService.releaseScopedWakeLock(netId)
@@ -2812,8 +3333,16 @@ fun startAddNetwork() {
         disconnectNetwork(netId)
     }
 
-    fun disconnectNetwork(netId: String) {
-        val quitMsg = _state.value.settings.quitMessage.ifBlank { "Client disconnect" }
+    /**
+     * Disconnect [netId]. The optional [reasonOverride] is sent to the server as
+     * the QUIT message; if null or blank, the persisted `settings.quitMessage`
+     * (or "Client disconnect" if that's also blank) is used. This is what makes
+     * `/quit Going to lunch, back in an hour` actually send "Going to lunch,
+     * back in an hour" on the wire instead of the user's default quit message.
+     */
+    fun disconnectNetwork(netId: String, reasonOverride: String? = null) {
+        val quitMsg = reasonOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: _state.value.settings.quitMessage.ifBlank { "Client disconnect" }
         viewModelScope.launch {
             withNetLock(netId) {
             val removedDesired = desiredConnected.remove(netId)
@@ -2900,7 +3429,21 @@ fun startAddNetwork() {
         autoReconnectJobs.remove(netId)?.cancel()
         val serverKey = bufKey(netId, "*server*")
         autoReconnectJobs[netId] = viewModelScope.launch(Dispatchers.Default) {
-            while (isActive) {
+            // Outer guard. The loop body touches a lot of subsystems - state mutation,
+            // notifications, log writes, network checks, KeepAliveService wakelock, the
+            // socket connect itself - any of which can throw in the wild (Samsung
+            // PendingIntent rate-limit firing under load, SAF revocation mid-session,
+            // a transient JCE provider failure during TLS handshake, OOM during a
+            // memory-pressured connect). viewModelScope is a SupervisorJob so a child
+            // failure doesn't propagate to the parent, but the default
+            // CoroutineExceptionHandler on Android re-throws unhandled child exceptions
+            // and crashes the app. Catching here keeps the reconnect machinery resilient:
+            // the failed attempt is logged, the netId stays in autoReconnectJobs only
+            // briefly (cleared in finally), and the next manual reconnect can start fresh.
+            // CancellationException is re-thrown so explicit cancel() still works as
+            // structured-concurrency expects.
+            try {
+                while (isActive) {
                 val attempt = reconnectAttempts[netId] ?: 0
                 val baseDelaySec = _state.value.settings.autoReconnectDelaySec.coerceIn(
                     ConnectionConstants.RECONNECT_BASE_DELAY_MIN_SEC,
@@ -3014,6 +3557,27 @@ fun startAddNetwork() {
                 reconnectAttempts[netId] = (attempt + 1).coerceAtMost(ConnectionConstants.RECONNECT_MAX_ATTEMPTS)
             }
             autoReconnectJobs.remove(netId)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                // Normal cancellation from autoReconnectJobs.remove(netId)?.cancel() upstream.
+                // Re-throw so structured concurrency cleanup runs normally.
+                throw ce
+            } catch (t: Throwable) {
+                android.util.Log.e("IrcViewModel", "autoReconnect loop crashed for $netId", t)
+                runCatching {
+                    append(
+                        serverKey,
+                        from = "CLIENT",
+                        text = "*** Auto-reconnect halted: ${t.message ?: t::class.java.simpleName} (manual reconnect needed)",
+                        isHighlight = true,
+                    )
+                }
+            } finally {
+                // Always evict the stale job reference so a fresh scheduleAutoReconnect
+                // can start cleanly. Without this, a thrown-out job would linger in
+                // autoReconnectJobs and the "already have a job for this netId" early
+                // return in scheduleAutoReconnect would silently refuse all later retries.
+                autoReconnectJobs.remove(netId)
+            }
         }
     }
 
@@ -3129,7 +3693,8 @@ fun startAddNetwork() {
 
     // Auto-expiry jobs for *received* typing indicators.
     // Key: "$bufferKey/$nick". IRCv3 spec recommends expiring after 30 s with no update.
-    private val receivedTypingExpiryJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+    private val receivedTypingExpiryJobs: MutableMap<String, kotlinx.coroutines.Job> =
+        java.util.concurrent.ConcurrentHashMap()
 
     /**
      * Called by the UI whenever the input text changes. Sends "active" typing status at most
@@ -3159,6 +3724,43 @@ fun startAddNetwork() {
         val (prevNet, prevBuf) = splitKey(prevKey)
         viewModelScope.launch {
             runCatching { runtimes[prevNet]?.client?.sendTypingStatus(prevBuf, "done") }
+        }
+    }
+
+    /**
+     * Called from [HexDroidApp.onActivityStarted] when the app comes back to the
+     * foreground. Resets unread and highlight counters on the currently-selected
+     * buffer because the user is, by definition, looking at it.
+     *
+     * Why this is needed: append()'s isSelected predicate includes
+     * AppVisibility.isForeground. While the app is backgrounded, isForeground is
+     * false, so an incoming message for the selected buffer increments unread.
+     * Without this hook, the user comes back to find a stale "1" badge on the
+     * channel they're actively viewing - particularly visible when they open the
+     * sidebar to switch channels. The reset here mirrors what openBuffer does
+     * for an explicit buffer-switch.
+     *
+     * Also anchors a lastReadTimestamp so the "unread separator" line shows up
+     * in the right place if the user later switches AWAY and then comes back -
+     * otherwise the separator would be anchored at the moment of the most
+     * recent foreground transition, which is wrong (no actual messages were
+     * "marked as read", we just suppressed the badge).
+     *
+     * Idempotent: safe to call when nothing is selected, when the selected
+     * buffer has zero unread, or when the buffer doesn't exist.
+     */
+    fun consumeUnreadOnForeground() {
+        _state.update { st ->
+            val key = st.selectedBuffer
+            if (key.isBlank()) return@update st
+            // Only reset when actually on the chat screen - foregrounding while on
+            // Settings or Networks shouldn't clear unread counters because the
+            // user isn't seeing the chat content yet.
+            if (st.screen != AppScreen.CHAT) return@update st
+            val buf = st.buffers[key] ?: return@update st
+            if (buf.unread == 0 && buf.highlights == 0) return@update st
+            val updated = buf.copy(unread = 0, highlights = 0)
+            st.copy(buffers = st.buffers + (key to updated))
         }
     }
 
@@ -3265,6 +3867,146 @@ fun startAddNetwork() {
                 val cmd = cmdLine.substringBefore(' ').lowercase()
 
                 when (cmd) {
+                    "quit", "disconnect" -> {
+                        // User-initiated disconnect. Send QUIT (so the server / bouncer sees
+                        // a graceful goodbye and any active channels announce a clean exit
+                        // to other users), then mark the network as manual-disconnecting
+                        // before the socket closes so the Disconnected handler's reconnect
+                        // path correctly identifies this as deliberate and bails. Without
+                        // this dual action, the raw "/quit" would just send QUIT to the
+                        // server; the server-side disconnect would then look identical to
+                        // an unexpected drop (manualDisconnecting unset, desiredConnected
+                        // still true) and scheduleAutoReconnect would immediately bring
+                        // the connection back, with the user-visible symptom of "I typed
+                        // /quit and it reconnected".
+                        //
+                        // Everything after the command verb is the quit message:
+                        //   /quit                       -> persisted settings.quitMessage
+                        //   /quit gone for tea          -> "gone for tea"
+                        //   /quit "back in 5"           -> "\"back in 5\"" (quotes preserved
+                        //                                  because IRC QUIT trailing is free-
+                        //                                  form text; users can include
+                        //                                  formatting / colour codes here too)
+                        // We use cmdLine (not the lowercased cmd) so the casing of the
+                        // user's message is preserved on the wire.
+                        val reason = cmdLine.substringAfter(' ', missingDelimiterValue = "")
+                            .trim()
+                            .takeIf { it.isNotBlank() }
+                        disconnectNetwork(netId, reasonOverride = reason)
+                        return@launch
+                    }
+                    "agm-key" -> {
+                        // Developer/test command. Manages per-target AES-256-GCM keys
+                        // for end-to-end encryption. Will be supplanted by the
+                        // channel-settings sheet + QR pairing in commit 2/3, but is
+                        // sufficient for two-device testing today.
+                        //
+                        //   /agm-key gen [target]           - generate a fresh 32-byte key,
+                        //                                     store it, print it so the
+                        //                                     other side can /agm-key set
+                        //   /agm-key set <target> <b64>     - install a base64-encoded key
+                        //   /agm-key clear <target>         - remove the key
+                        //   /agm-key info [target]          - show scheme + fingerprint
+                        //   /agm-key                        - usage
+                        //
+                        // "target" defaults to the current buffer (channel or query nick).
+                        // base64 form is standard (with or without padding) - both accepted.
+                        val parts = cmdLine.split(Regex("\\s+"), limit = 4)
+                        val sub = parts.getOrNull(1)?.lowercase() ?: ""
+                        fun usage() {
+                            append(currentKey, from = null, isLocal = true, doNotify = false,
+                                text = "*** /agm-key gen [target] | set <target> <b64> | clear <target> | info [target]")
+                        }
+                        val defaultTarget = if (bufferName == "*server*") null else bufferName
+                        when (sub) {
+                            "gen" -> {
+                                val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: defaultTarget
+                                if (target == null) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** /agm-key gen needs a target (or run it inside a channel/query)")
+                                    return@launch
+                                }
+                                val key = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+                                e2eKeyStore.set(netId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
+                                    com.boxlabs.hexdroid.crypto.E2eScheme.AGM, key))
+                                val b64 = android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+                                val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.AGM, key)
+                                append(currentKey, from = null, isLocal = true, doNotify = false,
+                                    text = "*** AGM key generated for $target. Fingerprint: $fp")
+                                append(currentKey, from = null, isLocal = true, doNotify = false,
+                                    text = "*** On the other device, run:   /agm-key set $target $b64")
+                                append(currentKey, from = null, isLocal = true, doNotify = false,
+                                    text = "*** (Verify the fingerprint matches on both sides before sending anything sensitive.)")
+                                return@launch
+                            }
+                            "set" -> {
+                                val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() }
+                                val b64 = parts.getOrNull(3)?.trim()
+                                if (target == null || b64.isNullOrBlank()) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** Usage: /agm-key set <target> <base64>")
+                                    return@launch
+                                }
+                                val keyBytes = try {
+                                    android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                } catch (_: IllegalArgumentException) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** /agm-key set: invalid base64 in key argument")
+                                    return@launch
+                                }
+                                if (keyBytes.size != 32) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** /agm-key set: expected 32-byte key (got ${keyBytes.size} bytes after base64 decode)")
+                                    return@launch
+                                }
+                                try {
+                                    e2eKeyStore.set(netId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
+                                        com.boxlabs.hexdroid.crypto.E2eScheme.AGM, keyBytes))
+                                    val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.AGM, keyBytes)
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** AGM key installed for $target. Fingerprint: $fp")
+                                } catch (t: Throwable) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** Failed to store key: ${t.message ?: t.javaClass.simpleName}")
+                                }
+                                return@launch
+                            }
+                            "clear" -> {
+                                val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: defaultTarget
+                                if (target == null) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** /agm-key clear needs a target (or run it inside a channel/query)")
+                                    return@launch
+                                }
+                                e2eKeyStore.clear(netId, target)
+                                append(currentKey, from = null, isLocal = true, doNotify = false,
+                                    text = "*** AGM key cleared for $target. Messages will now be sent in cleartext.")
+                                return@launch
+                            }
+                            "info" -> {
+                                val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: defaultTarget
+                                if (target == null) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** /agm-key info needs a target (or run it inside a channel/query)")
+                                    return@launch
+                                }
+                                val entry = e2eKeyStore.get(netId, target)
+                                if (entry == null) {
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** No encryption key configured for $target")
+                                } else {
+                                    val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(entry.scheme, entry.key)
+                                    append(currentKey, from = null, isLocal = true, doNotify = false,
+                                        text = "*** $target: scheme=${entry.scheme.displayName}  fingerprint=$fp")
+                                }
+                                return@launch
+                            }
+                            else -> {
+                                usage()
+                                return@launch
+                            }
+                        }
+                    }
                     "list" -> {
                         goTo(AppScreen.LIST)
                         return@launch
@@ -3275,7 +4017,8 @@ fun startAddNetwork() {
                         // If we're in a channel/query and connected, send it as a normal message.
                         if (bufferName != "*server*" && c != null) {
                             c.privmsg(bufferName, line)
-                            append(currentKey, from = fromNick, text = line, isLocal = true)
+                            val enc = e2eKeyStore.get(netId, bufferName)?.scheme
+                            append(currentKey, from = fromNick, text = line, isLocal = true, encryption = enc)
                             recordLocalSend(netId, currentKey, line, isAction = false)
                         } else {
                             append(currentKey, from = fromNick, text = line, isLocal = true)
@@ -3492,8 +4235,16 @@ fun startAddNetwork() {
                         }
 
                         val target = if (bufferName == "*server*") return@launch else bufferName
-                        c.sendRaw("PRIVMSG $target :\u0001ACTION $msg\u0001")
-                        append(currentKey, from = st.connections[netId]?.myNick ?: st.myNick, text = msg, isAction = true, isLocal = true)
+                        // Route through ctcp() so privmsg()'s E2E hook gets to encrypt
+                        // the ACTION body when a per-target key is configured. Direct
+                        // c.sendRaw("PRIVMSG …") would bypass that hook and ship the
+                        // ACTION text in clear, which would silently break encryption
+                        // for /me lines only - a particularly confusing partial-failure
+                        // for anyone debugging "why does my chat message look encrypted
+                        // but my /me line doesn't?".
+                        c.ctcp(target, "ACTION $msg")
+                        val actionEnc = e2eKeyStore.get(netId, target)?.scheme
+                        append(currentKey, from = st.connections[netId]?.myNick ?: st.myNick, text = msg, isAction = true, isLocal = true, encryption = actionEnc)
                         recordLocalSend(netId, currentKey, msg, isAction = true)
                         return@launch
                     }
@@ -3757,11 +4508,16 @@ fun startAddNetwork() {
 
             // Split message if it exceeds max length
             val chunks = splitMessageByLength(fullMessage, maxMsgLen)
-            
+            // Snapshot the encryption scheme for this target outside the chunk loop
+            // so all chunks of a single send render with the same lock state, even if
+            // a key is cleared mid-loop (which can't actually happen on a single-
+            // threaded IrcViewModel but we don't want to repeat the lookup either).
+            val sendEncryption = e2eKeyStore.get(netId, bufferName)?.scheme
+
             for (chunk in chunks) {
                 if (chunk.isEmpty()) continue
                 c.privmsg(bufferName, chunk)
-                append(currentKey, from = myNick, text = chunk, isLocal = true)
+                append(currentKey, from = myNick, text = chunk, isLocal = true, encryption = sendEncryption)
                 recordLocalSend(netId, currentKey, chunk, isAction = false)
             }
         }
@@ -3989,14 +4745,32 @@ fun startAddNetwork() {
                 // (dropped before STABLE_CONNECTION_MS) never clears the backoff counter.
                 stableConnectionJobs.remove(netId)?.cancel()
                 val r = ev.reason?.trim()
+                // Connect failures and mid-stream connection errors arrive prefixed
+                // ("Connect failed: …", "Connection error: …") - emit those as ERROR-
+                // styled lines, not the "*** Disconnected: …" system-message format.
+                // This replaces the previous Error + Disconnected event pair that
+                // produced duplicate visible lines for the same condition. Tray
+                // notifications stay suppressed (isHighlight = false, doNotify = false)
+                // because a routine connect-failure-and-retry shouldn't ping the user;
+                // the in-buffer error line is enough.
+                val isConnectFailureLine = r != null && (
+                    r.startsWith("Connect failed:", ignoreCase = true) ||
+                    r.startsWith("Connection error:", ignoreCase = true) ||
+                    r.startsWith("Connection failed:", ignoreCase = true)
+                )
                 val pretty = when {
                     r.isNullOrBlank() -> "Disconnected"
                     r.equals("Client disconnect", ignoreCase = true) -> "Disconnected"
                     r.equals("EOF", ignoreCase = true) -> "Disconnected"
                     r.equals("socket closed", ignoreCase = true) -> "Disconnected"
+                    isConnectFailureLine -> r
                     else -> "Disconnected: $r"
                 }
-                append(bufKey(netId, "*server*"), from = null, text = "*** $pretty", doNotify = false)
+                if (isConnectFailureLine) {
+                    append(bufKey(netId, "*server*"), from = "ERROR", text = pretty, isHighlight = false, doNotify = false)
+                } else {
+                    append(bufKey(netId, "*server*"), from = null, text = "*** $pretty", doNotify = false)
+                }
                 setNetConn(netId) { it.copy(connecting = false, connected = false, status = pretty, lagMs = null) }
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
                 cleanupNetworkMaps(netId)
@@ -4168,7 +4942,14 @@ fun startAddNetwork() {
                     val ts = System.currentTimeMillis()
                     val line = ev.line
                     val logLine = formatLogLine(ts, from = null, text = line, isAction = false)
-                    logs.append(netName, "*server*", logLine, stNow.settings.logFolderUri)
+                    val logFolderUri = stNow.settings.logFolderUri
+                    // Dispatch to IO so the disk/SAF write doesn't run on Main. See the
+                    // matching comment in append() for the full rationale - same race
+                    // between handleEvent now running on Main.immediate and LogWriter
+                    // doing synchronous buffered writes that occasionally flush.
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching { logs.append(netName, "*server*", logLine, logFolderUri) }
+                    }
                 }
                 // PONG handling and lag measurement are done in IrcCore; LagUpdated events update the UI.
             }
@@ -4668,6 +5449,19 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                 }
             }
             is IrcEvent.ChatMessage -> {
+                // Drop PRIVMSGs whose body is literally empty (zero bytes of trailing).
+                // Common sources: malformed CTCP wrappers that left only the SOH sentinel,
+                // a bouncer flushing a buffered control line with empty trailing, or a
+                // remote client sending "PRIVMSG #chan :". Without this guard the UI
+                // renders a bare "<nick> " line.
+                //
+                // Important: we only drop *truly empty* text. A message that looks blank
+                // because the wrong encoding decoded its bytes into invisible/control chars
+                // is still real content - dropping it would hide that the encoding is wrong.
+                // The encoding-detection fix (5-minute timeout + stricter thresholds in
+                // EncodingHelper) addresses the root cause; this guard only covers the
+                // protocol-level empty-trailing case.
+                if (ev.text.isEmpty()) return
                 val my = _state.value.connections[netId]?.myNick ?: runtimes[netId]?.myNick ?: _state.value.myNick
                 val fromMe = ev.from.equals(my, ignoreCase = true)
                 if (!fromMe && isNickIgnored(netId, ev.from)) return
@@ -4717,9 +5511,19 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     msgId = ev.msgId,
                     replyToMsgId = ev.replyToMsgId,
                     isHistory = ev.isHistory,
+                    encryption = ev.encryption,
                 )
             }
             is IrcEvent.Notice -> {
+                // Drop empty-bodied notices (literally zero bytes of trailing). Mirrors the
+                // ChatMessage guard above. Trigger seen in practice: bouncer bootstrapping
+                // notices (`NOTICE * :` with empty body), services pings, and the corner
+                // case where a remote client sends `NOTICE #chan :` with no payload.
+                // Without this guard the renderer paints a blank line attributed to the
+                // sender. Note: we don't filter encoding-mangled but non-empty content
+                // here (same as ChatMessage) - the user might want to see and fix the
+                // encoding rather than have the message silently dropped.
+                if (ev.text.isEmpty()) return
                 val st = _state.value
                 val suppressUnread = ev.isHistory && !st.settings.ircHistoryCountsAsUnread
                 if (!ev.isServer && isNickIgnored(netId, ev.from)) return
@@ -4874,6 +5678,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     doNotify = false,
                     msgId = ev.msgId,
                     replyToMsgId = ev.replyToMsgId,
+                    encryption = ev.encryption,
                 )
             }
 
@@ -5124,7 +5929,15 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     )
                 }
 
-                if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
+                // Nicklist removal: same defensive policy as Quit. For live PARTs we
+                // always update; for history-flagged PARTs we still remove the nick when
+                // they are actually present in the channel right now, because the alternative
+                // (display "X left" in chat while X stays in the nicklist) is the worse UX.
+                // removeNickFromChannel is a no-op if the nick isn't currently listed, so
+                // a genuinely-historical replay can't synthesize a fake removal.
+                val affectLivePart = shouldAffectLiveState(ev.isHistory, ev.timeMs)
+                val nickIsHere = chanNickCase[chanKey]?.containsKey(casefoldText(netId, ev.nick)) == true
+                if (affectLivePart || nickIsHere) {
                     // Re-read state after append so we don't overwrite the message we just appended.
                     val st1 = _state.value
                     removeNickFromChannel(netId, chanKey, ev.nick)
@@ -5220,28 +6033,29 @@ if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
 
                 val affectLive = shouldAffectLiveState(ev.isHistory, ev.timeMs)
 
-                val affected = if (!affectLive) {
-                    emptyList()
-                } else {
-                    st0.nicklists
-                        .filterKeys { it.startsWith("$netId::") }
-                        .filterValues { list -> list.any { parseNickWithPrefixes(netId, it).first.let { b -> casefoldText(netId, b) == casefoldText(netId, ev.nick) } } }
-                        .keys
-                        .toList()
-                }
-
-                val allChannelTargets = st0.buffers.keys
-                    .filter { it.startsWith("$netId::") }
-                    .filter { key ->
-                        val (_, name) = splitKey(key)
-                        isChannelOnNet(netId, name)
+                // Compute which channels the quitting nick is currently in, REGARDLESS of
+                // affectLive. The flag only gates state *mutation*; we still need an accurate
+                // target list to display the QUIT line only in channels the user actually
+                // shared with us.
+                val foldedNick = casefoldText(netId, ev.nick)
+                val affected = st0.nicklists
+                    .asSequence()
+                    .filter { (k, _) -> k.startsWith("$netId::") }
+                    .filter { (_, list) ->
+                        list.any { display ->
+                            casefoldText(netId, parseNickWithPrefixes(netId, display).first) == foldedNick
+                        }
                     }
+                    .map { it.key }
+                    .toList()
 
-                val targets = when {
-                    affected.isNotEmpty() -> affected
-                    allChannelTargets.isNotEmpty() -> allChannelTargets
-                    else -> listOf(bufKey(netId, "*server*"))
-                }
+                // Targets: ONLY channels where the user actually shared a nicklist with us.
+                // Previous behavior fell back to "all channels on this network" when the
+                // nicklist scan came up empty - that caused QUIT lines to appear in channels
+                // the parting user was never in. If we have no evidence they shared a
+                // channel with us, we have nothing meaningful to show, so the message is
+                // dropped entirely (matches how HexChat / Konversation behave).
+                val targets = affected
                 if (!st0.settings.hideJoinPartQuit) {
                     val host = ev.userHost ?: "*!*@*"
                     val msg = "* ${ev.nick} ($host) has quit" + (reason?.let { " [$it]" } ?: "")
@@ -5259,20 +6073,39 @@ if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
                 }
 
 
+// Nicklist removal:
+//   - For live events (affectLive = true): remove from every nicklist on this network.
+//   - For events flagged as history (affectLive = false): still remove from any channel
+//     where this nick is currently listed - the user was genuinely there and is now
+//     gone, regardless of the timestamp gating. Without this, a slightly-stale @time
+//     tag (clock skew, brief netsplit on the bouncer side, replayed-as-history live
+//     QUIT) would leave the nick hanging in the nicklist after their PART/QUIT was
+//     already displayed in chat. removeNickFromChannel is a no-op when the nick
+//     isn't actually present, so non-shared channels are unaffected.
+val st1 = _state.value
+val mutatedKeys = mutableListOf<String>()
 if (affectLive) {
-    // Remove the quitter from all nicklists we have for this network.
-    // Re-read state after appends so we don't overwrite message updates.
-    val st1 = _state.value
     val keys = st1.nicklists.keys.filter { it.startsWith("$netId::") }
     for (k in keys) {
         removeNickFromChannel(netId, k, ev.nick)
+        mutatedKeys.add(k)
     }
+} else {
+    for (k in affected) {
+        removeNickFromChannel(netId, k, ev.nick)
+        mutatedKeys.add(k)
+    }
+}
+if (mutatedKeys.isNotEmpty() || affectLive) {
     val newNicklists = st1.nicklists.mapValues { (k, list) ->
         val (kid, _) = splitKey(k)
-        if (kid != netId) list else rebuildNicklist(netId, k)
+        if (kid != netId || k !in mutatedKeys) list else rebuildNicklist(netId, k)
     }
-    // Also remove from away state map.
-    nickAwayState[netId]?.remove(casefoldText(netId, ev.nick))
+    // Also remove from away state map - only on truly live events; a stale replay
+    // shouldn't reset somebody's current away status.
+    if (affectLive) {
+        nickAwayState[netId]?.remove(casefoldText(netId, ev.nick))
+    }
     // Clear any pending typing indicator for the quitting nick across all buffers on this network.
     val newBufs = st1.buffers.mapValues { (k, buf) ->
         if (k.startsWith("$netId::") && ev.nick in buf.typingNicks) {
@@ -5786,7 +6619,26 @@ if (affectLive) {
         scrollbackLoadStartedAtMs[key] = loadStartMs
 
         viewModelScope.launch(Dispatchers.IO) {
-            val lines = logs.readTail(netName, bufferName, maxLines, st.settings.logFolderUri)
+            // Outer try around the whole scrollback pipeline. A throw here lands in
+            // viewModelScope's default uncaught-exception handler, which on Android
+            // re-throws and crashes the process. Concrete trigger we've seen in the
+            // wild: LogWriter.readTail -> readTailSaf -> findChild -> ContentResolver
+            // .query, which throws SecurityException when the saved logFolderUri came
+            // from a previous install via backup-restore and the SAF permission grant
+            // didn't transfer with the data. LogWriter now catches that at the source,
+            // but parseLogLineToUiMessage, the dedup arithmetic, and the merge into
+            // state are all I/O- and parse-heavy code paths that could plausibly throw
+            // on a partially-corrupted log file, so the belt-and-braces catch stays.
+            // Any failure here just means "no scrollback preload" - the user can still
+            // chat normally; live messages aren't affected.
+            val lines = try {
+                logs.readTail(netName, bufferName, maxLines, st.settings.logFolderUri)
+            } catch (t: Throwable) {
+                android.util.Log.w("IrcViewModel", "Scrollback preload failed for $key", t)
+                scrollbackRequested.remove(key)
+                scrollbackLoadStartedAtMs.remove(key)
+                return@launch
+            }
             if (lines.isEmpty()) {
                 // Allow a later retry if a log is created after the buffer exists.
                 scrollbackRequested.remove(key)
@@ -6118,6 +6970,13 @@ if (affectLive) {
          * messages skip that path entirely.
          */
         isHistory: Boolean = false,
+        /**
+         * E2E scheme the wire payload arrived under. Propagated into the resulting
+         * UiMessage so the chat renderer can draw a per-scheme padlock icon. Null
+         * for messages that never had an encryption prefix on the wire (the common
+         * case for system lines, server numerics, etc.).
+         */
+        encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         val msg = UiMessage(
@@ -6129,6 +6988,7 @@ if (affectLive) {
             isMotd = isMotd,
             msgId = msgId,
             replyToMsgId = replyToMsgId,
+            encryption = encryption,
         )
 
         // Content-fingerprint dedup. `time=` is server-stamped on replayed messages so two
@@ -6152,6 +7012,23 @@ if (affectLive) {
         val historyFingerprint: String? = if (from != null) {
             "$ts|$from|${text.hashCode()}"
         } else null
+
+        // Self-echo replay dedup. The fingerprint above keys on the timestamp, which
+        // works for replay-vs-replay (both carry the server `time=`) but NOT for
+        // local-echo-vs-replay: our own outgoing message was echoed locally with the
+        // device clock, while the bouncer replays it on reconnect with the server
+        // clock, so the fingerprints differ and the replay slips through as a visible
+        // duplicate (the classic "my last few messages appear twice after reconnect"
+        // bug). We catch it with a content+sender match against the recentSelfSends
+        // tracker, independent of timestamp. Only applied to history/replay lines
+        // attributed to our own nick; a live message or a message from anyone else is
+        // never affected. Computed outside the _state.update block because it consumes
+        // a tracker entry (a side effect that must not run on a CAS retry).
+        val (selfNetId, _) = splitKey(bufferKey)
+        val myNick = _state.value.connections[selfNetId]?.myNick ?: runtimes[selfNetId]?.myNick
+        val isFromMe = from != null && myNick != null && from.equals(myNick, ignoreCase = true)
+        val isSelfEchoReplayDuplicate =
+            isFromMe && isHistory && consumeSelfSendIfMatch(bufferKey, text, isAction)
 
         // Chathistory marker: when the FIRST live message for this buffer arrives after one
         // or more isHistory=true messages, emit a "── Chat history • Last message: <ts> ──"
@@ -6200,6 +7077,14 @@ if (affectLive) {
         var msgWasDuplicate = false
         _state.update { st: UiState ->
             val buf = st.buffers[bufferKey] ?: UiBuffer(bufferKey)
+
+            // Self-echo replay dedup (computed above, outside the update so the tracker
+            // consume runs exactly once). A history line that matched a message we
+            // already showed as a local echo is dropped here.
+            if (isSelfEchoReplayDuplicate) {
+                msgWasDuplicate = true
+                return@update st
+            }
 
             // Deduplicate by msgId using the O(1) seenMsgIds HashSet
             if (msgId != null && buf.seenMsgIds.contains(msgId)) {
@@ -6278,6 +7163,17 @@ if (affectLive) {
         val st = _state.value
         if (msgWasDuplicate) return
 
+        // Record genuine local echoes of our own outgoing messages so a later bouncer
+        // history-replay of the same line (after a reconnect) can be recognised and
+        // dropped. Gate: it's our nick, it's NOT history (a real live echo, not a
+        // replay), and it's a local echo (isLocal). The isHistory guard prevents a
+        // replayed own-message that slipped past dedup from re-arming the tracker, and
+        // the !isSelfEchoReplayDuplicate guard is implicit since duplicates already
+        // returned above.
+        if (isFromMe && !isHistory && isLocal) {
+            recordSelfSend(bufferKey, text, isAction)
+        }
+
         // Maintain the chathistory marker tracker. Done after a non-duplicate state update so a
         // dedup'd replay doesn't move the "last history" pointer forward — only newly committed
         // history messages do. Order matters: clear-on-emit must run BEFORE the isHistory write
@@ -6309,10 +7205,42 @@ if (affectLive) {
             val (netId, bufferName) = splitKey(bufferKey)
             if (bufferName != "*server*" || st.settings.logServerBuffer) {
                 val netName = st.networks.firstOrNull { it.id == netId }?.name ?: "network"
-                val err = logs.append(netName, bufferName, formatLogLine(ts, from, text, isAction), st.settings.logFolderUri)
-                if (err != null) {
-                    val serverKey = bufKey(netId, "*server*")
-                    append(serverKey, from = null, text = "*** Log write failed for $bufferName: $err", isLocal = true, doNotify = false)
+                val logLine = formatLogLine(ts, from, text, isAction)
+                val logFolderUri = st.settings.logFolderUri
+                // Dispatch the disk write off Main. Since the dispatcher refactor that
+                // serialises handleEvent on Main.immediate, append() runs on the UI
+                // thread for every incoming message; calling LogWriter.append directly
+                // here would mean a BufferedWriter / SAF OutputStream write happens on
+                // every message on Main. BufferedWriter usually completes in a few
+                // microseconds (the buffer absorbs it), but when the 8 KB buffer fills
+                // it flushes synchronously to disk - on slow storage, or on SAF where
+                // the ContentResolver IPC adds milliseconds even for cached streams,
+                // this can stack up into visible jank in busy channels. Worse, a flush
+                // that takes >5 s during a heavy log-folder traversal triggers ANR.
+                // Launching on IO trades zero-ordering between the in-memory append
+                // and the on-disk write (the message reaches the screen first, the
+                // file is updated a fraction of a second later) for guaranteed
+                // off-Main I/O - logs are eventually-consistent anyway and this is
+                // the same trade-off that every other Android logger makes.
+                viewModelScope.launch(Dispatchers.IO) {
+                    val err = runCatching {
+                        logs.append(netName, bufferName, logLine, logFolderUri)
+                    }.getOrElse { t -> t.message ?: t::class.java.simpleName }
+                    if (err != null) {
+                        // Surface failures back on Main via append, which is itself a
+                        // recursive call - the inner append re-enters this branch but
+                        // its bufferKey is the *server* buffer, so the loggingEnabled
+                        // path appends to logs and the "log write failed" line itself
+                        // gets logged too. That recursion is bounded by the buffer-name
+                        // check above: a write failure on the server buffer just gets
+                        // appended back to the server buffer in-memory and no further
+                        // disk write is attempted because the *server* buffer's own
+                        // log write either succeeded the same way or already failed
+                        // and is silenced by logServerBuffer = false in the common case.
+                        withContext(Dispatchers.Main.immediate) {
+                            append(bufKey(netId, "*server*"), from = null, text = "*** Log write failed for $bufferName: $err", isLocal = true, doNotify = false)
+                        }
+                    }
                 }
             }
         }

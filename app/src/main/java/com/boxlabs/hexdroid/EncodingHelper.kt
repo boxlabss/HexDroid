@@ -517,17 +517,38 @@ class EncodingLineReader(
     private var encodingLocked: Boolean = !autoDetect
 
     /**
+     * Wall-clock time when this reader was constructed, used by the detection-timeout
+     * cutoff. After [DETECTION_TIMEOUT_MS] from construction, auto-detection commits
+     * to whatever evidence we have (or stays on UTF-8 if none) and disables itself.
+     *
+     * Why this exists: without a timeout the detection loop runs for the lifetime of the
+     * connection. On a primarily-English channel that occasionally sees a non-ASCII line
+     * (a smart-quote pasted from Mac, a Russian-named user joining, a single Cyrillic word),
+     * those few stray bytes can vote a non-UTF-8 encoding above its threshold an hour into
+     * the session and switch decoding mid-stream - corrupting every subsequent message
+     * from regular UTF-8 users. Capping the window to the first 5 minutes contains the
+     * disruption to the early connect phase where most legitimate non-UTF-8 evidence
+     * arrives (MOTD, channel topics, NOTICE traffic).
+     */
+    private val createdAtMs: Long = System.currentTimeMillis()
+
+    /** Maximum elapsed time (ms) during which auto-detection is active. After this, the
+     *  reader locks to the current encoding (or UTF-8 if no lock has been committed yet). */
+    private val DETECTION_TIMEOUT_MS = 5L * 60_000L  // 5 minutes
+
+    /**
      * Minimum number of non-ASCII lines that must be seen before we consider locking.
      * Prevents locking on a single ambiguous registration line.
      */
-    private val MIN_EVIDENCE_LINES = 2
+    private val MIN_EVIDENCE_LINES = 4
 
     /**
      * The leading encoding's vote count must exceed second-place by at least this margin
-     * before we commit.  A lead of 2 means one disagreeing line is tolerated as noise
-     * but two in a row would delay the lock until more evidence accumulates.
+     * before we commit.  A larger threshold tolerates more noise: one or two stray non-UTF-8
+     * lines on a primarily-UTF-8 channel (a foreign-script nick joining, a single smart-quote
+     * pasted from a Mac client) shouldn't be enough to flip the whole connection's decoding.
      */
-    private val LEAD_THRESHOLD = 2
+    private val LEAD_THRESHOLD = 4
 
     /**
      * Hard cap on the corpus size (bytes).  We stop appending once this is reached to
@@ -586,6 +607,25 @@ class EncodingLineReader(
     fun readLine(): String? {
         if (!autoDetect || encodingLocked) {
             // Fast path: locked or explicit encoding - read and decode directly.
+            val (line, _) = EncodingHelper.readLine(
+                input, currentEncoding, autoDetect = false,
+                onTruncated = { truncatedLineCount++ }
+            )
+            return line
+        }
+
+        // Detection-window expiry: once DETECTION_TIMEOUT_MS has elapsed since this
+        // reader was created we stop voting and commit to whatever the leader is. This
+        // bounds the window in which a single foreign-script line can flip the
+        // decoding for the whole session. If no encoding has accumulated a majority,
+        // we fall back to UTF-8 (the safest default for any modern IRC network).
+        if (System.currentTimeMillis() - createdAtMs > DETECTION_TIMEOUT_MS) {
+            val leader = votes.maxByOrNull { it.value }?.key
+            currentEncoding = if (leader != null && evidenceLines >= MIN_EVIDENCE_LINES) leader else "UTF-8"
+            encodingLocked = true
+            corpus.reset()
+            votes.clear()
+            // Fall through to the locked fast path on this call.
             val (line, _) = EncodingHelper.readLine(
                 input, currentEncoding, autoDetect = false,
                 onTruncated = { truncatedLineCount++ }

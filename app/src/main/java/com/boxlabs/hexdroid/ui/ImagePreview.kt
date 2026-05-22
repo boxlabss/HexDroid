@@ -235,7 +235,23 @@ private suspend fun fetchBitmap(url: String, ctx: Context): FetchResult = withCo
 
                 val bytes = output.toByteArray()
                 val isGif = mime == "image/gif"
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let {
+                // Decode with explicit options to avoid the two bitmap-state edge cases
+                // that crash BaseRecordingCanvas.drawBitmap via throwIfCannotDraw():
+                //   1. Hardware bitmaps - some BitmapFactory paths on Android 9+ can
+                //      promote to Bitmap.Config.HARDWARE if the system is short on memory.
+                //      Hardware bitmaps cannot be drawn into a recording (display-list)
+                //      canvas without specific support, and Compose's BitmapPainter draws
+                //      into one. Forcing ARGB_8888 keeps the bitmap software-backed.
+                //   2. Non-premultiplied ARGB_8888 - the canvas requires premultiplied
+                //      alpha for ARGB_8888 with alpha channel; non-premultiplied throws
+                //      "Canvas: trying to use a non-premultiplied bitmap". Forcing
+                //      inPremultiplied = true normalises this.
+                val decodeOpts = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inPremultiplied = true
+                    inMutable = false
+                }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)?.let {
                     // For GIFs keep the raw bytes so the animated drawable can be created later.
                     FetchResult.Success(it, rawBytes = if (isGif) bytes else null, isGif = isGif)
                 } ?: FetchResult.Error
@@ -566,7 +582,15 @@ fun InlinePreview(
                                 bytes = s.rawBytes,
                                 modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                             )
-                        } else {
+                        } else if (!s.bitmap.isRecycled && s.bitmap.width > 0 && s.bitmap.height > 0) {
+                            // Drawing a recycled or zero-dimension bitmap throws RuntimeException
+                            // from BaseRecordingCanvas.drawBitmap → throwIfCannotDraw, taking down
+                            // the whole composition. The bitmap is held by PreviewState.Ready so
+                            // it should remain valid for the composition's lifetime, but Android
+                            // can recycle hardware-backed bitmaps under memory pressure, and a
+                            // small-but-nonzero number of malformed images decode to 0×N or N×0.
+                            // The guard turns either case into a silently-blank preview rather
+                            // than a crash.
                             Image(
                                 bitmap             = s.bitmap.asImageBitmap(),
                                 contentDescription = when {
