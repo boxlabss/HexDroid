@@ -327,24 +327,18 @@ def _print_status(msg):
     hexchat.prnt(f"\x0304[+AGM]\x03 {msg}")
 
 
-# Outbound: channel message intercept.
-#
-# We use a "Your Message" print hook AND a raw outgoing hook in different code
-# paths because HexChat's plugin API has separate paths for "channel message"
-# vs "private message". For simplicity we intercept the high-level command
-# instead of the wire-level PRIVMSG (which would also catch ourselves re-
-# sending, creating an infinite loop).
+# Outbound: intercept the user's input at the COMMAND layer
+# We send the ciphertext with `raw` (which does NOT echo locally) and then emit_print
+# the plaintext ourselves, giving a single readable local line. emit_print fires a
+# *print* event, which does not trigger command hooks, so there is no recursion.
 
 def _on_send_message(word, word_eol, userdata):
-    """Triggered when the user types a message in a channel or query. We replace
-    the outgoing message with an encrypted version when a key is configured for
-    the conversation.
+    """Fires when the user sends plain text to a channel or query (hook_command("")).
+    Replaces it with an encrypted PRIVMSG when a key is configured for the target.
     """
-    # word[0] = the cleartext message the user typed.
-    cleartext = word[0] if word else ""
-    # Don't re-encrypt our own re-sent ciphertext (the hexchat.command("msg ...")
-    # below can re-fire this event); without this guard we'd double-encrypt.
-    if cleartext.startswith(WIRE_PREFIX):
+    cleartext = word_eol[0] if word_eol else ""
+    # Empty input, or our own re-sent ciphertext somehow looping back: ignore.
+    if not cleartext or cleartext.startswith(WIRE_PREFIX):
         return hexchat.EAT_NONE
     network = _current_network()
     # In a channel this is the channel name; in a query dialog it is the peer's
@@ -361,22 +355,22 @@ def _on_send_message(word, word_eol, userdata):
     except Exception as e:
         _print_status(f"Failed to encrypt: {e}")
         return hexchat.EAT_NONE
-    # Send the encrypted line; HexChat will display the cleartext locally via
-    # the manual emit_print below so the user sees their own message readable.
-    hexchat.command(f"msg {target} {ct}")
-    # Display the cleartext locally with a lock prefix so the user sees what
-    # they sent, the same way HexDroid renders local echo with a padlock.
+    # `raw` sends the line without a local echo (unlike `msg`, which would print the
+    # ciphertext); we render the plaintext ourselves below.
+    hexchat.command(f"raw PRIVMSG {target} :{ct}")
+    # Display the cleartext locally with a lock prefix so the user sees what they
+    # sent, the same way HexDroid renders local echo with a padlock.
     hexchat.emit_print("Your Message", my_nick, "\u00033[+AGM]\u0003 " + cleartext)
     return hexchat.EAT_ALL
 
 
 def _on_send_action(word, word_eol, userdata):
-    """Triggered by /me. Same logic as _on_send_message but with CTCP ACTION
-    framing - the CTCP envelope (\x01ACTION ...\x01) stays cleartext, only
-    the inner text is encrypted, matching what HexDroid does.
+    """Fires on /me (hook_command("ME")). Encrypts only the inner action text; the
+    CTCP envelope (\x01ACTION ...\x01) stays cleartext, matching HexDroid.
     """
+    # For a "ME" command, word[0] == "me" and word_eol[1] is the action text.
     text = word_eol[1] if len(word_eol) > 1 else ""
-    if text.startswith(WIRE_PREFIX):
+    if not text or text.startswith(WIRE_PREFIX):
         return hexchat.EAT_NONE
     network = _current_network()
     # Channel name, or peer nick when the /me is in a query dialog.
@@ -392,10 +386,8 @@ def _on_send_action(word, word_eol, userdata):
     except Exception as e:
         _print_status(f"Failed to encrypt /me: {e}")
         return hexchat.EAT_NONE
-    # The "me" command in HexChat sends \x01ACTION ...\x01 which the encrypt
-    # would wrap whole. Instead send a raw CTCP that keeps the framing clear
-    # and only encrypts the inner text. Receivers (HexDroid and this plugin)
-    # do the same unwrap.
+    # Send a raw CTCP ACTION so the framing stays clear and only the inner text is
+    # encrypted. `raw` does not echo locally, so we emit_print the plaintext below.
     hexchat.command(f"raw PRIVMSG {target} :\x01ACTION {ct}\x01")
     hexchat.emit_print("Your Action", my_nick, "\u00033[+AGM]\u0003 " + text)
     return hexchat.EAT_ALL
@@ -572,8 +564,14 @@ def _cmd_agm_list(word, word_eol, userdata):
 # --------------------------------------------------------------------------- #
 # Registration
 
-hexchat.hook_print("Your Message",   _on_send_message)
-hexchat.hook_print("Your Action",    _on_send_action)
+# Outbound interception happens at the command layer (see _on_send_message): "" is
+# the hook for plain text typed into a channel/query, "ME" is the /me action. These
+# fire BEFORE the message is sent, so EAT_ALL suppresses the cleartext.
+hexchat.hook_command("",   _on_send_message)
+hexchat.hook_command("ME", _on_send_action)
+# Inbound stays on the print events: we replace the displayed ciphertext with the
+# decrypted text. (emit_print re-fires these, but the re-fired text no longer starts
+# with "+AGM " so _decrypt_inbound returns None and the recursion stops immediately.)
 hexchat.hook_print("Channel Message", _on_recv_message)
 hexchat.hook_print("Channel Action",  _on_recv_action)
 hexchat.hook_print("Channel Msg Hilight", _on_recv_message)
