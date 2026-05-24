@@ -87,11 +87,14 @@ nonce      = 12 bytes (random per message)
 ciphertext = N bytes  (AES-256-GCM)
 tag        = 16 bytes (GCM auth tag)
 
-AAD = lowercase(target).encode('utf-8')
+AAD = canonical conversation id, lowercased UTF-8:
+        channel -> the channel name
+        query   -> the two nicks, lowercased + sorted, joined with NUL
 ```
 
-The AAD-binds-target rule is what prevents replay across channels, a
-ciphertext intended for `#secret` will not decrypt under any key in `#public`.
+Binding the tag to the conversation prevents replay across conversations: a
+ciphertext for `#secret` will not decrypt under any key in `#public`, and a
+query decrypts identically in both directions.
 
 ## Limitations
 
