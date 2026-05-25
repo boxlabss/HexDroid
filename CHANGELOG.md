@@ -2,6 +2,11 @@
 
 All notable changes to HexDroid are documented here.
 ---
+## [1.6.4] - 2026-05-25
+- **Blowfish interoperability**: Fix
+- **Other improvements**
+
+
 ## [1.6.3] - 2026-05-23
 
 ### Added Secure Chat

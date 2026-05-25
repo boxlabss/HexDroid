@@ -1,0 +1,3 @@
+Added Secure Chat (AES-256-GCM) E2EE with a fallback for Blowfish
+See https://hexdroid.boxlabs.uk/encryption.html
+Several improvements and bugfixes. Full CHANGELOG.md from github

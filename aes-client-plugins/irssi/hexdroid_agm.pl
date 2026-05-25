@@ -26,6 +26,7 @@
 #   /agm-clear [target]         remove the key for target
 #   /agm-info  [target]         show the safety number (fingerprint) for target
 #   /agm-list                   list every configured key
+
 use strict;
 use warnings;
 
@@ -36,7 +37,7 @@ use JSON::PP     ();
 use Crypt::AuthEnc::GCM qw(gcm_encrypt_authenticate gcm_decrypt_verify);
 use Crypt::PRNG         qw(random_bytes);
 
-our $VERSION = '1.0.0';
+our $VERSION = '1.0.1';
 our %IRSSI = (
     authors     => 'boxlabs',
     name        => 'hexdroid_agm',
@@ -77,7 +78,8 @@ sub _is_channel {
     return ($c eq '#' || $c eq '&' || $c eq '+' || $c eq '!') ? 1 : 0;
 }
 
-# Standard (RFC 4648) base64 without trailing '=' padding, no line breaks
+# Standard (RFC 4648) base64 without trailing '=' padding, no line breaks - this
+# is exactly what HexDroid emits and what the HexChat plugin emits.
 sub _b64_encode_nopad {
     my ($bytes) = @_;
     my $b64 = encode_base64($bytes, '');   # '' = no line ending
@@ -198,12 +200,35 @@ sub _decrypt {
 
     my $pt = eval { gcm_decrypt_verify('AES', $key, $nonce, $aad, $ct, $tag) };
     return undef unless defined $pt;   # auth failure returns undef
+    # Replay guard. Checked only after the tag verifies. A
+    # repeated (key, conversation, nonce) means the ciphertext was re-injected into the
+    # same conversation. Drop the duplicate.
+    return undef if _replay_seen($key, $aad, $nonce);
     return $pt;
 }
 
+# Bounded FIFO window of authenticated (key, conversation, nonce) triples, namespaced by
+# a short key digest so distinct keys keep independent histories. In-memory and
+# session-scoped. Every AGM nonce is a fresh random 96-bit value, so a repeat is a
+# re-injected ciphertext, never a coincidence.
+my $REPLAY_CACHE_MAX = 2048;
+my %SEEN_NONCE;     # replay-key string -> 1
+my @SEEN_ORDER;     # FIFO of replay-key strings, for bounded eviction
+sub _replay_seen {
+    my ($key, $aad, $nonce) = @_;
+    my $rk = substr(sha256($key), 0, 8) . "\x00" . $aad . "\x00" . $nonce;
+    return 1 if exists $SEEN_NONCE{$rk};
+    $SEEN_NONCE{$rk} = 1;
+    push @SEEN_ORDER, $rk;
+    if (@SEEN_ORDER > $REPLAY_CACHE_MAX) {
+        my $old = shift @SEEN_ORDER;
+        delete $SEEN_NONCE{$old};
+    }
+    return 0;
+}
+
 # Safety number: SHA-256(0x00 || key), first 40 bits, Crockford base32 (no
-# 0/1/I/O) as 8 chars with a hyphen: "K4XR-T9BS". Identical to HexDroid's
-# E2eFingerprint and the HexChat plugin (scheme byte 0x00 = AGM).
+# 0/1/I/O) as 8 chars with a hyphen: "K4XR-T9BS".
 my @CROCKFORD = split //, 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 sub _fingerprint {
     my ($key) = @_;
