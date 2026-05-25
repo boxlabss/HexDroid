@@ -3896,10 +3896,8 @@ fun startAddNetwork() {
                         return@launch
                     }
                     "agm-key" -> {
-                        // Developer/test command. Manages per-target AES-256-GCM keys
-                        // for end-to-end encryption. Will be supplanted by the
-                        // channel-settings sheet + QR pairing in commit 2/3, but is
-                        // sufficient for two-device testing today.
+                        // Manages per-target AES-256-GCM keys
+                        // for end-to-end encryption.
                         //
                         //   /agm-key gen [target]           - generate a fresh 32-byte key,
                         //                                     store it, print it so the
@@ -3910,7 +3908,7 @@ fun startAddNetwork() {
                         //   /agm-key                        - usage
                         //
                         // "target" defaults to the current buffer (channel or query nick).
-                        // base64 form is standard (with or without padding) - both accepted.
+                        // base64 form is standard (with or without padding)
                         val parts = cmdLine.split(Regex("\\s+"), limit = 4)
                         val sub = parts.getOrNull(1)?.lowercase() ?: ""
                         fun usage() {
@@ -4464,7 +4462,7 @@ fun startAddNetwork() {
                 }
             }
 
-            // Regular text message - join any newlines into a single message.
+            // Regular text message, join any newlines into a single message.
             // Only split if the message exceeds the server's max line length.
             // The IRC protocol limit is typically 512 bytes (including CRLF), but many
             // servers support more via ISUPPORT LINELEN.
@@ -4496,8 +4494,27 @@ fun startAddNetwork() {
             // (64 max nick + ident + host + "!@" + " PRIVMSG " + channel + " :" + "\r\n").
             val myNick = st.connections[netId]?.myNick ?: st.myNick
             val serverLimit = runtimes[netId]?.support?.linelen ?: 512
-            val maxMsgLen = (serverLimit - 100).coerceIn(200, serverLimit - 10)
-            
+            val baseBudget = (serverLimit - 100).coerceIn(200, serverLimit - 10)
+
+            // When a key is configured, the wire line carries the *encrypted* form,
+            // which is larger than the plaintext: AES-GCM prepends a version byte +
+            // 12-byte nonce and appends a 16-byte tag, then the whole thing is base64'd
+            // (~+33%) behind a "+AGM " prefix; Blowfish prepends an 8-byte IV and
+            // zero-pads to the block size before base64 behind "+OK *". Splitting on the
+            // plaintext budget would let the encrypted line blow past the server limit
+            // and get truncated, which corrupts the tag and breaks decryption on the
+            // far side. So shrink the plaintext budget
+            // to leave headroom for the expansion. The formulas invert
+            // "prefix + base64(overhead + P) <= baseBudget" for P, minus a 2-byte margin.
+            val sendEncryption = e2eKeyStore.get(netId, bufferName)?.scheme
+            val maxMsgLen = when (sendEncryption) {
+                com.boxlabs.hexdroid.crypto.E2eScheme.AGM ->
+                    ((baseBudget - 5) * 3 / 4) - 29 - 2          // "+AGM " + base64(1+12+P+16)
+                com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH ->
+                    ((baseBudget - 5) * 3 / 4) - 15 - 2          // "+OK *" + base64(8 IV + P + ≤7 pad)
+                null -> baseBudget
+            }.coerceAtLeast(64)
+
             // Cancel pending typing-done timer and send "done" immediately on send.
             typingDoneJob?.cancel()
             typingDoneJob = null
@@ -4508,11 +4525,6 @@ fun startAddNetwork() {
 
             // Split message if it exceeds max length
             val chunks = splitMessageByLength(fullMessage, maxMsgLen)
-            // Snapshot the encryption scheme for this target outside the chunk loop
-            // so all chunks of a single send render with the same lock state, even if
-            // a key is cleared mid-loop (which can't actually happen on a single-
-            // threaded IrcViewModel but we don't want to repeat the lookup either).
-            val sendEncryption = e2eKeyStore.get(netId, bufferName)?.scheme
 
             for (chunk in chunks) {
                 if (chunk.isEmpty()) continue
@@ -5294,17 +5306,17 @@ if (code == "442") {
                     )
                 }
 
-// If we couldn't attribute this nick to any channel buffers, surface it in the server buffer.
-if (targets.isEmpty()) {
-    append(
-        bufKey(netId, "*server*"),
-        from = null,
-        text = lineColoured,
-        isLocal = suppressUnread,
-        timeMs = ev.timeMs,
-        doNotify = false
-    )
-}
+                // If we couldn't attribute this nick to any channel buffers, surface it in the server buffer.
+                if (targets.isEmpty()) {
+                    append(
+                        bufKey(netId, "*server*"),
+                        from = null,
+                        text = lineColoured,
+                        isLocal = suppressUnread,
+                        timeMs = ev.timeMs,
+                        doNotify = false
+                    )
+                }
 
                 if (!ev.isHistory) {
                     // If it's our nick, update runtime + UI connection state first.

@@ -26,15 +26,11 @@ import java.security.MessageDigest
  *
  * The fingerprint is SHA-256(scheme-tag || key) truncated to the first 5 bytes
  * (40 bits) and rendered as 8 base32 characters with a hyphen for readability:
- * e.g. `K4XR-T9BS`. 40 bits is enough to make a deliberate collision attack
- * infeasible (2^40 SHA-256 evaluations = days on a single GPU, but each candidate
- * would need to also encode a usable AES key chosen by an attacker who actually
- * controls the channel), while keeping the string short enough to compare over a
- * phone call.
- *
- * The scheme byte mixes into the digest so that the same raw bytes used with two
- * different schemes (which would technically be a misconfiguration) produce
- * different fingerprints, helping the user notice the mismatch.
+ * e.g. `K4XR-T9BS`. The security property that matters here is SECOND-PREIMAGE
+ * resistance: an attacker who wants to substitute their own key while keeping the
+ * displayed safety number unchanged must find a key whose digest matches a fixed
+ * 40-bit target, which costs ~2^40 SHA-256 evaluations AND each candidate must
+ * also be a usable AES key.
  */
 object E2eFingerprint {
 

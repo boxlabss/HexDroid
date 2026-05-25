@@ -68,9 +68,8 @@ internal class AesGcmCipher(private val key: ByteArray) : E2eCipher {
         // lowercase(Locale.ROOT) is mandatory here, NOT the default-locale
         // lowercase(): on a Turkish-locale device "#IRC".lowercase() yields "#ırc"
         // (dotless i), so the AAD bytes would differ from an English device's "#irc"
-        // and two HexDroid users in the same channel on different locales would fail
-        // every decrypt. Locale.ROOT does Unicode locale-independent case folding,
-        // matching the HexChat plugin's str.lower() (which is also locale-independent).
+        // and two users in the same channel on different locales would fail
+        // every decrypt. Locale.ROOT does Unicode locale-independent case folding.
         cipher.updateAAD(aadContext.lowercase(java.util.Locale.ROOT).toByteArray(StandardCharsets.UTF_8))
         val ct = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
 
@@ -85,38 +84,71 @@ internal class AesGcmCipher(private val key: ByteArray) : E2eCipher {
     override fun decrypt(wireText: String, aadContext: String): String? {
         val prefix = "${scheme.wirePrefix} "
         if (!wireText.startsWith(prefix)) return null
-        val b64 = wireText.substring(prefix.length).trim()
-        // Tolerate both padded and unpadded base64 from interop partners (the
-        // HexChat python plugin emits padded by default).
-        val raw = try {
-            Base64.decode(b64, Base64.DEFAULT)
-        } catch (_: IllegalArgumentException) {
-            return null
-        }
-        if (raw.size < 1 + NONCE_LEN + TAG_BYTES) return null
-        if (raw[0] != VERSION) return null
+            val b64 = wireText.substring(prefix.length).trim()
+            // Tolerate both padded and unpadded base64. We emit unpadded (NO_PADDING)
+            val raw = try {
+                Base64.decode(b64, Base64.DEFAULT)
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+            if (raw.size < 1 + NONCE_LEN + TAG_BYTES) return null
+                if (raw[0] != VERSION) return null
 
-        val nonce = raw.copyOfRange(1, 1 + NONCE_LEN)
-        val ctAndTag = raw.copyOfRange(1 + NONCE_LEN, raw.size)
+                    val nonce = raw.copyOfRange(1, 1 + NONCE_LEN)
+                    val ctAndTag = raw.copyOfRange(1 + NONCE_LEN, raw.size)
 
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(TAG_BITS, nonce))
-        cipher.updateAAD(aadContext.lowercase(java.util.Locale.ROOT).toByteArray(StandardCharsets.UTF_8))
-        return try {
-            // doFinal throws AEADBadTagException on a bad tag (wrong key, tamper, or
-            // wrong AAD i.e. replayed-across-conversations). Return null and let the
-            // caller surface a "decryption failed" hint to the user rather than
-            // swallowing.
-            String(cipher.doFinal(ctAndTag), StandardCharsets.UTF_8)
-        } catch (_: Throwable) {
-            null
-        }
+                    // Computed once and reused for both the AAD and the replay-cache key so the two
+                    // can never disagree about how the conversation id is folded.
+                    val convLower = aadContext.lowercase(java.util.Locale.ROOT)
+
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(TAG_BITS, nonce))
+                    cipher.updateAAD(convLower.toByteArray(StandardCharsets.UTF_8))
+                    val plaintext = try {
+                        // doFinal throws AEADBadTagException on a bad tag (wrong key, tamper, or
+                        // wrong AAD i.e. replayed-across-conversations). Return null and let the
+                        // caller surface a "decryption failed" hint to the user rather than
+                        // swallowing.
+                        String(cipher.doFinal(ctAndTag), StandardCharsets.UTF_8)
+                    } catch (_: Throwable) {
+                        return null
+                    }
+
+                    // Replay guard
+                    val replayKey = convLower + "\u0000" +
+                    Base64.encodeToString(nonce, Base64.NO_WRAP or Base64.NO_PADDING)
+                    synchronized(seenNonces) {
+                        if (seenNonces.put(replayKey, PRESENT) != null) {
+                            // Already seen for this conversation -> replayed/duplicate. Drop it.
+                            return null
+                        }
+                    }
+                    return plaintext
+    }
+
+    /**
+     * Bounded LRU of recently authenticated `conversation\u0000nonce` keys. access-order =
+     * true + [removeEldestEntry] gives insertion with automatic eviction of the least
+     * recently seen entry once [REPLAY_CACHE_MAX] is exceeded, so memory stays flat no
+     * matter how long the session runs. Guarded by `synchronized` because decrypt() can be
+     * invoked from multiple threads.
+     */
+    private val seenNonces = object : LinkedHashMap<String, Boolean>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>): Boolean =
+        size > REPLAY_CACHE_MAX
     }
 
     companion object {
         private const val VERSION: Byte = 0x01
-        private const val NONCE_LEN = 12
-        private const val TAG_BITS = 128
-        private const val TAG_BYTES = TAG_BITS / 8
+            private const val NONCE_LEN = 12
+            private const val TAG_BITS = 128
+            private const val TAG_BYTES = TAG_BITS / 8
+
+            // Upper bound on remembered nonces per cipher (i.e. per key, across all
+            // conversations that use it). 2048 covers very heavy use while costing well under
+            // ~200 KB worst case; the oldest entry is evicted past this.
+            private const val REPLAY_CACHE_MAX = 2048
+            // Sentinel value for the set-like LinkedHashMap (we only care about key presence).
+            private const val PRESENT = true
     }
 }

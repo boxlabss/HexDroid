@@ -38,7 +38,7 @@ enum class E2eScheme(val wirePrefix: String, val displayName: String) {
 
     companion object {
         /** Returns the scheme whose wire prefix matches the start of [text], or null. */
-        fun detect(text: String): E2eScheme? = values().firstOrNull { text.startsWith("${it.wirePrefix} ") }
+        fun detect(text: String): E2eScheme? = entries.firstOrNull { text.startsWith("${it.wirePrefix} ") }
 
         fun fromName(name: String?): E2eScheme? = when (name?.uppercase()) {
             "AGM"      -> AGM

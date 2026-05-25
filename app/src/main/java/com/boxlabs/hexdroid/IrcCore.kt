@@ -1893,6 +1893,7 @@ class IrcClient(val config: IrcConfig) {
 						if (text.isEmpty()) return
 
 						// Keep raw formatting codes. UI chooses to strip or render them.
+                        //  FOR DEBUGGING ONLY android.util.Log.w("AGMDUP", "EMIT core=${System.identityHashCode(this)} from=$from ts=$serverTimeMs text=${text.take(24)}")
 						send(
 							IrcEvent.ChatMessage(
 								from = from,

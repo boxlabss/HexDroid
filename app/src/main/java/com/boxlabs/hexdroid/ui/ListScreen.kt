@@ -193,7 +193,12 @@ fun ListScreen(
             HorizontalDivider()
 
             LazyColumn(Modifier.fillMaxSize()) {
-                items(items, key = { it.channel }) { ch ->
+                // distinctBy { it.channel }: /LIST replies routinely contain the same channel
+                // twice (mid-list refreshes, servers that double-send, or netsplit echoes).
+                // Duplicate keys make Compose throw IllegalArgumentException from inside its
+                // measure pass (LayoutNodeSubcompositionsState.subcompose) the moment the list
+                // is flung, crashing the app. Dropping the duplicate row is harmless here.
+                items(items.distinctBy { it.channel }, key = { it.channel }) { ch ->
                     Column(
                         Modifier
                             .fillMaxWidth()

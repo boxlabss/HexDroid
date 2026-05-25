@@ -65,13 +65,9 @@ internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
         // modern fishlim build. ECB encoding is deliberately not exposed because
         // there is no upside to producing it for new messages.
         //
-        // FiSH/Mircryption CBC zero-pads
-        // the plaintext to a multiple of the block size and strips trailing zero bytes
-        // on decrypt. JCE's "Blowfish/CBC/PKCS5Padding" appends non-zero pad bytes
-        // (0x01..0x08) which fishlim does not strip. JCE's PKCS5 unpadding rejects
-        // fishlim's zero-padded ciphertext as a bad pad, so decryption fails outright.
-        // We therefore use NoPadding and pad manually. (IRC text never contains a NUL
-        // byte, so stripping trailing NULs on the far side is unambiguous.)
+        // JCE's PKCS5 unpadding rejects fishlim's zero-padded ciphertext as a bad pad,
+        // so decryption fails outright. We therefore use NoPadding and pad manually.
+        // IRC text never contains a NUL byte, so stripping trailing NULs on the far side is unambiguous.
         val iv = ByteArray(BLOCK_SIZE).also { rng.nextBytes(it) }
         val cipher = Cipher.getInstance("Blowfish/CBC/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, secretKey, IvParameterSpec(iv))
@@ -88,12 +84,12 @@ internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
     override fun decrypt(wireText: String, aadContext: String): String? {
         val prefix = "${scheme.wirePrefix} "
         if (!wireText.startsWith(prefix)) return null
-            val body = wireText.substring(prefix.length).trim()
-            return if (body.startsWith("*")) {
-                decryptCbc(body.substring(1))
-            } else {
-                decryptEcb(body)
-            }
+        val body = wireText.substring(prefix.length).trim()
+        return if (body.startsWith("*")) {
+            decryptCbc(body.substring(1))
+        } else {
+            decryptEcb(body)
+        }
     }
 
     private fun decryptCbc(b64: String): String? {
@@ -117,7 +113,7 @@ internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
             val pt = cipher.doFinal(ct)
             var end = pt.size
             while (end > 0 && pt[end - 1] == 0.toByte()) end--
-                String(pt, 0, end, StandardCharsets.UTF_8)
+            String(pt, 0, end, StandardCharsets.UTF_8)
         } catch (_: Throwable) {
             null
         }
@@ -126,19 +122,23 @@ internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
     private fun decryptEcb(fishB64: String): String? {
         val raw = decodeFishBase64(fishB64) ?: return null
         if (raw.isEmpty() || raw.size % BLOCK_SIZE != 0) return null
-            return try {
-                // ECB with no padding. fishlim used a fixed-width custom base64 that
-                // happens to round to block boundaries by design, so there's no
-                // standard padding to strip. We trim trailing NULs that some
-                // implementations emit for short last blocks.
-                val cipher = Cipher.getInstance("Blowfish/ECB/NoPadding")
-                cipher.init(Cipher.DECRYPT_MODE, secretKey)
-                val pt = cipher.doFinal(raw)
-                val trimEnd = pt.indexOfFirst { it == 0.toByte() }.let { if (it < 0) pt.size else it }
-                String(pt, 0, trimEnd, StandardCharsets.UTF_8)
-            } catch (_: Throwable) {
-                null
-            }
+        return try {
+            // ECB with no padding. fishlim used a fixed-width custom base64 that
+            // happens to round to block boundaries by design, so there's no
+            // standard padding to strip. We trim trailing NULs that some
+            // implementations emit for short last blocks.
+            val cipher = Cipher.getInstance("Blowfish/ECB/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, secretKey)
+            val pt = cipher.doFinal(raw)
+            // Strip trailing zero padding only. walk NULs off the END rather than
+            // cutting at the first NUL. Cutting at the first NUL would silently
+            // truncate a message that legitimately contained an embedded 0x00.
+            var end = pt.size
+            while (end > 0 && pt[end - 1] == 0.toByte()) end--
+            String(pt, 0, end, StandardCharsets.UTF_8)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     companion object {
@@ -178,43 +178,43 @@ internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
 
         internal fun decodeFishBase64(s: String): ByteArray? {
             if (s.isEmpty() || s.length % 12 != 0) return null
-                val out = ByteArray((s.length / 12) * 8)
-                var outIdx = 0
-                var i = 0
-                while (i < s.length) {
-                    var rightWord: Long = 0
-                    var leftWord: Long = 0
-                    // FiSH packs each 8-byte block as two big-endian 32-bit words and
-                    // emits the RIGHT word (bytes 4-7) first, then the LEFT word (bytes
-                    // 0-3). Each char contributes 6 bits, least-significant first. So the
-                    // first 6 chars rebuild the right word and the next 6 the left word.
-                    for (j in 0 until 6) {
-                        val c = s[i + j]
-                        if (c.code >= 128) return null
-                            val v = FISH_INDEX[c.code]
-                            if (v < 0) return null
-                                rightWord = rightWord or (v.toLong() shl (j * 6))
-                    }
-                    for (j in 0 until 6) {
-                        val c = s[i + 6 + j]
-                        if (c.code >= 128) return null
-                            val v = FISH_INDEX[c.code]
-                            if (v < 0) return null
-                                leftWord = leftWord or (v.toLong() shl (j * 6))
-                    }
-                    // Write left word to bytes 0-3, right word to bytes 4-7 (big-endian).
-                    out[outIdx + 0] = ((leftWord shr 24) and 0xff).toByte()
-                    out[outIdx + 1] = ((leftWord shr 16) and 0xff).toByte()
-                    out[outIdx + 2] = ((leftWord shr 8) and 0xff).toByte()
-                    out[outIdx + 3] = (leftWord and 0xff).toByte()
-                    out[outIdx + 4] = ((rightWord shr 24) and 0xff).toByte()
-                    out[outIdx + 5] = ((rightWord shr 16) and 0xff).toByte()
-                    out[outIdx + 6] = ((rightWord shr 8) and 0xff).toByte()
-                    out[outIdx + 7] = (rightWord and 0xff).toByte()
-                    outIdx += 8
-                    i += 12
+            val out = ByteArray((s.length / 12) * 8)
+            var outIdx = 0
+            var i = 0
+            while (i < s.length) {
+                var rightWord: Long = 0
+                var leftWord: Long = 0
+                // FiSH packs each 8-byte block as two big-endian 32-bit words and
+                // emits the RIGHT word (bytes 4-7) first, then the LEFT word (bytes
+                // 0-3). Each char contributes 6 bits, least-significant first. So the
+                // first 6 chars rebuild the right word and the next 6 the left word.
+                for (j in 0 until 6) {
+                    val c = s[i + j]
+                    if (c.code >= 128) return null
+                    val v = FISH_INDEX[c.code]
+                    if (v < 0) return null
+                    rightWord = rightWord or (v.toLong() shl (j * 6))
                 }
-                return out
+                for (j in 0 until 6) {
+                    val c = s[i + 6 + j]
+                    if (c.code >= 128) return null
+                    val v = FISH_INDEX[c.code]
+                    if (v < 0) return null
+                    leftWord = leftWord or (v.toLong() shl (j * 6))
+                }
+                // Write left word to bytes 0-3, right word to bytes 4-7 (big-endian).
+                out[outIdx + 0] = ((leftWord shr 24) and 0xff).toByte()
+                out[outIdx + 1] = ((leftWord shr 16) and 0xff).toByte()
+                out[outIdx + 2] = ((leftWord shr 8) and 0xff).toByte()
+                out[outIdx + 3] = (leftWord and 0xff).toByte()
+                out[outIdx + 4] = ((rightWord shr 24) and 0xff).toByte()
+                out[outIdx + 5] = ((rightWord shr 16) and 0xff).toByte()
+                out[outIdx + 6] = ((rightWord shr 8) and 0xff).toByte()
+                out[outIdx + 7] = (rightWord and 0xff).toByte()
+                outIdx += 8
+                i += 12
+            }
+            return out
         }
     }
 }

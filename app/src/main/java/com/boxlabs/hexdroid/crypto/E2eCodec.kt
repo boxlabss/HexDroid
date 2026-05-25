@@ -135,8 +135,7 @@ class E2eCodec(
     }
 
     companion object {
-        // Standard IRC channel sigils. Matches the spec's definition and the
-        // HexChat plugin's _is_channel(); intentionally NOT the server-advertised
+        // Standard IRC channel sigils. Matches the spec; intentionally NOT the server-advertised
         // CHANTYPES, because the AAD must be computed identically by every client
         // regardless of what a particular server announces.
         private val CHANNEL_PREFIXES = setOf('#', '&', '+', '!')

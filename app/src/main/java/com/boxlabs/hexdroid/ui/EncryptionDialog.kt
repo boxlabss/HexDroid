@@ -67,8 +67,8 @@ import com.boxlabs.hexdroid.crypto.E2eScheme
  * Per-target end-to-end encryption settings dialog.
  *
  * Lets users:
- *   - Pick the cipher scheme (AES-GCM = modern HexDroid-to-HexDroid, Blowfish =
- *     legacy FiSH for HexChat interop)
+ *   - Pick the cipher scheme (AES-GCM = HexDroid's +AGM', Blowfish =
+ *     legacy FiSH)
  *   - Generate or import a key for that scheme
  *   - View the safety number (fingerprint) for out-of-band verification
  *   - Share / copy the key bytes
@@ -195,14 +195,14 @@ fun EncryptionDialog(
                 when (pickedScheme) {
                     E2eScheme.AGM -> {
                         Text(
-                            "HexDroid-to-HexDroid. 256-bit random key, per-message authenticated encryption.",
+                            "HexDroid's +AGM'. 256-bit random key, per-message authenticated encryption.",
                              style = MaterialTheme.typography.bodySmall,
                              color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     E2eScheme.BLOWFISH -> {
                         Text(
-                            "Legacy (FiSH) Blowfish has known weaknesses, use only when the other side can't speak AES-GCM.",
+                            "Only use FiSH when the other side can't speak +AGM.",
                              style = MaterialTheme.typography.bodySmall,
                              color = MaterialTheme.colorScheme.tertiary,
                         )

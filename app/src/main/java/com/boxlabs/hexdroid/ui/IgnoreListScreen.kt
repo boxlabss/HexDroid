@@ -175,7 +175,10 @@ fun IgnoreListScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(ignored, key = { it.lowercase() }) { nick ->
+                    // key is the lowercased nick, so two entries differing only in case
+                    // ("Bob" and "bob") would collide and crash Compose's measure pass on a
+                    // fling. distinctBy on the same lowercased form keeps the keys unique.
+                    items(ignored.distinctBy { it.lowercase() }, key = { it.lowercase() }) { nick ->
                         Surface(
                             tonalElevation = 1.dp,
                             shape = MaterialTheme.shapes.medium,
