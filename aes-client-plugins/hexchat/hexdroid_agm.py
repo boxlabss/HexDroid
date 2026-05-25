@@ -1,4 +1,22 @@
 """
+HexDroidIRC - An IRC Client for Android
+Copyright (C) 2026 boxlabs
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+
 hexdroid_agm.py
 
 HexChat plugin for HexDroid's +AGM end-to-end encryption.
@@ -37,10 +55,11 @@ Wire format (documented in docs/agm-wire-format.md in the HexDroid repo):
 from __future__ import annotations
 
 __module_name__        = "hexdroid_agm"
-__module_version__     = "1.0.0"
+__module_version__     = "1.0.1"
 __module_description__ = "HexDroid +AGM (AES-256-GCM) encryption support"
 
 import base64
+import collections
 import hashlib
 import json
 import os
@@ -50,15 +69,39 @@ import sys
 try:
     import hexchat  # type: ignore
 except ImportError:
-    sys.stderr.write("hexdroid_agm: this script must be loaded by HexChat.\n")
-    sys.exit(1)
+    # Not running inside HexChat. There's nowhere useful to report to (and sys.stderr
+    # may itself be None under HexChat), so just re-raise for a standalone interpreter.
+    raise
+
+# HexChat's embedded interpreter leaves sys.stdout / sys.stderr as None. Any warning or
+# traceback emitted during the rest of this module's import then gets written to None and
+# dies with "'NoneType' object has no attribute 'write'" - which MASKS the real error and
+# surfaces as a useless "Failed to load module" message. The usual trigger is a
+# CryptographyDeprecationWarning from the 'cryptography' package about HexChat's bundled
+# Python version, raised right inside the import below. Route both streams to the HexChat
+# window (installed BEFORE that import) so such warnings are visible and never fatal.
+class _HexChatStream:
+    def write(self, s):
+        s = s.rstrip("\r\n")
+        if s:
+            hexchat.prnt(s)
+    def flush(self):
+        pass
+    def isatty(self):
+        return False
+
+if sys.stdout is None:
+    sys.stdout = _HexChatStream()
+if sys.stderr is None:
+    sys.stderr = _HexChatStream()
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 except ImportError:
     hexchat.prnt(
-        "\x0304[hexdroid_agm]\x03 The 'cryptography' Python package is required. "
-        "Install with:  pip install cryptography"
+        "\x0304[+AGM]\x03 The 'cryptography' Python package is required but is not "
+        "installed in HexChat's Python interpreter. Install it for that interpreter, "
+        "then reload the script."
     )
     raise
 
@@ -128,18 +171,26 @@ def _load_keys():
 
 def _save_keys(d):
     """Write the in-memory keystore back to disk. File mode 0600 on Unix so
-    only the current user can read the key bytes; on Windows the chmod is a
-    no-op and the file inherits the user-profile ACL which is also restrictive
-    enough for the use case.
+    only the current user can read the key bytes; on Windows the mode argument
+    is ignored and the file inherits the user-profile ACL which is also
+    restrictive enough for the use case.
     """
     tmp = KEYFILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(d, fh, indent=2, sort_keys=True)
+    # Open with the strict mode from the very start (O_EXCL + 0600) so the file
+    # never briefly exists world-readable between create and chmod, and so a
+    # pre-planted symlink at the tmp path can't redirect the write.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_EXCL
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        # Windows doesn't honour POSIX modes; ignore.
-        pass
+        fd = os.open(tmp, flags, 0o600)
+    except FileExistsError:
+        # Stale tmp from a previous crash: remove and retry once.
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        fd = os.open(tmp, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2, sort_keys=True)
     os.replace(tmp, KEYFILE)
 
 
@@ -222,8 +273,8 @@ def _encrypt(plaintext, key, aad_context):
 def _decrypt(wire, key, aad_context):
     """Decrypt a "+AGM <base64>" line. Returns the plaintext, or None on any
     failure (malformed payload, wrong key, tampered tag, replayed across
-    conversations). `aad_context` is the canonical conversation id from
-    _aad_context().
+    conversations, or a replayed/duplicate nonce within a conversation).
+    `aad_context` is the canonical conversation id from _aad_context().
     """
     if not wire.startswith(WIRE_PREFIX):
         return None
@@ -245,9 +296,38 @@ def _decrypt(wire, key, aad_context):
         aesgcm = AESGCM(key)
         aad = aad_context.lower().encode("utf-8")
         pt = aesgcm.decrypt(nonce, ct_and_tag, aad)
-        return pt.decode("utf-8", errors="replace")
     except Exception:
         return None
+    # Replay guard.  Checked only after the tag verifies.
+    # A repeated (key, conversation, nonce) means the ciphertext was re-injected
+    # the AAD-bound tag stops cross-conversation replay but not a replay back into
+    # the SAME conversation. Drop the duplicate.
+    if _replay_seen(key, aad_context, nonce):
+        return None
+    return pt.decode("utf-8", errors="replace")
+
+
+# Bounded LRU of authenticated (key, conversation, nonce) triples, namespaced by a
+# short key digest so distinct keys keep independent histories. In-memory and
+# session-scoped; OrderedDict gives O(1) LRU via move_to_end + popitem(last=False).
+_REPLAY_CACHE_MAX = 2048
+_seen_nonces: "collections.OrderedDict[bytes, bool]" = collections.OrderedDict()
+
+
+def _replay_seen(key, aad_context, nonce):
+    """Return True if this (key, conversation, nonce) was seen before (a replay),
+    else record it and return False. Every AGM nonce is a fresh random 96-bit
+    value, so a repeat is a re-injected ciphertext, never a coincidence.
+    """
+    kid = hashlib.sha256(key).digest()[:8]
+    rk = kid + b"\x00" + aad_context.lower().encode("utf-8") + b"\x00" + bytes(nonce)
+    if rk in _seen_nonces:
+        _seen_nonces.move_to_end(rk)
+        return True
+    _seen_nonces[rk] = True
+    if len(_seen_nonces) > _REPLAY_CACHE_MAX:
+        _seen_nonces.popitem(last=False)
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -309,8 +389,11 @@ def _print_status(msg):
     hexchat.prnt(f"\x0304[+AGM]\x03 {msg}")
 
 
-# Outbound: intercept the user's input at the COMMAND layer
-# We send the ciphertext with `raw` (which does NOT echo locally) and then emit_print
+# Outbound: intercept the user's input at the COMMAND layer, not via print events.
+#
+# hook_command("") fires for plain text BEFORE it is sent, so returning EAT_ALL
+# actually suppresses the cleartext send. word_eol[0] is the whole typed line. We
+# send the ciphertext with `raw` (which does NOT echo locally) and then emit_print
 # the plaintext ourselves, giving a single readable local line. emit_print fires a
 # *print* event, which does not trigger command hooks, so there is no recursion.
 
@@ -335,8 +418,10 @@ def _on_send_message(word, word_eol, userdata):
     try:
         ct = _encrypt(cleartext, key, _aad_context(my_nick, target))
     except Exception as e:
-        _print_status(f"Failed to encrypt: {e}")
-        return hexchat.EAT_NONE
+        # Fail CLOSED: eat the input so HexChat does not fall through and send the
+        # plaintext.
+        _print_status(f"ENCRYPTION FAILED — message NOT sent: {e}")
+        return hexchat.EAT_ALL
     # `raw` sends the line without a local echo (unlike `msg`, which would print the
     # ciphertext); we render the plaintext ourselves below.
     hexchat.command(f"raw PRIVMSG {target} :{ct}")
@@ -366,8 +451,9 @@ def _on_send_action(word, word_eol, userdata):
     try:
         ct = _encrypt(text, key, _aad_context(my_nick, target))
     except Exception as e:
-        _print_status(f"Failed to encrypt /me: {e}")
-        return hexchat.EAT_NONE
+        # Fail CLOSED (see _on_send_message). Never let a /me fall through to plaintext.
+        _print_status(f"ENCRYPTION FAILED — /me NOT sent: {e}")
+        return hexchat.EAT_ALL
     # Send a raw CTCP ACTION so the framing stays clear and only the inner text is
     # encrypted. `raw` does not echo locally, so we emit_print the plaintext below.
     hexchat.command(f"raw PRIVMSG {target} :\x01ACTION {ct}\x01")
@@ -375,72 +461,96 @@ def _on_send_action(word, word_eol, userdata):
     return hexchat.EAT_ALL
 
 
-def _decrypt_inbound(word, evt_name):
-    """Common path for inbound message hooks. Returns either:
-      (decrypted_text, original_nick) if decryption succeeded, OR
-      None to indicate "let HexChat handle this normally" (no +AGM prefix
-      seen, or no key configured for this channel, or decrypt failed
-      in the last case we leave the +AGM line visible so the user can
-      copy/paste it for diagnosis).
+def _sanitize_for_recv(s):
+    """Strip bytes that could break the raw-line / CTCP framing when the decrypted
+    text is spliced back into a line for RECV. A peer holds the shared key, so they
+    are authenticated - but authenticated is not the same as trusted: a malicious
+    peer could embed CR/LF to inject arbitrary IRC protocol lines into our client, a
+    NUL to truncate, or \\x01 to forge a CTCP. We remove exactly those. Display
+    formatting (colour \\x03, bold \\x02, underline \\x1f, reverse \\x16, italic
+    \\x1d, reset \\x0f) is harmless and preserved. This sanitisation is the one piece
+    that turns RECV re-injection from a footgun into a safe approach.
     """
-    nick = word[0] if len(word) > 0 else ""
-    text = word[1] if len(word) > 1 else ""
-    if not text.startswith(WIRE_PREFIX):
-        return None
+    return s.translate({0x00: None, 0x0a: None, 0x0d: None, 0x01: None})
+
+
+# Reentrancy guard. RECV pushes the decrypted line back through HexChat's inbound
+# pipeline, which re-enters THIS hook. The re-injected trailing no longer starts with
+# "+AGM " so it would fall through anyway, but the flag makes our own line skip
+# processing outright and avoids a spurious "decrypt failed" notice in the unlikely
+# case a decrypted plaintext legitimately begins with "+AGM ".
+_reinjecting = False
+
+
+def _on_server_privmsg(word, word_eol, userdata):
+    """Inbound interception at the raw-server layer. For an AGM line we decrypt, then
+    re-inject the plaintext via RECV so HexChat's FULL native pipeline runs on the
+    cleartext - highlight-on-your-nick, message-vs-hilight classification, tab
+    activity colour, tray/sound notification, logging and timestamps all happen
+    exactly as they would for an unencrypted message. (The old print-hook + emit_print
+    approach ran all of that against the ciphertext, so e.g. a ping inside an
+    encrypted message never actually highlighted.)
+
+    word[0]=":nick!user@host"  word[1]="PRIVMSG"  word[2]=target  word_eol[3]=":trailing"
+    """
+    global _reinjecting
+    if _reinjecting:
+        return hexchat.EAT_NONE
+    if len(word) < 3 or len(word_eol) < 4:
+        return hexchat.EAT_NONE
+    prefix = word[0]
+    # Defensive: if IRCv3 message tags ever reach this named hook (HexChat normally
+    # strips them for named server events), prefix would start with "@", bail rather
+    # than misparse. Verify on-device; remove if confirmed unnecessary.
+    if prefix.startswith("@"):
+        return hexchat.EAT_NONE
+    target = word[2]
+    trailing = word_eol[3]
+    if trailing.startswith(":"):
+        trailing = trailing[1:]
+
+    # CTCP ACTION (/me) carries the encrypted text inside \x01ACTION ...\x01. Any other
+    # CTCP (VERSION/PING/DCC/...) is never our payload, so leave it for HexChat.
+    is_action = False
+    inner = trailing
+    if trailing.startswith("\x01ACTION ") and trailing.endswith("\x01"):
+        is_action = True
+        inner = trailing[len("\x01ACTION "):-1]
+    elif trailing.startswith("\x01"):
+        return hexchat.EAT_NONE
+
+    if not inner.startswith(WIRE_PREFIX):
+        return hexchat.EAT_NONE          # not an AGM line - HexChat handles it normally
+
+    sender = prefix[1:].split("!", 1)[0] if prefix.startswith(":") else prefix.split("!", 1)[0]
     network = _current_network()
-    channel = _current_channel()
-    # The key is stored under the conversation's "other side": the channel name
-    # for channel messages, the sender's nick for queries.
-    key_target = channel if _is_channel(channel) else nick
+    # Key lives under the conversation's "other side": the channel for channel
+    # messages, the sender's nick for a query (target == us).
+    key_target = target if _is_channel(target) else sender
     key = _get_key(network, key_target)
     if not key:
-        return None
-    # AAD is the canonical conversation id, which for a query is the sorted pair
-    # {my nick, sender nick} - NOT the bare sender nick (that asymmetry was the
-    # bug that made every query fail to decrypt).
+        return hexchat.EAT_NONE          # no key: leave the +AGM line visible
+
     my_nick = hexchat.get_info("nick") or ""
-    pt = _decrypt(text, key, _aad_context(my_nick, key_target))
+    pt = _decrypt(inner, key, _aad_context(my_nick, key_target))
     if pt is None:
-        # Decrypt failed despite the prefix and a configured key. Surface a
-        # warning but leave the original line visible.
-        _print_status(f"Decrypt failed for message from {nick} in {key_target}")
-        return None
-    return pt, nick
+        _print_status(f"Decrypt failed for message from {sender} in {key_target}")
+        return hexchat.EAT_NONE          # leave the +AGM line visible for diagnosis
 
+    safe = _sanitize_for_recv(pt)
+    marker = "\u00033[+AGM]\u0003 "
+    if is_action:
+        # Marker goes INSIDE the CTCP envelope so the \x01 framing stays intact.
+        new_trailing = "\x01ACTION " + marker + safe + "\x01"
+    else:
+        new_trailing = marker + safe
+    line = "%s PRIVMSG %s :%s" % (prefix, target, new_trailing)
 
-def _on_recv_message(word, word_eol, userdata):
-    r = _decrypt_inbound(word, "Channel Message")
-    if r is None:
-        return hexchat.EAT_NONE
-    pt, nick = r
-    hexchat.emit_print("Channel Message", nick, "\u00033[+AGM]\u0003 " + pt, *word[2:])
-    return hexchat.EAT_ALL
-
-
-def _on_recv_action(word, word_eol, userdata):
-    r = _decrypt_inbound(word, "Channel Action")
-    if r is None:
-        return hexchat.EAT_NONE
-    pt, nick = r
-    hexchat.emit_print("Channel Action", nick, "\u00033[+AGM]\u0003 " + pt, *word[2:])
-    return hexchat.EAT_ALL
-
-
-def _on_recv_priv_message(word, word_eol, userdata):
-    r = _decrypt_inbound(word, "Private Message")
-    if r is None:
-        return hexchat.EAT_NONE
-    pt, nick = r
-    hexchat.emit_print("Private Message", nick, "\u00033[+AGM]\u0003 " + pt)
-    return hexchat.EAT_ALL
-
-
-def _on_recv_priv_message_dialog(word, word_eol, userdata):
-    r = _decrypt_inbound(word, "Private Message to Dialog")
-    if r is None:
-        return hexchat.EAT_NONE
-    pt, nick = r
-    hexchat.emit_print("Private Message to Dialog", nick, "\u00033[+AGM]\u0003 " + pt)
+    _reinjecting = True
+    try:
+        hexchat.command("RECV " + line)
+    finally:
+        _reinjecting = False
     return hexchat.EAT_ALL
 
 
@@ -481,11 +591,15 @@ def _cmd_agm_set(word, word_eol, userdata):
     target = word[1]
     b64 = word_eol[2].strip()
     try:
-        # Add padding tolerance.
+        # Strict decode (validate=True) so a stray non-base64 character from a
+        # paste (bold markers, smart quotes, an accidental space) is reported as
+        # an error instead of being silently stripped into a wrong-but-valid key
+        # the user only discovers later when decryption fails.
+        # Padding tolerance is kept by re-padding before decoding.
         padded = b64 + "=" * ((4 - len(b64) % 4) % 4)
-        raw = base64.b64decode(padded, validate=False)
+        raw = base64.b64decode(padded, validate=True)
     except Exception:
-        _print_status("Not a valid base64 key.")
+        _print_status("Not a valid base64 key (contains non-base64 characters).")
         return hexchat.EAT_ALL
     if len(raw) != KEY_LEN:
         _print_status(f"Expected 32 bytes after base64 decode, got {len(raw)}.")
@@ -545,31 +659,43 @@ def _cmd_agm_list(word, word_eol, userdata):
 
 # --------------------------------------------------------------------------- #
 # Registration
+#
+# We keep every hook handle and unhook them explicitly in the unload callback.
+# HexChat removes hooks automatically on unload, but on some Windows builds that
+# automatic teardown runs each Hook object's __del__ during interpreter GC, where
+# it raises "initializer for ctype 'struct _hexchat_hook *' ... different ffi
+# instances" once per hook and can crash the client.
+
+_hooks = []
 
 # Outbound interception happens at the command layer (see _on_send_message): "" is
 # the hook for plain text typed into a channel/query, "ME" is the /me action. These
 # fire BEFORE the message is sent, so EAT_ALL suppresses the cleartext.
-hexchat.hook_command("",   _on_send_message)
-hexchat.hook_command("ME", _on_send_action)
-# Inbound stays on the print events: we replace the displayed ciphertext with the
-# decrypted text. (emit_print re-fires these, but the re-fired text no longer starts
-# with "+AGM " so _decrypt_inbound returns None and the recursion stops immediately.)
-hexchat.hook_print("Channel Message", _on_recv_message)
-hexchat.hook_print("Channel Action",  _on_recv_action)
-hexchat.hook_print("Channel Msg Hilight", _on_recv_message)
-hexchat.hook_print("Channel Action Hilight", _on_recv_action)
-hexchat.hook_print("Private Message", _on_recv_priv_message)
-hexchat.hook_print("Private Message to Dialog", _on_recv_priv_message_dialog)
+_hooks.append(hexchat.hook_command("",   _on_send_message))
+_hooks.append(hexchat.hook_command("ME", _on_send_action))
+# Inbound interception moved to the raw-server layer. We hook PRIVMSG (which covers
+# channel messages, queries and /me actions all PRIVMSG on the wire), decrypt, and
+# RECV the plaintext back through HexChat's native pipeline.
+_hooks.append(hexchat.hook_server("PRIVMSG", _on_server_privmsg))
 
-hexchat.hook_command("AGM",       _cmd_agm,       help="/AGM                       [show AGM plugin usage]")
-hexchat.hook_command("AGM-GEN",   _cmd_agm_gen,   help="/AGM-GEN [target]          [generate a new key]")
-hexchat.hook_command("AGM-SET",   _cmd_agm_set,   help="/AGM-SET <target> <base64> [install a key]")
-hexchat.hook_command("AGM-CLEAR", _cmd_agm_clear, help="/AGM-CLEAR [target]        [remove a key]")
-hexchat.hook_command("AGM-INFO",  _cmd_agm_info,  help="/AGM-INFO [target]         [show key info]")
-hexchat.hook_command("AGM-LIST",  _cmd_agm_list,  help="/AGM-LIST                  [list every configured key]")
+_hooks.append(hexchat.hook_command("AGM",       _cmd_agm,       help="/AGM                       [show AGM plugin usage]"))
+_hooks.append(hexchat.hook_command("AGM-GEN",   _cmd_agm_gen,   help="/AGM-GEN [target]          [generate a new key]"))
+_hooks.append(hexchat.hook_command("AGM-SET",   _cmd_agm_set,   help="/AGM-SET <target> <base64> [install a key]"))
+_hooks.append(hexchat.hook_command("AGM-CLEAR", _cmd_agm_clear, help="/AGM-CLEAR [target]        [remove a key]"))
+_hooks.append(hexchat.hook_command("AGM-INFO",  _cmd_agm_info,  help="/AGM-INFO [target]         [show key info]"))
+_hooks.append(hexchat.hook_command("AGM-LIST",  _cmd_agm_list,  help="/AGM-LIST                  [list every configured key]"))
 
 
 def _on_unload(userdata):
+    # Unhook everything ourselves, then drop the references, so HexChat's own
+    # GC-time finalizers have nothing left to clean up (see note above).
+    global _hooks
+    for h in _hooks:
+        try:
+            hexchat.unhook(h)
+        except Exception:
+            pass
+    _hooks = []
     hexchat.prnt(f"\x0304[+AGM]\x03 {__module_name__} {__module_version__} unloaded.")
 
 
