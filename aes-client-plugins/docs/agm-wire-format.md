@@ -164,11 +164,21 @@ since there is no content to protect.
 | Malformed base64                   | Same as above                                       |
 | Truncated payload                  | Same as above                                       |
 | Cross-conversation replay (AAD)    | Same as above (tag fails)                           |
+| Duplicate nonce in a conversation  | Drop as a replay (see nonce cache below)            |
 | No key configured for target       | Pass through, render the `+AGM ...` line verbatim   |
 
 Receivers MUST NOT decrypt under a key from a different target as a fallback
 (e.g. trying the `#foo` key on a message that arrived in `#bar`). That would
 break the cross-conversation replay protection.
+
+Receivers SHOULD also keep a bounded, per-conversation cache of recently seen
+nonces and drop any message whose `(conversation, nonce)` pair has already been
+accepted. Every nonce is a fresh 96-bit random value, so a repeat means a
+re-injected ciphertext (a replay), not a coincidence. The AAD binding alone
+stops replay only into a *different* conversation, not back into the same one.
+
+Senders SHOULD fail closed: if encryption fails for any reason, drop the message
+rather than transmitting it as plaintext.
 
 ## Threat model
 
@@ -177,7 +187,10 @@ AGM v1 protects:
   ISPs, bouncer operators if the IRC connection is TLS-terminated at the
   client).
 - Integrity (a tampered message is rejected, not silently mangled).
-- Cross-channel replay.
+- Cross-channel replay, plus replay back into the same conversation (via the
+  receiver-side nonce cache described under Failure handling).
+- Accidental plaintext leakage on the sender side (senders fail closed on any
+  encryption error rather than transmitting cleartext).
 
 A v2 scheme (`+AGE`) is planned to add per-conversation X25519 key exchange
 and a double-ratchet for forward secrecy / post-compromise security. v1

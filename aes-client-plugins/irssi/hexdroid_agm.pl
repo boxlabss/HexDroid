@@ -26,18 +26,19 @@
 #   /agm-clear [target]         remove the key for target
 #   /agm-info  [target]         show the safety number (fingerprint) for target
 #   /agm-list                   list every configured key
-
+0
 use strict;
 use warnings;
 
 use Irssi;
+use Fcntl    qw(O_WRONLY O_CREAT O_EXCL O_TRUNC);
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Digest::SHA  qw(sha256);
 use JSON::PP     ();
 use Crypt::AuthEnc::GCM qw(gcm_encrypt_authenticate gcm_decrypt_verify);
 use Crypt::PRNG         qw(random_bytes);
 
-our $VERSION = '1.0.1';
+our $VERSION = '1.0.2';
 our %IRSSI = (
     authors     => 'boxlabs',
     name        => 'hexdroid_agm',
@@ -123,11 +124,13 @@ sub _load_keys {
 sub _save_keys {
     my $json = JSON::PP->new->utf8->canonical->pretty->encode(\%keys);
     my $tmp  = "$KEYFILE.tmp";
-    if (open(my $fh, '>', $tmp)) {
+    # Create with mode 0600 from the start via O_CREAT|O_EXCL, so the key file is never
+    # briefly group/other-readable between open and a later chmod, and a pre-planted
+    # symlink at the tmp path can't redirect the write.
+    unlink($tmp);
+    if (sysopen(my $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600)) {
         print {$fh} $json;
         close($fh);
-        # 0600 so other local users can't read your keys.
-        chmod(0600, $tmp);
         rename($tmp, $KEYFILE) or _status("Could not replace key file: $!");
     } else {
         _status("Could not write key file: $!");
@@ -283,13 +286,23 @@ sub sig_send_text {
 
 # Outbound /me (and /action <target> ...). Only the inner text is encrypted; the
 # CTCP ACTION envelope stays clear, matching HexDroid.
+# Return contract: 1 = handled, caller must suppress the original /me (we either sent
+# the encrypted action OR a key was configured but encryption failed. in both cases
+# the cleartext must NOT go out); 0 = no key configured, caller lets irssi send the
+# action in cleartext as normal.
 sub _send_action {
     my ($server, $witem, $target, $text) = @_;
     my $key = _get_key_raw(_net_of($server), $target);
-    return 0 unless $key;   # caller should let the default command run
+    return 0 unless $key;   # no key -> 0 tells caller to let irssi send cleartext
 
     my $ct = eval { _encrypt($text, $key, _aad_context($target, _nick_of($server))) };
-    if (!defined $ct) { _status("Encrypt /me failed: $@"); return 0; }
+    if (!defined $ct) {
+        # A key IS configured but encryption failed: fail CLOSED. Return 1 so the caller
+        # suppresses the original /me, dropping it rather than leaking the plaintext
+        # action.
+        _status("Encrypt /me failed, action NOT sent: $@");
+        return 1;
+    }
 
     $server->send_raw("PRIVMSG $target :\x01ACTION $ct\x01");
     my $me = _nick_of($server);
@@ -389,6 +402,14 @@ sub cmd_agm_set {
     my ($target, $b64) = split(/\s+/, $data, 2);
     unless (defined $target && defined $b64 && length $b64) {
         _status("Usage: /agm-set <target> <base64-key>"); return;
+    }
+    # Strict charset check so a stray non-base64 character from a paste (a smart quote,
+    # an accidental symbol) is reported instead of being silently dropped by the lenient
+    # decoder into a wrong-but-plausible key. Whitespace is
+    # tolerated and stripped, matching _b64_decode_any.
+    (my $check = $b64) =~ s/\s+//g;
+    unless ($check =~ m{\A[A-Za-z0-9+/]*={0,2}\z}) {
+        _status("Key contains non-base64 characters - check for stray symbols or smart quotes."); return;
     }
     my $raw = eval { _b64_decode_any($b64) };
     unless (defined $raw) { _status("Not valid base64."); return; }
