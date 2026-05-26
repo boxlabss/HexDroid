@@ -26,7 +26,7 @@
 #   /agm-clear [target]         remove the key for target
 #   /agm-info  [target]         show the safety number (fingerprint) for target
 #   /agm-list                   list every configured key
-0
+
 use strict;
 use warnings;
 
