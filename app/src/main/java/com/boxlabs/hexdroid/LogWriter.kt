@@ -101,6 +101,15 @@ class LogWriter(private val ctx: Context) {
         // cannot interleave lines. ConcurrentHashMap.getOrPut is not atomic for the
         // writer itself, so we need an explicit guard around the get-or-create + write.
         synchronized(writeLockFor(cacheKey)) {
+            // Recreate a log file that was deleted whilst the app is running.
+            // if the user (or a cleanup tool) deletes the file,
+            // that inode is merely unlinked, so writes through the stale writer keep "succeeding"
+            // into the now-orphaned inode and the file is never recreated at its path.
+            if (!f.exists()) {
+                openWriters.remove(cacheKey)?.runCatching { close() }
+                lastFlushMs.remove(cacheKey)
+                dir.mkdirs()
+            }
             val writer = openWriters.getOrPut(cacheKey) {
                 BufferedWriter(FileWriter(f, /* append = */ true), 8192)
             }

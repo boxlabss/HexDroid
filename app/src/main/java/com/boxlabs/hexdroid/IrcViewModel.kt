@@ -6681,16 +6681,12 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
                 val liveDuringLoad = buf.messages.filter { it.timeMs >= startedAt }
                 val firstLiveTime = liveDuringLoad.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
 
-                // Build a set of live message signatures for deduplication.
-                // Primary: use msgid when available (IRCv3 message-ids) - exact, no false positives.
-                // Fallback: fuzzy match with ±3 second window. Chathistory delivers server-time in
-                // milliseconds; disk logs store second-precision timestamps. A 1–2 second skew is
-                // common (log written at :30, server says :31). 3 seconds catches this reliably
-                // without false-positiving on back-to-back identical messages from the same nick.
-                val liveMsgIds = liveDuringLoad.mapNotNull { it.msgId }.toHashSet()
+                // Build a set of message signatures for deduplication against what is
+                // in the buffer.
+                val existingMsgIds = buf.messages.mapNotNull { it.msgId }.toHashSet()
                 data class FuzzySig(val sec: Long, val from: String?, val text: String)
-                val liveFuzzy = buildSet<FuzzySig> {
-                    for (msg in liveDuringLoad) {
+                val existingFuzzy = buildSet<FuzzySig> {
+                    for (msg in buf.messages) {
                         val sec = msg.timeMs / 1000
                         val from = msg.from?.lowercase()
                         val text = msg.text.take(100).lowercase()
@@ -6704,11 +6700,14 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
                 val olderLoaded = loaded.filter { msg ->
                     val isOlder = msg.timeMs < (firstLiveTime - 500L)
                     val isTooRecent = msg.timeMs > (startedAt - 2000L)  // Within 2 seconds of buffer creation
-                    // Prefer msgid-based dedup; fall back to fuzzy ±3s window.
+                    // Prefer msgid-based dedup; fall back to fuzzy ±3s window. Compared against
+                    // every message already in the buffer (preExisting + liveDuringLoad) so an
+                    // already-displayed line is never re-added regardless of when it arrived
+                    // relative to this scrollback pass.
                     val isDupe = if (msg.msgId != null) {
-                        liveMsgIds.contains(msg.msgId)
+                        existingMsgIds.contains(msg.msgId)
                     } else {
-                        liveFuzzy.contains(FuzzySig(
+                        existingFuzzy.contains(FuzzySig(
                             msg.timeMs / 1000,
                             msg.from?.lowercase(),
                             msg.text.take(100).lowercase()
@@ -6754,14 +6753,25 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
 
                 val merged = withMarker.takeLast(maxLines)
 
-                // Rebuild seenMsgIds from the retained messages so the O(1) dedup index
-                // stays consistent with the actual message list after a scrollback load.
+                // Rebuild seenMsgIds AND seenHistoryFingerprints from the retained messages so
+                // both O(1) dedup indices stay consistent with the actual message list after a
+                // scrollback load. Rebuilding the fingerprint set (not just seenMsgIds) matters:
+                // disk-loaded lines carry no msgid, so a subsequent live re-delivery of one of
+                // them would otherwise have no fingerprint to match against in append() and would
+                // render a second time. The key formula mirrors append()'s historyFingerprint.
                 val mergedSeenMsgIds: Set<String> = merged.mapNotNullTo(HashSet()) { it.msgId }
+                val mergedSeenFingerprints: Set<String> = merged.mapNotNullTo(HashSet()) { m ->
+                    if (m.from != null) "${m.timeMs}|${m.from}|${m.text.hashCode()}" else null
+                }
 
                 // Use atomic update to prevent race conditions
                 _state.update { currentState: UiState ->
                     val currentBuf = currentState.buffers[key] ?: return@update currentState
-                    val newBuf = currentBuf.copy(messages = merged, seenMsgIds = mergedSeenMsgIds)
+                    val newBuf = currentBuf.copy(
+                        messages = merged,
+                        seenMsgIds = mergedSeenMsgIds,
+                        seenHistoryFingerprints = mergedSeenFingerprints,
+                    )
                     currentState.copy(buffers = currentState.buffers + (key to newBuf))
                 }
             }
