@@ -40,7 +40,13 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.util.Collections
+import java.io.InputStream
+import java.net.InetSocketAddress
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Parsed CTCP DCC SEND offer.
@@ -118,6 +124,338 @@ sealed class DccTransferState {
                         val endTimeMs: Long? = null
     ) : DccTransferState()
 
+}
+
+// ---------------------------------------------------------------------------
+// DCC receive pump (F1 read/write overlap + F3 SO_RCVBUF + F4 buffer sizing)
+//
+// These are top-level, file-internal declarations so the core pump is JVM-unit-testable
+// with ByteArrayInputStream / ByteArrayOutputStream and a capturing AckSink — no Android
+// classes, no real Socket, no Context, no Robolectric (see DccPumpReceiveTest).
+// ---------------------------------------------------------------------------
+
+/** F4: socket read buffer. 64 KB halves syscalls/iterations vs the old 32 KB. */
+internal const val DCC_READ_BUF_SIZE = 64 * 1024
+
+/**
+ * F1: bounded reader->writer hand-off depth. Peak in-flight memory is roughly
+ * (DCC_QUEUE_CAPACITY + 2) * DCC_READ_BUF_SIZE — the queue, plus the one chunk in the reader's
+ * hand while it blocks on a full queue and the one the writer is actively writing — plus the
+ * caller's 256 KB BufferedOutputStream: ~1.1 MB total. Fixed and independent of file size, so
+ * 4 GB+ transfers never OOM. Deep enough to ride out a disk write burst / fsync hiccup.
+ */
+internal const val DCC_QUEUE_CAPACITY = 12
+
+/**
+ * Back-pressure / liveness poll granularity: how long the reader waits on a full queue
+ * before re-checking whether the writer died (so a dead writer can't wedge it), and how
+ * long the writer waits on an empty queue before re-checking whether to stop.
+ */
+internal const val DCC_QUEUE_POLL_MS = 250L
+
+/**
+ * F3: requested SO_RCVBUF for incoming DCC. Clamped by net.core.rmem_max; best-effort.
+ * Must be set BEFORE connect/accept so TCP window scaling negotiates against it.
+ */
+internal const val DCC_SO_RCVBUF = 4 * 1024 * 1024   // 4 MB
+
+/** Throttle floor for onProgress emissions from the receive pump (first + final always emit). */
+internal const val DCC_PROGRESS_MIN_INTERVAL_MS = 100L
+
+/** Teardown stall-watchdog tick: how often the join loop re-checks the writer's durable progress. */
+internal const val DCC_WRITER_JOIN_TICK_MS = 100L
+
+/**
+ * Clean-completion stall ceiling: if the disk writer commits NO bytes for this long, treat the write
+ * as wedged (a non-interruptible SAF/cloud/SD-card stall) and fail, rather than hang the transfer
+ * "in progress" forever. Progress is measured at whole-chunk granularity (writtenTotal only advances
+ * after each write() returns), so this CANNOT distinguish a wedged write from a single write that is
+ * merely very slow. It is therefore set deliberately large: a single buffered write that blocks this
+ * long (2 min of zero progress) and then succeeds is vanishingly unlikely on real storage, while a
+ * genuinely wedged write stays bounded. (The only alternative — an unbounded join — hangs forever.)
+ * Note this is per-write: a slow-but-progressing writer resets the timer on every committed chunk,
+ * so a long total drain never trips it; only a single write exceeding this window does.
+ */
+internal const val DCC_WRITER_STALL_TIMEOUT_MS = 120_000L
+
+/** Abnormal-teardown (socket error / user cancel) stall ceiling — short, since the partial file is discarded. */
+internal const val DCC_WRITER_ABORT_TIMEOUT_MS = 3_000L
+
+/**
+ * Sink for cumulative DCC ACKs. A `fun interface` so [pumpReceive] is unit-testable on the JVM
+ * without a real [Socket]: production passes a lambda that writes the big-endian count to the
+ * upstream socket; tests pass a capturing lambda. Turbo mode passes `null` (no ACKs).
+ */
+internal fun interface AckSink {
+    /** Emit a cumulative ACK for [totalBytesReceived] (absolute running total, not a delta). */
+    fun ack(totalBytesReceived: Long)
+}
+
+/**
+ * Build the DCC ACK payload for [total] bytes received.
+ *
+ * Width is governed by the advertised [expectedSize] (matching the sender's ACK reader):
+ *  - 8-byte (64-bit) big-endian when the transfer exceeds a 32-bit value (> 4 GiB),
+ *  - 4-byte (32-bit) big-endian otherwise, with [total] clamped to 0xFFFFFFFF so a lying
+ *    sender cannot overflow the field.
+ */
+internal fun buildAck(total: Long, expectedSize: Long): ByteArray {
+    val ack64 = expectedSize > 0xFFFFFFFFL
+    return if (ack64) {
+        byteArrayOf(
+            (total ushr 56).toByte(), (total ushr 48).toByte(),
+            (total ushr 40).toByte(), (total ushr 32).toByte(),
+            (total ushr 24).toByte(), (total ushr 16).toByte(),
+            (total ushr  8).toByte(),  total.toByte()
+        )
+    } else {
+        val a = total.coerceAtMost(0xFFFFFFFFL)
+        byteArrayOf(
+            (a ushr 24).toByte(), (a ushr 16).toByte(),
+            (a ushr  8).toByte(),  a.toByte()
+        )
+    }
+}
+
+/**
+ * A unit of data handed from the socket-reader to the disk-writer: [buf] holds [len] valid
+ * bytes (len < 0 is the POISON stop sentinel). File-private so [pumpReceive] stays clean.
+ */
+private class DccChunk(val buf: ByteArray, val len: Int)
+
+/**
+ * Core receive pump (F1). Pure with respect to Android/Socket: it operates on a plain
+ * [InputStream] (the wire), a plain [OutputStream] (the disk), and an [AckSink], so it is
+ * JVM-unit-testable with ByteArrayInputStream / ByteArrayOutputStream and a capturing AckSink
+ * (JUnit4 only — no Android, no Socket, no coroutines).
+ *
+ * Threading model: the CALLING thread is the reader — it drains [data], emits ACKs, and
+ * throttles [onProgress]. A single daemon "dcc-disk-writer" thread is the writer — it drains a
+ * bounded queue to [disk]. Reading and writing therefore overlap, so disk latency no longer
+ * stalls draining the wire. The reader stays on the calling thread so the existing
+ * `invokeOnCompletion { sock.close() }` cancel contract keeps working unchanged: a close makes
+ * [data].read() throw, the reader exits, and the writer is joined before this returns.
+ *
+ * Contract (the report's mandatory caveats):
+ *  - BOUNDED + BACK-PRESSURE: [queueCapacity] slots of [bufSize] bytes cap in-flight memory
+ *    regardless of file size. When the disk lags, the reader blocks enqueuing, stops draining
+ *    the socket, and TCP flow control throttles the sender.
+ *  - JOIN BEFORE RETURN: the writer is joined (via a progress watchdog) before this returns/throws,
+ *    so the caller's flush/close/delete and integrity gate run after the writer stops touching
+ *    [disk]. The writer is a daemon; on a normal/slow finish it is fully joined. If it WEDGES on a
+ *    non-interruptible disk/SAF write (no durable progress for the stall window) the call still
+ *    completes — it records a stall failure and stops waiting; the daemon may briefly outlive the
+ *    call until the syscall returns, but can neither block process exit nor grow memory (queue is
+ *    cleared on its exit).
+ *  - EXCEPTION PROPAGATION: a writer error (disk full, IOException) or a stall is captured and
+ *    rethrown after join, so a truncated write surfaces as a FAILURE, never a silent clean short read.
+ *  - NO DEADLOCK / NO HANG: the reader uses offer(timeout) (never an unbounded put) and re-checks
+ *    writer liveness each tick; the writer uses poll(timeout); the teardown bounds the join with a
+ *    progress watchdog. Either side always makes progress or gives up.
+ *  - NO ALIASING: each read allocates a fresh exact-sized buffer the writer owns; the reader
+ *    never mutates a queued buffer.
+ *  - ACK SEMANTICS: ACK on bytes-read-off-socket (cumulative), on the reader; a TERMINAL
+ *    cumulative ACK == total is emitted unconditionally at EOF (non-turbo) so the sender's
+ *    final-ACK wait is satisfied. Turbo → ackSink == null → no ACKs.
+ *  - CAP + SHORT READS: preserves maxAccept (advertised size, else 8 GB), shrinks the final read
+ *    window to land exactly on the cap, treats read() < buffer as normal.
+ *
+ * @param ackSink null == turbo (no ACKs).
+ * @return total bytes DURABLY written to [disk] by the writer (the integrity-gate input). On a
+ *   clean run this equals bytes read, because the writer is joined before return; if the writer
+ *   failed, this function throws instead of returning.
+ */
+internal fun pumpReceive(
+    data: InputStream,
+    disk: OutputStream,
+    expectedSize: Long,
+    ackSink: AckSink?,
+    onProgress: (Long, Long) -> Unit,
+    bufSize: Int = DCC_READ_BUF_SIZE,
+    queueCapacity: Int = DCC_QUEUE_CAPACITY,
+    pollMs: Long = DCC_QUEUE_POLL_MS,
+    progressIntervalMs: Long = DCC_PROGRESS_MIN_INTERVAL_MS,
+    joinTickMs: Long = DCC_WRITER_JOIN_TICK_MS,
+    cleanStallMs: Long = DCC_WRITER_STALL_TIMEOUT_MS,
+    abortStallMs: Long = DCC_WRITER_ABORT_TIMEOUT_MS,
+): Long {
+    // EOF/stop is signalled by the POISON sentinel (len < 0), so a legitimate empty read can
+    // never be confused with end-of-stream.
+    val poison = DccChunk(ByteArray(0), -1)
+
+    val queue = ArrayBlockingQueue<DccChunk>(queueCapacity)
+    // First writer-thread failure (disk full, IOException), surfaced to the reader.
+    val writerError = AtomicReference<Throwable?>(null)
+    // Set when the writer has stopped consuming, so the reader's bounded offer() can't spin
+    // forever waiting for space that will never free.
+    val writerDone = AtomicBoolean(false)
+    // Total bytes the writer has DURABLY committed to disk. An AtomicLong (not a plain var) because
+    // the teardown stall watchdog reads it from the reader thread WHILE the writer is still running,
+    // to distinguish "slow but progressing" from "wedged"; the final read after join is safe too.
+    val writtenTotal = AtomicLong(0L)
+
+    val writer = thread(start = true, isDaemon = true, name = "dcc-disk-writer") {
+        try {
+            while (true) {
+                // Bounded wait so a dead reader can never strand this thread.
+                val c = queue.poll(pollMs, TimeUnit.MILLISECONDS) ?: continue
+                if (c.len < 0) break                 // poison: clean stop
+                disk.write(c.buf, 0, c.len)
+                writtenTotal.addAndGet(c.len.toLong())
+            }
+        } catch (_: InterruptedException) {
+            // Interrupted by teardown (user cancel or the stall watchdog) — a requested stop, not a
+            // disk failure. Leave writerError as the teardown set it (the stall error, or null on cancel).
+        } catch (t: Throwable) {
+            // A real write error (e.g. disk full).
+            writerError.compareAndSet(null, t)
+        } finally {
+            // Mark stopped and clear so a reader blocked in offer() gets free slots and can
+            // observe writerDone / writerError and bail instead of hanging.
+            writerDone.set(true)
+            queue.clear()
+        }
+    }
+
+    var readTotal = 0L
+    var lastProgressMs = 0L
+    var emittedFirst = false
+
+    fun emitProgress(force: Boolean) {
+        val now = System.currentTimeMillis()
+        if (force || !emittedFirst || now - lastProgressMs >= progressIntervalMs) {
+            emittedFirst = true
+            lastProgressMs = now
+            onProgress(readTotal, expectedSize)
+        }
+    }
+
+    var readerFailed = false
+    try {
+        val expected: Long? = expectedSize.takeIf { it > 0L }
+        // Hard ceiling for transfers without an advertised size: 8 GB (unchanged). With a known
+        // size we stop exactly at the advertised size so a lying sender can't bypass the cap.
+        val maxAccept: Long = expected ?: (8L * 1024 * 1024 * 1024)
+
+        while (true) {
+            // If the writer already stopped (e.g. disk full) stop reading — don't pull bytes we
+            // can't persist, and don't block on a queue that will never drain. The real error is
+            // rethrown exactly once, after the writer is joined (below), so wrapping stays uniform.
+            if (writerDone.get()) break
+
+            val remaining = maxAccept - readTotal
+            if (remaining <= 0L) break                          // maxAccept cap
+            val toRead = if (remaining < bufSize) remaining.toInt() else bufSize
+
+            val buf = ByteArray(toRead)                         // fresh buffer (no aliasing)
+            val n = data.read(buf, 0, toRead)                   // may return < toRead
+            if (n <= 0) break                                   // EOF / peer close
+
+            readTotal += n
+
+            // Hand off with back-pressure: a timed offer (never an unbounded put) that bails if the
+            // writer dies and — crucially — gives up if the writer makes NO durable progress for the
+            // stall window. Without that, a wedged non-interruptible disk/SAF write would spin the
+            // reader here forever once the queue fills (writerDone stays false because the writer is
+            // stuck, not dead). A merely-slow writer keeps committing bytes, which resets the stall
+            // timer, so it is never false-failed; back-pressure still throttles the sender via TCP.
+            val item = DccChunk(buf, n)
+            var handed = false
+            var bpIdleMs = 0L
+            var bpLastWritten = writtenTotal.get()
+            while (!handed && !writerDone.get()) {
+                handed = queue.offer(item, pollMs, TimeUnit.MILLISECONDS)
+                if (handed) break
+                val now = writtenTotal.get()
+                if (now != bpLastWritten) {
+                    bpLastWritten = now
+                    bpIdleMs = 0L
+                } else {
+                    bpIdleMs += pollMs
+                    if (bpIdleMs >= cleanStallMs) {
+                        writerError.compareAndSet(
+                            null,
+                            IOException("DCC disk write stalled: no progress for $cleanStallMs ms")
+                        )
+                        break
+                    }
+                }
+            }
+            if (!handed) break    // writer dead or stalled; finally + post-finally rethrow handle it
+
+            // ACK on bytes-read-off-socket, cumulative, on the reader. Full cadence.
+            ackSink?.ack(readTotal)
+            emitProgress(force = false)
+
+            if (expected != null && readTotal >= expected) break   // stop at size
+        }
+    } catch (t: Throwable) {
+        readerFailed = true
+        throw t
+    } finally {
+        // Stop the writer and join it before returning — but NEVER hang forever on a wedged,
+        // non-interruptible disk/SAF write (a cloud DocumentsProvider doing network I/O, a removed
+        // SD card, a wedged filesystem — none honour Thread.interrupt()). Strategy:
+        //  - Hand off the POISON stop sentinel. On a clean finish keep re-offering it until the
+        //    writer (FIFO) has drained every queued chunk and accepts it, so a fast-reader/slow-
+        //    writer transfer still writes every byte and is NEVER corrupted/interrupted mid-write.
+        //    On an abnormal finish (socket error / cancel) the partial file is discarded, so also
+        //    interrupt to stop ASAP.
+        //  - Join with a progress watchdog: while the writer keeps committing bytes we wait (a
+        //    legitimately slow target must never be false-failed); if it makes NO durable progress
+        //    for the stall window, record a stall error, interrupt, and stop waiting. The daemon may
+        //    briefly outlive the call until the syscall returns, but the queue is cleared on its exit
+        //    so it cannot block process exit or grow memory — and the caller always completes.
+        // If the reader bailed (socket error / cancel) OR a stall was already recorded (e.g. the
+        // back-pressure loop above gave up on a wedged writer), stop promptly with the short ceiling
+        // and interrupt now; otherwise wait patiently for a slow-but-progressing writer to finish.
+        val alreadyFailed = writerError.get() != null
+        val stallMs = if (readerFailed || alreadyFailed) abortStallMs else cleanStallMs
+        var poisonQueued = queue.offer(poison)
+        if (readerFailed || alreadyFailed) writer.interrupt()
+        var idleMs = 0L
+        var lastWritten = writtenTotal.get()
+        while (writer.isAlive) {
+            writer.join(joinTickMs)
+            if (!writer.isAlive) break
+            if (!poisonQueued) poisonQueued = queue.offer(poison)   // keep trying until it lands
+            val now = writtenTotal.get()
+            if (now != lastWritten) {
+                lastWritten = now
+                idleMs = 0L
+            } else {
+                idleMs += joinTickMs
+                if (idleMs >= stallMs) {
+                    writerError.compareAndSet(
+                        null,
+                        IOException("DCC disk write stalled: no progress for $stallMs ms")
+                    )
+                    writer.interrupt()
+                    break
+                }
+            }
+        }
+    }
+
+    // Propagate a writer failure (disk full, etc.) as a FAILURE so the integrity gate never sees
+    // a "clean" short read. Wrap non-IOExceptions so the caller's IOException handling applies
+    // uniformly. Thrown AFTER join so cleanup ordering holds.
+    writerError.get()?.let { e ->
+        throw if (e is IOException) e else IOException("DCC disk write failed: ${e.message}", e)
+    }
+
+    // Terminal cumulative ACK == bytes received, emitted unconditionally at EOF (non-turbo), even
+    // if the final per-chunk ACK held the same value, so the sender's 10s final-ACK wait is always
+    // satisfied and a successful transfer is never mis-reported as failed.
+    if (readTotal > 0L) ackSink?.ack(readTotal)
+
+    // Final progress report (the throttle may have skipped the last tick).
+    emitProgress(force = true)
+
+    // Return DURABLE bytes (what the writer committed), which is what the integrity gate compares
+    // to the offer size. On a clean run this equals bytes read; if the writer failed or stalled, the
+    // rethrow above fired instead of reaching here. AtomicLong makes this read safe regardless.
+    return writtenTotal.get()
 }
 
 /**
@@ -390,7 +728,21 @@ class DccManager(ctx: Context) {
                         // it, the file was leaked as zero bytes. Open the socket here too for the same
                         // reason — if the connect fails, no file gets created.
                         validateRemoteIp(offer.ip)
-                        val rawSock = Socket(offer.ip, offer.port)
+                        // F3: set SO_RCVBUF BEFORE connect so TCP window scaling negotiates the larger
+                        // window. The one-arg Socket(ip,port) ctor connects immediately, which would set
+                        // the buffer too late; use an unconnected socket + explicit connect. Clamped by
+                        // net.core.rmem_max; best-effort (never abort a transfer over a buffer hint).
+                        val rawSock = Socket().apply {
+                            runCatching { receiveBufferSize = DCC_SO_RCVBUF }
+                            try {
+                                connect(InetSocketAddress(offer.ip, offer.port))
+                            } catch (t: Throwable) {
+                                // The one-arg Socket(ip,port) ctor closed its fd on a failed connect;
+                                // preserve that (an unconnected Socket() leaks its fd otherwise).
+                                runCatching { close() }
+                                throw t
+                            }
+                        }
                         val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
 
                         val (outputStream, savedPath) = try {
@@ -456,8 +808,10 @@ class DccManager(ctx: Context) {
 
                             // Bind FIRST so a port-exhausted failure doesn't leave a leaked zero-byte file
                             // on disk. Same rationale as the validateRemoteIp-before-createDccOutputStream
-                            // ordering in receive() above.
-                            val ss = bindFirstAvailable(portMin, portMax)
+                            // ordering in receive() above. F3: bindFirstAvailable sets SO_RCVBUF on the
+                            // listen socket BEFORE bind (setting it post-bind would not affect the TCP
+                            // window of accepted connections); accepted sockets then inherit the window.
+                            val ss = bindFirstAvailable(portMin, portMax, DCC_SO_RCVBUF)
                             val (outputStream, savedPath) = try {
                                 createDccOutputStream(offer.filename, customFolderUri)
                             } catch (t: Throwable) {
@@ -676,7 +1030,11 @@ class DccManager(ctx: Context) {
                     /**
                      * Receive bytes from [sock] into [outputStream], ACKing progress per the DCC convention.
                      *
-                     * @return the total number of bytes actually written. The caller compares this against
+                     * Thin adapter over [pumpReceive] (F1): it wires the socket's input/output streams and
+                     * the DCC ACK encoding around the pure pump. All overlap, back-pressure, cancellation,
+                     * and exception-propagation logic lives in [pumpReceive].
+                     *
+                     * @return the total number of bytes DURABLY written. The caller compares this against
                      *   the advertised offer size to decide success vs. truncation (see [verifyCompleteOrCleanup]).
                      */
                     private fun receiveFromSocket(
@@ -687,64 +1045,25 @@ class DccManager(ctx: Context) {
                         onProgress: (Long, Long) -> Unit
                     ): Long {
                         sock.tcpNoDelay = true
-                        return sock.getInputStream().use { inp ->
-                            val buf = ByteArray(32 * 1024)
-                            // DCC ACK width. The protocol acknowledges progress with a
-                            // 4-byte (32-bit) unsigned big-endian count of total bytes received, which
-                            // overflows at 0xFFFFFFFF (4 GiB). Switch to 8-byte (64-bit) ACKs whenever the
-                            // transfer size exceeds a 32-bit value.
-                            val ack64 = expectedSize > 0xFFFFFFFFL
-                            val ackBuf = ByteArray(if (ack64) 8 else 4)
-                            var total = 0L
-                            val expected: Long? = expectedSize.takeIf { it > 0L }
-
-                            // Hard ceiling for transfers without an advertised size: 8 GB. Without this,
-                            // a malicious sender that omits the size field could keep writing forever and
-                            // fill the device's storage, causing the OS to start killing apps, including
-                            // ours. With a known size we still cap at the advertised size so a sender that
-                            // lies (offers 1 KB then sends 10 GB) can't bypass the limit either.
-                            val maxAccept: Long = expected ?: (8L * 1024 * 1024 * 1024)
-
-                            while (true) {
-                                // Don't read more than we're prepared to keep. If the next read would
-                                // exceed maxAccept, shrink the read window so we stop precisely at the cap
-                                // rather than discarding the overshoot.
-                                val remaining = maxAccept - total
-                                if (remaining <= 0L) break
-                                    val toRead = if (remaining < buf.size) remaining.toInt() else buf.size
-                                    val n = inp.read(buf, 0, toRead)
-                                    if (n <= 0) break
-
-                                        outputStream.write(buf, 0, n)
-                                        total += n
-                                        onProgress(total, expectedSize)
-                                        if (!turbo) {
-                                            // ACK the running total of bytes received: unsigned, network byte
-                                            // order, 8 bytes for large-file transfers and 4 bytes otherwise.
-                                            if (ack64) {
-                                                ackBuf[0] = (total ushr 56).toByte()
-                                                ackBuf[1] = (total ushr 48).toByte()
-                                                ackBuf[2] = (total ushr 40).toByte()
-                                                ackBuf[3] = (total ushr 32).toByte()
-                                                ackBuf[4] = (total ushr 24).toByte()
-                                                ackBuf[5] = (total ushr 16).toByte()
-                                                ackBuf[6] = (total ushr  8).toByte()
-                                                ackBuf[7] =  total.toByte()
-                                            } else {
-                                                // total never exceeds 4 GiB here (the expected size capped it),
-                                                // but clamp defensively so a lying sender can't overflow the field.
-                                                val ackInt = total.coerceAtMost(0xFFFFFFFFL)
-                                                ackBuf[0] = (ackInt ushr 24).toByte()
-                                                ackBuf[1] = (ackInt ushr 16).toByte()
-                                                ackBuf[2] = (ackInt ushr  8).toByte()
-                                                ackBuf[3] =  ackInt.toByte()
-                                            }
-                                            runCatching { sock.getOutputStream().write(ackBuf) }
-                                        }
-
-                                        if (expected != null && total >= expected) break
+                        // Cache the upstream output stream once; the ACK sink writes the cumulative total to
+                        // it. runCatching mirrors the original inline-ACK behaviour: a failed ACK write must
+                        // never abort a successful inbound transfer (the 4/8-byte write returns immediately
+                        // into a near-empty upstream socket, so it does not stall draining the wire).
+                        val ackOut: OutputStream? =
+                            if (turbo) null else runCatching { sock.getOutputStream() }.getOrNull()
+                        val ackSink: AckSink? =
+                            if (turbo) null else AckSink { total ->
+                                ackOut?.let { runCatching { it.write(buildAck(total, expectedSize)) } }
                             }
-                            total
+
+                        return sock.getInputStream().use { inp ->
+                            pumpReceive(
+                                data = inp,
+                                disk = outputStream,
+                                expectedSize = expectedSize,
+                                ackSink = ackSink,
+                                onProgress = onProgress,
+                            )
                         }
                     }
 
@@ -861,14 +1180,28 @@ class DccManager(ctx: Context) {
                         }
                     }
 
-                    private fun bindFirstAvailable(min: Int, max: Int): ServerSocket {
+                    private fun bindFirstAvailable(
+                        min: Int,
+                        max: Int,
+                        receiveBufferSize: Int? = null
+                    ): ServerSocket {
                         val a = min.coerceIn(1, 65535)
                         val b = max.coerceIn(1, 65535)
                         for (p in a..b) {
+                            // Create the socket UNBOUND so SO_RCVBUF can be applied BEFORE bind (F3): the
+                            // TCP receive window (>64 KB) only takes effect on accepted connections when
+                            // the buffer is set pre-bind — window scaling is negotiated at bind/accept
+                            // time. Setting it on an already-bound ServerSocket is silently ineffective.
+                            // Best-effort: an OS-rejected size must not abort binding.
+                            val ss = ServerSocket()
+                            if (receiveBufferSize != null) {
+                                runCatching { ss.receiveBufferSize = receiveBufferSize }
+                            }
                             try {
-                                return ServerSocket(p)
+                                ss.bind(InetSocketAddress(p))
+                                return ss
                             } catch (_: Throwable) {
-                                // try next
+                                runCatching { ss.close() }   // free it before trying the next port
                             }
                         }
                         throw IllegalStateException("No free port in $a..$b")
