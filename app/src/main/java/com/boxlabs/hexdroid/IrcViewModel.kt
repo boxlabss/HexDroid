@@ -2531,6 +2531,11 @@ fun startAddNetwork() {
      * so the user's badge counts don't fill up while the network flaps. Callers that
      * surface genuinely-actionable failures override these.
      *
+     * When [broadcast] is true AND this call resulted in a fresh append (not a counter
+     * bump on an existing line), the same text is also mirrored into every non-server,
+     * non-DCC-chat buffer on this network, so a user reading a channel sees "Disconnected"
+     * / "Reconnecting in 5s" / "Reconnected" inline.
+     *
      * Returns true if a new line was appended, false if it was collapsed into the
      * existing line's counter.
      *
@@ -2545,60 +2550,104 @@ fun startAddNetwork() {
         isHighlight: Boolean = false,
         doNotify: Boolean = false,
         from: String? = null,
-    ): Boolean = synchronized(connStatusLock) {
-        val now = System.currentTimeMillis()
-        val key = "${from ?: ""}|$text"
-        val bufferKey = bufKey(netId, "*server*")
-        val prev = lastConnStatusLine[netId]
+        broadcast: Boolean = false,
+    ): Boolean {
+        val appendedFresh: Boolean = synchronized(connStatusLock) {
+            val now = System.currentTimeMillis()
+            val key = "${from ?: ""}|$text"
+            val bufferKey = bufKey(netId, "*server*")
+            val prev = lastConnStatusLine[netId]
 
-        if (prev != null && prev.key == key && now - prev.lastSeenMs < CONN_STATUS_DEDUP_WINDOW_MS) {
-            // Same line, same network, still within window — try to bump the existing
-            // message's counter rather than appending a new one.
-            val newCount = prev.count + 1
-            val newText = "${prev.baseText} (×$newCount)"
-            // What the buffered message currently reads. First repeat: it's just the
-            // baseText (no suffix yet). Subsequent repeats: "(×N)" where N = prev.count.
-            val expectedText = if (prev.count == 1) prev.baseText
-                               else "${prev.baseText} (×${prev.count})"
-            var collapsed = false
-            _state.update { st ->
-                // Reset on every CAS retry so a failed retry doesn't leave `collapsed`
-                // stuck at true from a previous attempt that didn't make it into state.
-                collapsed = false
-                val buf = st.buffers[bufferKey] ?: return@update st
-                // Connection-status lines are recent by construction, so search only the
-                // last few messages, bounded scan, ignores the full scrollback. Matching
-                // on (from, text) is enough here: the count suffix differs between calls
-                // but expectedText reflects what the message reads RIGHT NOW.
-                val tailStart = (buf.messages.size - 8).coerceAtLeast(0)
-                val tail = buf.messages.subList(tailStart, buf.messages.size)
-                val idxInTail = tail.indexOfLast { it.from == from && it.text == expectedText }
-                if (idxInTail < 0) return@update st
-                val realIdx = tailStart + idxInTail
-                val updated = buf.messages[realIdx].copy(text = newText)
-                val newMessages = buf.messages.toMutableList().also { it[realIdx] = updated }
-                collapsed = true
-                st.copy(buffers = st.buffers + (bufferKey to buf.copy(messages = newMessages)))
+            if (prev != null && prev.key == key && now - prev.lastSeenMs < CONN_STATUS_DEDUP_WINDOW_MS) {
+                // Same line, same network, still within window — try to bump the existing
+                // message's counter rather than appending a new one.
+                val newCount = prev.count + 1
+                val newText = "${prev.baseText} (×$newCount)"
+                // What the buffered message currently reads. First repeat: it's just the
+                // baseText (no suffix yet). Subsequent repeats: "(×N)" where N = prev.count.
+                val expectedText = if (prev.count == 1) prev.baseText
+                else "${prev.baseText} (×${prev.count})"
+                    var collapsed = false
+                    _state.update { st ->
+                        // Reset on every CAS retry so a failed retry doesn't leave `collapsed`
+                        // stuck at true from a previous attempt that didn't make it into state.
+                        collapsed = false
+                        val buf = st.buffers[bufferKey] ?: return@update st
+                        // Connection-status lines are recent by construction, so search only the
+                        // last few messages (bounded scan, ignores the full scrollback.) Matching
+                        // on (from, text) is enough here: the count suffix differs between calls
+                        // but expectedText reflects what the message reads RIGHT NOW.
+                        val tailStart = (buf.messages.size - 8).coerceAtLeast(0)
+                        val tail = buf.messages.subList(tailStart, buf.messages.size)
+                        val idxInTail = tail.indexOfLast { it.from == from && it.text == expectedText }
+                        if (idxInTail < 0) return@update st
+                            val realIdx = tailStart + idxInTail
+                            val updated = buf.messages[realIdx].copy(text = newText)
+                            val newMessages = buf.messages.toMutableList().also { it[realIdx] = updated }
+                            collapsed = true
+                            st.copy(buffers = st.buffers + (bufferKey to buf.copy(messages = newMessages)))
+                    }
+                    if (collapsed) {
+                        lastConnStatusLine[netId] = prev.copy(count = newCount, lastSeenMs = now)
+                        return@synchronized false
+                    }
+                    // Else: original message has been trimmed out of scrollback (the buffer rolled
+                    // past it). Fall through and append fresh as a new line.
             }
-            if (collapsed) {
-                lastConnStatusLine[netId] = prev.copy(count = newCount, lastSeenMs = now)
-                return@synchronized false
-            }
-            // Else: original message has been trimmed out of scrollback (the buffer rolled
-            // past it). Fall through and append fresh as a new line, better to show the
-            // event again than silently lose it. The tracker is overwritten below.
+
+            append(bufferKey, from = from, text = text, isHighlight = isHighlight, doNotify = doNotify)
+            lastConnStatusLine[netId] = ConnStatusDedupEntry(
+                key = key,
+                baseText = text,
+                from = from,
+                lastSeenMs = now,
+                count = 1,
+                bufferKey = bufferKey,
+            )
+            true
         }
 
-        append(bufferKey, from = from, text = text, isHighlight = isHighlight, doNotify = doNotify)
-        lastConnStatusLine[netId] = ConnStatusDedupEntry(
-            key = key,
-            baseText = text,
-            from = from,
-            lastSeenMs = now,
-            count = 1,
-            bufferKey = bufferKey,
-        )
-        true
+        if (broadcast && appendedFresh) {
+            broadcastConnStatusToOtherBuffers(netId, text, from)
+        }
+
+        return appendedFresh
+    }
+
+    /**
+     * Mirror a connection-status line into every channel and query buffer on [netId] so
+     * the user sees state changes inline regardless of which buffer they're reading. The
+     * *server* buffer already has the canonical copy (with dedup-counter handling); this
+     * writes the secondary copies for visibility only.
+     *
+     * Exclusions:
+     *  - The *server* buffer itself (already has the canonical copy).
+     *  - DCC chat buffers
+     *  - Buffers on other networks
+     *
+     * Cross-posts are written with `isLocal = true` (no unread/highlight increment — a
+     * network-wide event shouldn't bump the badge on every channel) and `doNotify = false`
+     * (the *server*-buffer copy already ran the notification policy for this event;
+     * we mustn't double-fire).
+     *
+     * Disk-logging is left enabled: each channel log gets its own "*** Disconnected" /
+     * "*** Reconnected" entry at the matching timestamp, which gives a clear visual
+     * break for anyone reviewing logs later.
+     */
+    private fun broadcastConnStatusToOtherBuffers(netId: String, text: String, from: String?) {
+        val keys = _state.value.buffers.keys.filter { key ->
+            val (kNetId, kBufName) = splitKey(key)
+            kNetId == netId && kBufName != "*server*" && !isDccChatBufferName(kBufName)
+        }
+        for (key in keys) {
+            append(
+                bufferKey = key,
+                from = from,
+                text = text,
+                isLocal = true,
+                doNotify = false,
+            )
+        }
     }
 
     /**
@@ -3644,6 +3693,7 @@ fun startAddNetwork() {
                         from = null,
                         doNotify = false,
                         isHighlight = false,
+                        broadcast = true,
                     )
                     // While backgrounded, no one's looking at the countdown — skip the tick
                     // loop and just wait the full duration in one delay() call. Avoids waking
@@ -4972,9 +5022,9 @@ fun startAddNetwork() {
                     else -> "Disconnected: $r"
                 }
                 if (isConnectFailureLine) {
-                    appendConnStatus(netId, pretty, from = "ERROR", doNotify = false, isHighlight = false)
+                    appendConnStatus(netId, pretty, from = "ERROR", doNotify = false, isHighlight = false, broadcast = true)
                 } else {
-                    appendConnStatus(netId, "*** $pretty", from = null, doNotify = false, isHighlight = false)
+                    appendConnStatus(netId, "*** $pretty", from = null, doNotify = false, isHighlight = false, broadcast = true)
                 }
                 setNetConn(netId) { it.copy(connecting = false, connected = false, status = pretty, lagMs = null) }
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
@@ -5050,6 +5100,7 @@ fun startAddNetwork() {
                             from = null,
                             doNotify = false,
                             isHighlight = false,
+                            broadcast = true,
                         )
                         setNetConn(netId) { it.copy(status = "TLS error — reconnect halted") }
                         return
@@ -5064,6 +5115,7 @@ fun startAddNetwork() {
                             from = null,
                             doNotify = false,
                             isHighlight = false,
+                            broadcast = true,
                         )
                         setNetConn(netId) { it.copy(status = "Server unreachable — reconnect halted") }
                         return
@@ -5152,6 +5204,7 @@ fun startAddNetwork() {
                     from = "AUTH",
                     isHighlight = false,
                     doNotify = false,
+                    broadcast = true,
                 )
             }
 
@@ -5442,6 +5495,30 @@ if (code == "442") {
                     (rt0.client.hasCap("message-tags") || rt0.client.hasCap("draft/message-reactions"))
                 setNetConn(netId) { it.copy(myNick = ev.nick, hasReactionSupport = hasReact) }
                 append(bufKey(netId, "*server*"), from = null, text = "*** Registered as ${ev.nick}", doNotify = false)
+                // If this was a reconnect (we had been retrying), announce success in every
+                // channel/query buffer so the user reading a channel sees their connection
+                // come back without having to switch to the *server* buffer. Heuristic:
+                // reconnectAttempts[netId] > 0 means scheduleAutoReconnect had at least
+                // one round of backoff, i.e. this is a recovery, not a first connect.
+                // (For first connects, the user has just chosen to connect and doesn't
+                // need a "Reconnected" line in every channel they're about to join.)
+                //
+                // Done BEFORE resetConnStatusDedup so the dedup tracker, which is holding
+                // the previous "*** Disconnected:.." entry doesn't suppress the announce.
+                // Reconnected and Disconnected have different keys (different text), so
+                // they wouldn't collide anyway, but the ordering keeps intent obvious.
+                val wasReconnect = (reconnectAttempts[netId] ?: 0) > 0
+                if (wasReconnect) {
+                    appendConnStatus(
+                        netId = netId,
+                        text = "*** Reconnected",
+                        from = null,
+                        doNotify = false,
+                        isHighlight = false,
+                        broadcast = true,
+                    )
+                }
+
                 // Successful registration is the natural reset point for connection-status
                 // dedup: if the connection drops AGAIN for the same reason after this, the
                 // user has just been online long enough to care about seeing it logged.
