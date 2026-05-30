@@ -59,8 +59,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.File
@@ -683,6 +683,33 @@ class IrcViewModel(
     // is the durable source of truth that survives process kills.
     private val flapPaused: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var flapPausedLoaded = false
+
+    /**
+     * Per-network dedup tracker for transient connection-status lines (disconnect reasons,
+     * connect-failure errors, recurring SASL/keystore warnings). Within
+     * [CONN_STATUS_DEDUP_WINDOW_MS] of the first occurrence, a repeated identical line is
+     * NOT appended again, instead the existing message is updated in place with a
+     * "(×N)" counter suffix so the user can still see that the same condition happened
+     * multiple times.
+     */
+    private data class ConnStatusDedupEntry(
+        /** "$from|$text" identity key must match exactly for dedup. */
+        val key: String,
+        /** Original text without any "(×N)" suffix. Used to construct the updated string. */
+        val baseText: String,
+        /** Original sender field. Used together with [baseText] to find the message in the buffer. */
+        val from: String?,
+        /** Most-recent occurrence epoch ms. Drives the [CONN_STATUS_DEDUP_WINDOW_MS] window. */
+        val lastSeenMs: Long,
+        /** How many times we've seen this line so far (1 = original; subsequent hits >2). */
+        val count: Int,
+        /** Buffer the original message was appended to (always the *server* buffer in practice). */
+        val bufferKey: String,
+    )
+    private val lastConnStatusLine: MutableMap<String, ConnStatusDedupEntry> =
+        java.util.concurrent.ConcurrentHashMap()
+    private val connStatusLock = Any()
+    private val CONN_STATUS_DEDUP_WINDOW_MS = 60_000L
 
     /** Hydrate the in-memory flapPaused set from DataStore (called once, lazily, on first use). */
     private suspend fun ensureFlapPausedLoaded() {
@@ -2493,6 +2520,97 @@ fun startAddNetwork() {
         // deleteNetwork() instead.
     }
 
+    /**
+     * Append a transient connection-status line (disconnect reason, retry notice, auth
+     * warning) to the *server* buffer for [netId]. If an identical line was emitted within
+     * [CONN_STATUS_DEDUP_WINDOW_MS], the existing message is updated in place with a
+     * "(×N)" counter suffix rather than being re-appended; the connection-state status
+     * field is updated regardless so the toolbar still reflects the latest situation.
+     *
+     * Defaults are tuned for routine connectivity blips: no notification, no highlight,
+     * so the user's badge counts don't fill up while the network flaps. Callers that
+     * surface genuinely-actionable failures override these.
+     *
+     * Returns true if a new line was appended, false if it was collapsed into the
+     * existing line's counter.
+     *
+     * Thread-safety: serialised on [connStatusLock] so two concurrent calls (e.g. one
+     * from a Default-dispatched reconnect coroutine and one from a Main.immediate event
+     * handler) can't both decide they're the first to collapse and end up racing on the
+     * message search and counter increment.
+     */
+    private fun appendConnStatus(
+        netId: String,
+        text: String,
+        isHighlight: Boolean = false,
+        doNotify: Boolean = false,
+        from: String? = null,
+    ): Boolean = synchronized(connStatusLock) {
+        val now = System.currentTimeMillis()
+        val key = "${from ?: ""}|$text"
+        val bufferKey = bufKey(netId, "*server*")
+        val prev = lastConnStatusLine[netId]
+
+        if (prev != null && prev.key == key && now - prev.lastSeenMs < CONN_STATUS_DEDUP_WINDOW_MS) {
+            // Same line, same network, still within window — try to bump the existing
+            // message's counter rather than appending a new one.
+            val newCount = prev.count + 1
+            val newText = "${prev.baseText} (×$newCount)"
+            // What the buffered message currently reads. First repeat: it's just the
+            // baseText (no suffix yet). Subsequent repeats: "(×N)" where N = prev.count.
+            val expectedText = if (prev.count == 1) prev.baseText
+                               else "${prev.baseText} (×${prev.count})"
+            var collapsed = false
+            _state.update { st ->
+                // Reset on every CAS retry so a failed retry doesn't leave `collapsed`
+                // stuck at true from a previous attempt that didn't make it into state.
+                collapsed = false
+                val buf = st.buffers[bufferKey] ?: return@update st
+                // Connection-status lines are recent by construction, so search only the
+                // last few messages, bounded scan, ignores the full scrollback. Matching
+                // on (from, text) is enough here: the count suffix differs between calls
+                // but expectedText reflects what the message reads RIGHT NOW.
+                val tailStart = (buf.messages.size - 8).coerceAtLeast(0)
+                val tail = buf.messages.subList(tailStart, buf.messages.size)
+                val idxInTail = tail.indexOfLast { it.from == from && it.text == expectedText }
+                if (idxInTail < 0) return@update st
+                val realIdx = tailStart + idxInTail
+                val updated = buf.messages[realIdx].copy(text = newText)
+                val newMessages = buf.messages.toMutableList().also { it[realIdx] = updated }
+                collapsed = true
+                st.copy(buffers = st.buffers + (bufferKey to buf.copy(messages = newMessages)))
+            }
+            if (collapsed) {
+                lastConnStatusLine[netId] = prev.copy(count = newCount, lastSeenMs = now)
+                return@synchronized false
+            }
+            // Else: original message has been trimmed out of scrollback (the buffer rolled
+            // past it). Fall through and append fresh as a new line, better to show the
+            // event again than silently lose it. The tracker is overwritten below.
+        }
+
+        append(bufferKey, from = from, text = text, isHighlight = isHighlight, doNotify = doNotify)
+        lastConnStatusLine[netId] = ConnStatusDedupEntry(
+            key = key,
+            baseText = text,
+            from = from,
+            lastSeenMs = now,
+            count = 1,
+            bufferKey = bufferKey,
+        )
+        true
+    }
+
+    /**
+     * Forget the dedup tracker for [netId] so subsequent connection-status lines pass
+     * unconditionally. Called after a successful registration: the user has been on a
+     * working connection long enough that a fresh disconnect deserves a fresh log line,
+     * even if the new reason happens to match the last one we saw an hour ago.
+     */
+    private fun resetConnStatusDedup(netId: String) {
+        lastConnStatusLine.remove(netId)
+    }
+
     fun deleteNetwork(id: String) {
         viewModelScope.launch {
             repo.deleteNetwork(id)
@@ -3130,18 +3248,17 @@ fun startAddNetwork() {
             is com.boxlabs.hexdroid.data.SecretStore.SecretResult.Value -> saslPasswordResult.secret
             is com.boxlabs.hexdroid.data.SecretStore.SecretResult.KeystoreInvalidated -> {
                 // Keystore key was invalidated (biometric change, factory reset of
-                // Keystore, etc.). The stored SASL password has been cleared. Warn the user
-                // so they know why authentication will fail, rather than silently connecting
-                // without credentials and getting an opaque SASL error from the server.
+                // Keystore, etc.). The stored SASL password has been cleared.
                 ensureServerBuffer(netId)
-                append(
-                    bufKey(netId, "*server*"),
-                    from = null,
-                    text = "*** ⚠ SASL credentials unavailable - the Android Keystore key was " +
+                appendConnStatus(
+                    netId = netId,
+                    text = "*** ⚠ SASL credentials unavailable. the Android Keystore key was " +
                         "invalidated (this can happen after a biometric or screen-lock change). " +
-                        "Please re-enter your SASL password in Network Settings.",
-                    isHighlight = true,
-                    doNotify = true
+                        "Connecting without SASL; please re-enter your SASL password in Network " +
+                        "Settings to restore services authentication.",
+                    from = null,
+                    isHighlight = false,
+                    doNotify = false,
                 )
                 null
             }
@@ -3183,11 +3300,25 @@ fun startAddNetwork() {
             myNick = cfg.nick,
             listModes = preservedListModes
         ))
+        // Focus handling: a fresh user-initiated connect from the Networks list should land
+        // on the chat screen for the new connection. But every subsequent reconnect attempt
+        // (auto-reconnect after a drop, manual retry from the Reconnect button while already
+        // on a channel, etc.) should stay on the same buffer they were reading.
+        //
+        //   * Only force `screen = AppScreen.CHAT` when the user was on the Networks list,
+        //     which is the typical first-connect entry point. Settings / Transfers / Edit
+        //     screens are off-limits, the user is doing something deliberate there.
+        //   * Only force `selectedBuffer` when the user has no buffer selected at all. If
+        //     they're already focused on a buffer (channel, query, or this network's own
+        //     server buffer), leave that selection alone.
+        val curScreen = st.screen
+        val nextScreen = if (curScreen == AppScreen.NETWORKS) AppScreen.CHAT else curScreen
+        val nextSelectedBuffer = if (st.selectedBuffer.isBlank()) serverKey else st.selectedBuffer
         _state.value = syncActiveNetworkSummary(
             st.copy(
                 connections = newConns,
-                screen = AppScreen.CHAT,
-                selectedBuffer = if (st.activeNetworkId == netId) serverKey else st.selectedBuffer
+                screen = nextScreen,
+                selectedBuffer = nextSelectedBuffer
             )
         )
 
@@ -3356,6 +3487,10 @@ fun startAddNetwork() {
             // for rationale). Reaches the user-facing "reconnect" button via
             // reconnectActive() and the bouncer-side reconnect via this path.
             authBlockedReconnect.remove(netId)
+            // Forget the connection-status dedup tracker too: the user explicitly chose
+            // to retry, so any failure on this fresh attempt should surface even if it
+            // matches the last failure verbatim.
+            resetConnStatusDedup(netId)
 
             val oldRt = runtimes.remove(netId)
             runCatching { oldRt?.client?.disconnect(quitMsg) }
@@ -3498,9 +3633,18 @@ fun startAddNetwork() {
                     val jitter = (planned * ConnectionConstants.RECONNECT_JITTER_FACTOR).toLong()
                     val actual = if (jitter > 0) planned - jitter + Random.nextLong(jitter * 2 + 1) else planned
                     setNetConn(netId) { it.copy(status = "Reconnecting in ${actual}s…") }
-                    append(serverKey, from = null,
+                    // Route through appendConnStatus for consistency with the rest of the
+                    // connection-status pipeline. Each attempt has a different N and Xs so
+                    // dedup never collapses these in practice, but a malicious server that
+                    // forces us to retry on the same counter twice in a row wouldn't get to
+                    // print two identical lines.
+                    appendConnStatus(
+                        netId = netId,
                         text = "*** Reconnecting in ${actual}s (attempt ${attempt + 1})…",
-                        doNotify = false)
+                        from = null,
+                        doNotify = false,
+                        isHighlight = false,
+                    )
                     // While backgrounded, no one's looking at the countdown — skip the tick
                     // loop and just wait the full duration in one delay() call. Avoids waking
                     // the CPU every 1-5 s purely to update a status string the user can't see.
@@ -3590,7 +3734,13 @@ fun startAddNetwork() {
                 }
 
                 if (attempt > 0) {
-                    append(serverKey, from = null, text = "*** Retrying to connect (attempt ${attempt + 1})…", doNotify = false)
+                    appendConnStatus(
+                        netId = netId,
+                        text = "*** Retrying to connect (attempt ${attempt + 1})…",
+                        from = null,
+                        doNotify = false,
+                        isHighlight = false,
+                    )
                 }
                 setNetConn(netId) { it.copy(status = "Retrying to connect…") }
                 if (st.activeNetworkId == netId) updateConnectionNotification("Retrying to connect…")
@@ -4822,9 +4972,9 @@ fun startAddNetwork() {
                     else -> "Disconnected: $r"
                 }
                 if (isConnectFailureLine) {
-                    append(bufKey(netId, "*server*"), from = "ERROR", text = pretty, isHighlight = false, doNotify = false)
+                    appendConnStatus(netId, pretty, from = "ERROR", doNotify = false, isHighlight = false)
                 } else {
-                    append(bufKey(netId, "*server*"), from = null, text = "*** $pretty", doNotify = false)
+                    appendConnStatus(netId, "*** $pretty", from = null, doNotify = false, isHighlight = false)
                 }
                 setNetConn(netId) { it.copy(connecting = false, connected = false, status = pretty, lagMs = null) }
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
@@ -4868,27 +5018,54 @@ fun startAddNetwork() {
                     return
                 }
 
-                // TLS handshake failures that won't recover by retrying: halt auto-reconnect
-                // for the same reason as auth failures. Without this, a network with an
-                // expired/mismatched-CA cert (and no TOFU pin and allowInvalidCerts=false)
-                // would cycle through the exponential backoff forever, hitting the same
-                // failure each time and burning battery. Cleared by manual reconnect, like
-                // authBlockedReconnect.
-                if (r != null) {
-                    val unrecoverable =
+                // Disconnect reasons that won't recover by retrying are split into two
+                // categories so the user gets an actionable message specific to the
+                // failure mode. In both cases we halt auto-reconnect via authBlockedReconnect
+                // without this, a misconfigured network cycles through the exponential backoff forever,
+                // hitting the same failure each time and burning battery.
+                if (r != null && netId !in authBlockedReconnect) {
+                    val tlsUnrecoverable =
                         r.contains("TLS certificate verification failed", ignoreCase = true) ||
                         r.contains("TLS handshake rejected by server", ignoreCase = true) ||
                         r.contains("TLS pin enforcement failed", ignoreCase = true) ||
                         r.contains("server may not support TLS", ignoreCase = true)
-                    if (unrecoverable && netId !in authBlockedReconnect) {
+                    // "Server doesn't exist" class: the hostname doesn't resolve, or it
+                    // resolves but nothing is listening on the configured port. Patterns
+                    // cover Android's libcore DNS resolver, the bare JVM exception name
+                    // (in case it leaks through wrapping), the libc-level messages from
+                    // glibc/BSD, and the TCP-level "connection refused"
+                    val hostUnreachable =
+                        r.contains("Unable to resolve host", ignoreCase = true) ||
+                        r.contains("UnknownHostException", ignoreCase = true) ||
+                        r.contains("No address associated with hostname", ignoreCase = true) ||
+                        r.contains("nodename nor servname provided", ignoreCase = true) ||
+                        r.contains("Name or service not known", ignoreCase = true) ||
+                        r.contains("Connection refused", ignoreCase = true)
+                    if (tlsUnrecoverable) {
                         authBlockedReconnect.add(netId)
-                        append(
-                            bufKey(netId, "*server*"), from = null,
+                        appendConnStatus(
+                            netId = netId,
                             text = "*** Auto-reconnect halted: TLS error is unlikely to fix itself. " +
                                    "Adjust certificate trust settings, then reconnect manually.",
-                            doNotify = false
+                            from = null,
+                            doNotify = false,
+                            isHighlight = false,
                         )
                         setNetConn(netId) { it.copy(status = "TLS error — reconnect halted") }
+                        return
+                    }
+                    if (hostUnreachable) {
+                        authBlockedReconnect.add(netId)
+                        appendConnStatus(
+                            netId = netId,
+                            text = "*** Auto-reconnect halted: server unreachable (hostname doesn't resolve " +
+                                   "or port is closed). Check the host and port in Network Settings, " +
+                                   "then reconnect manually.",
+                            from = null,
+                            doNotify = false,
+                            isHighlight = false,
+                        )
+                        setNetConn(netId) { it.copy(status = "Server unreachable — reconnect halted") }
                         return
                     }
                 }
@@ -4897,29 +5074,84 @@ fun startAddNetwork() {
             }
             is IrcEvent.Error -> {
                 val msg = ev.message
-                val isConnectFail = msg.startsWith("Connect failed", ignoreCase = true) || msg.startsWith("Connection failed", ignoreCase = true)
-                append(bufKey(netId, "*server*"), from = "ERROR", text = msg, isHighlight = !isConnectFail, doNotify = !isConnectFail)
+                // "Transient" errors are routine connectivity blips that don't need to ping
+                // the user or bump the highlight badge: connect failures, socket-level
+                // timeouts, network resets, server-side closing-link messages from short
+                // disconnects, etc. Anything not matched here is treated as a genuine error
+                // We dedup either way so a flapping connection can't fill the buffer with identical
+                // "Read timed out" lines.
+                val lower = msg.lowercase()
+                val isTransient = msg.startsWith("Connect failed", ignoreCase = true) ||
+                    msg.startsWith("Connection failed", ignoreCase = true) ||
+                    lower.contains("read timed out") ||
+                    lower.contains("ping timeout") ||
+                    lower.contains("connection reset") ||
+                    lower.contains("broken pipe") ||
+                    lower.contains("closing link") ||
+                    lower.contains("socket closed") ||
+                    lower.contains("network is unreachable") ||
+                    lower.contains("software caused connection abort")
+                appendConnStatus(
+                    netId = netId,
+                    text = msg,
+                    from = "ERROR",
+                    isHighlight = !isTransient,
+                    doNotify = !isTransient,
+                )
             }
             is IrcEvent.AuthFailed -> {
-                // Server-side credential rejection (PASS or SASL). Halt auto-reconnect for
-                // this network; scheduleAutoReconnect checks authBlockedReconnect on entry.
-                // The block is cleared when the user takes manual action (manual reconnect,
-                // profile edit, autoConnect toggle) see those call sites.
-                authBlockedReconnect.add(netId)
-                val hint = when (ev.source) {
-                    "PASS" -> "Server password (PASS) rejected. " +
+                /*
+                * Auth failures
+                *
+                *   PASS (464 ERR_PASSWDMISMATCH): the server REJECTS the connection
+                *      entirely. The TCP socket is closed shortly after. Retrying with
+                *      the same credentials trips the same rejection. On bouncers,
+                *      repeated PASS failures can rate-limit or IP-ban us.
+                *        > Halt auto-reconnect via authBlockedReconnect, regardless of
+                *          whether the upstream is a bouncer.
+                *
+                *   SASL (904 / 905 / 906) on a direct IRC server: the server rejects
+                *      only the auth bundle, not the connection. SASL is optional,
+                *      the session proceeds.
+                *       > Warn the user but do NOT halt: a later ping-timeout drop on
+                *         this still-useful session should reconnect normally.
+                *
+                *   SASL on a bouncer (profile.isBouncer): the bouncer REQUIRES SASL
+                *      to route us to an upstream and will drop the connection within
+                *      seconds of the 904/905/906. Without a halt, we re-connect > re-
+                *      fail SASL > re-drop in a tight loop bounded only by the backoff,
+                *      flooding the bouncer's logs and burning battery for nothing.
+                *       >  Halt the same way as PASS.
+                */
+                val profile = _state.value.networks.firstOrNull { it.id == netId }
+                val isBouncerProfile = profile?.isBouncer == true
+                val isPassFailure = ev.source.equals("PASS", ignoreCase = true)
+                val isSaslFailure = ev.source.equals("SASL", ignoreCase = true)
+                val shouldHalt = isPassFailure || (isSaslFailure && isBouncerProfile)
+                if (shouldHalt) {
+                    authBlockedReconnect.add(netId)
+                }
+                val hint = when {
+                    isPassFailure -> "Server password (PASS) rejected. " +
                         "If this is a bouncer profile, the password format is usually " +
                         "user:password or user/network:password."
-                    "SASL" -> "SASL authentication rejected. Check the SASL username/password " +
+                    isSaslFailure && isBouncerProfile -> "SASL authentication rejected. " +
+                        "Bouncers require valid SASL to route the connection. Check the " +
+                        "SASL username/password (or client certificate) on this profile."
+                    isSaslFailure -> "SASL authentication rejected. " +
+                        "Check the SASL username/password " +
                         "(or client certificate) on this profile."
                     else -> "Authentication rejected."
                 }
-                append(
-                    bufKey(netId, "*server*"),
+                val haltSuffix = if (shouldHalt)
+                    " Auto-reconnect halted; tap reconnect after fixing credentials."
+                else ""
+                appendConnStatus(
+                    netId = netId,
+                    text = "*** ${ev.reason} — $hint$haltSuffix",
                     from = "AUTH",
-                    text = "*** ${ev.reason} — $hint Auto-reconnect halted; tap reconnect after fixing credentials.",
-                    isHighlight = true,
-                    doNotify = false
+                    isHighlight = false,
+                    doNotify = false,
                 )
             }
 
@@ -4953,7 +5185,7 @@ fun startAddNetwork() {
                 append(
                     bufKey(netId, "*server*"), from = "TLS",
                     text = "*** Certificate hostname mismatch: connected to ${ev.expected} but cert SANs are: $sansStr. " +
-                           "Connection allowed. To enforce strict identity, set a TOFU pin in Network Settings.",
+                           "Connection allowed.",
                     doNotify = false
                 )
             }
@@ -5210,6 +5442,10 @@ if (code == "442") {
                     (rt0.client.hasCap("message-tags") || rt0.client.hasCap("draft/message-reactions"))
                 setNetConn(netId) { it.copy(myNick = ev.nick, hasReactionSupport = hasReact) }
                 append(bufKey(netId, "*server*"), from = null, text = "*** Registered as ${ev.nick}", doNotify = false)
+                // Successful registration is the natural reset point for connection-status
+                // dedup: if the connection drops AGAIN for the same reason after this, the
+                // user has just been online long enough to care about seeing it logged.
+                resetConnStatusDedup(netId)
 
                 // Start the stability timer.  Only once this fires do we consider the
                 // connection stable enough to reset the exponential backoff counter.
@@ -5654,6 +5890,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                 val normTarget0 = normalizeIncomingBufferName(netId, ev.target)
                 val normTarget = stripStatusMsgPrefix(netId, normTarget0)
                 val isChanTarget = isChannelOnNet(netId, normTarget)
+                val targetIsServerBuffer = normTarget == "*server*"
 
                 // Notice routing rules:
                 //
@@ -5756,6 +5993,7 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
 
                 val destKey = when {
                     ev.isServer -> bufKey(netId, "*server*")
+                    targetIsServerBuffer -> bufKey(netId, "*server*")
                     isChanTarget -> resolveBufferKey(netId, normTarget)
                     else -> {
                         firstMentionedKnownChannelKey()
@@ -8399,14 +8637,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
                         val reply = withTimeout(timeoutMs) { def.await() }
                         if (reply.port <= 0) throw IOException("Invalid passive DCC reply")
-                            // Resume race: per the DCC RESUME protocol the receiver sends RESUME
-                            // If the deferred is already complete, use that offset; otherwise 0.
-                            // *before* its DCC SEND reply opens the port, so by the time we get
-                            // `reply` here the resume offset (if any) is already settled and the
-                            // await() returns immediately. The small timeout is a generous safety
-                            // margin for thread-scheduling races and avoids the experimental
-                            // getCompleted() API.
-                            val startOffset = withTimeoutOrNull(100L) { liveDeferred.await() } ?: 0L
+                        // Resume race: per the DCC RESUME protocol the receiver sends RESUME
+                        // *before* its DCC SEND reply opens the port, so by the time we get
+                        // `reply` here the resume offset (if any) is already settled and the
+                        // await() returns immediately. The small timeout is a generous safety
+                        // margin for thread-scheduling races and avoids the experimental
+                        // getCompleted() API.
+                        val startOffset = withTimeoutOrNull(100L) { liveDeferred.await() } ?: 0L
                         if (startOffset > 0L) {
                             val st4 = _state.value
                             _state.value = st4.copy(dccTransfers = st4.dccTransfers.map {
