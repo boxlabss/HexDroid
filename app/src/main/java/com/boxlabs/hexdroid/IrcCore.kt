@@ -568,6 +568,19 @@ sealed class IrcEvent {
     // CTCP DCC CHAT offer
     data class DccChatOfferEvent(val offer: DccChatOffer) : IrcEvent()
 
+    /**
+     * Incoming CTCP `DCC RESUME` from [from]. Carries the request we'd need to honour
+     * if [resume] matches one of our outgoing SEND offers (we're the sender).
+     */
+    data class DccResumeRequest(val from: String, val resume: DccResume) : IrcEvent()
+
+    /**
+     * Incoming CTCP `DCC ACCEPT` from [from]. The sender confirmed our RESUME request:
+     * the original SEND can now be answered (active: we connect; passive: we listen)
+     * with the agreed start offset.
+     */
+    data class DccAcceptResponse(val from: String, val accept: DccAccept) : IrcEvent()
+
     // Numeric 442 (ERR_NOTONCHANNEL)
     data class NotOnChannel(val channel: String, val message: String, val code: String = "442") : IrcEvent()
     /** 381 RPL_YOUREOPER — user successfully authenticated as IRC operator */
@@ -1855,6 +1868,24 @@ class IrcClient(val config: IrcConfig) {
 						if (dccChat != null) {
 							if (!nickEquals(from, currentNick)) {
 								send(IrcEvent.DccChatOfferEvent(dccChat.copy(from = from)))
+							}
+							return
+						}
+
+						// DCC RESUME (peer wants to resume one of our outgoing sends).
+						val dccResume = parseDccResume(textRaw)
+						if (dccResume != null) {
+							if (!nickEquals(from, currentNick)) {
+								send(IrcEvent.DccResumeRequest(from = from, resume = dccResume))
+							}
+							return
+						}
+
+						// DCC ACCEPT (the sender confirmed our RESUME request).
+						val dccAccept = parseDccAccept(textRaw)
+						if (dccAccept != null) {
+							if (!nickEquals(from, currentNick)) {
+								send(IrcEvent.DccAcceptResponse(from = from, accept = dccAccept))
 							}
 							return
 						}
@@ -3474,7 +3505,21 @@ class IrcClient(val config: IrcConfig) {
                 // session, so the client-to-bouncer link only needs to detect TCP stalls —
                 // 90 s is safe and saves one ping/PONG round-trip per minute (~2 packets,
                 // ~200 bytes) per connection when the device is idle.
-                val pingIntervalMs = if (config.isBouncer) 90_000L else 60_000L
+                //
+                // While the app is backgrounded we stretch the interval (see
+                // BACKGROUND_PING_INTERVAL_MS): the server's own PINGs keep us from being
+                // idle-dropped (the read loop answers them), a dead socket is caught by the
+                // socket read timeout and the connectivity callback, and nobody is watching
+                // the lag readout — so a once-a-minute client PING just burns a radio wake
+                // for nothing. The background value stays under SOCKET_READ_TIMEOUT_MS so the
+                // PONG still resets the read deadline on an otherwise-quiet connection.
+                // The interval is recomputed each cycle, so a foreground/background transition
+                // is picked up on the next iteration.
+                val pingIntervalMs = when {
+                    !AppVisibility.isForeground -> ConnectionConstants.BACKGROUND_PING_INTERVAL_MS
+                    config.isBouncer            -> 90_000L
+                    else                        -> 60_000L
+                }
                 delay(pingIntervalMs)
 
                 // If we're waiting on a PONG for a previous probe and it's taking too long,
@@ -4325,7 +4370,73 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 		val ip = if (ipField.contains('.')) ipField else ipFromLong(ipField.toLongOrNull() ?: return null)
 		if (ip.isBlank()) return null
+		// Reject malformed passive offers: a port=0 SEND is only meaningful with a token
+		// (reverse DCC handshake). Without one we'd dispatch it to receive() which immediately
+		// throws on the port>0 require(), surfacing a confusing error to the user. Drop them
+		// silently. the sender's client is misbehaving and the user can't do anything useful
+		// with a port=0/no-token offer anyway.
+		if (port == 0 && token == null) return null
 		return DccOffer(from = "?", filename = filename, ip = ip, port = port, size = size, token = token, turbo = turbo, secure = secure)
+	}
+
+	private fun parseDccResume(textRaw: String): DccResume? {
+		val p = parseDccResumeLike(textRaw, "RESUME") ?: return null
+		return DccResume(filename = p.filename, port = p.port, position = p.position, token = p.token)
+	}
+
+	private fun parseDccAccept(textRaw: String): DccAccept? {
+		val p = parseDccResumeLike(textRaw, "ACCEPT") ?: return null
+		return DccAccept(filename = p.filename, port = p.port, position = p.position, token = p.token)
+	}
+
+	private data class DccResumeLikePayload(val filename: String, val port: Int, val position: Long, val token: Long?)
+
+	/**
+	 * Shared parser for DCC RESUME and DCC ACCEPT. They have identical wire formats:
+	 *   \u0001DCC RESUME <filename> <port> <position> [token]\u0001
+	 *   \u0001DCC ACCEPT <filename> <port> <position> [token]\u0001
+	 *
+	 * Filename may be quoted. For passive resume, port is 0 and token is required.
+	 * Returns null if the line isn't a well-formed RESUME/ACCEPT for [expectedVerb].
+	 */
+	private fun parseDccResumeLike(textRaw: String, expectedVerb: String): DccResumeLikePayload? {
+		if (!textRaw.startsWith("\u0001DCC ", ignoreCase = false) || !textRaw.endsWith("\u0001")) return null
+
+		val inner = textRaw.removePrefix("\u0001").removeSuffix("\u0001").trim()
+		if (!inner.startsWith("DCC ", ignoreCase = true)) return null
+
+		val afterDcc = inner.drop(3).trimStart() // remove "DCC"
+		val verb = afterDcc.substringBefore(' ').uppercase()
+		if (verb != expectedVerb) return null
+
+		val rest = afterDcc.substringAfter(verb, "").trimStart()
+		if (rest.isBlank()) return null
+
+		// Filename (quoted or unquoted) — same logic as parseDccSend.
+		val (filename, afterName) = if (rest.startsWith('"')) {
+			val endQuote = rest.indexOf('"', startIndex = 1)
+			if (endQuote <= 0) return null
+			rest.substring(1, endQuote) to rest.substring(endQuote + 1).trim()
+		} else {
+			val firstSpace = rest.indexOf(' ')
+			if (firstSpace <= 0) return null
+			rest.substring(0, firstSpace) to rest.substring(firstSpace + 1).trim()
+		}
+
+		val parts = afterName.split(Regex("\\s+")).filter { it.isNotBlank() }
+		if (parts.size < 2) return null
+
+		val port = parts[0].toIntOrNull() ?: return null
+		val position = parts[1].toLongOrNull() ?: return null
+		if (port < 0 || position < 0L) return null
+
+		val token: Long? = parts.getOrNull(2)?.toLongOrNull()
+		// Passive RESUME/ACCEPT (port==0) MUST carry a token. Active form (port>0) may or
+		// may not carry one — some clients echo the token even on active resume to be
+		// helpful. Either is fine.
+		if (port == 0 && token == null) return null
+
+		return DccResumeLikePayload(filename = filename, port = port, position = position, token = token)
 	}
 
 	private fun parseDccChat(textRaw: String): DccChatOffer? {

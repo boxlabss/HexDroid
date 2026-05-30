@@ -59,6 +59,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withTimeout
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -262,7 +263,7 @@ data class UiSettings(
     val dccIncomingPortMax: Int = 5010,
     val dccDownloadFolderUri: String? = null,
 
-    val quitMessage: String = "HexDroid IRC - https://hexdroid.boxlabs.uk/",
+    val quitMessage: String = "HexDroid IRC - https://hexdroid.boxlabs.uk",
     val partMessage: String = "Leaving",
 
     val colorizeNicks: Boolean = true,
@@ -1022,6 +1023,7 @@ class IrcViewModel(
      */
     val e2eKeyStore = com.boxlabs.hexdroid.crypto.E2eKeyStore(repo.secretStore)
     private val dcc = DccManager(appContext)
+    private val dccPartials = DccResumeStore(appContext)
 
     private data class DccChatSession(
         val netId: String,
@@ -1050,6 +1052,47 @@ class IrcViewModel(
      * Stored so the user can cancel a send from the Transfers screen.
      */
     private val outgoingSendJobs: MutableMap<String, kotlinx.coroutines.Job> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Tracks in-flight DCC receive coroutines, keyed by the offer. Mirrors [outgoingSendJobs]
+     * so the user can cancel an incoming transfer from the Transfers screen X button.
+     * Cancelling the Job triggers [DccManager]'s `invokeOnCompletion` socket-close, which
+     * unblocks the receive loop and aborts the transfer.
+     */
+    private val incomingReceiveJobs: MutableMap<DccOffer, kotlinx.coroutines.Job> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Outgoing sends that are currently "live"  either listening for an
+     * active-DCC connect or having sent a passive-DCC offer and waiting for the peer.
+     * Keyed by the peer's view of the file: `nick.lowercase() + "|" + baseName + "|" + size`.
+     * Used to look up the matching send when a DCC RESUME arrives from the peer.
+     *
+     * The CompletableDeferred receives the agreed start offset once we've replied with
+     * DCC ACCEPT and committed to seeking the file there. The actual seek happens inside
+     * the DccManager send path.
+     */
+    private data class LiveOutgoingSend(
+        val target: String,
+        val filename: String,
+        val absolutePath: String,
+        val size: Long,
+        /** Active SEND's listening port, or 0 for passive sends. */
+        val port: Int,
+        /** Passive-DCC token, or null for active sends. */
+        val token: Long?,
+        /** Completes when peer sends DCC RESUME; surfaces the start offset to honour. */
+        val resumeRequest: CompletableDeferred<Long> = CompletableDeferred()
+    )
+    private val liveOutgoingSends: MutableMap<String, LiveOutgoingSend> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Pending DCC RESUME requests *we* sent, keyed by `peer.lowercase()|baseName|size`.
+     * Completes when the peer replies with DCC ACCEPT confirming the offset.
+     */
+    private val pendingResumeRequests: MutableMap<String, CompletableDeferred<DccAccept>> =
         java.util.concurrent.ConcurrentHashMap()
 
     private val nextUiMsgId = AtomicLong(1L)
@@ -5413,6 +5456,75 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                 }
             }
 
+            is IrcEvent.DccResumeRequest -> {
+                // Peer wants to resume one of our outgoing sends. Find the matching live
+                // send by (peer, basename, port-or-token) and, if the position is in range,
+                // reply with DCC ACCEPT so the send path can seek the file to that offset.
+                val r = ev.resume
+                val from = ev.from
+                val baseName = r.filename.substringAfterLast('/').substringAfterLast('\\')
+                if (isNickIgnored(netId, from)) return
+
+                // Two ways to match: passive (token-based) or active (port-based).
+                val match = liveOutgoingSends.values.firstOrNull { live ->
+                    if (!live.target.equals(from, ignoreCase = true)) return@firstOrNull false
+                    val nameMatches = live.filename.substringAfterLast('/').substringAfterLast('\\') == baseName
+                    if (!nameMatches) return@firstOrNull false
+                    if (r.token != null && live.token != null) {
+                        live.token == r.token
+                    } else {
+                        live.port == r.port && r.port > 0
+                    }
+                }
+                if (match == null) {
+                    append(bufKey(netId, "*server*"), from = null,
+                        text = "*** Ignored DCC RESUME from $from for $baseName — no matching send in progress.",
+                        doNotify = false)
+                    return
+                }
+                if (r.position < 0L || r.position >= match.size) {
+                    append(bufKey(netId, "*server*"), from = null,
+                        text = "*** DCC RESUME from $from has out-of-range position ${r.position} (size ${match.size}); ignoring.",
+                        doNotify = false)
+                    return
+                }
+
+                // Send DCC ACCEPT echoing the same triple/quadruple, then surface the offset
+                // to whoever is waiting on the LiveOutgoingSend's resumeRequest deferred.
+                // handleEvent isn't suspend, so the CTCP send hops to a coroutine; the
+                // deferred-completion below stays on the event thread so the awaiting
+                // sender sees the offset without an extra dispatch.
+                val rt = runtimes[netId] ?: return
+                val c = rt.client
+                val name = quoteDccFilenameIfNeeded(match.filename)
+                val tokenField = if (r.token != null) " ${r.token}" else if (match.token != null) " ${match.token}" else ""
+                val payload = "DCC ACCEPT $name ${r.port} ${r.position}$tokenField"
+                viewModelScope.launch { runCatching { c.ctcp(from, payload) } }
+                append(bufKey(netId, "*server*"), from = null,
+                    text = "*** Honouring DCC RESUME from $from at ${r.position} bytes.",
+                    doNotify = false)
+                // Don't blow up if multiple RESUMEs arrive (unusual but not illegal).
+                if (!match.resumeRequest.isCompleted) match.resumeRequest.complete(r.position)
+            }
+
+            is IrcEvent.DccAcceptResponse -> {
+                // The peer ACCEPTed a RESUME we sent. Hand the accept to the waiting
+                // negotiateResumeOrZero() coroutine so it can proceed with the receive.
+                val a = ev.accept
+                val baseName = a.filename.substringAfterLast('/').substringAfterLast('\\')
+                if (isNickIgnored(netId, ev.from)) return
+                // The pending map is keyed by (peer, basename, size). We don't have `size`
+                // in the ACCEPT payload, so we have to look up by (peer, basename) and
+                // tolerate at most one match per peer/basename at a time. Realistically
+                // a user never has two distinct in-flight RESUME requests for the same
+                // basename from the same peer.
+                val prefix = "${ev.from.lowercase()}|$baseName|"
+                val key = pendingResumeRequests.keys.firstOrNull { it.startsWith(prefix) }
+                if (key != null) {
+                    pendingResumeRequests[key]?.complete(a)
+                }
+            }
+
             is IrcEvent.DccChatOfferEvent -> {
                 if (isNickIgnored(netId, ev.offer.from)) return
 
@@ -6681,8 +6793,9 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
                 val liveDuringLoad = buf.messages.filter { it.timeMs >= startedAt }
                 val firstLiveTime = liveDuringLoad.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
 
-                // Build a set of message signatures for deduplication against what is
-                // in the buffer.
+                // Build a set of message signatures for deduplication against what is ALREADY
+                // in the buffer. This must cover *every* message currently displayed, not just
+                // the ones that arrived after this scrollback pass started (liveDuringLoad).
                 val existingMsgIds = buf.messages.mapNotNull { it.msgId }.toHashSet()
                 data class FuzzySig(val sec: Long, val from: String?, val text: String)
                 val existingFuzzy = buildSet<FuzzySig> {
@@ -7723,6 +7836,35 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     // DCC
 
     fun acceptDcc(offer: DccOffer) {
+        doAcceptDccCommon(offer, resumeFrom = null)
+    }
+
+    /**
+     * Look up a recorded partial for this offer and, if one exists, resume the transfer from
+     * that offset. Falls back to a fresh accept if no partial is found.
+     *
+     * The actual CTCP RESUME / ACCEPT exchange happens inside [doAcceptDccCommon] so the
+     * UI doesn't have to know which DCC mode (active vs passive) the offer was in.
+     */
+    fun acceptDccResume(offer: DccOffer) {
+        val partial = getPartialFor(offer)
+        if (partial == null) {
+            acceptDcc(offer)
+            return
+        }
+        doAcceptDccCommon(offer, resumeFrom = partial)
+    }
+
+    /**
+     * The partial recorded for [offer], if any, and currently usable.
+     * Public so the UI can decide whether to render a "Resume" button.
+     */
+    fun getPartialFor(offer: DccOffer): PartialTransfer? {
+        val baseName = offer.filename.substringAfterLast('/').substringAfterLast('\\')
+        return dccPartials.get(offer.from, baseName, offer.size)
+    }
+
+    private fun doAcceptDccCommon(offer: DccOffer, resumeFrom: PartialTransfer?) {
         val st = _state.value
 
         // Android 17+: DCC connections to LAN peers require ACCESS_LOCAL_NETWORK.
@@ -7738,7 +7880,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
         _state.value = st.copy(dccOffers = st.dccOffers.filterNot { it == offer })
 
-        val incoming = DccTransferState.Incoming(offer)
+        val resumeOffset = resumeFrom?.receivedBytes ?: 0L
+        val incoming = DccTransferState.Incoming(
+            offer = offer,
+            received = resumeOffset,
+            resumeOffset = resumeOffset,
+            savedPath = resumeFrom?.savedPath,
+        )
         _state.value = _state.value.copy(dccTransfers = _state.value.dccTransfers + incoming)
 
         // route the transfer through the network where the offer was received.
@@ -7748,9 +7896,23 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val minP = st.settings.dccIncomingPortMin
         val maxP = st.settings.dccIncomingPortMax
         val customFolder = st.settings.dccDownloadFolderUri
+        val baseName = offer.filename.substringAfterLast('/').substringAfterLast('\\')
 
         viewModelScope.launch {
+            // Register the Job so cancelIncomingDcc() can find it. The map entry is
+            // removed on completion regardless of how the coroutine ended (normal,
+            // error, or cancellation) so we don't leak entries for finished transfers.
+            incomingReceiveJobs[offer] = checkNotNull(coroutineContext[kotlinx.coroutines.Job]) {
+                "No Job in coroutine context"
+            }
             try {
+                // If resuming, run the CTCP RESUME / ACCEPT handshake first. If the sender
+                // doesn't ACCEPT within the timeout (it may not support RESUME), we silently
+                // fall back to a fresh download — better UX than failing the transfer.
+                val effectiveOffset: Long = if (resumeFrom != null) {
+                    negotiateResumeOrZero(netId, c, offer, resumeFrom)
+                } else 0L
+
                 val savedPath = if (offer.isPassive) {
                     // Passive/reverse DCC: we open a port and tell the sender to connect.
                     dcc.receivePassive(
@@ -7758,27 +7920,130 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         portMin = minP,
                         portMax = maxP,
                         customFolderUri = customFolder,
+                        resumeOffset = effectiveOffset,
+                        resumeSavedPath = if (effectiveOffset > 0L) resumeFrom?.savedPath else null,
+                        onSavedPath = { path ->
+                            // Stamp the path on the Incoming state as soon as the file is opened
+                            // so a mid-transfer error can still leave a useful partial pointer.
+                            updateIncoming(offer) { it.copy(savedPath = path) }
+                        },
                         onListening = { ipAsInt, port, size, token ->
                             val name = quoteDccFilenameIfNeeded(offer.filename)
                             val tokenStr = if (offer.turbo) "${token}T" else token.toString()
                             val payload = "DCC SEND $name $ipAsInt $port $size $tokenStr"
                             c.ctcp(offer.from, payload)
-                            append(bufKey(netId, "*server*"), from = null, text = "*** Accepted passive DCC offer: ${offer.filename} (listening on $port)", doNotify = false)
+                            val resumeNote = if (effectiveOffset > 0L) " (resuming from ${effectiveOffset} bytes)" else ""
+                            append(bufKey(netId, "*server*"), from = null, text = "*** Accepted passive DCC offer: ${offer.filename} (listening on $port)$resumeNote", doNotify = false)
                         }
                     ) { got, _ ->
                         updateIncoming(offer) { it.copy(received = got) }
                     }
                 } else {
-                    dcc.receive(offer, customFolder) { got, _ ->
+                    dcc.receive(
+                        offer = offer,
+                        customFolderUri = customFolder,
+                        resumeOffset = effectiveOffset,
+                        resumeSavedPath = if (effectiveOffset > 0L) resumeFrom?.savedPath else null,
+                        onSavedPath = { path -> updateIncoming(offer) { it.copy(savedPath = path) } },
+                    ) { got, _ ->
                         updateIncoming(offer) { it.copy(received = got) }
                     }
                 }
                 updateIncoming(offer) { it.copy(done = true, savedPath = savedPath, endTimeMs = System.currentTimeMillis()) }
+                // Clear the partial record on success (don't delete the file — it IS the completed download).
+                dccPartials.remove(offer.from, baseName, offer.size)
                 val displayPath = if (savedPath.startsWith("content://")) "Downloads" else savedPath.substringAfterLast('/')
                 notifier.notifyFileDone(netId, offer.filename, displayPath)
             } catch (t: Throwable) {
-                updateIncoming(offer) { it.copy(error = t.message ?: "error", endTimeMs = System.currentTimeMillis()) }
+                // A user cancel manifests in two ways depending on timing: as a
+                // CancellationException at a suspension point, OR as an IOException
+                // bubbling up from the socket close that DccManager's invokeOnCompletion
+                // triggered. Either way, !isActive is true once cancel() has been called,
+                // which is the reliable signal.
+                val cancelled = !isActive || t is kotlinx.coroutines.CancellationException
+                val msg = if (cancelled) "Cancelled" else (t.message ?: "error")
+                val cur = _state.value.dccTransfers.firstOrNull {
+                    it is DccTransferState.Incoming && it.offer == offer
+                } as? DccTransferState.Incoming
+                updateIncoming(offer) {
+                    if (it.done || it.error != null) it
+                    else it.copy(error = msg, endTimeMs = System.currentTimeMillis())
+                }
+                // Record the partial so a future offer can be RESUMEd. We need both a non-empty
+                // saved path and at least one byte on disk for the entry to be useful.
+                val partialPath = cur?.savedPath
+                val partialBytes = cur?.received ?: 0L
+                if (!partialPath.isNullOrBlank() && partialBytes > 0L && offer.size > 0L) {
+                    dccPartials.put(
+                        PartialTransfer(
+                            from = offer.from,
+                            filename = baseName,
+                            size = offer.size,
+                            savedPath = partialPath,
+                            receivedBytes = partialBytes,
+                            secure = offer.secure,
+                            turbo = offer.turbo,
+                        )
+                    )
+                }
+                if (t is kotlinx.coroutines.CancellationException) throw t
+            } finally {
+                incomingReceiveJobs.remove(offer)
             }
+        }
+    }
+
+    /**
+     * Send `DCC RESUME` to the peer and wait for a matching `DCC ACCEPT`. Returns the agreed
+     * offset (typically equal to [partial].receivedBytes) on success, or 0L if the peer didn't
+     * reply within the timeout (graceful fallback to a fresh transfer).
+     *
+     * Why we don't fail hard on no-reply: many older clients/bots don't implement RESUME, but
+     * happily send a fresh stream from byte 0 in response to our normal SEND-acknowledgement.
+     * Falling back to byte 0 is strictly better than telling the user "RESUME failed, try again".
+     */
+    private suspend fun negotiateResumeOrZero(
+        netId: String,
+        c: IrcClient,
+        offer: DccOffer,
+        partial: PartialTransfer,
+        timeoutMs: Long = 10_000L,
+    ): Long {
+        val baseName = offer.filename.substringAfterLast('/').substringAfterLast('\\')
+        val key = "${offer.from.lowercase()}|$baseName|${offer.size}"
+        val def = CompletableDeferred<DccAccept>()
+        pendingResumeRequests[key] = def
+
+        val name = quoteDccFilenameIfNeeded(offer.filename)
+        // Active offer: <port> is the sender's port from the offer.
+        // Passive offer: <port> is 0 and <token> is required (echoes the offer's token).
+        val portField = if (offer.isPassive) 0 else offer.port
+        val tokenField = if (offer.isPassive) " ${offer.token}" else ""
+        val resumePayload = "DCC RESUME $name $portField ${partial.receivedBytes}$tokenField"
+        c.ctcp(offer.from, resumePayload)
+        append(bufKey(netId, "*server*"), from = null,
+            text = "*** Requested DCC RESUME for ${offer.filename} at ${partial.receivedBytes} bytes…",
+            doNotify = false)
+
+        return try {
+            val accept = withTimeout(timeoutMs) { def.await() }
+            // Defensive: if the peer ACCEPTed a different position than we asked for, honour
+            // their position (clamped to the partial's actual size). Some clients align to
+            // block boundaries.
+            val agreed = accept.position.coerceIn(0L, partial.receivedBytes)
+            if (agreed != partial.receivedBytes) {
+                append(bufKey(netId, "*server*"), from = null,
+                    text = "*** Sender accepted RESUME at $agreed bytes (we asked for ${partial.receivedBytes})",
+                    doNotify = false)
+            }
+            agreed
+        } catch (_: TimeoutCancellationException) {
+            append(bufKey(netId, "*server*"), from = null,
+                text = "*** No DCC ACCEPT from ${offer.from} — restarting transfer from the beginning.",
+                doNotify = false)
+            0L
+        } finally {
+            pendingResumeRequests.remove(key)
         }
     }
 
@@ -7814,6 +8079,11 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     fun rejectDcc(offer: DccOffer) {
         _state.value = _state.value.copy(dccOffers = _state.value.dccOffers.filterNot { it == offer })
         val netId = offer.netId.takeIf { it.isNotBlank() } ?: _state.value.activeNetworkId ?: return
+        // Discard any partial we had for this offer: the user explicitly rejected, so we
+        // shouldn't keep the bytes (or the resume option) around. The store does both:
+        // unlinks the partial file and drops the registry entry.
+        val baseName = offer.filename.substringAfterLast('/').substringAfterLast('\\')
+        dccPartials.removeAndDeleteFile(offer.from, baseName, offer.size)
         append(bufKey(netId, "*server*"), from = null, text = "*** Rejected DCC offer: ${offer.filename}", doNotify = false)
     }
 
@@ -8050,6 +8320,14 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 suspend fun doActiveSend() {
                     val secure = st.settings.dccSecure
                     val verb = if (secure) "SSEND" else "SEND"
+                    // We need to know our listening port before we can register the live-send
+                    // entry that incoming DCC RESUME requests are matched against. Bind happens
+                    // inside dcc.sendFile; the port is delivered to us in `onClient`. To bridge
+                    // that we keep a placeholder key and rewrite it once the port is known.
+                    val baseName = offerName.substringAfterLast('/').substringAfterLast('\\')
+                    var liveKey: String? = null
+                    val liveDeferred = CompletableDeferred<Long>()
+                    val absolutePath = file.absolutePath
                     dcc.sendFile(
                         file = file,
                         portMin = minP,
@@ -8057,12 +8335,41 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         secure = secure,
                         onClient = { ipAsInt, port, size ->
                             val payload = "DCC $verb $offerNamePayload $ipAsInt $port $size"
+                            // Register BEFORE sending the CTCP so a quick RESUME reply finds us.
+                            val key = "${target.lowercase()}|$baseName|$size"
+                            liveKey = key
+                            liveOutgoingSends[key] = LiveOutgoingSend(
+                                target = target,
+                                filename = offerName,
+                                absolutePath = absolutePath,
+                                size = size,
+                                port = port,
+                                token = null,
+                                resumeRequest = liveDeferred,
+                            )
                             c.ctcp(target, payload)
                             val secureLabel = if (secure) " (SDCC/TLS)" else ""
                             append(statusKey, from = null, text = "*** Offering $offerName to $target via DCC$secureLabel (active, port $port)…", doNotify = false)
                         },
+                        awaitStartOffset = {
+                            // Short window for a late RESUME; if the peer didn't ask for resume,
+                            // proceed from byte 0. The receiver-side spec says RESUME, if used,
+                            // is sent before the data connection, but a tiny race grace is cheap.
+                            // withTimeoutOrNull keeps us off the experimental getCompleted() API.
+                            val offset = withTimeoutOrNull(500L) { liveDeferred.await() } ?: 0L
+                            if (offset > 0L) {
+                                val st4 = _state.value
+                                _state.value = st4.copy(dccTransfers = st4.dccTransfers.map {
+                                    if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName)
+                                        it.copy(resumeOffset = offset, bytesSent = offset)
+                                    else it
+                                })
+                            }
+                            offset
+                        },
                         onProgress = { sent, _ -> updateOutgoing(sent) }
                     )
+                    liveKey?.let { liveOutgoingSends.remove(it) }
                 }
 
                 suspend fun doPassiveSend(timeoutMs: Long = 120_000L) {
@@ -8070,7 +8377,19 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     val verb = if (secure) "SSEND" else "SEND"
                     val token = Random.nextLong(1L, 0x7FFFFFFFL)
                     val def = CompletableDeferred<DccOffer>()
-                    pendingPassiveDccSends[token] = PendingPassiveDccSend(target, offerName.substringAfterLast('/').substringAfterLast('\\'), fileSize, def)
+                    val baseName = offerName.substringAfterLast('/').substringAfterLast('\\')
+                    pendingPassiveDccSends[token] = PendingPassiveDccSend(target, baseName, fileSize, def)
+                    val liveKey = "${target.lowercase()}|$baseName|$fileSize"
+                    val liveDeferred = CompletableDeferred<Long>()
+                    liveOutgoingSends[liveKey] = LiveOutgoingSend(
+                        target = target,
+                        filename = offerName,
+                        absolutePath = file.absolutePath,
+                        size = fileSize,
+                        port = 0,
+                        token = token,
+                        resumeRequest = liveDeferred,
+                    )
                     try {
                         val ipInt = dcc.localIpv4AsInt()
                         val payload = "DCC $verb $offerNamePayload $ipInt 0 $fileSize $token"
@@ -8080,17 +8399,37 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
                         val reply = withTimeout(timeoutMs) { def.await() }
                         if (reply.port <= 0) throw IOException("Invalid passive DCC reply")
-                        append(statusKey, from = null, text = "*** $target accepted; connecting…", doNotify = false)
+                            // Resume race: per the DCC RESUME protocol the receiver sends RESUME
+                            // If the deferred is already complete, use that offset; otherwise 0.
+                            // *before* its DCC SEND reply opens the port, so by the time we get
+                            // `reply` here the resume offset (if any) is already settled and the
+                            // await() returns immediately. The small timeout is a generous safety
+                            // margin for thread-scheduling races and avoids the experimental
+                            // getCompleted() API.
+                            val startOffset = withTimeoutOrNull(100L) { liveDeferred.await() } ?: 0L
+                        if (startOffset > 0L) {
+                            val st4 = _state.value
+                            _state.value = st4.copy(dccTransfers = st4.dccTransfers.map {
+                                if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName)
+                                    it.copy(resumeOffset = startOffset, bytesSent = startOffset)
+                                else it
+                            })
+                            append(statusKey, from = null, text = "*** $target accepted; resuming from $startOffset bytes…", doNotify = false)
+                        } else {
+                            append(statusKey, from = null, text = "*** $target accepted; connecting…", doNotify = false)
+                        }
 
                         dcc.sendFileConnect(
                             file = file,
                             host = reply.ip,
                             port = reply.port,
                             secure = secure,
+                            startOffset = startOffset,
                             onProgress = { sent, _ -> updateOutgoing(sent) }
                         )
                     } finally {
                         pendingPassiveDccSends.remove(token)
+                        liveOutgoingSends.remove(liveKey)
                     }
                 }
 
@@ -8120,14 +8459,19 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 append(statusKey, from = null, text = "*** DCC send complete: $offerName → $target", doNotify = false)
 
             } catch (t: Throwable) {
-                val cancelled = t is kotlinx.coroutines.CancellationException
+                // See incoming catch above for why !isActive is the reliable cancel signal:
+                // a user cancel can manifest either as CancellationException at a suspension
+                // point or as an IOException bubbling up from the closed socket. Surface
+                // "Cancelled" as the error string (not null) so the Transfers screen renders
+                // it as a stopped transfer rather than a successful one.
+                val cancelled = !isActive || t is kotlinx.coroutines.CancellationException
                 val msg = if (cancelled) "Cancelled" else (t.message ?: t::class.java.simpleName).trim()
                 val stErr = _state.value
                 offerNameForState?.let { fn ->
                     outgoingSendJobs.remove("$target/$fn")
                     _state.value = stErr.copy(dccTransfers = stErr.dccTransfers.map {
                         if (it is DccTransferState.Outgoing && it.target == target && it.filename == fn)
-                            it.copy(done = true, error = if (cancelled) null else msg, endTimeMs = System.currentTimeMillis())
+                            it.copy(done = true, error = msg, endTimeMs = System.currentTimeMillis())
                         else it
                     })
                     if (!cancelled) append(statusKey, from = "DCC", text = "*** DCC send failed: $msg", isHighlight = true)
@@ -8136,7 +8480,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     _state.value = stErr.copy(dccTransfers = stErr.dccTransfers + DccTransferState.Outgoing(target = target, filename = "(unknown)", done = true, error = msg, endTimeMs = System.currentTimeMillis()))
                     if (!cancelled) append(statusKey, from = "DCC", text = "*** DCC send failed: $msg", isHighlight = true)
                 }
-                if (cancelled) throw t   // re-throw so coroutine completes correctly
+                if (t is kotlinx.coroutines.CancellationException) throw t   // re-throw so coroutine completes correctly
             }
         }
 
@@ -8150,9 +8494,23 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val jobKey = "$target/$filename"
         outgoingSendJobs[jobKey]?.cancel()
         outgoingSendJobs.remove(jobKey)
+        // We deliberately don't remove the transfer from dccTransfers here. The send
+        // coroutine's catch block transitions it to error = "Cancelled" so the UI shows
+        // the cancelled state; the user then taps the X (clearDccTransfer) to dismiss
+        // it. Two buttons, two actions.
     }
 
-    
+    /**
+     * Cancel an in-progress incoming DCC receive.
+     *
+     * Cancelling the Job triggers [DccManager]'s `invokeOnCompletion(onCancelling = true)`
+     * socket-close, which unblocks the receive loop synchronously. The launched coroutine's
+     * catch block transitions the transfer to `error = "Cancelled"`; the user then taps the
+     * separate X (clearDccTransfer) to dismiss the cancelled entry.
+     */
+    fun cancelIncomingDcc(offer: DccOffer) {
+        incomingReceiveJobs[offer]?.cancel()
+    }
 private fun queryDisplayName(uri: android.net.Uri): String? {
     return try {
         val proj = arrayOf(

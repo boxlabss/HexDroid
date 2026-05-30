@@ -103,7 +103,12 @@ fun TransfersScreen(
     onSetDccEnabled: (Boolean) -> Unit,
     onSetDccSendMode: (DccSendMode) -> Unit,
     onCancelOutgoing: (target: String, filename: String) -> Unit = { _, _ -> },
+    onCancelIncoming: (DccOffer) -> Unit = {},
     onClearTransfer: (DccTransferState) -> Unit = {},
+    /** Accept an incoming offer with DCC RESUME, picking up from a stored partial. */
+    onAcceptResume: (DccOffer) -> Unit = {},
+    /** Look up the partial bytes available for an offer (null = none / not resumable). */
+    partialFor: (DccOffer) -> com.boxlabs.hexdroid.PartialTransfer? = { null },
     /** Navigate directly to a buffer (e.g. a DCC chat buffer) and close Transfers. */
     onOpenBuffer: ((String) -> Unit)? = null
 ) {
@@ -393,13 +398,31 @@ fun TransfersScreen(
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                val partial = partialFor(o)
                                 Button(
                                     onClick = { onAccept(o) },
                                     enabled = state.settings.dccEnabled
                                 ) { Text(stringResource(R.string.transfers_accept)) }
+                                if (partial != null) {
+                                    OutlinedButton(
+                                        onClick = { onAcceptResume(o) },
+                                        enabled = state.settings.dccEnabled
+                                    ) {
+                                        Text(stringResource(R.string.transfers_resume))
+                                    }
+                                }
                                 OutlinedButton(
                                     onClick = { onReject(o) }
                                 ) { Text(stringResource(R.string.transfers_reject)) }
+                            }
+                            // Subtle note when a partial is available so the Resume button isn't a mystery.
+                            val partialForCaption = partialFor(o)
+                            if (partialForCaption != null) {
+                                Text(
+                                    stringResource(R.string.transfers_partial_available, formatBytes(partialForCaption.receivedBytes)),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                )
                             }
                         }
                     }
@@ -539,6 +562,28 @@ fun TransfersScreen(
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
+                                        }
+                                        if (t.resumeOffset > 0L) {
+                                            Text(
+                                                stringResource(R.string.transfers_resuming_from, formatBytes(t.resumeOffset)),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        TextButton(
+                                            onClick = { onCancelIncoming(t.offer) },
+                                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error
+                                            ),
+                                            modifier = Modifier.align(Alignment.End)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(Modifier.size(4.dp))
+                                            Text("Cancel")
                                         }
                                     }
 

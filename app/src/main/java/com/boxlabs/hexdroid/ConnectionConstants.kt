@@ -29,6 +29,25 @@ object ConnectionConstants {
     
     /** How long to wait for a PONG before considering the connection dead (ms). */
     const val PING_TIMEOUT_MS = 180_000L  // 180 seconds (3 missed pings at 60s interval)
+
+    /**
+     * Client PING interval used while the app is backgrounded (ms).
+     *
+     * Foreground uses 60 s (direct) / 90 s (bouncer) for a responsive lag readout and
+     * fast stall detection. Backgrounded, nobody is watching the lag display and a dead
+     * socket is already caught by [SOCKET_READ_TIMEOUT_MS] plus the ConnectivityManager
+     * callback, so the only job left for our own PING is to keep inbound data flowing.
+     * The IRC server itself PINGs an idle client (the read loop answers with PONG), so a
+     * frequent client PING is not required to avoid an idle-drop. Lengthening this cuts
+     * background CPU/radio wakeups.
+     *
+     * INVARIANT: this MUST stay strictly below [SOCKET_READ_TIMEOUT_MS]. Our PING elicits
+     * a PONG, and that inbound PONG is what resets the socket read deadline. If the
+     * interval met or exceeded the read timeout, a healthy-but-quiet connection would hit
+     * the read timeout and reconnect needlessly. 120 s leaves a 30 s margin for the PONG
+     * round-trip under the 150 s read timeout.
+     */
+    const val BACKGROUND_PING_INTERVAL_MS = 120_000L
     
     // --- Reconnect Backoff ---
     

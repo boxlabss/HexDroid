@@ -247,6 +247,9 @@
     <string name="transfers_no_offers">No file offers yet.</string>
     <string name="transfers_accept">Accept</string>
     <string name="transfers_reject">Reject</string>
+    <string name="transfers_resume">Resume</string>
+    <string name="transfers_resuming_from">Resuming from %1$s</string>
+    <string name="transfers_partial_available">%1$s partially downloaded. resume?</string>
     <string name="transfers_accept_open">Accept &amp; Open</string>
     <string name="transfers_active">Active transfers</string>
     <string name="transfers_no_transfers">No transfers in progress.</string>

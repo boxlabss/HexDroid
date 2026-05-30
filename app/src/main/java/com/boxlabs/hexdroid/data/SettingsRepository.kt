@@ -441,13 +441,6 @@ class SettingsRepository(private val ctx: Context) {
                         userhostInNames = o.optBoolean("cap_userhostInNames", false),
                         draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
                         draftReadMarker = o.optBoolean("cap_draftReadMarker", true),
-                        // Caps added after the original v1 set. Pre-r10 these were neither
-                        // read nor written, so every load reverted to the CapPrefs default
-                        // and the per-network UI toggle (where one existed) had no effect
-                        // across app restarts. Defaults match the CapPrefs field defaults
-                        // so existing profiles silently inherit the same behaviour they had
-                        // before; anyone who'd disabled a cap in the UI gets it disabled
-                        // again from this release onward.
                         monitor = o.optBoolean("cap_monitor", true),
                         accountTag = o.optBoolean("cap_accountTag", true),
                         typingIndicator = o.optBoolean("cap_typingIndicator", true),
@@ -508,9 +501,6 @@ class SettingsRepository(private val ctx: Context) {
                     bouncerClientId = o.optString("bouncerClientId", "").takeIf { it.isNotBlank() },
                     tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
                     tlsTofuFingerprints = run {
-                        // v4: additional fingerprints for round-robin DNS hosts. Missing on
-                        // pre-v4 profiles; defaults to empty (the legacy single-fingerprint
-                        // field carries the pin on its own for those).
                         val arr = o.optJSONArray("tlsTofuFingerprints") ?: return@run emptySet()
                         val s = LinkedHashSet<String>(arr.length())
                         for (i in 0 until arr.length()) {

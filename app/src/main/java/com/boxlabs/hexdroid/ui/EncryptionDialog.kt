@@ -195,7 +195,7 @@ fun EncryptionDialog(
                 when (pickedScheme) {
                     E2eScheme.AGM -> {
                         Text(
-                            "HexDroid's +AGM'. 256-bit random key, per-message authenticated encryption.",
+                            "HexDroid's +AGM. 256-bit random key, per-message authenticated encryption.",
                              style = MaterialTheme.typography.bodySmall,
                              color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

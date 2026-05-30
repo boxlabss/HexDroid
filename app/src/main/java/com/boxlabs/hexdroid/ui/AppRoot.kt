@@ -362,7 +362,11 @@ fun AppRoot(
                     onShareFile = vm::shareFile,
                     onSetDccEnabled = vm::setDccEnabled,
                     onSetDccSendMode = vm::setDccSendMode,
-                    onCancelOutgoing = vm::cancelOutgoingDcc
+                    onCancelOutgoing = vm::cancelOutgoingDcc,
+                    onCancelIncoming = vm::cancelIncomingDcc,
+                    onClearTransfer = vm::clearDccTransfer,
+                    onAcceptResume = vm::acceptDccResume,
+                    partialFor = vm::getPartialFor
                 )
 
                 AppScreen.ABOUT -> AboutScreen(
