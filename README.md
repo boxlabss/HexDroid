@@ -267,7 +267,7 @@ Bug reports and pull requests are welcome. Please open an issue before submittin
 
 **Developers:**
 
-The HexChat companion plugin and the `+AGM` wire-format specification live under `/aes-client-plugins/hexchat` and `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
+Scripts exist for HexChat, irssi and WeeChat for the `+AGM` spec. The wire-format specification lives under `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
 
 Translations are managed in the string resources under `app/src/main/res/values-*/`. If your language is missing or incomplete, a PR updating the relevant `strings.xml` is very welcome.
 
