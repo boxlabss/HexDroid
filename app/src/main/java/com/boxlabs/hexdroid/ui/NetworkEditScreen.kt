@@ -137,6 +137,10 @@ fun NetworkEditScreen(
     var serverPassword by remember(n0.id, n0.serverPassword) { mutableStateOf(n0.serverPassword ?: "") }
     var autoConnect by remember(n0.id) { mutableStateOf(n0.autoConnect) }
     var autoReconnect by remember(n0.id) { mutableStateOf(n0.autoReconnect) }
+    var notifyOnErrors by remember(n0.id) { mutableStateOf(n0.notifyOnErrors) }
+    var highlightIgnoreText by remember(n0.id) {
+        mutableStateOf(n0.highlightIgnoreMasks.joinToString("\n"))
+    }
     var isBouncer by remember(n0.id) { mutableStateOf(n0.isBouncer) }
     var bouncerKind by remember(n0.id) { mutableStateOf(n0.bouncerKind) }
     var bouncerKindExpanded by remember { mutableStateOf(false) }
@@ -178,7 +182,6 @@ fun NetworkEditScreen(
     var capUserhostInNames by remember(n0.id) { mutableStateOf(n0.caps.userhostInNames) }
     var capDraftRelaymsg by remember(n0.id) { mutableStateOf(n0.caps.draftRelaymsg) }
     var capDraftReadMarker by remember(n0.id) { mutableStateOf(n0.caps.draftReadMarker) }
-    // IRCv3 modern caps - were missing from UI and always silently reset to defaults on save
     var capMonitor by remember(n0.id) { mutableStateOf(n0.caps.monitor) }
     var capAccountTag by remember(n0.id) { mutableStateOf(n0.caps.accountTag) }
     var capTypingIndicator by remember(n0.id) { mutableStateOf(n0.caps.typingIndicator) }
@@ -186,8 +189,6 @@ fun NetworkEditScreen(
     var capPreAway by remember(n0.id) { mutableStateOf(n0.caps.preAway) }
     var capMessageIds by remember(n0.id) { mutableStateOf(n0.caps.messageIds) }
     var capWhox by remember(n0.id) { mutableStateOf(n0.caps.whox) }
-    // Caps that previously had no UI toggle and were silently reset to their CapPrefs defaults
-    // on every save. Now exposed in the advanced section so the user's choice round-trips.
     var capChannelRename by remember(n0.id) { mutableStateOf(n0.caps.channelRename) }
     var capExtendedMonitor by remember(n0.id) { mutableStateOf(n0.caps.extendedMonitor) }
     var capMessageReactions by remember(n0.id) { mutableStateOf(n0.caps.messageReactions) }
@@ -271,10 +272,6 @@ fun NetworkEditScreen(
                             whox = capWhox,
                             sojuRead = capSojuRead,
                             sojuNoImplicitNames = capSojuNoImplicitNames,
-                            // Pre-r10 these five fields were not threaded through the save
-                            // constructor, so any user choice silently reverted to the
-                            // CapPrefs default on every save. Threading them now means a
-                            // disabled cap stays disabled across edits.
                             channelRename = capChannelRename,
                             extendedMonitor = capExtendedMonitor,
                             messageReactions = capMessageReactions,
@@ -342,6 +339,12 @@ fun NetworkEditScreen(
                                 autoJoin = aj,
                                 autoConnect = autoConnect,
                                 autoReconnect = autoReconnect,
+                                notifyOnErrors = notifyOnErrors,
+                                highlightIgnoreMasks = highlightIgnoreText
+                                    .split("\n")
+                                    .map { it.trim() }
+                                    .filter { it.isNotBlank() }
+                                    .distinct(),
                                 isBouncer = isBouncer,
                                 bouncerKind = if (isBouncer) bouncerKind else com.boxlabs.hexdroid.BouncerKind.NONE,
                                 bouncerNetworkName = bouncerNetworkName.trim().takeIf { it.isNotBlank() },
@@ -1062,6 +1065,41 @@ fun NetworkEditScreen(
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            CardSection(stringResource(R.string.network_section_notifications)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(stringResource(R.string.network_notify_errors_label))
+                        Text(
+                            stringResource(R.string.network_notify_errors_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = notifyOnErrors, onCheckedChange = { notifyOnErrors = it })
+                }
+
+                Text(
+                    stringResource(R.string.network_highlight_ignore_label),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    stringResource(R.string.network_highlight_ignore_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = highlightIgnoreText,
+                    onValueChange = { highlightIgnoreText = it },
+                    placeholder = { Text(stringResource(R.string.network_highlight_ignore_hint)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2
                 )
             }
 

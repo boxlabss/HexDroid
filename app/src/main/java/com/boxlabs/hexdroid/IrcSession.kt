@@ -475,7 +475,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         ?: config.username.takeIf { it.isNotBlank() && it != DEFAULT_USERNAME }
                         ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
-                    val pass = s.password ?: ""
+                    val pass = s.password
                     val msg = "\u0000$authcid\u0000$pass"
                     val b64 = Base64.encodeToString(msg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                     out += chunkAuthenticate(b64)

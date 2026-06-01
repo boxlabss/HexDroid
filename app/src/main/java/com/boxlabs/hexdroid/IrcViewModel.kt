@@ -573,6 +573,15 @@ class IrcViewModel(
          * shows once instead of twice after a reconnect.
          */
         const val SELF_SEND_RETAIN_MS = 15 * 60_000L
+        /**
+         * After a *reconnect*, how long self-JOIN echoes are treated as automatic rejoins
+         * (and therefore do NOT switch the active buffer). Covers both the client-sent
+         * rejoin burst and bouncer-replayed JOINs; sized to the 45 s upstream history-expect
+         * ceiling that bouncer playback uses (see the Connected handler). An explicit user
+         * /join during this window still switches, because it is recorded in
+         * [NetRuntime.pendingUserJoinSwitch] which overrides the suppression.
+         */
+        const val AUTO_JOIN_SWITCH_SUPPRESS_MS = 45_000L
     }
 
     private data class NamesRequest(
@@ -611,7 +620,20 @@ class IrcViewModel(
         var support: NetSupport = NetSupport(),
         // Manually-joined channels not covered by autoJoin, rejoined on reconnect.
         // Key = channel name (server casing), value = channel key or null.
-        val manuallyJoinedChannels: MutableMap<String, String?> = mutableMapOf()
+        val manuallyJoinedChannels: MutableMap<String, String?> = mutableMapOf(),
+        // Channels the user EXPLICITLY asked to JOIN this session (join button or a typed
+        // /join). A self-JOIN echo for one of these always switches the active buffer to it,
+        // even inside the post-reconnect suppression window below. Folded channel names;
+        // entries are consumed (removed) when the matching self-JOIN arrives.
+        val pendingUserJoinSwitch: MutableSet<String> =
+            java.util.concurrent.ConcurrentHashMap.newKeySet(),
+        // While System.currentTimeMillis() < this value, the JOIN handler does NOT auto-switch
+        // the active buffer for self-joins we did NOT explicitly request — i.e. the burst of
+        // rejoins after a reconnect (client-sent JOINs for autojoin + manuallyJoinedChannels,
+        // AND bouncer-replayed JOINs from our prior session). Set ONLY on a reconnect, so a
+        // first connect still lands the user in an autojoin channel as before. Without this, a
+        // reconnect that re-joins every channel yanks the user onto whichever JOIN echoes last.
+        @Volatile var suppressAutoJoinSwitchUntilMs: Long = 0L
     )
 
     // Many of the per-network maps and sets below are mutated and read from multiple
@@ -664,6 +686,24 @@ class IrcViewModel(
     private val authBlockedReconnect: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+    /**
+     * Networks that have successfully REGISTERED (received 001) at least once during this
+     * app-process session. Used to decide whether a given registration is a genuine first
+     * connect or a re-connect of any kind (auto-reconnect, the user's manual "Reconnect",
+     * or a manual disconnect followed by a manual connect).
+     *
+     * On a first connect we let autojoin pull the user into a channel; on any re-connect we
+     * arm [NetRuntime.suppressAutoJoinSwitchUntilMs] so the rejoin burst doesn't yank the
+     * user off the buffer they were viewing.
+     *
+     * Deliberately NOT cleared on disconnect (including manual disconnect): a manual
+     * disconnect→reconnect must still count as a re-connect. Only cleared when the profile
+     * is removed (deleteNetwork / orphan-import cleanup); the whole set is naturally empty
+     * again on the next app launch.
+     */
+    private val everRegisteredThisSession: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     // Flap detection: track timestamps (ms) of ping-timeout disconnects per network.
     // If ≥ FLAP_THRESHOLD occur within FLAP_WINDOW_MS the connection is deemed unstable
     // and auto-reconnect is suspended until the user manually reconnects.
@@ -710,6 +750,25 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap()
     private val connStatusLock = Any()
     private val CONN_STATUS_DEDUP_WINDOW_MS = 60_000L
+    /**
+     * Per-network buffer of the most recent server-sent `ERROR :..` payload. Populated
+     * when the [IrcEvent.ServerError] handler fires; read by the [IrcEvent.Disconnected]
+     * handler to recover the rejection reason in cases where the disconnect itself
+     * arrives with a generic reason (e.g. "socket closed", "EOF") that's stripped of
+     * the server's actual explanation. The classic case is `ERROR :Closing Link: <addr>
+     * (SASL required for this connection class)` followed immediately by socket close
+     * without correlation the disconnect handler can't see "SASL required" in `r` and
+     * scheduleAutoReconnect happily floods.
+     *
+     * Cleared on successful registration
+     *
+     * Value: (message text, epoch ms). Correlation window is intentionally short
+     * ([SERVER_ERROR_DISCONNECT_CORRELATION_MS]) a server error from 30 s ago is
+     * almost certainly unrelated to the disconnect happening now.
+     */
+    private val lastServerErrorByNet: MutableMap<String, Pair<String, Long>> =
+        java.util.concurrent.ConcurrentHashMap()
+        private val SERVER_ERROR_DISCONNECT_CORRELATION_MS = 5_000L
 
     /** Hydrate the in-memory flapPaused set from DataStore (called once, lazily, on first use). */
     private suspend fun ensureFlapPausedLoaded() {
@@ -1597,21 +1656,15 @@ class IrcViewModel(
                 viewModelScope.launch {
                     delay(500) // Brief window to let a failover interface take over.
                     if (!hasInternetConnection()) {
-                        // No connectivity at all. Actively disconnect each affected
-                        // network so the socket's readLine() unblocks immediately
-                        // instead of blocking for up to SOCKET_READ_TIMEOUT_MS (150 s).
-                        // Without this, the UI freezes on the stale connection state,
-                        // the exit drawer button appears to do nothing (the disconnect
-                        // coroutine is queued behind the blocked read), and the app can
-                        // hang long enough for the OS to restart the process.
-                        // disconnectNetwork() honours desiredConnected, so onAvailable()
-                        // will reconnect everything once the network returns.
+                        // No connectivity at all. Tear down each affected socket so its
+                        // readLine() unblocks immediately instead of blocking for up to
+                        // SOCKET_READ_TIMEOUT_MS (150 s). Without this, the UI freezes on
+                        // the stale connection state, the exit drawer button appears to do
+                        // nothing (the disconnect coroutine is queued behind the blocked
+                        // read), and the app can hang long enough for the OS to restart it.
+                        // dropConnectionForNetworkLoss() drops the socket but KEEPS the
+                        // network in desiredConnected and resumes auto-reconnect.
                         val st = _state.value
-                        // Snapshot before iterating: disconnectNetwork() removes from
-                        // desiredConnected (via the viewModelScope.launch inside it),
-                        // and on rapid network flaps that mutation can race against this
-                        // iteration. Snapshotting also stops re-entrant onLost callbacks
-                        // from each modifying the live view in place.
                         val snapshot = desiredConnected.toList()
                         for (netId in snapshot) {
                             val conn = st.connections[netId]
@@ -1619,7 +1672,7 @@ class IrcViewModel(
                                 val serverKey = bufKey(netId, "*server*")
                                 append(serverKey, from = null, text = "*** Network lost. Waiting for connectivity…", doNotify = false)
                                 noNetworkNotice.add(netId)
-                                disconnectNetwork(netId)
+                                dropConnectionForNetworkLoss(netId)
                             }
                         }
                     }
@@ -2461,7 +2514,7 @@ fun startAddNetwork() {
      * - reconnectAttempts / autoReconnectJobs
      * ...do not accumulate entries for networks that no longer exist.
      */
-    private fun cleanupNetworkMaps(netId: String) {
+    private fun cleanupNetworkMaps(netId: String, resetReconnectState: Boolean = false) {
         // Per-channel nick maps
         val chanPrefix = "$netId::"
         chanNickCase.keys.filter   { it.startsWith(chanPrefix) }.forEach { chanNickCase.remove(it) }
@@ -2492,19 +2545,27 @@ fun startAddNetwork() {
         // Same per-network sweep for the chathistory marker armed window.
         chathistoryMarkerArmedUntilMs.keys.filter { it.startsWith(chanPrefix) }.toList()
             .forEach { chathistoryMarkerArmedUntilMs.remove(it) }
-        // PING timeout history: was previously only removed by reconnectNetwork(), so
-        // disconnectNetwork-without-reconnect (the user backgrounding a network) left
-        // stale ArrayDeques behind. Removing here aligns the lifecycle with the rest
-        // of the per-network state.
-        pingTimeoutTimestamps.remove(netId)
-        // Reconnect state
-        reconnectAttempts.remove(netId)
+        // Flap-detection history (pingTimeoutTimestamps) and the exponential-backoff
+        // counter (reconnectAttempts) MUST survive a transient disconnect, because the
+        // whole point of both is to accumulate state across a connect>Drop>reconnect
+        // cycle:
+        //   - pingTimeoutTimestamps lets the flap detector count repeated timeouts and
+        //     pause auto-reconnect once FLAP_THRESHOLD is hit within the window.
+        //   - reconnectAttempts is the backoff exponent. The design (see the Connected
+        //     handler and STABLE_CONNECTION_MS) is that it resets ONLY after a connection
+        //     stays up for STABLE_CONNECTION_MS.
+        // We only clear them on a PERMANENT teardown (user disconnect, profile delete,
+        // orphan-import cleanup) where there is no pending auto-reconnect to preserve them
+        if (resetReconnectState) {
+            pingTimeoutTimestamps.remove(netId)
+            reconnectAttempts.remove(netId)
+        }
         autoReconnectJobs.remove(netId)?.cancel()
         stableConnectionJobs.remove(netId)?.cancel()
         noNetworkNotice.remove(netId)
-        // Flap detection (NOT cleared here - we want to preserve across reconnect cycles
-        // so flapping doesn't reset just because cleanupNetworkMaps was called.
-        // Cleared explicitly in reconnectNetwork() when the user manually reconnects.)
+        // The flap-PAUSED set (flapPaused) is likewise NOT cleared here: a network that
+        // tripped flap protection must stay paused across reconnect cycles until the user
+        // explicitly intervenes. Cleared in reconnectNetwork() on a manual reconnect.
 
         // Bouncer upstream cache: drop so a reconnect doesn't surface stale "discovered"
         // entries from the previous session. The bouncer re-announces the full list on
@@ -2513,7 +2574,7 @@ fun startAddNetwork() {
             if (!st.bouncerNetworks.containsKey(netId)) st
             else st.copy(bouncerNetworks = st.bouncerNetworks - netId)
         }
-        // NOTE: authBlockedReconnect is deliberately NOT cleared here — cleanupNetworkMaps
+        // NOTE: authBlockedReconnect is deliberately NOT cleared here, cleanupNetworkMaps
         // runs on every disconnect (including the auth-failure-induced disconnect that
         // SET the block), and clearing here would defeat the block entirely. Cleared
         // explicitly in connectNetwork(), reconnectNetwork(), saveEditingNetwork(), and
@@ -2551,6 +2612,7 @@ fun startAddNetwork() {
         doNotify: Boolean = false,
         from: String? = null,
         broadcast: Boolean = false,
+        isError: Boolean = false,
     ): Boolean {
         val appendedFresh: Boolean = synchronized(connStatusLock) {
             val now = System.currentTimeMillis()
@@ -2595,7 +2657,7 @@ fun startAddNetwork() {
                     // past it). Fall through and append fresh as a new line.
             }
 
-            append(bufferKey, from = from, text = text, isHighlight = isHighlight, doNotify = doNotify)
+            append(bufferKey, from = from, text = text, isHighlight = isHighlight, doNotify = doNotify, isError = isError)
             lastConnStatusLine[netId] = ConnStatusDedupEntry(
                 key = key,
                 baseText = text,
@@ -2675,10 +2737,13 @@ fun startAddNetwork() {
             recentSelfSends.keys.filter { it.startsWith(pfx) }.forEach { recentSelfSends.remove(it) }
         }
         disconnectNetwork(id)
-        cleanupNetworkMaps(id)
+        cleanupNetworkMaps(id, resetReconnectState = true)
         // Profile is gone; drop any auth-failure block that pinned it. (cleanupNetworkMaps
         // doesn't touch authBlockedReconnect, see the note there.)
         authBlockedReconnect.remove(id)
+        // Profile is gone for good; drop its session-registration marker too. (Unlike a
+        // disconnect, a delete means there's no reconnect that should still count as one.)
+        everRegisteredThisSession.remove(id)
         // Purge orphan state for the deleted network: buffers, the connection record, and
         // the per-buffer chathistory marker tracker. Without this, buffer messages and
         // associated state stay in memory until the process is killed - a real leak in
@@ -2774,7 +2839,8 @@ fun startAddNetwork() {
                             // chathistory marker tracker. Same purge pattern as deleteNetwork()
                             // — the profile is gone from disk; its UI state should follow.
                             authBlockedReconnect.remove(id)
-                            cleanupNetworkMaps(id)
+                            everRegisteredThisSession.remove(id)
+                            cleanupNetworkMaps(id, resetReconnectState = true)
                             val prefix = "$id::"
                             _state.update { st ->
                                 val orphanKeys = st.buffers.keys.filter { it.startsWith(prefix) }
@@ -3483,10 +3549,15 @@ fun startAddNetwork() {
             }
         }
 		
-        // If the collector exits without emitting Disconnected, clean up and maybe reconnect.
-        // Guard: if the job was *cancelled* (intentional teardown - force-close, manual
-        // disconnect, reconnect replacing this runtime) we must not treat it as an unexpected
-        // drop. CancellationException means someone called job.cancel() on purpose.
+        // FALLBACK ONLY: if the collector exits without ever emitting Disconnected,
+        // clean up and schedule reconnect. In the NORMAL path the IrcCore read loop
+        // does emit Disconnected; that fires handleEvent/Disconnected handler which
+        // calls scheduleAutoReconnect itself, and re-scheduling here would cancel and
+        // recreate the auto-reconnect coroutine, racing the reconnectAttempts increment
+        // and visibly freezing the "(attempt N)" counter.
+        // Guard: if the job was *cancelled* (intentional teardown. force-close, manual
+        // disconnect, reconnect replacing this runtime) we must not treat it as an
+        // unexpected drop. CancellationException means someone called job.cancel().
         rt.job?.invokeOnCompletion { cause ->
             if (cause is kotlinx.coroutines.CancellationException) return@invokeOnCompletion
             viewModelScope.launch {
@@ -3494,11 +3565,17 @@ fun startAddNetwork() {
 
                 val cur = _state.value.connections[netId]
                 val wasConnectedOrConnecting = (cur?.connected == true || cur?.connecting == true)
-                if (wasConnectedOrConnecting) {
-                    append(bufKey(netId, "*server*"), from = null, text = "*** Disconnected", doNotify = false)
-                    setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Disconnected") }
-                    if (_state.value.activeNetworkId == netId) clearConnectionNotification()
+                if (!wasConnectedOrConnecting) {
+                    // Disconnected handler already ran (it sets connected/connecting = false
+                    // and schedules its own auto-reconnect). Nothing to do here.
+                    return@launch
                 }
+
+                // True fallback path: do the cleanup the Disconnected handler would have
+                // done, then schedule reconnect.
+                append(bufKey(netId, "*server*"), from = null, text = "*** Disconnected", doNotify = false)
+                setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Disconnected") }
+                if (_state.value.activeNetworkId == netId) clearConnectionNotification()
 
                 if (!_state.value.settings.autoReconnectEnabled) return@launch
                 val wasManual = manualDisconnecting.remove(netId)
@@ -3540,6 +3617,10 @@ fun startAddNetwork() {
             // to retry, so any failure on this fresh attempt should surface even if it
             // matches the last failure verbatim.
             resetConnStatusDedup(netId)
+            // Same lifecycle: drop any stashed server-error text. A current session
+            // that registered cleanly invalidates any pre-registration ERROR we might
+            // have correlated with a disconnect later on.
+            lastServerErrorByNet.remove(netId)
 
             val oldRt = runtimes.remove(netId)
             runCatching { oldRt?.client?.disconnect(quitMsg) }
@@ -3577,7 +3658,7 @@ fun startAddNetwork() {
             manualDisconnecting.add(netId)
             reconnectAttempts.remove(netId)  // Clear reconnect backoff
             autoReconnectJobs.remove(netId)?.cancel()
-            cleanupNetworkMaps(netId)
+            cleanupNetworkMaps(netId, resetReconnectState = true)
 
             val oldRt = runtimes.remove(netId)
             runCatching { oldRt?.client?.disconnect(quitMsg) }
@@ -3632,8 +3713,35 @@ fun startAddNetwork() {
         for (id in netIds) disconnectNetwork(id)
     }
 
-    // Auto-reconnect
+    /**
+     * Drop a live connection because the underlying network interface went away
+     * (Wi-Fi/mobile handover with no failover)
+     *
+     * We tear the socket down (rather than waiting for readLine() to time out) so the
+     * UI updates instantly and the read coroutine doesn't sit blocked for up to
+     * SOCKET_READ_TIMEOUT_MS. Recovery is driven explicitly via [scheduleAutoReconnect]
+     */
+    private fun dropConnectionForNetworkLoss(netId: String) {
+        viewModelScope.launch {
+            withNetLock(netId) {
+                val oldRt = runtimes.remove(netId)
+                runCatching { oldRt?.client?.forceClose("Network lost") }
+                runCatching { oldRt?.job?.cancel() }
+                // Reset the backoff counter so the first attempt after the network
+                // returns fires promptly instead of waiting out a stale exponential delay.
+                reconnectAttempts.remove(netId)
+                setNetConn(netId) {
+                    it.copy(connected = false, connecting = false, status = "Waiting for network…", lagMs = null)
+                }
+                if (_state.value.activeNetworkId == netId) updateConnectionNotification("Waiting for network…")
+                    if (_state.value.settings.autoReconnectEnabled && desiredConnected.contains(netId)) {
+                        scheduleAutoReconnect(netId)
+                    }
+            }
+        }
+    }
 
+    // Auto-reconnect
     private fun scheduleAutoReconnect(netId: String) {
         val st0 = _state.value
         if (!st0.settings.autoReconnectEnabled) return
@@ -3672,7 +3780,14 @@ fun startAddNetwork() {
             try {
                 while (isActive) {
                 val attempt = reconnectAttempts[netId] ?: 0
-                val baseDelaySec = _state.value.settings.autoReconnectDelaySec.coerceIn(
+                // Without this guard we'd print "Reconnecting in Ns
+                // (attempt N)…" and run the whole countdown over a connection that's already
+                // up, only self-correcting at the post-countdown check below.
+                if (_state.value.connections[netId]?.connected == true) {
+                    reconnectAttempts.remove(netId)
+                    break
+                }
+                    val baseDelaySec = _state.value.settings.autoReconnectDelaySec.coerceIn(
                     ConnectionConstants.RECONNECT_BASE_DELAY_MIN_SEC,
                     ConnectionConstants.RECONNECT_BASE_DELAY_MAX_SEC
                 )
@@ -3709,6 +3824,10 @@ fun startAddNetwork() {
                         }
                         var remaining = actual
                         while (remaining > 0 && isActive) {
+                            // If the connection came up mid-countdown (an in-flight attempt
+                            // succeeded, or onAvailable reconnected us), stop ticking now so we
+                            // don't paint a stale "Reconnecting in Ns…" over "Connected".
+                            if (_state.value.connections[netId]?.connected == true) break
                             val tick = remaining.coerceAtMost(tickInterval)
                             delay(tick * 1000L)
                             remaining -= tick
@@ -3719,6 +3838,7 @@ fun startAddNetwork() {
                                     delay(remaining * 1000L)
                                     remaining = 0
                                 } else {
+                                    if (_state.value.connections[netId]?.connected == true) break
                                     setNetConn(netId) { it.copy(status = "Reconnecting in ${remaining}s…") }
                                 }
                             }
@@ -4108,6 +4228,20 @@ fun startAddNetwork() {
                 // after the command verb is taken from strippedForCommandCheck directly.
                 val cmdLine = strippedForCommandCheck.drop(1).substringBefore('\n').trim()
                 val cmd = cmdLine.substringBefore(' ').lowercase()
+
+                // A typed /join is forwarded to the client below (the else branch) and is
+                // NOT pre-switched by openBuffer the way the join button is, so it relies on
+                // the JOIN-handler auto-switch to land the user in the channel. Record the
+                // intent here so that switch still fires even if a post-reconnect suppression
+                // window is active. Args: /join #a,#b [key] — only the channel list matters.
+                if (cmd == "join") {
+                    cmdLine.substringAfter(' ', "").trim().substringBefore(' ')
+                        .split(",")
+                        .forEach { ch ->
+                            ch.trim().takeIf { it.isNotBlank() }
+                                ?.let { rt?.pendingUserJoinSwitch?.add(casefoldText(netId, it)) }
+                        }
+                }
 
                 when (cmd) {
                     "quit", "disconnect" -> {
@@ -4823,6 +4957,12 @@ fun startAddNetwork() {
     fun joinChannel(channel: String) {
         val netId = _state.value.activeNetworkId ?: return
         val rt = runtimes[netId] ?: return
+        // Mark as an explicit user join so the self-JOIN echo switches the buffer even if a
+        // reconnect suppression window is active. (openBuffer below also switches us there
+        // immediately; this keeps the two switch paths consistent.)
+        channel.split(",").forEach { ch ->
+            ch.trim().takeIf { it.isNotBlank() }?.let { rt.pendingUserJoinSwitch.add(casefoldText(netId, it)) }
+        }
         viewModelScope.launch { rt.client.sendRaw("JOIN $channel") }
         openBuffer(resolveBufferKey(netId, channel))
     }
@@ -4893,6 +5033,32 @@ fun startAddNetwork() {
         return Regex(regex).containsMatchIn(input)
     }
 
+    /**
+     * True when [nick]'s messages on [netId] should NOT raise a highlight or PM
+     * notification, per NetworkProfile.highlightIgnoreMasks. Unlike isNickIgnored (which
+     * drops the message entirely), this only suppresses the *alert* — the message still
+     * lands in its buffer. Matches the bare nick (status prefixes stripped) against each
+     * mask as a regex (`/.../`), an IRC glob (`*`/`?`), or a plain case-insensitive nick.
+     */
+    private fun isNotifyIgnoredSender(netId: String, nick: String?): Boolean {
+        val base = nick?.trim()?.trimStart('~', '&', '@', '%', '+').takeIf { !it.isNullOrBlank() }
+            ?: return false
+        val masks = _state.value.networks.firstOrNull { it.id == netId }?.highlightIgnoreMasks.orEmpty()
+        if (masks.isEmpty()) return false
+        return masks.any { raw ->
+            val m = raw.trim()
+            when {
+                m.isEmpty() -> false
+                m.length >= 2 && m.startsWith("/") && m.endsWith("/") ->
+                    runCatching {
+                        Regex(m.substring(1, m.length - 1), RegexOption.IGNORE_CASE).containsMatchIn(base)
+                    }.getOrDefault(false)
+                m.contains('*') || m.contains('?') -> matchIrcGlob(m, base)
+                else -> m.equals(base, ignoreCase = true)
+            }
+        }
+    }
+
     private fun updateNetworkInState(updated: com.boxlabs.hexdroid.data.NetworkProfile) {
         val st = _state.value
         val next = st.networks.map { if (it.id == updated.id) updated else it }
@@ -4937,11 +5103,14 @@ fun startAddNetwork() {
         when (ev) {
             is IrcEvent.Status -> {
                 setNetConn(netId) { it.copy(status = ev.text) }
-                append(bufKey(netId, "*server*"), from = null, text = "*** ${ev.text}", doNotify = false)
+                // Route through appendConnStatus so rapid retries (every "*** Connecting.."
+                // before the next failure) collapse into "(×N)" instead of stacking
+                // 7–8 deep between two error lines.
+                appendConnStatus(netId, "*** ${ev.text}", from = null, doNotify = false, isHighlight = false)
             }
             is IrcEvent.Connected -> {
                 manualDisconnecting.remove(netId)
-                // Do NOT reset reconnectAttempts here - the connection may be dropped
+                // Do NOT reset reconnectAttempts here, the connection may be dropped
                 // immediately (Z-line, cert error, etc.).  The backoff is only cleared
                 // after STABLE_CONNECTION_MS of uptime (see IrcEvent.Registered).
                 stableConnectionJobs.remove(netId)?.cancel() // cancel any leftover timer
@@ -5001,11 +5170,8 @@ fun startAddNetwork() {
                 stableConnectionJobs.remove(netId)?.cancel()
                 val r = ev.reason?.trim()
                 // Connect failures and mid-stream connection errors arrive prefixed
-                // ("Connect failed: …", "Connection error: …") - emit those as ERROR-
-                // styled lines, not the "*** Disconnected: …" system-message format.
-                // This replaces the previous Error + Disconnected event pair that
-                // produced duplicate visible lines for the same condition. Tray
-                // notifications stay suppressed (isHighlight = false, doNotify = false)
+                // ("Connect failed: ...", "Connection error: ...") - emit those as ERROR
+                // styled lines, Tray notifications stay suppressed (isHighlight = false, doNotify = false)
                 // because a routine connect-failure-and-retry shouldn't ping the user;
                 // the in-buffer error line is enough.
                 val isConnectFailureLine = r != null && (
@@ -5030,11 +5196,19 @@ fun startAddNetwork() {
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
                 cleanupNetworkMaps(netId)
 
-                // Flap detection: count ping-timeout disconnects within the window.
+                // Flap detection: count ping-timeout / dead-socket disconnects within the window.
+                //   - "Connection timed out"  : the 150 s SOCKET_READ_TIMEOUT_MS path (the most
+                //                               common dead-socket case on mobile, and it fires
+                //                               BEFORE the 180 s client-ping timeout).
+                //   - "read timed out"        : raw SocketTimeoutException message (rare; usually
+                //                               overridden to "Connection timed out" above).
+                //   - "connection reset"      : friendlyErrorMessage("Connection reset by server").
+                //   - "ping timeout"          : server-sent "Closing Link: ... (Ping timeout)".
                 val isPingTimeout = r != null && (
                     r.contains("ping timeout", ignoreCase = true) ||
                     r.contains("ping time out", ignoreCase = true) ||
                     r.contains("connection reset", ignoreCase = true) ||
+                    r.contains("connection timed out", ignoreCase = true) ||
                     r.contains("SocketTimeout", ignoreCase = true) ||
                     r.contains("read timed out", ignoreCase = true)
                 )
@@ -5091,6 +5265,67 @@ fun startAddNetwork() {
                         r.contains("nodename nor servname provided", ignoreCase = true) ||
                         r.contains("Name or service not known", ignoreCase = true) ||
                         r.contains("Connection refused", ignoreCase = true)
+                    // "Server rejected the connection" class: the TCP+TLS handshake succeeded
+                    // and the server then told us, in plain words, that it won't have us. The
+                    // wire form is typically a raw `ERROR :Closing Link: <addr> (<reason>)`
+                    // frame followed by the socket close; the `<reason>` text comes through as
+                    // part of `r`.
+                    //
+                    // We can't blanket-halt on "Closing Link" because the SAME framing is
+                    // used for routine drops the user DOES want auto-reconnected, most
+                    // notably "Closing Link: nick[host] (Ping timeout: 240 seconds)". So we
+                    // match the specific reasons that mean "your reconnect will hit the same
+                    // wall":
+                    //
+                    //   SASL-required class      bouncer/server demands SASL we don't provide
+                    //   K/G/Z/D/X-line class     IRCd ban
+                    //   bad-password class       PASS rejected via raw ERROR rather than the
+                    //                            464 numeric
+                    //   connection-limit class   server is at capacity OR we've hit a
+                    //                            per-IP / per-account connection cap
+                    //   throttled                some ircds
+                    //                            explicitly throttle reconnects-too-fast and
+                    //                            extend the throttle each time we retry
+                    //   access-denied / banned   catch-all for "you're not welcome here"
+                    val lowerR = r.lowercase()
+                    val recentServerErrorText = lastServerErrorByNet[netId]?.let { (msg, ts) ->
+                        if (System.currentTimeMillis() - ts < SERVER_ERROR_DISCONNECT_CORRELATION_MS)
+                            msg.lowercase()
+                        else null
+                    }
+                    fun anyMatches(vararg needles: String): Boolean = needles.any { n ->
+                        lowerR.contains(n) || (recentServerErrorText?.contains(n) ?: false)
+                    }
+                    val serverRejection =
+                        // SASL-required class
+                        anyMatches(
+                            "sasl required", "sasl needed", "sasl is required",
+                            "you must authenticate", "authentication required",
+                        ) ||
+                        // *-lined: hyphenated and concatenated forms
+                        anyMatches(
+                            "k-lined", "klined",
+                            "g-lined", "glined",
+                            "z-lined", "zlined",
+                            "d-lined", "dlined",
+                            "x-lined", "xlined",
+                            "you are banned",
+                            "banned from this server", "banned from server",
+                        ) ||
+                        // bad password via raw ERROR
+                        anyMatches(
+                            "bad password", "password incorrect",
+                            "password mismatch", "invalid password",
+                        ) ||
+                        // connection-limit
+                        anyMatches(
+                            "too many connections", "too many clients", "too many users",
+                            "connection limit", "max clients",
+                        ) ||
+                        // throttled / rate-limit
+                        anyMatches("throttled", "reconnecting too fast") ||
+                        // access-denied
+                        anyMatches("access denied", "not authorized", "not authorised")
                     if (tlsUnrecoverable) {
                         authBlockedReconnect.add(netId)
                         appendConnStatus(
@@ -5102,7 +5337,7 @@ fun startAddNetwork() {
                             isHighlight = false,
                             broadcast = true,
                         )
-                        setNetConn(netId) { it.copy(status = "TLS error — reconnect halted") }
+                        setNetConn(netId) { it.copy(status = "TLS error: reconnect halted") }
                         return
                     }
                     if (hostUnreachable) {
@@ -5117,9 +5352,23 @@ fun startAddNetwork() {
                             isHighlight = false,
                             broadcast = true,
                         )
-                        setNetConn(netId) { it.copy(status = "Server unreachable — reconnect halted") }
+                        setNetConn(netId) { it.copy(status = "Server unreachable: reconnect halted") }
                         return
                     }
+                    if (serverRejection) {
+                        authBlockedReconnect.add(netId)
+                        appendConnStatus(
+                            netId = netId,
+                            text = "*** Auto-reconnect halted: server rejected the connection.",
+                            from = null,
+                            doNotify = false,
+                            isHighlight = false,
+                            broadcast = true,
+                        )
+                        setNetConn(netId) { it.copy(status = "Server rejected connection: reconnect halted") }
+                        return
+                    }
+
                 }
 
                 if (desiredConnected.contains(netId)) scheduleAutoReconnect(netId)
@@ -5149,6 +5398,7 @@ fun startAddNetwork() {
                     from = "ERROR",
                     isHighlight = !isTransient,
                     doNotify = !isTransient,
+                    isError = true,
                 )
             }
             is IrcEvent.AuthFailed -> {
@@ -5268,7 +5518,7 @@ fun startAddNetwork() {
                     text = "⚠️  Server certificate fingerprint has CHANGED! " +
                            "Expected: ${ev.stored}  •  Got: ${ev.actual}  - " +
                            "Connection refused. Auto-reconnect halted. " +
-                           "If this server uses round-robin DNS (irc.libera.chat, irc.oftc.net, etc.), " +
+                           "If this server uses round-robin DNS (irc.example.tld), " +
                            "open Network Settings and tap 'Trust this server too' to add the new " +
                            "fingerprint without losing the others. " +
                            "If the cert was rotated/renewed, tap 'Reset & re-pin' instead - " +
@@ -5536,6 +5786,24 @@ if (code == "442") {
                 val rt = runtimes[netId] ?: return
                 val profile = _state.value.networks.firstOrNull { it.id == netId }
 
+                // On any RE-connect (auto-reconnect, manual "Reconnect", or manual
+                // disconnect→connect) the channels we re-join — and, for bouncers, the JOINs
+                // the bouncer replays for our prior session — arrive as self-JOIN echoes.
+                // Suppress the JOIN handler's automatic buffer switch for that window so the
+                // user stays on the buffer they were reading instead of being yanked onto
+                // whichever channel happens to JOIN last.
+                //
+                // We key this off "has this network ever registered this session" rather than
+                // the backoff counter: a manual reconnect clears reconnectAttempts, so the old
+                // wasReconnect check treated manual reconnects as first connects and still
+                // switched. A genuine FIRST connect (set.add returns true) deliberately does
+                // NOT arm, so initial autojoin still lands the user in a channel.
+                val firstRegistrationThisSession = everRegisteredThisSession.add(netId)
+                if (!firstRegistrationThisSession) {
+                    rt.suppressAutoJoinSwitchUntilMs =
+                        System.currentTimeMillis() + AUTO_JOIN_SWITCH_SUPPRESS_MS
+                }
+
                 viewModelScope.launch {
                     // Service auth command (e.g. /msg NickServ IDENTIFY password)
                     //    Runs first, before autojoin, so channels with +r can be joined.
@@ -5619,7 +5887,7 @@ if (code == "442") {
                 val my = st0.connections[netId]?.myNick ?: runtimes[netId]?.myNick ?: st0.myNick
                 val isMe = casefoldText(netId, ev.oldNick) == casefoldText(netId, my)
 
-                // Show nick changes in-channel (like mIRC):
+                // Show nick changes in-channel:
                 //   * old is now known as new
                 //   * You are now known as new
                 val line = if (isMe) "* You are now known as ${ev.newNick}"
@@ -5685,32 +5953,32 @@ if (code == "442") {
                     val st1 = _state.value
 
                     
-// Update nicklists for this network (multi-status safe).
-moveNickAcrossChannels(netId, ev.oldNick, ev.newNick)
+                    // Update nicklists for this network (multi-status safe).
+                    moveNickAcrossChannels(netId, ev.oldNick, ev.newNick)
 
-// Transfer away state from old nick to new nick.
-val awayMap = nickAwayState[netId]
-if (awayMap != null) {
-    val oldFold = casefoldText(netId, ev.oldNick)
-    val newFold = casefoldText(netId, ev.newNick)
-    awayMap.remove(oldFold)?.let { awayMap[newFold] = it }
-}
+                    // Transfer away state from old nick to new nick.
+                    val awayMap = nickAwayState[netId]
+                    if (awayMap != null) {
+                        val oldFold = casefoldText(netId, ev.oldNick)
+                        val newFold = casefoldText(netId, ev.newNick)
+                        awayMap.remove(oldFold)?.let { awayMap[newFold] = it }
+                    }
 
-val updatedNicklists = st1.nicklists.mapValues { (k, list) ->
-    val (kid, _) = splitKey(k)
-    if (kid != netId) list
-    else rebuildNicklist(netId, k)
-}
+                    val updatedNicklists = st1.nicklists.mapValues { (k, list) ->
+                        val (kid, _) = splitKey(k)
+                        if (kid != netId) list
+                        else rebuildNicklist(netId, k)
+                    }
 
-// Drop the old nick's typing indicator from all channel buffers on this network.
-// The new nick hasn't sent a TAGMSG typing event yet, so don't carry it over.
-val updatedBufs = st1.buffers.mapValues { (k, buf) ->
-    if (k.startsWith("$netId::") && ev.oldNick in buf.typingNicks)
-        buf.copy(typingNicks = buf.typingNicks - ev.oldNick)
-    else buf
-}
+                    // Drop the old nick's typing indicator from all channel buffers on this network.
+                    // The new nick hasn't sent a TAGMSG typing event yet, so don't carry it over.
+                    val updatedBufs = st1.buffers.mapValues { (k, buf) ->
+                        if (k.startsWith("$netId::") && ev.oldNick in buf.typingNicks)
+                            buf.copy(typingNicks = buf.typingNicks - ev.oldNick)
+                        else buf
+                    }
 
-var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
+                    var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     // Rename private-message buffer key if present.
                     val oldKey = bufKey(netId, ev.oldNick)
                     val newKey = bufKey(netId, ev.newNick)
@@ -6302,10 +6570,25 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                             }
                         }
                     }
+                    // Decide whether this self-JOIN should pull the user onto the channel.
+                    // It should for an explicit user join (typed /join or the join button),
+                    // recorded in pendingUserJoinSwitch. It should NOT for the automatic rejoin
+                    // burst after a reconnect (client-sent rejoins and bouncer-replayed JOINs),
+                    // which is what suppressAutoJoinSwitchUntilMs guards. An explicit user join
+                    // always wins, even inside the suppression window.
+                    val rtForSwitch = runtimes[netId]
+                    // Consume the intent only on an actual self-join so a JOIN by someone else
+                    // never clears it.
+                    val userRequestedJoin =
+                        isMe && rtForSwitch?.pendingUserJoinSwitch?.remove(casefoldText(netId, ev.channel)) == true
+                    val autoSwitchSuppressed =
+                        rtForSwitch != null &&
+                            System.currentTimeMillis() < rtForSwitch.suppressAutoJoinSwitchUntilMs
                     val shouldSwitch =
                         isMe &&
                             st1.activeNetworkId == netId &&
-                            (st1.screen == AppScreen.CHAT || st1.screen == AppScreen.NETWORKS)
+                            (st1.screen == AppScreen.CHAT || st1.screen == AppScreen.NETWORKS) &&
+                            (userRequestedJoin || !autoSwitchSuppressed)
 
                     if (shouldSwitch) {
                         val leaving = st1.selectedBuffer
@@ -6419,50 +6702,50 @@ var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
                     )
                 }
 
-if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
-    // Re-read state after append so we don't overwrite the message we just appended.
-    val st1 = _state.value
+                if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
+                    // Re-read state after append so we don't overwrite the message we just appended.
+                    val st1 = _state.value
 
-    val myNick = st1.connections[netId]?.myNick ?: st1.myNick
-    val victimIsMe = casefoldText(netId, ev.victim) == casefoldText(netId, myNick)
+                    val myNick = st1.connections[netId]?.myNick ?: st1.myNick
+                    val victimIsMe = casefoldText(netId, ev.victim) == casefoldText(netId, myNick)
 
-    removeNickFromChannel(netId, chanKey, ev.victim)
-    if (victimIsMe) {
-        chanNickCase[chanKey] = mutableMapOf()
-        chanNickStatus[chanKey] = mutableMapOf()
-    }
+                    removeNickFromChannel(netId, chanKey, ev.victim)
+                    if (victimIsMe) {
+                        chanNickCase[chanKey] = mutableMapOf()
+                        chanNickStatus[chanKey] = mutableMapOf()
+                    }
 
-    val finalList = if (victimIsMe) emptyList() else rebuildNicklist(netId, chanKey)
-    _state.value = syncActiveNetworkSummary(st1.copy(nicklists = st1.nicklists + (chanKey to finalList)))
+                    val finalList = if (victimIsMe) emptyList() else rebuildNicklist(netId, chanKey)
+                    _state.value = syncActiveNetworkSummary(st1.copy(nicklists = st1.nicklists + (chanKey to finalList)))
 
-    // Auto-rejoin on kick. Off by default. Throttled to one rejoin per channel per
-    // AUTO_REJOIN_SUPPRESS_MS so we don't loop against +i/+k/+b modes or against an
-    // op who is actively kick-banning. The small AUTO_REJOIN_DELAY_MS makes it feel
-    // less adversarial than an instant rejoin.
-    if (victimIsMe && st1.settings.rejoinOnKick) {
-        val rejoinKey = "$netId::${ev.channel.lowercase()}"
-        val now = System.currentTimeMillis()
-        // Opportunistic eviction: if the map has grown past a small bound, drop entries
-        // older than 2× the suppress window so it can't grow without limit on a busy
-        // channel-hopping user.
-        if (recentKickRejoins.size > 32) {
-            val cutoff = now - (AUTO_REJOIN_SUPPRESS_MS * 2)
-            recentKickRejoins.entries.removeAll { it.value < cutoff }
-        }
-        val last = recentKickRejoins[rejoinKey] ?: 0L
-        if (now - last > AUTO_REJOIN_SUPPRESS_MS) {
-            recentKickRejoins[rejoinKey] = now
-            viewModelScope.launch {
-                delay(AUTO_REJOIN_DELAY_MS)
-                runtimes[netId]?.client?.sendRaw("JOIN ${ev.channel}")
-            }
-        } else {
-            append(chanKey, from = null,
-                text = "*** Auto-rejoin suppressed (kicked again within ${AUTO_REJOIN_SUPPRESS_MS / 1000}s)",
-                doNotify = false)
-        }
-    }
-}
+                    // Auto-rejoin on kick. Off by default. Throttled to one rejoin per channel per
+                    // AUTO_REJOIN_SUPPRESS_MS so we don't loop against +i/+k/+b modes or against an
+                    // op who is actively kick-banning. The small AUTO_REJOIN_DELAY_MS makes it feel
+                    // less adversarial than an instant rejoin.
+                    if (victimIsMe && st1.settings.rejoinOnKick) {
+                        val rejoinKey = "$netId::${ev.channel.lowercase()}"
+                        val now = System.currentTimeMillis()
+                        // Opportunistic eviction: if the map has grown past a small bound, drop entries
+                        // older than 2× the suppress window so it can't grow without limit on a busy
+                        // channel-hopping user.
+                        if (recentKickRejoins.size > 32) {
+                            val cutoff = now - (AUTO_REJOIN_SUPPRESS_MS * 2)
+                            recentKickRejoins.entries.removeAll { it.value < cutoff }
+                        }
+                        val last = recentKickRejoins[rejoinKey] ?: 0L
+                        if (now - last > AUTO_REJOIN_SUPPRESS_MS) {
+                            recentKickRejoins[rejoinKey] = now
+                            viewModelScope.launch {
+                                delay(AUTO_REJOIN_DELAY_MS)
+                                runtimes[netId]?.client?.sendRaw("JOIN ${ev.channel}")
+                            }
+                        } else {
+                            append(chanKey, from = null,
+                                text = "*** Auto-rejoin suppressed (kicked again within ${AUTO_REJOIN_SUPPRESS_MS / 1000}s)",
+                                doNotify = false)
+                        }
+                    }
+                }
             }
 
             is IrcEvent.Quit -> {
@@ -6512,49 +6795,49 @@ if (shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
                 }
 
 
-// Nicklist removal:
-//   - For live events (affectLive = true): remove from every nicklist on this network.
-//   - For events flagged as history (affectLive = false): still remove from any channel
-//     where this nick is currently listed - the user was genuinely there and is now
-//     gone, regardless of the timestamp gating. Without this, a slightly-stale @time
-//     tag (clock skew, brief netsplit on the bouncer side, replayed-as-history live
-//     QUIT) would leave the nick hanging in the nicklist after their PART/QUIT was
-//     already displayed in chat. removeNickFromChannel is a no-op when the nick
-//     isn't actually present, so non-shared channels are unaffected.
-val st1 = _state.value
-val mutatedKeys = mutableListOf<String>()
-if (affectLive) {
-    val keys = st1.nicklists.keys.filter { it.startsWith("$netId::") }
-    for (k in keys) {
-        removeNickFromChannel(netId, k, ev.nick)
-        mutatedKeys.add(k)
-    }
-} else {
-    for (k in affected) {
-        removeNickFromChannel(netId, k, ev.nick)
-        mutatedKeys.add(k)
-    }
-}
-if (mutatedKeys.isNotEmpty() || affectLive) {
-    val newNicklists = st1.nicklists.mapValues { (k, list) ->
-        val (kid, _) = splitKey(k)
-        if (kid != netId || k !in mutatedKeys) list else rebuildNicklist(netId, k)
-    }
-    // Also remove from away state map - only on truly live events; a stale replay
-    // shouldn't reset somebody's current away status.
-    if (affectLive) {
-        nickAwayState[netId]?.remove(casefoldText(netId, ev.nick))
-    }
-    // Clear any pending typing indicator for the quitting nick across all buffers on this network.
-    val newBufs = st1.buffers.mapValues { (k, buf) ->
-        if (k.startsWith("$netId::") && ev.nick in buf.typingNicks) {
-            receivedTypingExpiryJobs.remove("$k/${ev.nick}")?.cancel()
-            buf.copy(typingNicks = buf.typingNicks - ev.nick)
-        }
-        else buf
-    }
-    _state.value = syncActiveNetworkSummary(st1.copy(nicklists = newNicklists, buffers = newBufs))
-}
+                // Nicklist removal:
+                //   - For live events (affectLive = true): remove from every nicklist on this network.
+                //   - For events flagged as history (affectLive = false): still remove from any channel
+                //     where this nick is currently listed - the user was genuinely there and is now
+                //     gone, regardless of the timestamp gating. Without this, a slightly-stale @time
+                //     tag (clock skew, brief netsplit on the bouncer side, replayed-as-history live
+                //     QUIT) would leave the nick hanging in the nicklist after their PART/QUIT was
+                //     already displayed in chat. removeNickFromChannel is a no-op when the nick
+                //     isn't actually present, so non-shared channels are unaffected.
+                val st1 = _state.value
+                val mutatedKeys = mutableListOf<String>()
+                if (affectLive) {
+                    val keys = st1.nicklists.keys.filter { it.startsWith("$netId::") }
+                    for (k in keys) {
+                        removeNickFromChannel(netId, k, ev.nick)
+                        mutatedKeys.add(k)
+                    }
+                } else {
+                    for (k in affected) {
+                        removeNickFromChannel(netId, k, ev.nick)
+                        mutatedKeys.add(k)
+                    }
+                }
+                if (mutatedKeys.isNotEmpty() || affectLive) {
+                    val newNicklists = st1.nicklists.mapValues { (k, list) ->
+                        val (kid, _) = splitKey(k)
+                        if (kid != netId || k !in mutatedKeys) list else rebuildNicklist(netId, k)
+                    }
+                    // Also remove from away state map - only on truly live events; a stale replay
+                    // shouldn't reset somebody's current away status.
+                    if (affectLive) {
+                        nickAwayState[netId]?.remove(casefoldText(netId, ev.nick))
+                    }
+                    // Clear any pending typing indicator for the quitting nick across all buffers on this network.
+                    val newBufs = st1.buffers.mapValues { (k, buf) ->
+                        if (k.startsWith("$netId::") && ev.nick in buf.typingNicks) {
+                            receivedTypingExpiryJobs.remove("$k/${ev.nick}")?.cancel()
+                            buf.copy(typingNicks = buf.typingNicks - ev.nick)
+                        }
+                        else buf
+                    }
+                    _state.value = syncActiveNetworkSummary(st1.copy(nicklists = newNicklists, buffers = newBufs))
+                }
             }
 
             is IrcEvent.TopicReply -> {
@@ -6731,6 +7014,10 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
 
             // Server-sent ERROR (fatal). IrcCore already emits Disconnected afterwards.
             is IrcEvent.ServerError -> {
+                // Stash for the imminent Disconnected handler. IrcCore may report the
+                // disconnect reason as generic "socket closed" while the actual rejection
+                // text (SASL required, K-Lined, etc.) only came in via this ERROR frame.
+                lastServerErrorByNet[netId] = ev.message to System.currentTimeMillis()
                 val serverKey = bufKey(netId, "*server*")
                 append(serverKey, from = null, text = "*** Server error: ${ev.message}", doNotify = false, isLocal = false)
             }
@@ -7411,6 +7698,13 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
         timeMs: Long? = null,
         doNotify: Boolean = true,
         isMotd: Boolean = false,
+        /**
+         * True for genuine server/connection error lines (from = "ERROR"). When set, the
+         * notification (if any) is routed through NotificationHelper.notifyError and gated
+         * on the per-network NetworkProfile.notifyOnErrors flag instead of the highlight/PM
+         * settings, so errors stay out of the tray unless the user opted in for that network.
+         */
+        isError: Boolean = false,
         msgId: String? = null,
         replyToMsgId: String? = null,
         /**
@@ -7429,6 +7723,11 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
         encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
+        // A sender on this network's highlight-ignore list never highlights or alerts; the
+        // message still gets appended. effectiveHighlight is used everywhere below in place
+        // of the raw isHighlight so the badge, colour intent, and tray alert all agree.
+        val senderNotifyIgnored = from != null && isNotifyIgnoredSender(splitKey(bufferKey).first, from)
+        val effectiveHighlight = isHighlight && !senderNotifyIgnored
         val msg = UiMessage(
             id = nextUiMsgId.getAndIncrement(),
             timeMs = ts,
@@ -7557,7 +7856,7 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
                 && st.screen == AppScreen.CHAT
                 && AppVisibility.isForeground)
             val unreadInc = if (!isSelected && !isLocal) 1 else 0
-            val highlightInc = if (!isSelected && isHighlight && !isLocal) 1 else 0
+            val highlightInc = if (!isSelected && effectiveHighlight && !isLocal) 1 else 0
 
             val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000)
             // Splice in the chathistory marker (if any) before the new live message, in a
@@ -7730,72 +8029,82 @@ if (mutatedKeys.isNotEmpty() || affectLive) {
                 msgId != null -> "msgid:$msgId"
                 else -> "ts:${ts / 1000}|${(from ?: "")}|${stripIrcFormatting(text).take(80)}"
             }
-            if (isPrivate && st.settings.notifyOnPrivateMessages) {
-                runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
-                if (st.settings.vibrateOnHighlight) {
-                    runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
+            val net = st.networks.firstOrNull { it.id == netId }
+            when {
+                // Errors: opt-in per network, dedicated error notification, never a chat ping.
+                isError -> {
+                    if (net?.notifyOnErrors == true) {
+                        runCatching { notifier.notifyError(netId, bufferForNotif, cleanText, notifTitle, msgAnchor = msgAnchor) }
+                    }
                 }
-            } else if (isHighlight && st.settings.notifyOnHighlights) {
-                runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
-                if (st.settings.vibrateOnHighlight) {
-                    runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
+                // Sender on the highlight-ignore list: message is visible but raises no alert.
+                senderNotifyIgnored -> { /* intentionally silent */ }
+                isPrivate && st.settings.notifyOnPrivateMessages -> {
+                    runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
+                    if (st.settings.vibrateOnHighlight) {
+                        runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
+                    }
+                }
+                effectiveHighlight && st.settings.notifyOnHighlights -> {
+                    runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
+                    if (st.settings.vibrateOnHighlight) {
+                        runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
+                    }
                 }
             }
         }
     }
 
     /**
-     * Determine whether a message should be highlighted for a specific network.
-     *
-     * Important: nicks can differ per network, so we must NOT use the global UiState.myNick.
-     */
-/**
- * Highlight rules:
- * - Private messages always highlight.
- * - Nick + extra highlight words match as whole-words (prevents "eck" matching "check").
- * - Uses per-network CASEMAPPING when folding.
- */
-private fun isHighlight(netId: String, text: String, isPrivate: Boolean): Boolean {
-    if (isPrivate) return true
-    val s = _state.value.settings
-    if (!s.highlightOnNick && s.extraHighlightWords.isEmpty()) return false
+    * Determine whether a message should be highlighted for a specific network.
+    *
+    * Important: nicks can differ per network, so we must NOT use the global UiState.myNick.
+    * Highlight rules:
+    * - Private messages always highlight.
+    * - Nick + extra highlight words match as whole-words (prevents "eck" matching "check").
+    * - Uses per-network CASEMAPPING when folding.
+    */
+    private fun isHighlight(netId: String, text: String, isPrivate: Boolean): Boolean {
+        if (isPrivate) return true
+        val s = _state.value.settings
+        if (!s.highlightOnNick && s.extraHighlightWords.isEmpty()) return false
 
-    val plain = stripIrcFormatting(text)
-    val foldedText = casefoldText(netId, plain)
+        val plain = stripIrcFormatting(text)
+        val foldedText = casefoldText(netId, plain)
 
-    fun isWordChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_'
+        fun isWordChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_'
 
-    fun containsWholeWord(needleFolded: String): Boolean {
-        if (needleFolded.isBlank()) return false
-        var from = 0
-        while (true) {
-            val idx = foldedText.indexOf(needleFolded, startIndex = from)
-            if (idx < 0) return false
-            val beforeIdx = idx - 1
-            val afterIdx = idx + needleFolded.length
-            val beforeOk = beforeIdx < 0 || !isWordChar(foldedText[beforeIdx])
-            val afterOk = afterIdx >= foldedText.length || !isWordChar(foldedText[afterIdx])
-            if (beforeOk && afterOk) return true
-            from = idx + 1
-            if (from >= foldedText.length) return false
+        fun containsWholeWord(needleFolded: String): Boolean {
+            if (needleFolded.isBlank()) return false
+            var from = 0
+            while (true) {
+                val idx = foldedText.indexOf(needleFolded, startIndex = from)
+                if (idx < 0) return false
+                val beforeIdx = idx - 1
+                val afterIdx = idx + needleFolded.length
+                val beforeOk = beforeIdx < 0 || !isWordChar(foldedText[beforeIdx])
+                val afterOk = afterIdx >= foldedText.length || !isWordChar(foldedText[afterIdx])
+                if (beforeOk && afterOk) return true
+                from = idx + 1
+                if (from >= foldedText.length) return false
+            }
         }
+
+        if (s.highlightOnNick) {
+            val nick = _state.value.connections[netId]?.myNick ?: _state.value.myNick
+            if (nick.isNotBlank() && containsWholeWord(casefoldText(netId, nick))) return true
+        }
+
+        for (w in s.extraHighlightWords) {
+            val ww = w.trim()
+            if (ww.isBlank()) continue
+            if (containsWholeWord(casefoldText(netId, ww))) return true
+        }
+
+        return false
     }
 
-    if (s.highlightOnNick) {
-        val nick = _state.value.connections[netId]?.myNick ?: _state.value.myNick
-        if (nick.isNotBlank() && containsWholeWord(casefoldText(netId, nick))) return true
-    }
-
-    for (w in s.extraHighlightWords) {
-        val ww = w.trim()
-        if (ww.isBlank()) continue
-        if (containsWholeWord(casefoldText(netId, ww))) return true
-    }
-
-    return false
-}
-
-// Nicklist helpers (multi-status + CASEMAPPING aware)
+    // Nicklist helpers (multi-status + CASEMAPPING aware)
 
     /**
      * Stable casefold for tracking in-flight /NAMES requests.
@@ -8825,67 +9134,67 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     fun cancelIncomingDcc(offer: DccOffer) {
         incomingReceiveJobs[offer]?.cancel()
     }
-private fun queryDisplayName(uri: android.net.Uri): String? {
-    return try {
-        val proj = arrayOf(
-            OpenableColumns.DISPLAY_NAME,
-            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            "_display_name",
-            "display_name"
-        )
-        appContext.contentResolver.query(uri, proj, null, null, null)?.use { c ->
-            if (!c.moveToFirst()) return@use null
-            for (col in proj) {
-                val idx = c.getColumnIndex(col)
-                if (idx >= 0) {
-                    val v = runCatching { c.getString(idx) }.getOrNull()
-                    if (!v.isNullOrBlank()) return@use v
+    private fun queryDisplayName(uri: android.net.Uri): String? {
+        return try {
+            val proj = arrayOf(
+                OpenableColumns.DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                "_display_name",
+                "display_name"
+            )
+            appContext.contentResolver.query(uri, proj, null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return@use null
+                for (col in proj) {
+                    val idx = c.getColumnIndex(col)
+                    if (idx >= 0) {
+                        val v = runCatching { c.getString(idx) }.getOrNull()
+                        if (!v.isNullOrBlank()) return@use v
+                    }
                 }
+                null
             }
+        } catch (_: Throwable) {
             null
         }
-    } catch (_: Throwable) {
-        null
     }
-}
 
-private data class PreparedDccSend(val file: File, val offerName: String)
+    private data class PreparedDccSend(val file: File, val offerName: String)
 
-private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = withContext(Dispatchers.IO) {
-    // Try hard to preserve a meaningful filename for the DCC offer.
-    val raw = queryDisplayName(uri)
-        ?: runCatching { java.net.URLDecoder.decode(uri.lastPathSegment ?: "", "UTF-8") }.getOrNull()
-        ?: ("dcc_send_" + System.currentTimeMillis())
+    private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = withContext(Dispatchers.IO) {
+        // Try hard to preserve a meaningful filename for the DCC offer.
+        val raw = queryDisplayName(uri)
+            ?: runCatching { java.net.URLDecoder.decode(uri.lastPathSegment ?: "", "UTF-8") }.getOrNull()
+            ?: ("dcc_send_" + System.currentTimeMillis())
 
-    // Document IDs often look like "primary:Download/foo.txt".
-    val cleaned = raw
-        .substringAfterLast('/')
-        .substringAfterLast('\\')
-        .substringAfterLast(':')
+        // Document IDs often look like "primary:Download/foo.txt".
+        val cleaned = raw
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .substringAfterLast(':')
 
-    val offerName = cleaned
-        .replace(Regex("[^A-Za-z0-9._ -]"), "_")
-        .trim()
-        .ifBlank { "dcc_send_" + System.currentTimeMillis() }
-        .replace(' ', '_') // avoid spaces in CTCP DCC payload
+        val offerName = cleaned
+            .replace(Regex("[^A-Za-z0-9._ -]"), "_")
+            .trim()
+            .ifBlank { "dcc_send_" + System.currentTimeMillis() }
+            .replace(' ', '_') // avoid spaces in CTCP DCC payload
 
-    val out = run {
-        val candidate = File(appContext.cacheDir, offerName)
-        if (!candidate.exists()) candidate else {
-            val dot = offerName.lastIndexOf('.')
-			val stem = if (dot > 0) offerName.take(dot) else offerName
-            val ext = if (dot > 0) offerName.drop(dot) else ""
-            File(appContext.cacheDir, "${stem}_${System.currentTimeMillis()}$ext")
+        val out = run {
+            val candidate = File(appContext.cacheDir, offerName)
+            if (!candidate.exists()) candidate else {
+                val dot = offerName.lastIndexOf('.')
+                val stem = if (dot > 0) offerName.take(dot) else offerName
+                val ext = if (dot > 0) offerName.drop(dot) else ""
+                File(appContext.cacheDir, "${stem}_${System.currentTimeMillis()}$ext")
+            }
         }
-    }
 
-    val inp = appContext.contentResolver.openInputStream(uri) ?: throw IOException("Unable to open selected file")
-    inp.use { input ->
-        out.outputStream().use { fos -> input.copyTo(fos) }
-    }
+        val inp = appContext.contentResolver.openInputStream(uri) ?: throw IOException("Unable to open selected file")
+        inp.use { input ->
+            out.outputStream().use { fos -> input.copyTo(fos) }
+        }
 
-    PreparedDccSend(file = out, offerName = out.name)
-}
+        PreparedDccSend(file = out, offerName = out.name)
+    }
 
     // Sharing
 
@@ -8894,33 +9203,73 @@ private suspend fun prepareDccSendFile(uri: android.net.Uri): PreparedDccSend = 
             // MediaStore or SAF path - already a content URI, use directly.
             android.net.Uri.parse(path)
         } else {
-            // Filesystem path - wrap with FileProvider so other apps can read it.
+            // Filesystem path, wrap with FileProvider so other apps can read it.
             val f = File(path)
             if (!f.exists()) return
-            FileProvider.getUriForFile(appContext, appContext.packageName + ".fileprovider", f)
-        }
-        // Use ACTION_VIEW to open the file directly rather than a share sheet.
-        // Fall back to ACTION_SEND if no viewer is installed for this type.
-        val mime = appContext.contentResolver.getType(uri) ?: "*/*"
-        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mime)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        // resolveActivity() is unreliable on API 30+ due to package visibility restrictions
-        // (requires <queries> in the manifest or QUERY_ALL_PACKAGES permission to work).
-        // Instead, attempt startActivity directly and fall back to a chooser on failure.
-        try {
-            appContext.startActivity(viewIntent)
-        } catch (_: android.content.ActivityNotFoundException) {
-            // No app can handle this type directly - show a chooser.
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = mime
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            // getUriForFile throws IllegalArgumentException when the path isn't under one of the
+            // FileProvider's configured roots. Treat that as "can't share" instead of crashing.
+            runCatching {
+                FileProvider.getUriForFile(appContext, appContext.packageName + ".fileprovider", f)
+           }.getOrElse {
+                toastShareError()
+                return
             }
-            appContext.startActivity(
-                Intent.createChooser(shareIntent, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+        }
+        val mime = appContext.contentResolver.getType(uri) ?: "*/*"
+        // Try, in order: open directly (ACTION_VIEW), then a share chooser (ACTION_SEND) each
+        // first WITH a read-permission grant, then WITHOUT it.
+        //
+        // The grant is needed for our own FileProvider URIs. But for SAF / MediaStore content://
+        // URIs we don't own (DCC downloads on Android 10+ are saved via MediaStore and stored as
+        // content:// URIs), asking the system to grant access on our behalf makes
+        // UriGrantsManagerService.checkGrantUriPermission throw SecurityException at startActivity.
+        val clip = android.content.ClipData.newRawUri("", uri)
+
+        fun tryStart(action: String, withGrant: Boolean, asChooser: Boolean): Boolean {
+            val base = Intent(action).apply {
+                if (action == Intent.ACTION_VIEW) {
+                    setDataAndType(uri, mime)
+                } else {
+                    type = mime
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                }
+                if (withGrant) {
+                    // Setting ClipData makes the grant reliably cover the data/stream URI across
+                    // OEM implementations, not just the bare data field.
+                    clipData = clip
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }
+            val toLaunch = (if (asChooser) Intent.createChooser(base, "Open with") else base)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            return try {
+                appContext.startActivity(toLaunch)
+                true
+            } catch (_: android.content.ActivityNotFoundException) {
+                false
+            } catch (_: SecurityException) {
+                // Can't grant this URI (SAF/MediaStore URI we don't own) fall through to retry.
+                false
+            } catch (_: RuntimeException) {
+                false
+            }
+        }
+
+        if (tryStart(Intent.ACTION_VIEW, withGrant = true, asChooser = false)) return
+            if (tryStart(Intent.ACTION_SEND, withGrant = true, asChooser = true)) return
+                // Grant-less retries: for content:// URIs the target can resolve on its own.
+                if (tryStart(Intent.ACTION_VIEW, withGrant = false, asChooser = false)) return
+                    if (tryStart(Intent.ACTION_SEND, withGrant = false, asChooser = true)) return
+                        toastShareError()
+    }
+
+    private fun toastShareError() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            runCatching {
+                android.widget.Toast.makeText(
+                    appContext, "Couldn't open this file", android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 

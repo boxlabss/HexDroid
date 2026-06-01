@@ -473,6 +473,13 @@ class SettingsRepository(private val ctx: Context) {
                         }.distinctBy { it.lowercase() }
                     } ?: emptyList(),
 
+                    notifyOnErrors = o.optBoolean("notifyOnErrors", false),
+                    highlightIgnoreMasks = o.optJSONArray("highlightIgnoreMasks")?.let { hm ->
+                        (0 until hm.length()).mapNotNull { j ->
+                            hm.optString(j)?.trim()?.takeIf { it.isNotBlank() }
+                        }.distinct()
+                    } ?: emptyList(),
+
                     autoCommandDelaySeconds = o.optInt("autoCommandDelaySeconds", 0),
                     serviceAuthCommand = o.optString("serviceAuthCommand", "").takeIf { it.isNotBlank() },
                     autoCommandsText = o.optString("autoCommandsText", ""),
@@ -557,8 +564,6 @@ class SettingsRepository(private val ctx: Context) {
             o.put("cap_userhostInNames", n.caps.userhostInNames)
             o.put("cap_draftRelaymsg", n.caps.draftRelaymsg)
             o.put("cap_draftReadMarker", n.caps.draftReadMarker)
-            // Persist every cap, including the 14 added since the original v1 set. See the
-            // matching note on the deserializer above for context on why this was missing.
             o.put("cap_monitor", n.caps.monitor)
             o.put("cap_accountTag", n.caps.accountTag)
             o.put("cap_typingIndicator", n.caps.typingIndicator)
@@ -578,6 +583,10 @@ class SettingsRepository(private val ctx: Context) {
             o.put("autoConnect", n.autoConnect)
             o.put("autoReconnect", n.autoReconnect)
             o.put("ignoreList", JSONArray(n.ignoredNicks))
+            o.put("notifyOnErrors", n.notifyOnErrors)
+            if (n.highlightIgnoreMasks.isNotEmpty()) {
+                o.put("highlightIgnoreMasks", JSONArray(n.highlightIgnoreMasks))
+            }
 
             o.put("autoCommandDelaySeconds", n.autoCommandDelaySeconds)
             o.put("serviceAuthCommand", n.serviceAuthCommand ?: "")
@@ -970,6 +979,29 @@ data class NetworkProfile(
 
     // Ignored nicknames (case-insensitive match).
     val ignoredNicks: List<String> = emptyList(),
+
+    /**
+     * If true, genuine (non-transient) server/connection errors on this network are
+     * surfaced as a system notification. Default false: errors are shown in the server
+     * buffer but do not raise a notification, so a flapping link or a one-off server
+     * gripe doesn't ping the user. Transient blips (connect-retry, read-timeout, etc.)
+     * never notify regardless of this flag.
+     */
+    val notifyOnErrors: Boolean = false,
+
+    /**
+     * Sender masks whose messages must NOT raise a highlight or private-message
+     * notification on this network
+     * The message still appears in its buffer; it just doesn't highlight, badge, play a
+     * sound, vibrate, or post a notification.
+     *
+     * Each entry is matched against the sender's nick (case-insensitive) as one of:
+     * - a plain nick: exact match (e.g. `GitHub`);
+     * - an IRC glob with `*` / `?` (e.g. `*-bot`, `travis?`); or
+     * - a regular expression wrapped in slashes (e.g. `/^(travis|circleci)/`).
+     * Invalid regexes are ignored rather than crashing the match.
+     */
+    val highlightIgnoreMasks: List<String> = emptyList(),
 
     // If enabled, the app will attempt to auto-connect this network on startup.
     val autoConnect: Boolean = false,

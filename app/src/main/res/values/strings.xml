@@ -449,6 +449,13 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="network_section_postcmds">Post-connect Commands</string>
     <string name="network_section_encoding">Character Encoding</string>
     <string name="network_section_ircv3">IRCv3.x Capabilities</string>
+    <!-- NetworkEditScreen: notifications -->
+    <string name="network_section_notifications">Notifications</string>
+    <string name="network_notify_errors_label">Notify on errors</string>
+    <string name="network_notify_errors_desc">Show a notification for server and connection errors. Off by default; transient reconnects never notify.</string>
+    <string name="network_highlight_ignore_label">Ignore highlights from</string>
+    <string name="network_highlight_ignore_hint">e.g. GitHub, *-bot, or /^(travis|circleci)/ [One per line]</string>
+    <string name="network_highlight_ignore_desc">One sender per line whose messages should never highlight or notify. Use a plain nick, an IRC wildcard (* and ?), or a regular expression wrapped in /slashes/. Messages still appear in their channel.</string>
     <!-- NetworkEditScreen: misc -->
     <string name="network_default_name">Network</string>
     <string name="network_bouncer_desc">Skips auto-join, requests playback of missed messages</string>

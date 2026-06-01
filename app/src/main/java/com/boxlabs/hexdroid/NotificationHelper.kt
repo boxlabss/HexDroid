@@ -30,6 +30,7 @@ class NotificationHelper(private val ctx: Context) {
         const val CH_HIGHLIGHT_SOUND  = "hexdroid_highlight_sound"
         const val CH_PM  = "hexdroid_pm"
         const val CH_DCC = "hexdroid_dcc"
+        const val CH_ERROR = "hexdroid_error"
 
         /** Per-network highlight channel ID. Each network gets its own channel so the user
          *  can set a distinct sound in Android system settings. Falls back to the global
@@ -174,6 +175,9 @@ class NotificationHelper(private val ctx: Context) {
         val highlightSound = NotificationChannel(CH_HIGHLIGHT_SOUND, "IRC Highlights", NotificationManager.IMPORTANCE_DEFAULT)
         val pm  = NotificationChannel(CH_PM,  "IRC Private Messages", NotificationManager.IMPORTANCE_DEFAULT)
         val dcc = NotificationChannel(CH_DCC, "DCC Requests",         NotificationManager.IMPORTANCE_HIGH)
+        val error = NotificationChannel(CH_ERROR, "IRC Errors", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "Server and connection errors (only when enabled per network)"
+        }
 
         try {
             nm.createNotificationChannel(conn)
@@ -181,6 +185,7 @@ class NotificationHelper(private val ctx: Context) {
             nm.createNotificationChannel(highlightSound)
             nm.createNotificationChannel(pm)
             nm.createNotificationChannel(dcc)
+            nm.createNotificationChannel(error)
         } catch (_: Throwable) {}
     }
 
@@ -309,6 +314,21 @@ class NotificationHelper(private val ctx: Context) {
         openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
         buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
         NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
+    }
+
+    /** Post a server/connection error notification. Opt-in per network (NetworkProfile.notifyOnErrors).
+     *  Uses a dedicated low-key channel and has no inline-reply action (you can't reply to an error). */
+    fun notifyError(networkId: String, buffer: String, text: String, displayTitle: String = buffer, msgAnchor: String? = null) {
+        ensureChannels()
+        val builder = NotificationCompat.Builder(ctx, CH_ERROR)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle(displayTitle)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+        openBufferPendingIntent(networkId, buffer, msgAnchor = msgAnchor)?.let { builder.setContentIntent(it) }
+        NotificationManagerCompat.from(ctx).notify(nextNotifId(), builder.build())
     }
 
     fun notifyPm(networkId: String, buffer: String, text: String, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = "") {

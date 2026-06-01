@@ -2365,8 +2365,8 @@ class IrcClient(val config: IrcConfig) {
 					"ERROR" -> {
 						val message = msg.trailing ?: msg.params.joinToString(" ")
 						send(IrcEvent.ServerError(message))
-						// Emit Disconnected immediately so the reconnect loop doesn't wait for EOF
-						send(IrcEvent.Disconnected("Server error: $message"))
+						// Emit Disconnected immediately so the reconnect loop doesn't wait for EOF.
+						sendDisconnectedOnce("Server error: $message")
 					}
 
 					// AWAY: another user's away status changed (requires away-notify CAP).
@@ -2593,6 +2593,14 @@ class IrcClient(val config: IrcConfig) {
     }
 
     @Volatile private var userClosing: Boolean = false
+    /**
+     * One-shot guard against emitting [IrcEvent.Disconnected] more than once per
+     * IrcClient lifecycle. ERROR :Closing Link triggers an explicit Disconnected
+     * (so scheduleAutoReconnect doesn’t wait for the EOF that the server is
+     * about to deliver), and the read loop then exits ~ms later on EOF and the
+     * post-loop send fires a second Disconnected for the same logical disconnect.
+     */
+    @Volatile private var disconnectedEmitted: Boolean = false
     @Volatile private var lastTlsInfo: String? = null
 
     /**
@@ -2602,6 +2610,17 @@ class IrcClient(val config: IrcConfig) {
      * within the same [IrcClient] instance.
      */
     @Volatile private var learnedFingerprint: String? = null
+
+    /**
+     * Emit [IrcEvent.Disconnected] only if no Disconnected has been emitted yet
+     * for this IrcClient instance. Subsequent calls are no-ops.
+     */
+    private suspend fun ProducerScope<IrcEvent>.sendDisconnectedOnce(reason: String) {
+        if (disconnectedEmitted) return
+        disconnectedEmitted = true
+        send(IrcEvent.Disconnected(reason))
+    }
+
 
     /**
      * Soft hostname-verification result from THIS connection's handshake. Non-null when the
@@ -3376,7 +3395,7 @@ class IrcClient(val config: IrcConfig) {
             // (legitimate cert renewal vs. suspected MITM).
             if (t is TlsFingerprintMismatchException) {
                 send(IrcEvent.TlsFingerprintChanged(stored = t.stored, actual = t.actual))
-                send(IrcEvent.Disconnected("TLS certificate fingerprint changed"))
+                sendDisconnectedOnce("TLS certificate fingerprint changed")
                 return@channelFlow
             }
             val msg = friendlyErrorMessage(t)
@@ -3392,7 +3411,7 @@ class IrcClient(val config: IrcConfig) {
             // a routine failure), so we keep the visual error treatment without the
             // duplicate line. Mid-stream socket errors (the line-4128 branch below) use
             // the same approach with a "Connection error: …" prefix.
-            send(IrcEvent.Disconnected("Connect failed: $msg"))
+            sendDisconnectedOnce("Connect failed: $msg")
             return@channelFlow
         }
 
@@ -4283,20 +4302,20 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			}
 
 			// If the user requested a disconnect, don't surface "EOF" as an error.
-			send(IrcEvent.Disconnected(if (userClosing) (lastQuitReason ?: "Disconnected") else "EOF"))
+			sendDisconnectedOnce(if (userClosing) (lastQuitReason ?: "Disconnected") else "EOF")
 		} catch (t: Throwable) {
 			val msg = friendlyErrorMessage(t)
 			if (userClosing) {
-				send(IrcEvent.Disconnected(lastQuitReason ?: "Disconnected"))
+				sendDisconnectedOnce(lastQuitReason ?: "Disconnected")
 			} else if (t is java.net.SocketTimeoutException) {
 				// Read timeout: socket silent for 150 s (Doze/NAT killed it).
 				// Reconnect quietly without showing a red error banner.
-				send(IrcEvent.Disconnected("Connection timed out"))
+				sendDisconnectedOnce("Connection timed out")
 			} else {
 				// Same deduplication as the connect-failure path above: emit a single
 				// Disconnected event prefixed with "Connection error: …". The previous
 				// Error + Disconnected pair produced duplicate lines for the user.
-				send(IrcEvent.Disconnected("Connection error: $msg"))
+				sendDisconnectedOnce("Connection error: $msg")
 			}
 		} finally {
 			joinedChannelCases.clear()
@@ -4629,12 +4648,21 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			ss.soTimeout = ConnectionConstants.TLS_HANDSHAKE_TIMEOUT_MS
 			try {
 				ss.startHandshake()
-			} catch (e: Exception) {
-				runCatching { ss.close() }
-				runCatching { rawSocket.close() }
-				throw e
-			}
-			ss.soTimeout = config.readTimeoutMs  // restore post-handshake timeout
+            } catch (e: Exception) {
+                runCatching { ss.close() }
+                runCatching { rawSocket.close() }
+                // Flush this context's client session cache now so the immediate retry performs a clean FULL handshake.
+                // Only runs on failure, so successful reconnects keep the resumption fast-path.
+                runCatching {
+                    val sessions = sslContext.clientSessionContext
+                    val ids = sessions.ids
+                    while (ids.hasMoreElements()) {
+                        sessions.getSession(ids.nextElement())?.invalidate()
+                    }
+                }
+                throw e
+            }
+            ss.soTimeout = config.readTimeoutMs  // restore post-handshake timeout
 
 			// Soft hostname check (skipped in pin mode: TOFU pinning is the identity proof in
 			// that case, and self-signed bouncer certs commonly have CNs that won't match the
@@ -4782,7 +4810,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		val chain = generateSequence<Throwable>(t) { it.cause.takeIf { c -> c !== it } }
 			.take(8)
 			.toList()
-		val raw = chain.mapNotNull { it.message }.joinToString(" | ")
+		// Dedup the cause chain BEFORE joining.
+		val raw = chain.mapNotNull { it.message?.trim()?.takeIf { s -> s.isNotEmpty() } }
+			.distinct()
+			.joinToString(" | ")
 			.ifBlank { t::class.java.simpleName }
 		val anyIs: (Class<out Throwable>) -> Boolean = { cls -> chain.any { cls.isInstance(it) } }
 
