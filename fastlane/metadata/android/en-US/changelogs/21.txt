@@ -1,0 +1,1 @@
+Added DCC RESUME support, Notification Settings (per network), mute notifications

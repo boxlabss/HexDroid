@@ -34,6 +34,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +47,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -59,7 +61,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -96,6 +97,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -117,7 +119,7 @@ import android.graphics.Color as AColor
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
-    val website = "https://hexdroid.boxlabs.uk/"
+    val website = "https://hexdroid.boxlabs.uk"
     val scroll = rememberScrollState()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -192,54 +194,142 @@ fun AboutScreen(onBack: () -> Unit) {
 
 @Composable
 private fun AboutContent(ctx: Context, website: String) {
+    // Cyan accent shared with the flask hero so the whole screen reads as one piece.
+    val accent = Color(0xFF00B4F4)
+
+    // Tagline with a soft white→cyan gradient fill.
     Text(
-        stringResource(R.string.about_tagline),
-        style = MaterialTheme.typography.headlineSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = Color.White
-    )
-    Text(
-        "Version ${BuildConfig.VERSION_NAME}",
-        style = MaterialTheme.typography.bodyMedium,
-        color = Color.White.copy(alpha = 0.8f)
+        text = stringResource(R.string.about_tagline),
+        textAlign = TextAlign.Center,
+        style = MaterialTheme.typography.headlineSmall.copy(
+            fontWeight = FontWeight.Bold,
+            brush = Brush.linearGradient(
+                listOf(Color.White, accent.copy(alpha = 0.85f))
+            )
+        )
     )
 
-    Spacer(Modifier.height(4.dp))
+    // Version "pill" with a glowing accent dot.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(accent.copy(alpha = 0.12f))
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(RoundedCornerShape(50))
+                .background(accent)
+        )
+        Text(
+            "Version ${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.9f)
+        )
+    }
 
-    Card(
+    Spacer(Modifier.height(6.dp))
+
+    // Glass support card: soft radial glow behind, gradient hairline border,
+    // an accent strip down the leading edge, and a gradient primary button.
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = 400.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF1A1A1A)
-        )
+            .widthIn(max = 400.dp)
     ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(accent.copy(alpha = 0.10f), Color.Transparent),
+                        radius = 600f
+                    )
+                )
+        )
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(accent.copy(alpha = 0.45f), Color.White.copy(alpha = 0.06f))
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                ),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
         ) {
-            Text(
-                stringResource(R.string.about_support_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = Color.White
-            )
-            Text(
-                stringResource(R.string.about_support_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-            OutlinedButton(
-                onClick = {
-                    runCatching {
-                        ctx.startActivity(
-                            Intent(Intent.ACTION_VIEW, website.toUri())
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            Row(Modifier.height(IntrinsicSize.Min)) {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(
+                            Brush.verticalGradient(listOf(accent, accent.copy(alpha = 0.25f)))
+                        )
+                )
+                Column(
+                    Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.about_support_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    Text(
+                        stringResource(R.string.about_support_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(accent, hueRotate(accent, -18f))
+                                )
+                            )
+                            .clickable {
+                                runCatching {
+                                    ctx.startActivity(
+                                        Intent(Intent.ACTION_VIEW, website.toUri())
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            stringResource(R.string.about_open_website),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF06121A)
                         )
                     }
                 }
-            ) { Text(stringResource(R.string.about_open_website)) }
+            }
         }
     }
+
+    Spacer(Modifier.height(2.dp))
+
+    Text(
+        "GPLv3",
+        style = MaterialTheme.typography.bodySmall,
+        color = Color.White.copy(alpha = 0.45f),
+        textAlign = TextAlign.Center
+    )
 }
 
 /**

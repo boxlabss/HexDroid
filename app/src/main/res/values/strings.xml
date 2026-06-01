@@ -453,7 +453,7 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="network_section_notifications">Notifications</string>
     <string name="network_notify_errors_label">Notify on errors</string>
     <string name="network_notify_errors_desc">Show a notification for server and connection errors. Off by default; transient reconnects never notify.</string>
-    <string name="network_highlight_ignore_label">Ignore highlights from</string>
+    <string name="network_highlight_ignore_label">Mute highlights from</string>
     <string name="network_highlight_ignore_hint">e.g. GitHub, *-bot, or /^(travis|circleci)/ [One per line]</string>
     <string name="network_highlight_ignore_desc">One sender per line whose messages should never highlight or notify. Use a plain nick, an IRC wildcard (* and ?), or a regular expression wrapped in /slashes/. Messages still appear in their channel.</string>
     <!-- NetworkEditScreen: misc -->
@@ -590,6 +590,10 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="nick_unignore">Unignore</string>
     <string name="nick_ignore_desc">Hide all messages from this user</string>
     <string name="nick_unignore_desc">Show messages from this user again</string>
+    <string name="nick_ignore_notifs">Mute notifications</string>
+    <string name="nick_unignore_notifs">Unmute notifications</string>
+    <string name="nick_ignore_notifs_desc">Mute highlight &amp; PM alerts; messages still show</string>
+    <string name="nick_unignore_notifs_desc">Allow alerts from this user again</string>
     <string name="nick_moderation">Moderation</string>
     <string name="nick_kick_ban">Kick / Ban…</string>
     <string name="nick_kick_ban_desc">Remove or ban %1$s from this channel</string>

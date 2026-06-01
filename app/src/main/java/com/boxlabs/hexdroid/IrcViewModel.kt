@@ -5096,6 +5096,47 @@ fun startAddNetwork() {
         append(dest, from = null, text = "*** Unignored $base", isLocal = true, doNotify = false)
     }
 
+    /**
+     * Mute highlight/PM notifications from [nick] on [netId] without ignoring the user:
+     * their messages still land in the buffer (see [isNotifyIgnoredSender]), only the alert
+     * is suppressed. Stores the bare nick in NetworkProfile.highlightIgnoreMasks, which the
+     * notify gate matches case-insensitively as a plain nick.
+     */
+    fun ignoreNotifications(netId: String, nick: String) {
+        val base = canonicalIgnoreNick(nick) ?: return
+        val st = _state.value
+        val net = st.networks.firstOrNull { it.id == netId } ?: return
+        val nextList = (net.highlightIgnoreMasks + base)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+        val updated = net.copy(highlightIgnoreMasks = nextList)
+        updateNetworkInState(updated)
+        viewModelScope.launch { repo.upsertNetwork(updated) }
+        val sel = _state.value.selectedBuffer
+        val (selNet, _) = splitKey(sel)
+        val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
+        append(dest, from = null, text = "*** Notifications muted for $base", isLocal = true, doNotify = false)
+    }
+
+    /**
+     * Reverse [ignoreNotifications]. Removes only the exact bare-nick entry, leaving any
+     * glob/regex masks the user added by hand in highlightIgnoreMasks intact.
+     */
+    fun unignoreNotifications(netId: String, nick: String) {
+        val base = canonicalIgnoreNick(nick) ?: return
+        val st = _state.value
+        val net = st.networks.firstOrNull { it.id == netId } ?: return
+        val nextList = net.highlightIgnoreMasks.filterNot { it.trim().equals(base, ignoreCase = true) }
+        val updated = net.copy(highlightIgnoreMasks = nextList)
+        updateNetworkInState(updated)
+        viewModelScope.launch { repo.upsertNetwork(updated) }
+        val sel = _state.value.selectedBuffer
+        val (selNet, _) = splitKey(sel)
+        val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
+        append(dest, from = null, text = "*** Notifications unmuted for $base", isLocal = true, doNotify = false)
+    }
+
     fun openIgnoreList() { goTo(AppScreen.IGNORE) }
     // IRC event handling
 

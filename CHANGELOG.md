@@ -2,6 +2,18 @@
 
 All notable changes to HexDroid are documented here.
 ---
+## [1.6.5] - 2026-06-01
+
+### Notification Settings
+- **Transient reconnect notifications** no longer clutter app notifications. Instead, reconnections display on the current buffer. An option to enable error notifications added.
+- **Mute notifications** Per network ignore highlights from users. Use nick, * ? wildcards, or /regex/
+
+### DCC RESUME support
+
+- **Interrupted DCC downloads can now be resumed.** When a file transfer fails partway, the partial bytes are remembered (sender + filename + size) along with the path on disk. A subsequent offer of the same file from the same peer shows a **Resume** button next to **Accept** / **Reject**.
+- **Honour incoming `DCC RESUME` on outgoing sends.** If a peer requests resume of one of our outgoing sends, we now reply with `DCC ACCEPT` and start from the agreed offset. 
+- **Partial state survives app restarts.** Partial transfers persist to `${filesDir}/dcc_partials.json` via a tmp-rename, are pruned after 30 days, and tolerate file corruption (a bad JSON is treated as empty rather than crashing). Rejecting an incoming offer also deletes its partial bytes on disk so the user has a clear way to reclaim the space.
+
 ## [1.6.4] - 2026-05-25
 - **Blowfish interoperability**: Fix
 - **Other improvements**

@@ -33,42 +33,29 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 </div>
 
 ---
-
 ## Features
-
-- **Multi-network** — connect to multiple servers simultaneously, each with independent nick, SASL, TLS, autojoin, and encoding settings
-- **Bouncer support** supports ZNC and soju. Discover and clone profiles when connecting without a network profile.
-- **IRCv3** — 40+ capabilities including `chathistory`, `away-notify`, `server-time`, `echo-message`, `draft/typing`, MONITOR, bouncer-specific caps, and more
-- **Secure Chat** — optional end-to-end encryption per channel or PMs: AES-256-GCM (`+AGM`) for HexDroid-to-HexDroid, plus Blowfish/FiSH (`+OK`) for interoperability
-- **Security** — TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates, Android Keystore credential storage
-- **irc:// and ircs://** — tapping IRC links in other apps opens HexDroid directly and connects to the target network and channel
-- **Localisation** — Arabic, Chinese, Dutch, French, German, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish
-
-### User Interface
-
-- Material Design 3 with light, dark, and Matrix (green-on-black) themes
-- Adjustable font family (Open Sans, Inter, Monospace, custom TTF/OTF) and size, separately for UI and chat
-- Inline image and video link previews
-- ASCII art rendering with auto-sized MOTD display
-- mIRC colour rendering with 99-colour picker + ANSI colour rendering
-- Nick `@` autocomplete and `/command` completion with inline hint chips
-- Channel op panel: topic, key, user limit; ban/quiet/except/invex list management
-- IRCop tools panel (visible when umode `+o`): K/G/D/Z-line, Shun, Kill, SAJoin/SAPart, WALLOPS/GLOBOPS/LOCOPS, MOTD, Links, Uptime
-- Per-network ignore list (case-insensitive; covers chat, notices, and DCC offers)
-- Channel list with live search and typing indicators displayed per-buffer
-- Lag indicator, swipe gestures, compact mode, intro tour for new users
+ 
+- Multiple networks at once, each with its own nick, SASL, TLS, autojoin, and encoding
+- IRCv3 (40+ caps incl. chathistory, MONITOR, typing, replies)
+- Bouncer support (ZNC, soju) with profile discovery
+- End-to-end encrypted chat per channel/PM: AES-256-GCM (`+AGM`) and Blowfish/FiSH (`+OK`)
+- TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates
+- DCC SEND/CHAT, including TLS-encrypted SSEND/SCHAT. RESUME support for file transfers
+- `irc://` / `ircs://` link handling, image/video previews, mIRC + ANSI colour and ASCII art rendering
+- Per-network ignore list, channel op tools, IRCop panel
+- Channel /list, lag indicator, nick `@` and `/command` autocompletion
+- Material Design 3 light, dark, and Matrix themes; adjustable fonts; 13 languages
 - Backup/restore: network profiles and settings exported as JSON
 
 ### Secure Chat (End-to-End Encryption)
 
-HexDroid can encrypt message **content** end-to-end, on top of your TLS connection to the server. TLS protects the link to the server; end-to-end encryption keeps the message text private from the server operator, any bouncer in between, and other channel members who don't hold the key. Configured per channel or per private conversation, off by default.
-
+HexDroid can encrypt message **content** end-to-end.
 **Two schemes**, selectable per target in the encryption dialog:
 
 | Scheme | Wire prefix | Indicator | Use it for |
 |---|---|---|---|
-| **AES-256-GCM** | `+AGM` | 🔒 | The modern default. HexDroid-to-HexDroid (or HexDroid-to-HexChat via the plugin). Authenticated encryption, fresh random nonce per message, channel-bound against cross-channel replay. **Recommended for new conversations.** |
-| **Blowfish (FiSH)** | `+OK` | 🐟 | interoperability with HexChat's `fishlim` and other FiSH clients. Reads both ECB and CBC FiSH formats, sends CBC. Use only when the other side can't speak `+AGM`. |
+| **AES-256-GCM** | `+AGM` | 🔒 | The modern default. Authenticated encryption, fresh random nonce per message, channel-bound against cross-channel replay. **Recommended for new conversations.** |
+| **Blowfish (FiSH)** | `+OK` | 🐟 | interoperability with other clients that support FiSH. Reads both ECB and CBC FiSH formats, sends CBC. |
 
 **How it works**
 
@@ -82,16 +69,12 @@ HexDroid can encrypt message **content** end-to-end, on top of your TLS connecti
 - Keys are stored on-device in `EncryptedSharedPreferences`, wrapped by the Android Keystore — the same protection used for SASL credentials.
 - Keys are **excluded from backups** by design, so they never leave the device in a portable form. After a reinstall or device move you re-share keys with your contacts.
 
-**HexChat interoperability**
+**Client interoperability**
 
-- `+AGM`: install the companion `hexdroid_agm.py` plugin (requires the Python `cryptography` package). Adds `/AGM-GEN`, `/AGM-SET`, `/AGM-INFO` and transparent encrypt/decrypt.
-- `+OK`: use HexChat's bundled `fishlim` plugin with the same passphrase on both sides.
+- `+AGM`: Supported clients have scripts in [aes-client-plugins](https://github.com/boxlabss/HexDroid/tree/main/aes-client-plugins).
+- `+OK`: `fishlim` plugins exist for most IRC clients.
 
-The plugin and the full `+AGM` wire-format specification are published in this repository so any client author can add `+AGM` support.
-
-> **What it protects:** passive eavesdropping by the server/bouncer/network, other channel members without the key, message tampering (a modified message fails its integrity check), and replay of a ciphertext into another channel.
->
-> **What it does *not* protect:** identity (anyone with the key can read and send), forward secrecy (a compromised key exposes past messages), metadata (who talks to whom, and when), or a compromised device. It's a pragmatic upgrade over plaintext IRC and FiSH, not a replacement for Signal. See the [encryption guide](https://hexdroid.boxlabs.uk/encryption).
+The full `+AGM` wire-format specification are published [here](https://github.com/boxlabss/HexDroid/blob/main/aes-client-plugins/docs/agm-wire-format.md) in this repository so any client author can add `+AGM` support.
 
 ### IRCv3
 
@@ -172,12 +155,13 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 
 ### Character Encoding
 
-Automatic detection starting from UTF-8, with fallback to windows-1251, KOI8-R, ISO-8859-1/15, GB2312, Big5, Shift_JIS, EUC-JP, EUC-KR, and more. Manual override per network for legacy servers.
+Automatic detection starting from UTF-8.
 
 ### DCC
 
 - DCC SEND and DCC CHAT with active, passive, and auto modes
-- **Secure DCC** — SSEND and SCHAT for TLS-encrypted file transfers and chat sessions
+- **Secure DCC** SSEND and SCHAT for TLS-encrypted file transfers and chat sessions
+- **RESUME** support resuming of "paused" file transfers
 - Configurable incoming port range and download folder
 - Rich transfer progress cards with one-tap accept from notification
 - Incoming DCC CHAT offers create a buffer immediately and deep-link from notification
@@ -201,7 +185,7 @@ Automatic detection starting from UTF-8, with fallback to windows-1251, KOI8-R, 
 
 [<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroidButtonGreyBorder_nofont.png" height="35" alt="Get it at IzzyOnDroid">](https://apt.izzysoft.de/packages/com.boxlabs.hexdroid)
 
-*Available via the [IzzyOnDroid F-Droid repo](https://apt.izzysoft.de/fdroid/). Not yet in the main F-Droid repository.*
+*Available via the [IzzyOnDroid F-Droid repo](https://apt.izzysoft.de/fdroid/).*
 
 </td>
 <td align="center">
@@ -239,7 +223,7 @@ Full documentation at [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/).
 
 ## Reproducible Builds
 
-The Play Store and IzzyOnDroid releases are [reproducibly buildable](https://reproducible-builds.org/) — the APK produced from source matches the distributed binary byte-for-byte. The `RB Status` badge above links to the verification record. To verify locally:
+The Play Store and IzzyOnDroid releases are [reproducibly buildable](https://reproducible-builds.org/). The `RB Status` badge above links to the verification record. To verify locally:
 
 ```bash
 ./gradlew assembleRelease
@@ -281,12 +265,7 @@ Bug reports and pull requests are welcome. Please open an issue before submittin
 - Steps to reproduce
 - Relevant logcat output (Android Studio > Logcat, filter by `hexdroid`)
 
-**Development setup:**
-
-1. Clone the repo and open in Android Studio Meerkat (2024.3) or later
-2. Sync Gradle — no additional configuration required
-3. Run on a device or emulator with API 26+
-4. Tests: `./gradlew test` for unit tests, `./gradlew connectedAndroidTest` for instrumented tests
+**Developers:**
 
 The HexChat companion plugin and the `+AGM` wire-format specification live under `/aes-client-plugins/hexchat` and `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
 
@@ -297,9 +276,6 @@ Translations are managed in the string resources under `app/src/main/res/values-
 ## License
 
 ```
-HexDroid — IRC Client for Android
-Copyright (C) 2026 boxlabs
-
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or

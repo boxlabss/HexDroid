@@ -262,6 +262,8 @@ fun AppRoot(
                     onWhois = vm::whois,
                     onIgnoreNick = vm::ignoreNick,
                     onUnignoreNick = vm::unignoreNick,
+                    onIgnoreNotifications = vm::ignoreNotifications,
+                    onUnignoreNotifications = vm::unignoreNotifications,
 					onRefreshNicklist = vm::refreshNicklistForSelectedBuffer,
                     onDccSendFile = { nick ->
                         dccPendingNick = nick

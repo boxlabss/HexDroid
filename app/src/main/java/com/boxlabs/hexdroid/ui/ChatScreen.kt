@@ -106,6 +106,8 @@ import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.filled.Search
@@ -1070,6 +1072,9 @@ fun ChatScreen(
     onWhois: (String) -> Unit,
     onIgnoreNick: (String, String) -> Unit,
     onUnignoreNick: (String, String) -> Unit,
+    /** Mute/unmute highlight & PM notifications from a nick (adds/removes a bare-nick entry in highlightIgnoreMasks). */
+    onIgnoreNotifications: (String, String) -> Unit,
+    onUnignoreNotifications: (String, String) -> Unit,
     onRefreshNicklist: () -> Unit,
     /** Called when user taps "DCC Send File" in nick actions. Opens file picker then calls /dcc send. */
     onDccSendFile: ((targetNick: String) -> Unit)? = null,
@@ -5083,6 +5088,27 @@ fun ChatScreen(
                     onClick = {
                         if (isIgnored) onUnignoreNick(selNetId, selectedNick)
                         else onIgnoreNick(selNetId, selectedNick)
+                        showNickActions = false
+                    }
+                )
+
+                // Notification mute is independent of a full ignore: the user's messages still
+                // appear in the buffer, only the highlight/PM alert is suppressed. State is the
+                // presence of an exact bare-nick entry in highlightIgnoreMasks (the same thing
+                // onIgnoreNotifications adds); hand-written glob/regex masks aren't reflected
+                // here and are left untouched by the unignore path.
+                val notifyMasks = state.networks.firstOrNull { it.id == selNetId }?.highlightIgnoreMasks.orEmpty()
+                val isNotifyIgnored = notifyMasks.any { it.trim().equals(selectedNick, ignoreCase = true) }
+
+                ActionRow(
+                    icon = if (isNotifyIgnored) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                    label = if (isNotifyIgnored) stringResource(R.string.nick_unignore_notifs) else stringResource(R.string.nick_ignore_notifs),
+                    subtitle = if (isNotifyIgnored) stringResource(R.string.nick_unignore_notifs_desc) else stringResource(R.string.nick_ignore_notifs_desc),
+                    enabled = canIgnore,
+                    tint = if (isNotifyIgnored) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        if (isNotifyIgnored) onUnignoreNotifications(selNetId, selectedNick)
+                        else onIgnoreNotifications(selNetId, selectedNick)
                         showNickActions = false
                     }
                 )

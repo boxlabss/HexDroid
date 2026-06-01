@@ -1,75 +1,53 @@
-HexDroid is a clean, fast IRC client built for modern Android. Connect to your favourite networks, chat with friends and communities, and stay on top of every mention -  all from a Material Design interface built for mobile.
+HexDroid is a clean, fast, open-source IRC client for modern Android. Connect to your favourite networks, chat with friends and communities, and never miss a mention — all from a Material Design interface built for mobile.
 
 <b>Connect anywhere</b>
-• Connect to multiple IRC networks simultaneously, each with independent settings
-• Auto-connect and auto-join on startup
-• Bouncer support: ZNC and soju (including BOUNCER BIND for soju multi-network)
-• Always Connected mode keeps your session alive in the background using a foreground service
+• Multiple networks at once, each with independent settings
+• Auto-connect and auto-join on startup, with optional post-connect commands
+• Bouncer support: ZNC and soju
+• Always Connected mode keeps your session alive in the background
 
-<b>Security and authentication</b>
-• TLS/SSL on every connection by default
-• SASL authentication - PLAIN (TLS-only), EXTERNAL (client certificates), and SCRAM-SHA-256
-• Trust-On-First-Use certificate pinning for self-signed certificates
-• Passwords stored encrypted using Android Keystore AES-GCM
-• Secure Chat (HexDroid's AES-256-GCM, with Blowfish fallback)
+<b>Security</b>
+• TLS on every connection by default
+• SASL: PLAIN, EXTERNAL (client certificates), and SCRAM-SHA-256
+• Trust-On-First-Use pinning for self-signed certificates
+• Credentials encrypted with the Android Keystore, never plain text.
+• Secure Chat end-to-end encryption (AES-256-GCM, with Blowfish/FiSH fallback)
 
 <b>Modern IRC (IRCv3)</b>
-• Message replies with inline quote previews — swipe any message to reply
-• Typing indicators in channels and private messages
-• Chat history replay on supporting servers
-• Message reactions, read markers, account tags, and more
-• Works with Libera.Chat, Ergo, soju, ZNC, and other modern networks and bouncers
+• Swipe to reply, with inline quote previews
+• Typing indicators, chat-history replay, reactions, read markers, account tags and more
 
-<b>Notifications</b>
-• Instant alerts when your nick is mentioned
-• Reply directly from the notification drawer without opening the app
-• DCC file request notifications
+<b>Chat experience</b>
+• Instant mention alerts — reply straight from the notification
+• /command and @nick autocomplete
+• Colour-coded nicks, consistent across messages and the sidebar
+• Inline image/video previews, mIRC + ANSI colour, formatting toolbar
+• In-buffer search, jump-to-unread, channel op and IRCop tools
+• Ignore list with nick and hostmask support
+• Mute notifications from users
 
 <b>DCC file transfers</b>
-• Send and receive files with full DCC support
-• Passive/reverse DCC and Secure DCC (SSEND/SCHAT) for TLS-encrypted transfers
-• Dedicated Transfers screen with progress tracking
-• DCC Chat support
-• Off by default - enable in settings when you need it
+• Send and receive files, plus DCC Chat
+• Passive/reverse DCC and Secure DCC (SSEND/SCHAT) over TLS with RESUME support
+• Progress tracking on a dedicated Transfers screen
+• Off by default — enable it in settings when you need it
 
-<b>Full chat experience</b>
-• /Command and Nick @mention autocomplete
-• Colour-coded nicks with 45 distinct hues, consistent across messages and the sidebar
-• Inline image and video link previews
-• ASCII art rendering with auto-sized MOTD display
-• mIRC and ANSI colour codes
-• Character formatting toolbar (bold, italic, colour)
-• In-buffer search with /find and /gfind
-• Jump-to-unread marker
-• Channel op tools and IRCop tools (when you have +o)
-• Ignore list with nick and hostmask support
-
-<b>Settings and customisation</b>
-• Per-network character encoding: auto-detect, UTF-8, windows-1251, and others
-• Custom nick colour with colour picker
-• Post-connect commands per network
-• Network settings backup and restore to JSON
-• Drag-and-drop network ordering
-
-<b>Logging</b>
-• Optional chat logging stored only on your device
-• Choose between internal storage or any folder via the system file picker
+<b>Customisation</b>
+• Translations
+• Per-network character encoding (auto-detect, UTF-8, windows-1251, and more)
+• Custom nick colours, drag-and-drop network ordering
+• Settings backup and restore to JSON
+• Optional on-device chat logging to internal storage or a folder you choose
 
 <b>Privacy</b>
-• No ads
-• No analytics SDKs
-• No tracking of any kind
-• Your messages and credentials are sent only to the IRC servers you choose to connect to
+No ads, no analytics, no tracking. Your messages and credentials are sent only to the IRC servers you connect to.
 
-<b>Permissions explained</b>
-• Internet / Network state - connect to IRC servers
-• Notifications - alert you to highlights and mentions
-• Foreground service - optional, only used when Always Connected is enabled
-• Wake lock - optional, prevents sleep to keep your connection active with Always Connected
+<b>Permissions</b>
+• Internet / network state: connect to IRC servers
+• Notifications: alert you to mentions
+• Foreground service and wake lock: optional, only used by Always Connected
 
-<b>Notes</b>
-• IRCv3 features depend on server support and vary by network
-• Background connectivity may vary depending on device and battery optimisation settings
+IRCv3 features depend on server support. Background connectivity may vary with device and battery settings.
 
 Free and open source, licensed under GPLv3.
 
