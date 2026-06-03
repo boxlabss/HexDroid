@@ -1047,6 +1047,11 @@ class IrcClient(val config: IrcConfig) {
     @Volatile private var pendingLagPingSentAtMs: Long? = null
     @Volatile private var lastLagMs: Long? = null
 
+    // Time of the last line received from the server, of ANY kind.
+    // The stall detector keys off this rather than off our lag-ping token being echoed,
+    // because older RFC-1459 daemons reply to a client PING without mirroring the token
+    @Volatile private var lastInboundAtMs: Long = 0L
+
     // ISUPPORT-derived server features (defaults are RFC1459-ish)
     @Volatile private var chantypes: String = "#&"
     @Volatile private var caseMapping: String = "rfc1459"
@@ -3557,16 +3562,15 @@ class IrcClient(val config: IrcConfig) {
                 }
                 delay(pingIntervalMs)
 
-                // If we're waiting on a PONG for a previous probe and it's taking too long,
-                // consider the connection stalled and force a reconnect.
+                // Liveness is decided by whether ANY data has arrived recently, not by
+                // whether our lag-ping token came back.A link is dead only when it has gone genuinely silent:
+                // no PONG, no server PING, no message at all for PING_TIMEOUT_MS. We still
+                // send our own PING below to elicit traffic on an otherwise-idle (but
+                // healthy) connection so lastInboundAtMs keeps refreshing.
                 val now = System.currentTimeMillis()
-                val pendingTok = pendingLagPingToken
-                val pendingAt = pendingLagPingSentAtMs
-                if (pendingTok != null && pendingAt != null) {
-                    if (now - pendingAt > ConnectionConstants.PING_TIMEOUT_MS && !userClosing) {
-                        lastQuitReason = "Ping timeout"
-                        runCatching { s.close() }
-                    }
+                if (!userClosing && now - lastInboundAtMs > ConnectionConstants.PING_TIMEOUT_MS) {
+                    lastQuitReason = "Ping timeout"
+                    runCatching { s.close() }
                     continue
                 }
 
@@ -3983,9 +3987,21 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			var truncatedNotified = false
 			var lastTruncatedCount = 0
 
+			// Seed the liveness clock at connection time so a server that completes the
+			// socket/TLS handshake but then says nothing still gets a full PING_TIMEOUT_MS
+			// grace window before the stall detector acts (rather than tripping instantly
+			// off the 0L default).
+			lastInboundAtMs = System.currentTimeMillis()
+
 			while (true) {
 				val prevEncoding = lineReader.encoding
 				val line = withContext(Dispatchers.IO) { lineReader.readLine() } ?: break
+
+				// Any successful read proves the link is alive, stamp it before parsing so
+				// every kind of inbound line (PONG with or without our token, server PING,
+				// PRIVMSG, even a truncated oversize line) refreshes liveness. The ping
+				// coroutine reads this instead of requiring our lag-ping token to be echoed.
+				lastInboundAtMs = System.currentTimeMillis()
 
 				// A truncated line returned as "" — skip parsing, but surface the fact
 				// to the user once so they know something was dropped rather than
@@ -4040,7 +4056,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				}
 
 				if (msg.command == "PONG") {
-					// Update lag bar if this is a response to our last lag probe.
+					// Liveness was already refreshed by lastInboundAtMs above when this
+					// line was read. The token match here is now ONLY for the lag/RTT
+					// readout: servers that echo our token (modern ircds, bouncers) get an
+					// accurate lag figure; RFC-1459 daemons that don't echo it simply won't
+					// populate the lag bar, but they no longer trip a false ping timeout.
 					val payload = msg.trailing ?: msg.params.lastOrNull() ?: ""
 					val tok = pendingLagPingToken
 					val sentAt = pendingLagPingSentAtMs
@@ -4403,8 +4423,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			token = numeric.toLongOrNull()
 		}
 
-		val ip = if (ipField.contains('.')) ipField else ipFromLong(ipField.toLongOrNull() ?: return null)
-		if (ip.isBlank()) return null
+		val ip = parseDccAddress(ipField) ?: return null
 		// Reject malformed passive offers: a port=0 SEND is only meaningful with a token
 		// (reverse DCC handshake). Without one we'd dispatch it to receive() which immediately
 		// throws on the port>0 require(), surfacing a confusing error to the user. Drop them
@@ -4495,8 +4514,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		val proto = parts[0]
 		val ipField = parts[1]
 		val port = parts[2].toIntOrNull() ?: return null
-		val ip = if (ipField.contains('.')) ipField else ipFromLong(ipField.toLongOrNull() ?: return null)
-		if (ip.isBlank()) return null
+		val ip = parseDccAddress(ipField) ?: return null
 
 		return DccChatOffer(from = "?", protocol = proto, ip = ip, port = port, secure = secure)
 	}
@@ -4507,6 +4525,30 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		val b3 = (v shr 8) and 255
 		val b4 = v and 255
 		return "$b1.$b2.$b3.$b4"
+	}
+
+	/**
+	 * Parse a DCC offer's address field. DCC carries the peer address as a 32-bit integer
+	 * (classic) or a dotted IPv4 quad — never a hostname. Anything else is rejected
+	 * (returns null, dropping the offer) so a crafted hostname can't reach
+	 * validateRemoteIp's InetAddress.getByName(): that would perform an on-device DNS
+	 * lookup, which leaks the queried name outside an active SOCKS/Tor tunnel and is
+	 * remotely triggerable by a malicious offer. IPv6 DCC is non-standard and not handled
+	 * here (it was already unparseable), so this is not a regression.
+	 */
+	private fun parseDccAddress(ipField: String): String? {
+		val f = ipField.trim()
+		if (f.contains('.')) {
+			// Dotted quad: exactly four octets, each 0..255, all numeric.
+			val octets = f.split('.')
+			if (octets.size != 4) return null
+			if (octets.any { (it.toIntOrNull() ?: -1) !in 0..255 }) return null
+			return f
+		}
+		// Classic 32-bit integer form.
+		val v = f.toLongOrNull() ?: return null
+		if (v !in 0L..0xFFFFFFFFL) return null
+		return ipFromLong(v)
 	}
 	private fun openSocket(): Socket {
 		// Sane socket defaults for mobile networks.
