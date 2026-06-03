@@ -184,6 +184,27 @@ class SecretStore(private val ctx: Context) {
         prefs.edit().remove("pass:$networkId").apply()
     }
 
+    /**
+     * SOCKS proxy password (RFC 1929 user/pass auth), stored encrypted exactly like the
+     * server and SASL passwords so it never lands in the networks JSON or a backup export.
+     */
+    fun getProxyPassword(networkId: String): String? {
+        val enc = prefs.getString("proxypass:$networkId", null) ?: return null
+        val bytes = decryptFromB64(enc) ?: run {
+            clearProxyPassword(networkId)
+            return null
+        }
+        return bytes.toString(Charsets.UTF_8)
+    }
+
+    fun setProxyPassword(networkId: String, password: String) {
+        prefs.edit().putString("proxypass:$networkId", encryptToB64(password.toByteArray(Charsets.UTF_8))).apply()
+    }
+
+    fun clearProxyPassword(networkId: String) {
+        prefs.edit().remove("proxypass:$networkId").apply()
+    }
+
 
     /**
      * Import a client certificate/key selection from the Network Edit screen.

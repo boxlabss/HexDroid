@@ -20,6 +20,7 @@ package com.boxlabs.hexdroid
 
 import android.annotation.SuppressLint
 import com.boxlabs.hexdroid.connection.ConnectionConstants
+import com.boxlabs.hexdroid.connection.SocksProxy
 import com.boxlabs.hexdroid.data.AutoJoinChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -248,7 +249,12 @@ data class IrcConfig(
      * Composed into the auth identity per [bouncerKind]'s rules. Leave null when not using
      * per-client buffers, or for bouncers that don't support the concept.
      */
-    val bouncerClientId: String? = null
+    val bouncerClientId: String? = null,
+    /**
+     * SOCKS proxy to tunnel this connection through. Default [ProxyConfig] has
+     * type NONE (direct connection)
+     */
+    val proxy: com.boxlabs.hexdroid.connection.ProxyConfig = com.boxlabs.hexdroid.connection.ProxyConfig()
 ) {
     /**
      * Assemble the authentication identity string for this connection, applying the bouncer-
@@ -3356,6 +3362,16 @@ class IrcClient(val config: IrcConfig) {
 				val arg = parts.getOrNull(1)?.trim() ?: return
 				if (arg.isBlank()) return
 
+				// /dns resolves on-device. With a proxy active that would leak the queried
+				// name to the local resolver, outside the tunnel the rest of the session
+				// Refuse rather than leak.
+				if (config.proxy.enabled) {
+					commandEvents.send(IrcEvent.ServerText(
+						"/dns is disabled while a proxy is active (a local lookup would bypass the proxy and leak the query).",
+						bufferName = currentBuffer))
+					return
+				}
+
 				coroutineScope {
 					launch {
 						try {
@@ -4502,49 +4518,68 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			soTimeout = config.readTimeoutMs
 		}
 
-		// Resolve every address the host has (both A/IPv4 and AAAA/IPv6). InetSocketAddress(host, port)
-		// resolves once and binds to a single address (usually the first AAAA) which means an IRC
-		// server with an AAAA record but no working IPv6 path (very common on mobile carriers, hotel
-		// Wi-Fi, and dual-stack networks where v6 routing is broken) just gives "Connection refused"
-		// or a connect-timeout with no fallback. RFC 8305 Happy Eyeballs would race v6 + v4 in
-		// parallel; we use the simpler sequential-fallback variant; try each resolved address in
-		// turn, accept the first that connects, surface only the last error if all fail. This is
-		// the same approach OkHttp / curl / SSH default to.
-		val resolved: Array<InetAddress> = try {
-			InetAddress.getAllByName(config.host)
-		} catch (uhe: java.net.UnknownHostException) {
-			// Re-throw with the host name in the message so the friendly-error mapper can show
-			// the user something more useful than the bare exception message.
-			throw java.net.UnknownHostException("Unable to resolve ${config.host}: ${uhe.message ?: "no DNS record"}")
-		}
-		require(resolved.isNotEmpty()) { "No addresses resolved for ${config.host}" }
+		// When proxying, the destination is NOT resolved on-device — the proxy resolves it
+		// remotely (mandatory for Tor `.onion`, and a DNS-leak guard for clearnet). So the
+		// whole Happy-Eyeballs local-resolution loop below is bypassed; SocksProxy returns a
+		// single already-connected raw socket that the TLS branch wraps just like a direct one.
+		val proxyEnabled = config.proxy.enabled
 
 		/**
-		 * Connect [s] to one resolved address, throwing on failure. Caller is responsible for
-		 * closing [s] if this throws. Wrapped here so the TLS and plaintext branches can share
-		 * the per-address connect logic without duplicating the address-iteration loop.
+		 * Open the underlying (pre-TLS) TCP socket to the destination, either directly via
+		 * Happy-Eyeballs or through the configured SOCKS proxy. The TLS and plaintext paths
+		 * both build on this so the proxy logic lives in exactly one place.
 		 */
-		fun connectTo(s: Socket, addr: InetAddress) {
-			s.connect(InetSocketAddress(addr, config.port), config.connectTimeoutMs)
-		}
-
-		return if (!config.useTls) {
+		fun openRawSocket(): Socket {
+			if (proxyEnabled) {
+				// The handshake leaves soTimeout at readTimeoutMs; socket options are applied
+				// inside SocksProxy.connect to match baseSocket().
+				return SocksProxy.connect(
+					cfg = config.proxy,
+					destHost = config.host,
+					destPort = config.port,
+					connectTimeoutMs = config.connectTimeoutMs,
+					soTimeoutMs = config.readTimeoutMs,
+					tcpNoDelay = config.tcpNoDelay,
+					keepAlive = config.keepAlive,
+				)
+			}
+			// FAIL CLOSED: if a proxy was selected but is misconfigured (e.g. blank host or
+			// out-of-range port), do NOT silently fall back to a direct connection — that
+			// would leak the real connection outside the tunnel the user explicitly asked
+			// for. Refuse instead, with a message pointing at the fix.
+			if (config.proxy.type != com.boxlabs.hexdroid.connection.ProxyType.NONE) {
+				throw java.io.IOException(
+					"Proxy is enabled for this network but misconfigured (host/port invalid). " +
+					"Refusing to connect directly. Check the proxy settings."
+				)
+			}
+			// Direct connection: resolve every address the host has (A/IPv4 and AAAA/IPv6) and
+			// try each in turn (sequential-fallback Happy Eyeballs), accepting the first that
+			// connects. This is the same approach OkHttp / curl / SSH default to and copes with
+			// hosts that publish an AAAA record but have no working IPv6 path.
+			val resolved: Array<InetAddress> = try {
+				InetAddress.getAllByName(config.host)
+			} catch (uhe: java.net.UnknownHostException) {
+				throw java.net.UnknownHostException("Unable to resolve ${config.host}: ${uhe.message ?: "no DNS record"}")
+			}
+			require(resolved.isNotEmpty()) { "No addresses resolved for ${config.host}" }
 			var lastError: Throwable? = null
 			for (addr in resolved) {
 				val s = baseSocket()
 				try {
-					connectTo(s, addr)
+					s.connect(InetSocketAddress(addr, config.port), config.connectTimeoutMs)
 					return s
 				} catch (t: Throwable) {
 					runCatching { s.close() }
 					lastError = t
-					// Continue to the next resolved address. Common cases for the loop continuing:
-					// AAAA returned but the carrier blackholes IPv6 traffic (Connect timed out);
-					// IPv6 reachable but the server doesn't listen on it (Connection refused);
-					// firewall path-MTU issues that show up as connect-time RST.
 				}
 			}
 			throw lastError ?: java.net.ConnectException("All resolved addresses failed for ${config.host}")
+		}
+
+		return if (!config.useTls) {
+			// Plaintext IRC: just the raw socket (direct Happy-Eyeballs, or via the proxy).
+			openRawSocket()
 		} else {
 			// Shared SSLContext cache: reconnects to the same profile reuse the same context
 			// and therefore the same JSSE session cache, letting the platform perform TLS
@@ -4598,26 +4633,13 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				ctx
 			}
 
-			// Try each resolved address until one connects (or all fail). The TCP connect happens
-			// per-address; the TLS handshake is only attempted on the address whose TCP connect
-			// succeeded. If the TLS handshake itself fails, we do NOT try the next address —
-			// TLS failures are configuration issues (cert mismatch, protocol mismatch, etc.) and
-			// retrying against a different IP is unlikely to help and would obscure the real cause.
-			var lastError: Throwable? = null
-			var raw: Socket? = null
-			for (addr in resolved) {
-				val candidate = baseSocket()
-				try {
-					connectTo(candidate, addr)
-					raw = candidate
-					break
-				} catch (t: Throwable) {
-					runCatching { candidate.close() }
-					lastError = t
-				}
-			}
-			val rawSocket = raw ?: throw (lastError
-				?: java.net.ConnectException("All resolved addresses failed for ${config.host}"))
+			// Obtain the underlying TCP socket (direct Happy-Eyeballs, or through the SOCKS
+			// proxy). When proxying, resolution + connect happen at the proxy; otherwise we
+			// try each resolved address until one connects. The TLS handshake below is then
+			// attempted exactly once on that socket — a TLS failure is a configuration issue
+			// (cert/protocol mismatch) where retrying a different IP wouldn't help and would
+			// only obscure the real cause.
+			val rawSocket = openRawSocket()
 
 			val ss = sslContext.socketFactory.createSocket(rawSocket, config.host, config.port, true) as SSLSocket
 			val allowed = ss.supportedProtocols.filter { it == "TLSv1.3" || it == "TLSv1.2" }
@@ -4816,6 +4838,16 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			.joinToString(" | ")
 			.ifBlank { t::class.java.simpleName }
 		val anyIs: (Class<out Throwable>) -> Boolean = { cls -> chain.any { cls.isInstance(it) } }
+
+		// Proxy (SOCKS) failures: surface the proxy's own diagnostic, which SocksProxy already
+		// phrases for humans ("connection refused by destination", "proxy requires username…").
+		// Prefix so the user knows the failure was at the proxy hop, not the IRC server.
+		if (anyIs(com.boxlabs.hexdroid.connection.ProxyException::class.java)) {
+			val msg = chain.firstNotNullOfOrNull {
+				(it as? com.boxlabs.hexdroid.connection.ProxyException)?.message
+			} ?: raw
+			return "Proxy error — $msg"
+		}
 
 		// SSL handshake failures (certificate problems, protocol mismatch).
 		// Note: hostname mismatch is NOT here - we now perform RFC 6125 verification

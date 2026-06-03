@@ -449,6 +449,19 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="network_section_postcmds">Post-connect Commands</string>
     <string name="network_section_encoding">Character Encoding</string>
     <string name="network_section_ircv3">IRCv3.x Capabilities</string>
+    <!-- NetworkEditScreen: proxy/Tor -->
+    <string name="network_section_proxy">Proxy (SOCKS/Tor)</string>
+    <string name="network_proxy_type_label">Proxy type</string>
+    <string name="network_proxy_type_none">None (direct connection)</string>
+    <string name="network_proxy_type_socks5">SOCKS5</string>
+    <string name="network_proxy_type_socks4a">SOCKS4a</string>
+    <string name="network_proxy_host_label">Proxy host</string>
+    <string name="network_proxy_port_label">Port</string>
+    <string name="network_proxy_username_label">Username (optional)</string>
+    <string name="network_proxy_password_label">Password (optional)</string>
+    <string name="network_proxy_preset_orbot">Tor (Orbot)</string>
+    <string name="network_proxy_preset_tor_browser">Tor Browser</string>
+    <string name="network_proxy_hint">The destination is resolved at the proxy (remote DNS), so .onion addresses work and the server hostname isn\'t leaked to your local network. For Tor, run Orbot and use 127.0.0.1 with port 9050. DCC file sends are routed through the proxy and use passive mode automatically; receiving passive offers and DCC chat hosting are unavailable while a proxy is active, since they require listening outside the tunnel.</string>
     <!-- NetworkEditScreen: notifications -->
     <string name="network_section_notifications">Notifications</string>
     <string name="network_notify_errors_label">Notify on errors</string>

@@ -42,6 +42,8 @@ import com.boxlabs.hexdroid.SaslMechanism
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.data.AutoJoinChannel
 import com.boxlabs.hexdroid.data.NetworkProfile
+import com.boxlabs.hexdroid.connection.ProxyType
+import com.boxlabs.hexdroid.connection.ProxyConfig
 import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
 
@@ -149,6 +151,15 @@ fun NetworkEditScreen(
     var encoding by remember(n0.id) { mutableStateOf(n0.encoding) }
     var encodingExpanded by remember { mutableStateOf(false) }
 
+    // Proxy (SOCKS/Tor)
+    var proxyType by remember(n0.id) { mutableStateOf(n0.proxyType) }
+    var proxyTypeExpanded by remember { mutableStateOf(false) }
+    var proxyHost by remember(n0.id) { mutableStateOf(n0.proxyHost) }
+    var proxyPort by remember(n0.id) { mutableStateOf(n0.proxyPort.toString()) }
+    var proxyPortError by remember(n0.id) { mutableStateOf(false) }
+    var proxyUsername by remember(n0.id) { mutableStateOf(n0.proxyUsername ?: "") }
+    var proxyPassword by remember(n0.id, n0.proxyPassword) { mutableStateOf(n0.proxyPassword ?: "") }
+
     // Identity
     var nick by remember(n0.id) { mutableStateOf(n0.nick) }
     var altNick by remember(n0.id) { mutableStateOf(n0.altNick ?: "") }
@@ -232,7 +243,16 @@ fun NetworkEditScreen(
                         }
                         portError = false
 
-                        val aj = autoJoinText
+                        // Validate the proxy port too, but only when a proxy is actually
+                        // selected; an unused/blank port on a disabled proxy mustn't block save.
+                        if (proxyType != ProxyType.NONE) {
+                            val pp = proxyPort.filter { it.isDigit() }.toIntOrNull() ?: 0
+                            if (pp !in 1..65535) {
+                                proxyPortError = true
+                                return@Button
+                            }
+                        }
+                        proxyPortError = false
                             .lines()
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
@@ -352,7 +372,13 @@ fun NetworkEditScreen(
                                 autoCommandDelaySeconds = postDelayText.toIntOrNull() ?: 0,
                                 serviceAuthCommand = serviceAuthCommand.trim().takeIf { it.isNotBlank() },
                                 autoCommandsText = autoCommandsText,
-                                encoding = encoding
+                                encoding = encoding,
+                                proxyType = proxyType,
+                                proxyHost = proxyHost.trim(),
+                                proxyPort = proxyPort.filter { it.isDigit() }.toIntOrNull()
+                                    ?: ProxyConfig.TOR_ORBOT_PORT,
+                                proxyUsername = proxyUsername.trim().takeIf { it.isNotBlank() },
+                                proxyPassword = proxyPassword.takeIf { it.isNotBlank() }
                             ),
                             certDraft,
                             removeClientCert
@@ -1024,6 +1050,139 @@ fun NetworkEditScreen(
                         Text(stringResource(R.string.network_commands_hint))
                     }
                 )
+            }
+
+            CardSection(stringResource(R.string.network_section_proxy)) {
+                // Proxy type selector. SOCKS5 is the right pick for Tor (Orbot) and for any
+                // modern proxy; SOCKS4a is offered for legacy proxies. Both resolve the
+                // destination host at the proxy (remote DNS), which is what lets `.onion`
+                // hosts work and stops the IRC server hostname leaking to the local resolver.
+                ExposedDropdownMenuBox(
+                    expanded = proxyTypeExpanded,
+                    onExpandedChange = { proxyTypeExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = stringResource(when (proxyType) {
+                            ProxyType.NONE -> R.string.network_proxy_type_none
+                            ProxyType.SOCKS5 -> R.string.network_proxy_type_socks5
+                            ProxyType.SOCKS4A -> R.string.network_proxy_type_socks4a
+                        }),
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                        label = { Text(stringResource(R.string.network_proxy_type_label)) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = proxyTypeExpanded) }
+                    )
+                    ExposedDropdownMenu(
+                        expanded = proxyTypeExpanded,
+                        onDismissRequest = { proxyTypeExpanded = false }
+                    ) {
+                        listOf(
+                            ProxyType.NONE to R.string.network_proxy_type_none,
+                            ProxyType.SOCKS5 to R.string.network_proxy_type_socks5,
+                            ProxyType.SOCKS4A to R.string.network_proxy_type_socks4a,
+                        ).forEach { (type, labelRes) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(labelRes)) },
+                                onClick = {
+                                    val wasNone = proxyType == ProxyType.NONE
+                                    proxyType = type
+                                    proxyTypeExpanded = false
+                                    proxyPortError = false
+                                    // First time a proxy is turned on with empty fields, drop in
+                                    // the Tor/Orbot defaults so the common case is one tap.
+                                    if (wasNone && type != ProxyType.NONE && proxyHost.isBlank()) {
+                                        proxyHost = "127.0.0.1"
+                                        proxyPort = ProxyConfig.TOR_ORBOT_PORT.toString()
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = proxyType != ProxyType.NONE) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Quick presets for the two common local Tor SOCKS ports.
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AssistChip(
+                                onClick = {
+                                    proxyType = ProxyType.SOCKS5
+                                    proxyHost = "127.0.0.1"
+                                    proxyPort = ProxyConfig.TOR_ORBOT_PORT.toString()
+                                    proxyPortError = false
+                                },
+                                label = { Text(stringResource(R.string.network_proxy_preset_orbot)) }
+                            )
+                            AssistChip(
+                                onClick = {
+                                    proxyType = ProxyType.SOCKS5
+                                    proxyHost = "127.0.0.1"
+                                    proxyPort = ProxyConfig.TOR_BROWSER_PORT.toString()
+                                    proxyPortError = false
+                                },
+                                label = { Text(stringResource(R.string.network_proxy_preset_tor_browser)) }
+                            )
+                        }
+
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = proxyHost,
+                                onValueChange = { proxyHost = it.trim() },
+                                label = { Text(stringResource(R.string.network_proxy_host_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = proxyPort,
+                                onValueChange = {
+                                    proxyPort = it.filter { c -> c.isDigit() }
+                                    proxyPortError = false
+                                },
+                                label = { Text(stringResource(R.string.network_proxy_port_label)) },
+                                singleLine = true,
+                                isError = proxyPortError,
+                                supportingText = if (proxyPortError) {
+                                    { Text("Port must be between 1 and 65535") }
+                                } else null,
+                                modifier = Modifier.width(120.dp)
+                            )
+                        }
+
+                        // RFC 1929 user/pass auth applies to SOCKS5 only. For SOCKS4a the
+                        // username is sent as the USERID field and the password is ignored.
+                        OutlinedTextField(
+                            value = proxyUsername,
+                            onValueChange = { proxyUsername = it },
+                            label = { Text(stringResource(R.string.network_proxy_username_label)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        AnimatedVisibility(visible = proxyType == ProxyType.SOCKS5) {
+                            OutlinedTextField(
+                                value = proxyPassword,
+                                onValueChange = { proxyPassword = it },
+                                label = { Text(stringResource(R.string.network_proxy_password_label)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        Text(
+                            stringResource(R.string.network_proxy_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
             CardSection(stringResource(R.string.network_section_encoding)) {

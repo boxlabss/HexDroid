@@ -40,6 +40,8 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import com.boxlabs.hexdroid.connection.ProxyConfig
+import com.boxlabs.hexdroid.connection.SocksProxy
 import java.nio.ByteBuffer
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicLong
@@ -176,6 +178,32 @@ class DccManager(ctx: Context) {
 
     // Avoid leaking an Activity context.
     private val ctx: Context = ctx.applicationContext
+
+    /**
+     * Open an outbound TCP socket to [host]:[port], through [proxy] when it's enabled,
+     * otherwise directly. The proxy is passed explicitly by each caller  so concurrent
+     * transfers on different networks can't race over which proxy applies.
+     *
+     * Socket options match the prior direct-`Socket(host, port)` behaviour (tcpNoDelay +
+     * keepAlive are set by the individual callers after this returns).
+     */
+    private fun openOutbound(host: String, port: Int, proxy: ProxyConfig): Socket {
+        return if (proxy.enabled) {
+            // The proxy resolves [host] remotely, so a literal IP or a hostname both work and
+            // no on-device DNS lookup leaks. Reuse the IRC socket timeouts for parity.
+            SocksProxy.connect(
+                cfg = proxy,
+                destHost = host,
+                destPort = port,
+                connectTimeoutMs = com.boxlabs.hexdroid.connection.ConnectionConstants.SOCKET_CONNECT_TIMEOUT_MS,
+                soTimeoutMs = 0,  // DCC transfers are long-lived; rely on the transfer loop, not soTimeout
+                tcpNoDelay = false,
+                keepAlive = true,
+            )
+        } else {
+            Socket(host, port)
+        }
+    }
 
     /**
      * Wraps a plain socket with TLS for SDCC (Secure DCC).
@@ -452,6 +480,7 @@ class DccManager(ctx: Context) {
         customFolderUri: String?,
         resumeOffset: Long = 0L,
         resumeSavedPath: String? = null,
+        proxy: ProxyConfig = ProxyConfig(),
         onSavedPath: ((String) -> Unit)? = null,
         onProgress: (Long, Long) -> Unit
     ): String = withContext(Dispatchers.IO) {
@@ -475,7 +504,7 @@ class DccManager(ctx: Context) {
         // it, the file was leaked as zero bytes. Open the socket here too for the same
         // reason — if the connect fails, no file gets created.
         validateRemoteIp(offer.ip)
-        val rawSock = Socket(offer.ip, offer.port)
+        val rawSock = openOutbound(offer.ip, offer.port, proxy)
         val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
 
         val (outputStream, savedPath) = try {
@@ -765,12 +794,13 @@ class DccManager(ctx: Context) {
         port: Int,
         secure: Boolean = false,
         startOffset: Long = 0L,
+        proxy: ProxyConfig = ProxyConfig(),
         onProgress: (Long, Long) -> Unit
     ): Unit = withContext(Dispatchers.IO) {
         val size = file.length()
         require(startOffset in 0L..size) { "DCC SEND: startOffset ($startOffset) out of range for $size-byte file" }
         validateRemoteIp(host)
-        val rawSock = Socket(host, port)
+        val rawSock = openOutbound(host, port, proxy)
         val sock = if (secure) wrapTls(rawSock, host) else rawSock
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true) { runCatching { sock.close() } }
         try {
@@ -810,8 +840,9 @@ class DccManager(ctx: Context) {
     }
 
     /** Standard (active) DCC CHAT: connect to the offered ip:port and return the connected socket. */
-    suspend fun connectChat(offer: DccChatOffer): Socket = withContext(Dispatchers.IO) {
-        val rawSock = Socket(offer.ip, offer.port)
+    suspend fun connectChat(offer: DccChatOffer, proxy: ProxyConfig = ProxyConfig()): Socket = withContext(Dispatchers.IO) {
+        validateRemoteIp(offer.ip)
+        val rawSock = openOutbound(offer.ip, offer.port, proxy)
         val sock = if (offer.secure) wrapTls(rawSock, offer.ip) else rawSock
         sock.tcpNoDelay = true
         sock.keepAlive = true

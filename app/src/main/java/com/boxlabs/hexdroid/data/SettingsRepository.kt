@@ -515,6 +515,18 @@ class SettingsRepository(private val ctx: Context) {
                         }
                         s
                     },
+                    proxyType = run {
+                        val raw = o.optString("proxyType", "")
+                        if (raw.isNotBlank()) {
+                            runCatching { com.boxlabs.hexdroid.connection.ProxyType.valueOf(raw) }
+                                .getOrDefault(com.boxlabs.hexdroid.connection.ProxyType.NONE)
+                        } else com.boxlabs.hexdroid.connection.ProxyType.NONE
+                    },
+                    proxyHost = o.optString("proxyHost", ""),
+                    proxyPort = o.optInt("proxyPort", com.boxlabs.hexdroid.connection.ProxyConfig.TOR_ORBOT_PORT),
+                    proxyUsername = o.optString("proxyUsername", "").takeIf { it.isNotBlank() },
+                    // proxyPassword is stored encrypted via SecretStore
+                    proxyPassword = null,
                 )
             }
             out
@@ -605,6 +617,13 @@ class SettingsRepository(private val ctx: Context) {
                 val arr = JSONArray()
                 for (fp in n.tlsTofuFingerprints) arr.put(fp)
                 o.put("tlsTofuFingerprints", arr)
+            }
+            // Proxy: persist the non-secret fields. proxyPassword is encrypted in SecretStore.
+            if (n.proxyType != com.boxlabs.hexdroid.connection.ProxyType.NONE) {
+                o.put("proxyType", n.proxyType.name)
+                o.put("proxyHost", n.proxyHost)
+                o.put("proxyPort", n.proxyPort)
+                if (!n.proxyUsername.isNullOrBlank()) o.put("proxyUsername", n.proxyUsername)
             }
             arr.put(o)
         }
@@ -777,7 +796,7 @@ class SettingsRepository(private val ctx: Context) {
         //   errors. Kept at 1 — older builds get default behaviour for unknown fields via the
         //   optXxx() parse calls; they just miss the new features (bouncer-kind distinction,
         //   TOFU pins, rejoinOnKick). That's acceptable graceful downgrade, not corruption.
-        root.put("version", 3)
+        root.put("version", 4)
         root.put("minCompatVersion", 1)
         root.put("app", "HexDroid")
         root.put("exportedAt", java.time.Instant.now().toString())
@@ -786,7 +805,8 @@ class SettingsRepository(private val ctx: Context) {
             "v2: added sortOrder and isFavourite fields on NetworkProfile",
             "v3: added bouncerKind, bouncerClientId, tlsTofuFingerprint on NetworkProfile; " +
                 "added rejoinOnKick on UiSettings. bouncerNetworkName pre-v3 profiles are " +
-                "migrated to bouncerKind=SOJU on import."
+                "migrated to bouncerKind=SOJU on import.",
+            "v4: added proxyType, proxyHost, proxyPort, proxyUsername on NetworkProfile (SOCKS/Tor)."
         )))
         root.put("settings", toSettingsJson(settings))
         root.put("networks", toNetworksJson(networks))
@@ -800,8 +820,6 @@ class SettingsRepository(private val ctx: Context) {
      * Networks whose IDs already exist are overwritten; networks not in the backup are removed.
      *
      * @throws IllegalArgumentException if the JSON is invalid or the version is unsupported.
-     */
-    /**
      * Import a backup, replacing current settings and/or networks with the ones in [json].
      * Does not touch the encrypted secret store — passwords and client certs live in
      * [SecretStore] and are deliberately excluded from backups.
@@ -823,7 +841,7 @@ class SettingsRepository(private val ctx: Context) {
         // import this file.  If minCompatVersion is absent, assume it equals version (old
         // backups that predate this field are version 1 and this build supports version 1).
         val minCompat = root.optInt("minCompatVersion", version)
-        val appBackupVersion = 3  // this build's highest supported backup version
+        val appBackupVersion = 4  // this build's highest supported backup version
         if (minCompat > appBackupVersion) {
             throw IllegalArgumentException(
                 "This backup requires a newer version of HexDroid (backup minCompatVersion=$minCompat, app supports up to $appBackupVersion). Please update the app."
@@ -1081,10 +1099,25 @@ data class NetworkProfile(
      * Storing as Set guarantees no duplicates; serialised as a JSON array.
      */
     val tlsTofuFingerprints: Set<String> = emptySet(),
+
+    /**
+     * SOCKS proxy settings for this network. Default is [ProxyType.NONE] (direct connection).
+     * When set to SOCKS5/SOCKS4A, the connection is tunnelled through [proxyHost]:[proxyPort]
+     * and the destination is resolved at the proxy (remote DNS), which is what enables Tor
+     * (`.onion` via Orbot) and prevents the IRC server hostname from leaking to the local
+     * resolver. [proxyUsername]/[proxyPassword] apply to SOCKS5 auth (RFC 1929); for SOCKS4A
+     * the username is sent as the USERID field and the password is ignored.
+     */
+    val proxyType: com.boxlabs.hexdroid.connection.ProxyType = com.boxlabs.hexdroid.connection.ProxyType.NONE,
+    val proxyHost: String = "",
+    val proxyPort: Int = com.boxlabs.hexdroid.connection.ProxyConfig.TOR_ORBOT_PORT,
+    val proxyUsername: String? = null,
+    val proxyPassword: String? = null,
 ) {
     fun toIrcConfig(
         saslPasswordOverride: String? = null,
         serverPasswordOverride: String? = null,
+        proxyPasswordOverride: String? = null,
         tlsClientCert: com.boxlabs.hexdroid.TlsClientCert? = null
     ): com.boxlabs.hexdroid.IrcConfig {
         val effectivePassword = saslPasswordOverride ?: saslPassword
@@ -1114,6 +1147,13 @@ data class NetworkProfile(
             bouncerClientId = bouncerClientId?.takeIf { it.isNotBlank() },
             tlsTofuFingerprint = tlsTofuFingerprint,
             tlsTofuFingerprints = tlsTofuFingerprints,
+            proxy = com.boxlabs.hexdroid.connection.ProxyConfig(
+                type = proxyType,
+                host = proxyHost,
+                port = proxyPort,
+                username = proxyUsername?.takeIf { it.isNotEmpty() },
+                password = (proxyPasswordOverride ?: proxyPassword)?.takeIf { it.isNotEmpty() },
+            ),
         )
     }
 }

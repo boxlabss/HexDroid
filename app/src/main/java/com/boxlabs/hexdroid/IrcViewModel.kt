@@ -962,6 +962,42 @@ class IrcViewModel(
     }
 
     /**
+     * The SOCKS proxy configured for [netId]'s profile, or a disabled config when the
+     * network has none. Used to tunnel DCC connections through the same proxy as the IRC
+     * link, and to decide whether listen-based DCC operations are available.
+     *
+     * The proxy password isn't needed here: DccManager only calls SocksProxy.connect, and an
+     * authenticated proxy will already be holding an authenticated IRC connection but to be
+     * correct for proxies that authenticate per-connection we load it from SecretStore.
+     */
+    private fun proxyForNetwork(netId: String): com.boxlabs.hexdroid.connection.ProxyConfig {
+        val profile = _state.value.networks.firstOrNull { it.id == netId }
+            ?: return com.boxlabs.hexdroid.connection.ProxyConfig()
+        if (profile.proxyType == com.boxlabs.hexdroid.connection.ProxyType.NONE) {
+            return com.boxlabs.hexdroid.connection.ProxyConfig()
+        }
+        val pw = runCatching { repo.secretStore.getProxyPassword(netId) }.getOrNull()
+        return com.boxlabs.hexdroid.connection.ProxyConfig(
+            type = profile.proxyType,
+            host = profile.proxyHost,
+            port = profile.proxyPort,
+            username = profile.proxyUsername?.takeIf { it.isNotEmpty() },
+            password = pw?.takeIf { it.isNotEmpty() },
+        )
+    }
+
+    /**
+     * Cheap check (no keystore/disk access) for whether [netId] is configured to use a
+     * proxy. Safe to call on the main thread; use this for UI-thread gating, and call
+     * [proxyForNetwork] (which loads the encrypted password) only on a background dispatcher.
+     */
+    private fun isProxiedNetwork(netId: String): Boolean {
+        val profile = _state.value.networks.firstOrNull { it.id == netId } ?: return false
+        return profile.proxyType != com.boxlabs.hexdroid.connection.ProxyType.NONE &&
+            profile.proxyHost.isNotBlank() && profile.proxyPort in 1..65535
+    }
+
+    /**
      * Returns true when the app holds ACCESS_LOCAL_NETWORK (required on Android 17+).
      * On earlier API levels the permission doesn't exist and this always returns true.
      */
@@ -2362,10 +2398,12 @@ fun startAddNetwork() {
             // Passwords/secrets are stored in SecretStore (Android Keystore). Load them for the edit form only.
             val serverPass = repo.secretStore.getServerPassword(id)
             val saslPass = repo.secretStore.getSaslPassword(id)
+            val proxyPass = repo.secretStore.getProxyPassword(id)
 
             val withSecrets = n.copy(
                 serverPassword = serverPass,
-                saslPassword = saslPass
+                saslPassword = saslPass,
+                proxyPassword = proxyPass
             )
 
             val st1 = _state.value
@@ -2445,6 +2483,16 @@ fun startAddNetwork() {
                 } else {
                     repo.secretStore.clearServerPassword(profile.id)
                 }
+
+                // Proxy password (SOCKS5 auth). Only meaningful when a proxy is configured;
+                // clear it otherwise so a stale secret can't linger after the user turns the
+                // proxy off.
+                val pp = profile.proxyPassword?.trim()
+                if (profile.proxyType != com.boxlabs.hexdroid.connection.ProxyType.NONE && !pp.isNullOrBlank()) {
+                    repo.secretStore.setProxyPassword(profile.id, pp)
+                } else {
+                    repo.secretStore.clearProxyPassword(profile.id)
+                }
             }
             if (secretsResult.isFailure) {
                 val t = secretsResult.exceptionOrNull()
@@ -2459,6 +2507,7 @@ fun startAddNetwork() {
             var updated = profile.copy(
                 saslPassword = null,
                 serverPassword = null,
+                proxyPassword = null,
                 tlsClientCertLabel = profile.tlsClientCertLabel
             )
 
@@ -2727,6 +2776,7 @@ fun startAddNetwork() {
             repo.deleteNetwork(id)
             repo.secretStore.clearSaslPassword(id)
             repo.secretStore.clearServerPassword(id)
+            repo.secretStore.clearProxyPassword(id)
             // Drop every E2E key configured for this network's targets - the profile
             // is gone, the keys would dangle and leak storage (and confusing UI if
             // the same network slug is later re-created).
@@ -2818,6 +2868,7 @@ fun startAddNetwork() {
                 for (id in orphanedIds) {
                     runCatching { repo.secretStore.clearSaslPassword(id) }
                     runCatching { repo.secretStore.clearServerPassword(id) }
+                    runCatching { repo.secretStore.clearProxyPassword(id) }
                     // Client cert lookup requires the certId stored on the (now-deleted) profile;
                     // we no longer have that reference after the import overwrites NETWORKS_JSON,
                     // so cert files under /client_certs/*.bin for deleted profiles may still
@@ -3029,6 +3080,7 @@ fun startAddNetwork() {
             // on first connect.
             val parentServerPass = runCatching { repo.secretStore.getServerPassword(parentNetId) }.getOrNull()
             val parentSaslPass = runCatching { repo.secretStore.getSaslPassword(parentNetId) }.getOrNull()
+            val parentProxyPass = runCatching { repo.secretStore.getProxyPassword(parentNetId) }.getOrNull()
 
             val newId = "net_" + java.util.UUID.randomUUID().toString().replace("-", "")
             val maxSort = st.networks.maxOfOrNull { it.sortOrder } ?: -1
@@ -3110,8 +3162,16 @@ fun startAddNetwork() {
                 // live in SecretStore and are written below.
                 serverPassword = null,
                 saslPassword = null,
+                // proxy* non-secret fields carry over via copy(); the proxy password lives
+                // in SecretStore and is re-written below for the clone's own id.
+                proxyPassword = null,
             )
             repo.upsertNetwork(clone)
+            // Carry the proxy password over to the clone (same proxy host/port inherited via
+            // copy()), so a proxied parent produces a working proxied clone.
+            if (clone.proxyType != com.boxlabs.hexdroid.connection.ProxyType.NONE && !parentProxyPass.isNullOrEmpty()) {
+                runCatching { repo.secretStore.setProxyPassword(newId, parentProxyPass) }
+            }
             // Write the chosen SASL secret (if any). Always leave server password empty on
             // the clone when SASL is the active auth path, having a stray serverPassword
             // around could trip the bouncer's "two auth attempts" warning.
@@ -3380,10 +3440,12 @@ fun startAddNetwork() {
             is com.boxlabs.hexdroid.data.SecretStore.SecretResult.NotSet -> null
         }
         val serverPassword = repo.secretStore.getServerPassword(profile.id)
+        val proxyPassword = repo.secretStore.getProxyPassword(profile.id)
         val tlsCert = repo.secretStore.loadTlsClientCert(profile.id, profile.tlsClientCertId)
         val cfg = profile.toIrcConfig(
                         saslPasswordOverride = saslPassword,
                         serverPasswordOverride = serverPassword,
+                        proxyPasswordOverride = proxyPassword,
                         tlsClientCert = tlsCert
                     ).copy(
                         historyLimit = st.settings.ircHistoryLimit
@@ -8558,6 +8620,22 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val netId = offer.netId.takeIf { it.isNotBlank() } ?: _state.value.activeNetworkId ?: return
         val rt = runtimes[netId] ?: return
         val c = rt.client
+        // A passive offer means WE must listen for the sender to connect back. A CONNECT-only
+        // proxy (Tor) can't accept inbound connections, and listening on a local port while
+        // proxied would expose our real IP/port to the sender outside the tunnel — defeating
+        // the point. Refuse rather than leak. (Active offers, where we dial out, are fine and
+        // get tunnelled below.) Use the cheap flag check here; the full proxy config (with the
+        // encrypted password) is loaded off the main thread inside the launch below.
+        if (isProxiedNetwork(netId) && offer.isPassive) {
+            _state.value = _state.value.copy(dccTransfers = _state.value.dccTransfers.filterNot {
+                it is DccTransferState.Incoming && it.offer == offer
+            })
+            append(bufKey(netId, "*server*"), from = null,
+                text = "*** Can't accept passive DCC from ${offer.from} while a proxy is active: " +
+                    "it would require listening outside the tunnel. Ask them to send actively, or disable the proxy for this transfer.",
+                isHighlight = true)
+            return
+        }
         val minP = st.settings.dccIncomingPortMin
         val maxP = st.settings.dccIncomingPortMax
         val customFolder = st.settings.dccDownloadFolderUri
@@ -8571,6 +8649,10 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 "No Job in coroutine context"
             }
             try {
+                // Load the proxy (incl. encrypted password) off the main thread (this launch
+                // runs on Main by default). Only the active (outbound) receive path uses it;
+                // the passive branch can't be reached while proxied (guarded above).
+                val proxy = withContext(Dispatchers.IO) { proxyForNetwork(netId) }
                 // If resuming, run the CTCP RESUME / ACCEPT handshake first. If the sender
                 // doesn't ACCEPT within the timeout (it may not support RESUME), we silently
                 // fall back to a fresh download — better UX than failing the transfer.
@@ -8609,6 +8691,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         customFolderUri = customFolder,
                         resumeOffset = effectiveOffset,
                         resumeSavedPath = if (effectiveOffset > 0L) resumeFrom?.savedPath else null,
+                        proxy = proxy,
                         onSavedPath = { path -> updateIncoming(offer) { it.copy(savedPath = path) } },
                     ) { got, _ ->
                         updateIncoming(offer) { it.copy(received = got) }
@@ -8864,7 +8947,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         viewModelScope.launch {
             try {
                 append(key, from = null, text = "*** Connecting DCC CHAT to ${offer.from} (${offer.ip}:${offer.port})…", doNotify = false)
-                val socket = dcc.connectChat(offer)
+                val chatProxy = withContext(Dispatchers.IO) { proxyForNetwork(netId) }
+                val socket = dcc.connectChat(offer, proxy = chatProxy)
                 startDccChatSession(netId, peer, key, socket)
             } catch (t: Throwable) {
                 append(key, from = null, text = "*** DCC CHAT connect failed: ${(t.message ?: t::class.java.simpleName)}", isHighlight = true)
@@ -8890,6 +8974,17 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
         if (!st.settings.dccEnabled) {
             append(bufKey(netId, "*server*"), from = "DCC", text = "DCC is disabled in settings.", isHighlight = true)
+            return
+        }
+
+        // Active DCC CHAT requires us to listen for the peer to connect in. A CONNECT-only
+        // proxy can't do that, and listening locally while proxied would expose our real
+        // address. There's no passive/reverse CHAT equivalent that's widely supported, so
+        // refuse outright while a proxy is active.
+        if (isProxiedNetwork(netId)) {
+            append(bufKey(netId, "*server*"), from = "DCC",
+                text = "Can't offer DCC CHAT while a proxy is active (it requires listening outside the tunnel). Disable the proxy for this network to use DCC CHAT.",
+                isHighlight = true)
             return
         }
 
@@ -8971,6 +9066,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
                 val offerNamePayload = quoteDccFilenameIfNeeded(offerName)
                 val fileSize = runCatching { file.length() }.getOrDefault(0L)
+
+                // This network's proxy, captured once before the send helpers so the passive
+                // connect can tunnel through it. Loaded off the main thread (this launch runs
+                // on Main) since proxyForNetwork reads the encrypted password. Passed
+                // explicitly to dcc.sendFileConnect rather than via shared state, so concurrent
+                // transfers can't race over it.
+                val sendProxy = withContext(Dispatchers.IO) { proxyForNetwork(netId) }
 
                 val outgoing = DccTransferState.Outgoing(target = target, filename = offerName, fileSize = fileSize)
                 _state.value = st.copy(dccTransfers = st.dccTransfers + outgoing)
@@ -9056,7 +9158,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         resumeRequest = liveDeferred,
                     )
                     try {
-                        val ipInt = dcc.localIpv4AsInt()
+                        // In passive DCC the advertised IP is unused for the connection (the
+                        // receiver sends back its own address and we dial out). When proxied
+                        // we deliberately advertise 0 rather than our real LAN IP: emitting
+                        // the local address in the CTCP would leak network metadata about a
+                        // user who turned the proxy on precisely for anonymity. Many clients
+                        // already tolerate 0 here since the field is informational for passive.
+                        val ipInt = if (sendProxy.enabled) 0L else dcc.localIpv4AsInt()
                         val payload = "DCC $verb $offerNamePayload $ipInt 0 $fileSize $token"
                         c.ctcp(target, payload)
                         val secureLabel = if (secure) " (SDCC/TLS)" else ""
@@ -9089,6 +9197,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                             port = reply.port,
                             secure = secure,
                             startOffset = startOffset,
+                            proxy = sendProxy,
                             onProgress = { sent, _ -> updateOutgoing(sent) }
                         )
                     } finally {
@@ -9097,7 +9206,21 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     }
                 }
 
-                when (mode) {
+                // With a proxy active we can't listen for an inbound connection, so an ACTIVE
+                // send (where the peer dials us) is impossible. Force PASSIVE — we dial the
+                // peer outbound through the proxy instead. This mirrors how mIRC behind a
+                // SOCKS firewall falls back to reverse/passive DCC. If the user explicitly
+                // pinned ACTIVE, tell them why we're overriding.
+                val effectiveMode = if (sendProxy.enabled && mode != DccSendMode.PASSIVE) {
+                    if (mode == DccSendMode.ACTIVE) {
+                        append(statusKey, from = null,
+                            text = "*** Proxy active: using passive DCC (active send can't listen through a proxy).",
+                            doNotify = false)
+                    }
+                    DccSendMode.PASSIVE
+                } else mode
+
+                when (effectiveMode) {
                     DccSendMode.ACTIVE -> doActiveSend()
                     DccSendMode.PASSIVE -> doPassiveSend()
                     DccSendMode.AUTO -> {
