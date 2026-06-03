@@ -253,6 +253,7 @@ fun NetworkEditScreen(
                             }
                         }
                         proxyPortError = false
+                        val aj = autoJoinText
                             .lines()
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
