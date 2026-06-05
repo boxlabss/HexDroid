@@ -37,6 +37,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.nio.ByteOrder
 import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
@@ -460,6 +461,51 @@ class DccManager(ctx: Context) {
     }
 
     /**
+     * First usable global/ULA IPv6 address in dotted (colon) notation, or null when the
+     * device has no routable IPv6. Loopback, link-local (fe80::), wildcard and multicast are
+     * skipped. Any scope id ("%wlan0") is stripped
+     *
+     * Note: when several IPv6 addresses are present we return the first match, which
+     * may be an RFC-4941 privacy/temporary address or a stable one depending on enumeration
+     * order.
+     */
+    fun localIpv6OrNull(): String? {
+        return try {
+            val ifaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+            for (iface in ifaces) {
+                if (!iface.isUp || iface.isLoopback) continue
+                val addrs = Collections.list(iface.inetAddresses)
+                for (a in addrs) {
+                    if (a is Inet6Address &&
+                        !a.isLoopbackAddress && !a.isLinkLocalAddress &&
+                        !a.isAnyLocalAddress && !a.isMulticastAddress
+                    ) {
+                        return a.hostAddress?.substringBefore('%')
+                    }
+                }
+            }
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * The local address to advertise in a DCC offer's address field.
+     *
+     * DESIGN: classic DCC encodes IPv4 as a 32-bit integer; the de-facto IPv6 convention
+     * puts the literal colon-form address in the same field, detected by the  receiver via the ':'.
+     * We PREFER IPv4 (the integer form) whenever a v4 address exists,
+     * because far more clients understand it, and only fall back to the IPv6 literal on a
+     * v6-only network. Returns "0" when no usable address is found
+     */
+    fun dccAddressField(): String {
+        localIpv4OrNull()?.let { return ipv4ToLongBestEffort(it).toString() }
+        localIpv6OrNull()?.let { return it }
+        return "0"
+    }
+
+    /**
      * Standard DCC RECEIVE (we connect to sender's ip:port).
      *
      * @param customFolderUri Optional SAF URI for custom download folder (null = Downloads)
@@ -578,7 +624,7 @@ class DccManager(ctx: Context) {
         resumeOffset: Long = 0L,
         resumeSavedPath: String? = null,
         onSavedPath: ((String) -> Unit)? = null,
-        onListening: suspend (ipAsInt: Long, port: Int, size: Long, token: Long) -> Unit,
+        onListening: suspend (addrField: String, port: Int, size: Long, token: Long) -> Unit,
         onProgress: (Long, Long) -> Unit
     ): String = withContext(Dispatchers.IO) {
         // Validate passive offer: must have a token AND port must be 0. Some misbehaving clients
@@ -616,8 +662,8 @@ class DccManager(ctx: Context) {
         val ssCancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true) { runCatching { ss.close() } }
         try {
             ss.soTimeout = 45_000
-            val ipInt = localIpv4AsInt()
-            onListening(ipInt, ss.localPort, offer.size, token)
+            val addrField = dccAddressField()
+            onListening(addrField, ss.localPort, offer.size, token)
 
             val rawSock = try {
                 ss.accept()
@@ -745,7 +791,7 @@ class DccManager(ctx: Context) {
         portMin: Int,
         portMax: Int,
         secure: Boolean = false,
-        onClient: suspend (ipAsInt: Long, port: Int, size: Long) -> Unit,
+        onClient: suspend (addrField: String, port: Int, size: Long) -> Unit,
         awaitStartOffset: suspend () -> Long = { 0L },
         onProgress: (Long, Long) -> Unit
     ): Unit = withContext(Dispatchers.IO) {
@@ -753,8 +799,8 @@ class DccManager(ctx: Context) {
         val ss = bindFirstAvailable(portMin, portMax)
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true) { runCatching { ss.close() } }
         try {
-            val ipInt = localIpv4AsInt()
-            onClient(ipInt, ss.localPort, size)
+            val addrField = dccAddressField()
+            onClient(addrField, ss.localPort, size)
 
             ss.soTimeout = 45_000
             val rawSock = try {
@@ -819,12 +865,12 @@ class DccManager(ctx: Context) {
     suspend fun startChat(
         portMin: Int,
         portMax: Int,
-        onClient: suspend (ipAsInt: Long, port: Int) -> Unit
+        onClient: suspend (addrField: String, port: Int) -> Unit
     ): Socket = withContext(Dispatchers.IO) {
         val ss = bindFirstAvailable(portMin, portMax)
         try {
-            val ipInt = localIpv4AsInt()
-            onClient(ipInt, ss.localPort)
+            val addrField = dccAddressField()
+            onClient(addrField, ss.localPort)
             ss.soTimeout = 45_000
             val sock = try {
                 ss.accept()

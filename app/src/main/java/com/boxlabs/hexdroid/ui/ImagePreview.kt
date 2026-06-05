@@ -92,8 +92,26 @@ private fun extractTwitterData(url: String): TwitterUrlData? {
 private data class TwitterMeta(
     val thumbnailUrl: String,
     val hasVideo: Boolean,
+    /** Direct, host-validated video URL from fxtwitter, or null if absent/untrusted. */
+    val videoUrl: String?,
     val tweetUrl: String,
 )
+
+/**
+ * fxtwitter is a third-party proxy, so we never feed its `url` straight into a media player
+ * without checking it first: only an https URL whose host is exactly Twitter's own video CDN
+ * (`video.twimg.com`) is treated as playable. Anything else (a spoofed/compromised response,
+ * an unexpected host) falls back to opening the tweet externally. Mirrors how image preview
+ * sources are constrained elsewhere in this file.
+ */
+private fun isPlayableTwitterVideoUrl(url: String?): Boolean {
+    if (url.isNullOrBlank()) return false
+    return runCatching {
+        val u = android.net.Uri.parse(url)
+        u.scheme.equals("https", ignoreCase = true) &&
+            u.host.equals("video.twimg.com", ignoreCase = true)
+    }.getOrDefault(false)
+}
 
 private suspend fun fetchTwitterMeta(data: TwitterUrlData, ctx: Context): TwitterMeta? = withContext(Dispatchers.IO) {
     runCatching {
@@ -111,15 +129,20 @@ private suspend fun fetchTwitterMeta(data: TwitterUrlData, ctx: Context): Twitte
             // Prefer video thumbnail
             val videos = media?.optJSONArray("videos")
             if (videos != null && videos.length() > 0) {
-                val thumb = videos.getJSONObject(0).optString("thumbnail_url").takeIf { it.isNotBlank() }
-                if (thumb != null) return@use TwitterMeta(thumb, true, data.originalUrl)
+                val v = videos.getJSONObject(0)
+                val thumb = v.optString("thumbnail_url").takeIf { it.isNotBlank() }
+                // The same object carries a direct playable URL (progressive MP4 or HLS).
+                // Keep it only if it passes the CDN-host check; otherwise leave it null and
+                // the UI falls back to opening the tweet externally.
+                val vurl = v.optString("url").takeIf { isPlayableTwitterVideoUrl(it) }
+                if (thumb != null) return@use TwitterMeta(thumb, true, vurl, data.originalUrl)
             }
 
             // Fall back to first photo
             val photos = media?.optJSONArray("photos")
             if (photos != null && photos.length() > 0) {
                 val photoUrl = photos.getJSONObject(0).optString("url").takeIf { it.isNotBlank() }
-                if (photoUrl != null) return@use TwitterMeta(photoUrl, false, data.originalUrl)
+                if (photoUrl != null) return@use TwitterMeta(photoUrl, false, null, data.originalUrl)
             }
 
             null // text-only tweet — nothing to preview
@@ -273,6 +296,8 @@ private sealed interface PreviewState {
         val videoId: String = "",
         val isTwitterVideo: Boolean = false,
         val twitterUrl: String = "",
+        /** Playable video URL for a Twitter/X video, or null to fall back to opening externally. */
+        val twitterVideoUrl: String? = null,
     ) : PreviewState
     data class  Failed(val message: String) : PreviewState   // a friendly message
 }
@@ -341,6 +366,80 @@ private fun YouTubePlayer(videoId: String, onClose: () -> Unit) {
     }
 }
 
+// Embedded X video player
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun TwitterVideoPlayer(videoUrl: String, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    // One player instance per URL. fxtwitter hands back either a progressive MP4 or an HLS
+    // (.m3u8) URL; the default media-source factory picks the right one from the URL because
+    // the HLS module is on the classpath, so no explicit MediaSource wiring is needed.
+    val exoPlayer = remember(videoUrl) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(videoUrl))
+            playWhenReady = true
+            prepare()
+        }
+    }
+
+    // Pause when the app goes to the background so audio doesn't keep playing, and always
+    // release the player when this preview leaves composition (scrolled away/dismissed).
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, videoUrl) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) exoPlayer.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 240.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                androidx.media3.ui.PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+                    setShowNextButton(false)
+                    setShowPreviousButton(false)
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+            onRelease = { it.player = null },
+        )
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp)
+                .size(36.dp)
+                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(18.dp)),
+        ) {
+            Icon(
+                imageVector        = Icons.Default.Close,
+                contentDescription = "Close player",
+                tint               = Color.White,
+                modifier           = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
 /**
  * Renders an inline image preview, YouTube thumbnail+player, or Twitter/X media preview for [url].
  *
@@ -355,8 +454,9 @@ private fun YouTubePlayer(videoId: String, onClose: () -> Unit) {
  *
  * Twitter/X:
  *   1. Thumbnail auto-loads via the open api.fxtwitter.com metadata API (no auth needed)
- *   2. If the tweet has a video, a play icon is shown; tapping opens the tweet URL in the browser.
- *      Twitter video cannot be embedded directly (no public iframe API), so we open externally.
+ *   2. If the tweet has a video and fxtwitter returned a host-validated CDN URL, a play icon
+ *      is shown and tapping launches an inline Media3 player. If no playable URL is available
+ *      (text-only, untrusted host, or API gap), tapping opens the tweet URL in the browser.
  *   3. Photo-only tweets show the image inline with no play overlay.
  *
  * SVGs blocked by extension check AND Content-Type validation.
@@ -490,6 +590,7 @@ fun InlinePreview(
                             bitmap = result.bitmap,
                             isTwitterVideo = meta.hasVideo,
                             twitterUrl = meta.tweetUrl,
+                            twitterVideoUrl = meta.videoUrl,
                         )
                         FetchResult.TooLarge -> state = PreviewState.Failed("Preview too large (max 5 MB)")
                         FetchResult.Error    -> state = PreviewState.Failed("Failed to load preview")
@@ -561,6 +662,11 @@ fun InlinePreview(
                         videoId = s.videoId,
                         onClose = { isPlaying = false },
                     )
+                } else if (playing && s.isTwitterVideo && s.twitterVideoUrl != null) {
+                    TwitterVideoPlayer(
+                        videoUrl = s.twitterVideoUrl,
+                        onClose = { isPlaying = false },
+                    )
                 } else {
                     Box(
                         modifier = Modifier
@@ -571,7 +677,10 @@ fun InlinePreview(
                             .then(when {
                                 s.isYouTube       -> Modifier.clickable { isPlaying = true }
                                 s.isTwitterVideo  -> Modifier.clickable {
-                                    runCatching { uriHandler.openUri(s.twitterUrl) }
+                                    // Play inline when we have a trusted video URL; otherwise
+                                    // fall back to opening the tweet in the browser.
+                                    if (s.twitterVideoUrl != null) isPlaying = true
+                                    else runCatching { uriHandler.openUri(s.twitterUrl) }
                                 }
                                 else -> Modifier
                             }),
@@ -605,7 +714,7 @@ fun InlinePreview(
                         if (hasPlayOverlay) {
                             Icon(
                                 imageVector        = Icons.Default.PlayCircleOutline,
-                                contentDescription = if (s.isYouTube) "Play video" else "Open tweet video",
+                                contentDescription = if (s.isYouTube || s.twitterVideoUrl != null) "Play video" else "Open tweet video",
                                 tint               = Color.White,
                                 modifier           = Modifier
                                     .size(64.dp)

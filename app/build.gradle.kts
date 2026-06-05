@@ -9,8 +9,8 @@ android {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 21
-        versionName = "1.6.5"
+        versionCode = 22
+        versionName = "1.6.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -83,6 +83,12 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:13.0.0")
+    // Media3 / ExoPlayer for inline Twitter/X video playback. HLS module is needed because
+    // fxtwitter returns progressive MP4 for most clips but HLS (.m3u8) for longer ones; all
+    // three modules must share the same version.
+    implementation("androidx.media3:media3-exoplayer:1.10.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.10.0")
+    implementation("androidx.media3:media3-ui:1.10.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

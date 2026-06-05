@@ -53,6 +53,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -421,6 +422,13 @@ data class UiState(
     val listFilter: String = "",
     /** Sort order for the channel list: "size_desc", "size_asc", "name_asc", "name_desc". */
     val listSort: String = "size_desc",
+    /**
+     * True when the active network advertises ELIST=...U, i.e. it can filter LIST by user
+     * count server-side ("LIST >N"). When true the channel-list min/max user fields are sent
+     * to the server on refresh (smaller, faster result that avoids the slow-reader cutoff on
+     * huge networks); when false they only filter the already-received list client-side.
+     */
+    val listElistUserFilter: Boolean = false,
 
     val collapsedNetworkIds: Set<String> = emptySet(),
     val settings: UiSettings = UiSettings(),
@@ -540,12 +548,33 @@ class IrcViewModel(
      * Large servers (e.g. Libera) send 10 000+ channel entries. If we update [_state] on
      * every entry the entire UiState - including all message buffers - is copied O(n) times
      * and the UI re-renders for each one. Instead we collect entries here and flush to
-     * [_state] in batches of [CHANNEL_LIST_BATCH_SIZE], with a final flush on 323 (ListEnd).
-     * The buffer is cleared on ListStart so back-to-back /list calls are safe.
+     * [_state] on a time throttle (see [_channelListLastFlushMs]), with a final flush on 323
+     * (ListEnd). The buffer is cleared on ListStart so back-to-back /list calls are safe.
      */
     private val _channelListBuffer = ArrayList<ChannelListEntry>()
+    /**
+     * Wall-clock (elapsedRealtime) of the last time the streaming LIST buffer was pushed to
+     * [_state]. Flushing is time-throttled rather than per-N-items: on large networks (Libera)
+     * each RPL_LIST line is consumed on the Main thread, and a UI flush triggers a recomposition
+     * of the channel list.
+     */
+    private var _channelListLastFlushMs = 0L
     private companion object {
-        const val CHANNEL_LIST_BATCH_SIZE = 200
+        /** Minimum gap between streaming LIST UI flushes. See [_channelListLastFlushMs]. */
+        const val CHANNEL_LIST_FLUSH_INTERVAL_MS = 300L
+        /**
+         * Default upper user-count bound for ELIST range queries when the user hasn't set a max
+         * (see requestList).
+         */
+        const val DEFAULT_LIST_MAX_USERS = 10000
+        /**
+         * Capacity of the buffer that decouples the per-connection socket read loop from
+         * Main-thread event handling (see the events().buffer(...) call). Sized far above any
+         * realistic /LIST so a full channel-list burst never blocks the reader, while still
+         * bounding memory and re-applying backpressure under a pathological flood. Each buffered
+         * IrcEvent is small; the worst-case transient footprint is a few MB.
+         */
+        const val EVENT_DRAIN_BUFFER_CAPACITY = 65536
         /**
          * Delay between successive connectNetwork() calls when fanning out autoconnect or
          * restoring a set of keep-alive connections. ~500 ms is enough to satisfy typical
@@ -603,7 +632,12 @@ class IrcViewModel(
          * LINELEN from ISUPPORT 005: max bytes per IRC line including CRLF.
          * Null = server didn't advertise it; treat as the RFC 1459 default of 512.
          */
-        val linelen: Int? = null
+        val linelen: Int? = null,
+        /**
+         * ELIST token from ISUPPORT 005 (uppercased): supported server-side LIST filters.
+         * Contains 'U' when "LIST >N" / "LIST <N" user-count filtering is available.
+         */
+        val elist: String? = null
     )
 
 
@@ -2568,6 +2602,15 @@ fun startAddNetwork() {
         val chanPrefix = "$netId::"
         chanNickCase.keys.filter   { it.startsWith(chanPrefix) }.forEach { chanNickCase.remove(it) }
         chanNickStatus.keys.filter { it.startsWith(chanPrefix) }.forEach { chanNickStatus.remove(it) }
+        // The UI-visible nicklist is derived from the two maps above. Clear it as well, or the
+        // channel keeps rendering a stale member list after a disconnect, making it look like
+        // you're still joined when you aren't. Normally a rejoin's NAMES reply rebuilds it within
+        // a second, so this is invisible; it only became visible when the rejoin itself failed
+        // (manually-joined channels, see manuallyJoinedChannels preservation in connectNetworkInternal).
+        _state.update { st ->
+            val staleKeys = st.nicklists.keys.filter { it.startsWith(chanPrefix) }.toSet()
+            if (staleKeys.isEmpty()) st else st.copy(nicklists = st.nicklists - staleKeys)
+        }
         // Away state
         nickAwayState.remove(netId)
         // Echo dedup queue
@@ -3403,6 +3446,11 @@ fun startAddNetwork() {
         autoReconnectJobs.remove(netId)?.cancel()
 
         val existing = runtimes.remove(netId)
+        // Channels the user joined manually (i.e. not in the profile's autoJoin list) are
+        // tracked on the NetRuntime. A reconnect discards the old runtime and builds a fresh
+        // one below, so without carrying this map over it would start empty and those channels
+        // would never be rejoined.
+        val carriedManualJoins = existing?.manuallyJoinedChannels?.toMap().orEmpty()
         if (existing != null) {
             runCatching { existing.client.forceClose("Reconnecting") }
             runCatching { existing.job?.cancel() }
@@ -3509,6 +3557,9 @@ fun startAddNetwork() {
         client.e2eCodec = com.boxlabs.hexdroid.crypto.E2eCodec(netId, e2eKeyStore)
         val thisClient = client
         val rt = NetRuntime(netId = netId, client = client, myNick = cfg.nick, suppressMotd = _state.value.settings.hideMotdOnConnect)
+        // Restore manually-joined channels so they're rejoined after a reconnect (see the
+        // capture of carriedManualJoins above). Empty on a first connect.
+        rt.manuallyJoinedChannels.putAll(carriedManualJoins)
         runtimes[netId] = rt
 
         if (st.activeNetworkId == netId) updateConnectionNotification("Connecting…")
@@ -3547,7 +3598,13 @@ fun startAddNetwork() {
                 //     state UI reaches a coherent terminal state (status pill, reconnect
                 //     scheduling, etc.) instead of being stuck at "Connecting".
                 try {
-                    client.events().collect { ev ->
+                    client.events()
+                        // Decouple the socket read loop from Main-thread event handling. Without
+                        // this, the channelFlow's small default buffer (64) fills whenever Main
+                        // lags, the producer's send() suspends, and the socket stops being
+                        // drained, which makes us a "slow reader".
+                        .buffer(capacity = EVENT_DRAIN_BUFFER_CAPACITY)
+                        .collect { ev ->
                         // Hop to Main.immediate before touching state. The dozens of
                         //
                         //     val st = _state.value
@@ -5029,13 +5086,39 @@ fun startAddNetwork() {
         openBuffer(resolveBufferKey(netId, channel))
     }
 
-    fun requestList() {
+    /**
+     * Request the channel list.
+     *
+     * On servers that advertise ELIST user-count filtering (ELIST=...U)
+     * we always send a range: ">0" (every channel with at least one member)
+     * up to [maxUsers], or [DEFAULT_LIST_MAX_USERS] when unspecified, with [minUsers]
+     * raising the lower bound. The ListScreen's min/max fields narrow it further. Servers without
+     * ELIST U get a plain LIST and the list is filtered client-side.
+     */
+    fun requestList(minUsers: Int? = null, maxUsers: Int? = null) {
         val netId = _state.value.activeNetworkId ?: return
         val rt = runtimes[netId] ?: return
+        val supportsUserFilter = rt.support.elist?.contains('U') == true
+
+        val listCmd = if (supportsUserFilter) {
+            val lo = (minUsers ?: 0).coerceAtLeast(0)
+            val hi = maxUsers?.takeIf { it > 0 } ?: DEFAULT_LIST_MAX_USERS
+            "LIST >$lo,<$hi"
+        } else {
+            "LIST"
+        }
+
         viewModelScope.launch {
             _channelListBuffer.clear()
-            _state.value = _state.value.copy(listInProgress = true, channelDirectory = emptyList())
-            rt.client.sendRaw("LIST")
+            _channelListLastFlushMs = 0L
+            _state.update {
+                it.copy(
+                    listInProgress = true,
+                    channelDirectory = emptyList(),
+                    listElistUserFilter = supportsUserFilter
+                )
+            }
+            rt.client.sendRaw(listCmd)
         }
     }
 
@@ -5826,8 +5909,14 @@ if (code == "442") {
                         prefixSymbols = ev.prefixSymbols,
                         statusMsg = ev.statusMsg,
                         chanModes = ev.chanModes,
-                        linelen = ev.linelen
+                        linelen = ev.linelen,
+                        elist = ev.elist
                     )
+                }
+
+                // Surface server-side LIST user-count filtering ("LIST >N") to the channel-list UI
+                if (netId == _state.value.activeNetworkId) {
+                    _state.update { it.copy(listElistUserFilter = ev.elist?.contains('U') == true) }
                 }
 
                 // Expose list modes to the UI so the Channel lists sheet can adapt per-ircd.
@@ -7019,11 +7108,18 @@ if (code == "442") {
             }
             is IrcEvent.ChannelListStart -> {
                 _channelListBuffer.clear()
+                _channelListLastFlushMs = 0L
                 _state.value = _state.value.copy(listInProgress = true, channelDirectory = emptyList())
             }
             is IrcEvent.ChannelListItem -> {
                 _channelListBuffer.add(ChannelListEntry(ev.channel, ev.users, ev.topic))
-                if (_channelListBuffer.size % CHANNEL_LIST_BATCH_SIZE == 0) {
+                // Time-throttled flush (not every-N-items): keeps the socket draining fast on
+                // huge networks so the server's slow-reader LIST cutoff isn't tripped. The
+                // first item flushes immediately (lastFlush == 0), then at most every
+                // CHANNEL_LIST_FLUSH_INTERVAL_MS. ListEnd always does a final flush.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - _channelListLastFlushMs >= CHANNEL_LIST_FLUSH_INTERVAL_MS) {
+                    _channelListLastFlushMs = now
                     val snapshot = _channelListBuffer.toList()
                     _state.update { it.copy(channelDirectory = snapshot) }
                 }
@@ -7375,13 +7471,41 @@ if (code == "442") {
                     timeMs = ev.timeMs, doNotify = false, isLocal = true)
             }
 
-            // ChannelModeChanged: live MODE change string (for future UI display of channel modes).
-            // Currently surfaced as a status line; the modeString in UiBuffer is updated separately
-            // by ChannelModeIs (324) when explicitly requested.
+            // ChannelModeChanged: live simple-mode delta on a channel. We merge it into the
+            // buffer's stored modeString so the Channel Tools toggles reflect the change
+            // immediately, instead of only updating on a 324 snapshot. The readable status line
+            // is emitted separately via ChannelModeLine in the MODE command handler.
             is IrcEvent.ChannelModeChanged -> {
-                // Already handled as a ChannelModeLine via the MODE command handler in IrcCore.
-                // This event exists for UI components that want a structured mode-change signal.
-                Unit
+                val chanKey = resolveBufferKey(netId, ev.channel)
+                val buf = _state.value.buffers[chanKey] ?: return
+                val support = runtimes[netId]?.support
+                // Modes to ignore when tracking the channel's simple-mode letters:
+                //  - prefix modes (o/v/h/q/a): per-user rank, handled by the nicklist, not the
+                //    channel mode string.
+                //  - type-A list modes (b/e/I/q…): per-mask lists, not channel-wide flags.
+                val prefixModes = (support?.prefixModes ?: "qaohv").toSet()
+                val listModes = support?.chanModes?.split(",")?.getOrNull(0)?.toSet()
+                    ?: setOf('b', 'e', 'I')
+                val ignore = prefixModes + listModes
+
+                // Apply the +/- delta to the existing letter set. Args (keys/limits/nicks) are
+                // separate params and never appear in ev.modes, so only letters are processed.
+                // LinkedHashSet keeps a stable order so the rebuilt string is deterministic.
+                val current = buf.modeString ?: ""
+                val letters = LinkedHashSet<Char>(current.removePrefix("+").toList())
+                var adding = true
+                for (c in ev.modes) {
+                    when (c) {
+                        '+' -> adding = true
+                        '-' -> adding = false
+                        in ignore -> { /* not a channel-wide flag */ }
+                        else -> if (adding) letters.add(c) else letters.remove(c)
+                    }
+                }
+                val merged = if (letters.isEmpty()) "" else "+" + letters.joinToString("")
+                if (merged != current) {
+                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(modeString = merged))) }
+                }
             }
 
             is IrcEvent.OpenQueryBuffer -> {
@@ -8636,6 +8760,20 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 isHighlight = true)
             return
         }
+        // Active offer through a proxy: we dial out via the tunnel, which is fine for a
+        // routable peer. But a private/loopback/link-local target can't be the peer's real
+        // address once we're tunnelling. connecting to it would make the proxy probe its OWN
+        // local network on our behalf. Refuse rather than turn the proxy into a scanner.
+        if (isProxiedNetwork(netId) && !offer.isPassive && isLocalHost(offer.ip)) {
+            _state.value = _state.value.copy(dccTransfers = _state.value.dccTransfers.filterNot {
+                it is DccTransferState.Incoming && it.offer == offer
+            })
+            append(bufKey(netId, "*server*"), from = null,
+                text = "*** Refusing DCC from ${offer.from}: it advertises a private/LAN address (${offer.ip}) " +
+                    "that isn't reachable through the proxy. Disable the proxy for this transfer if they're on your LAN.",
+                isHighlight = true)
+            return
+        }
         val minP = st.settings.dccIncomingPortMin
         val maxP = st.settings.dccIncomingPortMax
         val customFolder = st.settings.dccDownloadFolderUri
@@ -8674,10 +8812,10 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                             // so a mid-transfer error can still leave a useful partial pointer.
                             updateIncoming(offer) { it.copy(savedPath = path) }
                         },
-                        onListening = { ipAsInt, port, size, token ->
+                        onListening = { addrField, port, size, token ->
                             val name = quoteDccFilenameIfNeeded(offer.filename)
                             val tokenStr = if (offer.turbo) "${token}T" else token.toString()
-                            val payload = "DCC SEND $name $ipAsInt $port $size $tokenStr"
+                            val payload = "DCC SEND $name $addrField $port $size $tokenStr"
                             c.ctcp(offer.from, payload)
                             val resumeNote = if (effectiveOffset > 0L) " (resuming from ${effectiveOffset} bytes)" else ""
                             append(bufKey(netId, "*server*"), from = null, text = "*** Accepted passive DCC offer: ${offer.filename} (listening on $port)$resumeNote", doNotify = false)
@@ -8936,6 +9074,16 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         ensureBuffer(key)
         _state.value = _state.value.copy(selectedBuffer = key)
 
+        // See acceptDcc: a private/LAN target can't be the real peer through a proxy tunnel,
+        // and dialling it would make the proxy probe its own local network. Refuse.
+        if (isProxiedNetwork(netId) && isLocalHost(offer.ip)) {
+            append(key, from = null,
+                text = "*** Refusing DCC CHAT from $peer: it advertises a private/LAN address (${offer.ip}) " +
+                    "not reachable through the proxy. Disable the proxy for this network if they're on your LAN.",
+                isHighlight = true)
+            return
+        }
+
         // Android 17+: connecting to a LAN peer requires ACCESS_LOCAL_NETWORK.
         if (isLocalHost(offer.ip) && !hasLocalNetworkPermission()) {
             append(key, from = null,
@@ -9004,8 +9152,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 val socket = dcc.startChat(
                     portMin = minP,
                     portMax = maxP,
-                    onClient = { ipAsInt, port ->
-                        val payload = "DCC $chatVerb chat $ipAsInt $port"
+                    onClient = { addrField, port ->
+                        val payload = "DCC $chatVerb chat $addrField $port"
                         c.ctcp(peer, payload)
                         append(bufKey(netId, "*server*"), from = null, text = "*** Sent DCC$secureLabel CHAT offer to $peer (port $port)", doNotify = false)
                     }
@@ -9100,8 +9248,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         portMin = minP,
                         portMax = maxP,
                         secure = secure,
-                        onClient = { ipAsInt, port, size ->
-                            val payload = "DCC $verb $offerNamePayload $ipAsInt $port $size"
+                        onClient = { addrField, port, size ->
+                            val payload = "DCC $verb $offerNamePayload $addrField $port $size"
                             // Register BEFORE sending the CTCP so a quick RESUME reply finds us.
                             val key = "${target.lowercase()}|$baseName|$size"
                             liveKey = key
@@ -9164,8 +9312,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         // the local address in the CTCP would leak network metadata about a
                         // user who turned the proxy on precisely for anonymity. Many clients
                         // already tolerate 0 here since the field is informational for passive.
-                        val ipInt = if (sendProxy.enabled) 0L else dcc.localIpv4AsInt()
-                        val payload = "DCC $verb $offerNamePayload $ipInt 0 $fileSize $token"
+                        val ipField = if (sendProxy.enabled) "0" else dcc.dccAddressField()
+                        val payload = "DCC $verb $offerNamePayload $ipField 0 $fileSize $token"
                         c.ctcp(target, payload)
                         val secureLabel = if (secure) " (SDCC/TLS)" else ""
                         append(statusKey, from = null, text = "*** Offering $offerName to $target via DCC$secureLabel (passive)…", doNotify = false)

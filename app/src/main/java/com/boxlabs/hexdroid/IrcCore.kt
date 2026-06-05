@@ -437,7 +437,13 @@ sealed class IrcEvent {
          * RFC 1459 = 512; IRCv3 / Ergo / InspIRCd = typically 4096.
          * Null when the server did not advertise LINELEN (assume 512).
          */
-        val linelen: Int? = null
+        val linelen: Int? = null,
+        /**
+         * ELIST ISUPPORT token (uppercased): supported server-side LIST search extensions.
+         * Contains 'U' when the server can filter LIST by user count ("LIST >N"). Null when
+         * not advertised.
+         */
+        val elist: String? = null
     ) : IrcEvent()
 
     // Join failure numerics (e.g. 471-477) with the channel extracted
@@ -1066,12 +1072,19 @@ class IrcClient(val config: IrcConfig) {
     @Volatile private var whoxSupported: Boolean = false
 
     /**
+     * ELIST=<chars> from ISUPPORT (005): which server-side LIST search extensions the server
+     * supports. Each letter is a capability, most relevantly 'U' (filter by user count, e.g.
+     * "LIST >50"), plus C/N/T/M (creation time / non-match mask / topic age / mask). Null until
+     * 005 is seen. Stored uppercase. Used so the channel-list UI only offers server-side
+     * filtering the server can actually honour, instead of having it silently ignored.
+     */
+    @Volatile private var elistTokens: String? = null
+
+    /**
      * MONITOR=<n> from ISUPPORT (005): maximum entries the server allows in this client's
      * watch list. Int.MAX_VALUE means "advertised with no value" = no limit. -1 (the
      * pre-005 default) means MONITOR support hasn't been confirmed. The /monitor dispatcher
      * uses this to surface a clear message in the server buffer when MONITOR is unsupported.
-     * Was previously absent entirely - users on networks without MONITOR saw raw 421
-     * "Unknown command" lines after typing /monitor.
      */
     @Volatile private var monitorLimit: Int = -1
     /**
@@ -1619,18 +1632,8 @@ class IrcClient(val config: IrcConfig) {
     /**
      * Per-message dispatcher for non-numeric IRC commands. Extracted from the events()
      * channelFlow body to keep its compiled invokeSuspend method under the JVM 64KB
-     * size limit. The body still has the same shape — one big `when` over the command
-     * name — but lives in its own bytecode method so it doesn't count toward events()'s
-     * budget. Numeric replies are still dispatched by the numericHandlers map further
+     * size limit. Numeric replies are still dispatched by the numericHandlers map further
      * up; this method only handles letter-keyed commands (PRIVMSG, NOTICE, JOIN, etc).
-     *
-     * Receiver: ProducerScope<IrcEvent> from the channelFlow, so `send(IrcEvent.X)`
-     * works directly inside the body the same as it did when this code was inline.
-     *
-     * Originally each `when` arm used `continue` to skip the rest of the read-loop
-     * iteration for the current message. After extraction those `continue` statements
-     * became `return` (return from this method); the outer loop continues automatically
-     * because there's no further work for the current msg after the dispatcher.
      */
     private suspend fun ProducerScope<IrcEvent>.handleMessageCommand(
         msg: IrcMessage,
@@ -2317,15 +2320,23 @@ class IrcClient(val config: IrcConfig) {
 						val modeStr = msg.params.getOrNull(1) ?: return
 						val args = msg.params.drop(2)
 
+						val isHistoryMode = playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs)
+
 						// Update nick prefixes for rank modes (op/voice/etc).
 						parseChannelUserModes(target, modeStr, args).forEach { (nick, prefix, adding) ->
-							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
+							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = isHistoryMode))
+						}
+
+						// Surface the simple-mode delta so the ViewModel can keep the channel's
+						// stored mode string current (drives the Channel Tools toggles).
+						if (!isHistoryMode) {
+							send(IrcEvent.ChannelModeChanged(target, modeStr))
 						}
 
 						// Also surface the mode change as a readable line in the channel buffer.
 						val setter = msg.prefixNick() ?: (msg.prefix ?: "server")
 						val extra = if (args.isEmpty()) "" else " " + args.joinToString(" ")
-						send(IrcEvent.ChannelModeLine(target, "*** $setter sets mode $modeStr$extra", timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs))))
+						send(IrcEvent.ChannelModeLine(target, "*** $setter sets mode $modeStr$extra", timeMs = serverTimeMs, isHistory = isHistoryMode))
 					}
 
 					// IRCv3 CHGHOST: ident or hostname changed (requires chghost CAP)
@@ -3037,7 +3048,12 @@ class IrcClient(val config: IrcConfig) {
                     }
 				}
 			}
-            "list" -> sendRaw("LIST")
+            "list" -> {
+                // Forward any arguments so ELIST filters work directly, e.g. "/list >50" to
+                // list channels with more than 50 users on servers that advertise ELIST=...U.
+                val args = parts.drop(1).joinToString(" ").trim()
+                sendRaw(if (args.isBlank()) "LIST" else "LIST $args")
+            }
             "motd" -> {
                 val arg = parts.drop(1).joinToString(" ")
                 sendRaw(if (arg.isBlank()) "MOTD" else "MOTD $arg")
@@ -3156,8 +3172,10 @@ class IrcClient(val config: IrcConfig) {
 				val reason = parts.drop(3).joinToString(" ").trim()
 				sendRaw(if (reason.isBlank()) "SAPART $nick $chan" else "SAPART $nick $chan :$reason")
 			}
-			"gline", "zline", "kline", "dline", "eline", "qline", "shun", "kill" -> {
-				// Common IRCop/line commands usually take a trailing reason; prefix ':' so spaces are preserved.
+			"gline", "zline", "kline", "dline", "eline", "qline", "shun" -> {
+				// Server ban/line commands take <mask> <duration> [reason]; prefix ':' on the
+				// reason so spaces are preserved. The first two tokens (mask, duration) stay
+				// bare so the server parses the duration correctly.
 				// Examples:
 				//   /gline *!*@bad.host 1d no spam pls
 				//   /zline 203.0.113.0/24 2h scanning
@@ -3170,6 +3188,17 @@ class IrcClient(val config: IrcConfig) {
 					val rest = parts.drop(1).joinToString(" ").trim()
 					sendRaw(if (rest.isBlank()) raw else "$raw $rest")
 				}
+			}
+			"kill" -> {
+				// KILL takes <nick> <comment>
+				val nick = parts.getOrNull(1)
+				if (nick.isNullOrBlank()) {
+					commandEvents.send(IrcEvent.Notice(from = "*", target = currentBuffer,
+						text = "Usage: /kill <nick> [reason]", isPrivate = true))
+					return
+				}
+				val reason = parts.drop(2).joinToString(" ").trim()
+				sendRaw(if (reason.isBlank()) "KILL $nick" else "KILL $nick :$reason")
 			}
             "wallops", "globops", "locops", "operwall" -> {
                 val msg = parts.drop(1).joinToString(" ").trim()
@@ -3685,6 +3714,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                 "LINELEN" -> v?.toIntOrNull()?.takeIf { it in 512..65535 }?.let { ll = it }
                 // WHOX is a flag token (no value): server supports extended WHO %fields,querytype
                 "WHOX" -> whoxSupported = true
+                // ELIST=<chars>: server-side LIST search extensions (U = user-count filtering, etc).
+                "ELIST" -> if (!v.isNullOrBlank()) elistTokens = v.uppercase(Locale.ROOT)
                 // MONITOR=<n> declares the maximum watch list size per client. Empty value
                 // means "no limit". Stored so that the /monitor dispatcher can report a
                 // useful "limit reached" message instead of "0 monitors available" - which
@@ -3710,7 +3741,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         for (i in 0 until n) mp[pm[i]] = ps[i]
         if (mp.isNotEmpty()) prefixModeToSymbol = mp
 
-        send(IrcEvent.ISupport(chantypes, caseMapping, prefixModes, prefixSymbols, statusMsg, chanModes, ll))
+        send(IrcEvent.ISupport(chantypes, caseMapping, prefixModes, prefixSymbols, statusMsg, chanModes, ll, elistTokens))
     },
 
     // LIST output
@@ -4528,16 +4559,24 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 	}
 
 	/**
-	 * Parse a DCC offer's address field. DCC carries the peer address as a 32-bit integer
-	 * (classic) or a dotted IPv4 quad — never a hostname. Anything else is rejected
-	 * (returns null, dropping the offer) so a crafted hostname can't reach
-	 * validateRemoteIp's InetAddress.getByName(): that would perform an on-device DNS
-	 * lookup, which leaks the queried name outside an active SOCKS/Tor tunnel and is
-	 * remotely triggerable by a malicious offer. IPv6 DCC is non-standard and not handled
-	 * here (it was already unparseable), so this is not a regression.
+	 * Parse a DCC offer's address field. DCC carries the peer address as one of:
+	 * a 32-bit integer (classic IPv4),
+	 * a dotted IPv4 quad, or
+	 * a literal IPv6 address: the
+	 * same field carries the colon-separated address as text, detected by the ':').
+	 * A hostname is NEVER accepted: anything that isn't one of the numeric forms is rejected
+	 * (returns null, dropping the offer) so a crafted hostname can't reach validateRemoteIp's
+	 * InetAddress.getByName(): that would perform an on-device DNS lookup, which leaks the
+	 * queried name outside an active SOCKS/Tor tunnel and is remotely triggerable by a
+	 * malicious offer.
 	 */
 	private fun parseDccAddress(ipField: String): String? {
 		val f = ipField.trim()
+		// IPv6 literal. May arrive bracketed (some clients wrap it in [ ]); strip those.
+		if (f.contains(':')) {
+			val literal = f.removePrefix("[").removeSuffix("]")
+			return if (isIpv6Literal(literal)) literal else null
+		}
 		if (f.contains('.')) {
 			// Dotted quad: exactly four octets, each 0..255, all numeric.
 			val octets = f.split('.')
@@ -4545,10 +4584,59 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			if (octets.any { (it.toIntOrNull() ?: -1) !in 0..255 }) return null
 			return f
 		}
-		// Classic 32-bit integer form.
+		// Classic 32-bit integer form (IPv4 only).
 		val v = f.toLongOrNull() ?: return null
 		if (v !in 0L..0xFFFFFFFFL) return null
 		return ipFromLong(v)
+	}
+
+	/**
+	 * Purely *syntactic* IPv6 literal check. performs NO name resolution, so a crafted DCC
+	 * offer can never trigger an on-device DNS lookup (see [parseDccAddress]). Accepts the
+	 * standard textual forms including "::" zero-compression and a trailing dotted-quad IPv4
+	 * tail (e.g. ::ffff:192.0.2.1). Rejects scope ids ("%eth0"), which are meaningless coming
+	 * from a remote peer. The address still passes through validateRemoteIp afterwards, which
+	 * rejects loopback / link-local / wildcard / multicast, so this only needs to gate shape.
+	 */
+	private fun isIpv6Literal(s: String): Boolean {
+		if (s.isEmpty() || s.length > 45 || s.contains('%')) return false
+
+		// Detach an optional embedded IPv4 tail and validate it; replace with two synthetic
+		// hex groups so the remainder can be counted as plain 16-bit groups below.
+		var work = s
+		val lastColon = s.lastIndexOf(':')
+		if (lastColon >= 0 && s.substring(lastColon + 1).contains('.')) {
+			val v4 = s.substring(lastColon + 1)
+			val octets = v4.split('.')
+			if (octets.size != 4) return false
+			for (p in octets) {
+				if (p.isEmpty() || p.length > 3 || p.any { !it.isDigit() }) return false
+				if ((p.toIntOrNull() ?: -1) !in 0..255) return false
+			}
+			work = s.substring(0, lastColon) + ":0:0"
+		}
+
+		// At most one "::".
+		val dc = work.indexOf("::")
+		if (dc != work.lastIndexOf("::")) return false
+
+		fun countGroups(part: String): Int? {
+			if (part.isEmpty()) return 0
+			val groups = part.split(':')
+			for (g in groups) {
+				if (g.isEmpty() || g.length > 4 || g.any { it.lowercaseChar() !in "0123456789abcdef" }) return null
+			}
+			return groups.size
+		}
+
+		return if (dc >= 0) {
+			val l = countGroups(work.substring(0, dc)) ?: return false
+			val r = countGroups(work.substring(dc + 2)) ?: return false
+			// "::" stands in for >= 1 zero group, so the explicit groups must total < 8.
+			l + r <= 7
+		} else {
+			countGroups(work) == 8
+		}
 	}
 	private fun openSocket(): Socket {
 		// Sane socket defaults for mobile networks.

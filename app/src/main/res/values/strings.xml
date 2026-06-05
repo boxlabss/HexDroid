@@ -150,6 +150,8 @@
     <string name="chat_kick_ban">Kick / Ban</string>
     <string name="chat_nick">Nick</string>
     <string name="chat_reason">Reason</string>
+    <string name="chat_duration_label">Duration</string>
+    <string name="chat_duration_hint">e.g. 1d, 2h; 0 is usually permanent</string>
     <string name="chat_kick">Kick</string>
     <string name="chat_ban">Ban</string>
     <string name="chat_kick_ban_btn">Kick+Ban</string>
@@ -267,7 +269,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">Incoming DCC chat from %1$s</string>
-    <string name="notif_dcc_incoming_chat_text">Tap to open — or use Transfers to accept / reject</string>
+    <string name="notif_dcc_incoming_chat_text">Tap to open or use Transfers to accept/reject</string>
     <string name="notif_dcc_incoming_file_title">Incoming file from %1$s</string>
     <string name="notif_dcc_file_done_title">DCC complete</string>
     <string name="notif_dcc_file_done_text">%1$s saved to %2$s</string>
@@ -610,6 +612,11 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="nick_moderation">Moderation</string>
     <string name="nick_kick_ban">Kick / Ban…</string>
     <string name="nick_kick_ban_desc">Remove or ban %1$s from this channel</string>
+    <string name="nick_privileges">Channel privileges</string>
+    <string name="nick_op">Give op (+o)</string>
+    <string name="nick_deop">Take op (-o)</string>
+    <string name="nick_voice">Voice (+v)</string>
+    <string name="nick_devoice">Devoice (-v)</string>
     <!-- IgnoreListScreen -->
     <string name="ignore_network_label">Network</string>
     <string name="ignore_list_desc">Ignored nicks are matched case-insensitively and apply to chat + notices + incoming DCC offers on this network.</string>
@@ -630,6 +637,9 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="list_users_filter_label">Users:</string>
     <string name="list_users_min">Min</string>
     <string name="list_users_max">Max</string>
+    <string name="list_users_server_hint">tap Apply to refetch with these limits</string>
+    <string name="list_users_local_hint">Filters the loaded list (this server can\'t filter by size remotely)</string>
+    <string name="list_users_apply">Apply</string>
 
     <!-- Topic quick-edit dialog -->
     <string name="topic_edit_title">Edit topic</string>

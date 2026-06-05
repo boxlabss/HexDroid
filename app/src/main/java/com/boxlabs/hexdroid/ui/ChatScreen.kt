@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -115,6 +116,8 @@ import androidx.compose.material.icons.filled.MarkChatRead
 import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -3783,6 +3786,10 @@ fun ChatScreen(
     }
 
     if (showChanOps && isChannel) {
+        // Refresh the channel's modes on open so the toggles reflect the live server state
+        LaunchedEffect(showChanOps, selBufName) {
+            if (selBufName.isNotBlank() && selBufName != "*server*") onSend("/mode $selBufName")
+        }
         // windowInsets = WindowInsets(0) so we control insets ourselves.
         // imePadding() goes on the OUTER container, not inside the scroll — this prevents
         // the "bounce" where scrolled-to-bottom content jumps when the keyboard appears,
@@ -3864,25 +3871,33 @@ fun ChatScreen(
                 if (canMode) {
                     Text(stringResource(R.string.chat_modes_panel), fontWeight = FontWeight.Bold)
 
-                    // Parse active simple modes from currentModeString for toggle state
-                    val activeModes = currentModeString?.removePrefix("+") ?: ""
+                    // Optimistic local copy of the active simple modes.
+                    var activeModes by remember(currentModeString) {
+                        mutableStateOf(currentModeString?.removePrefix("+") ?: "")
+                    }
 
                     @Composable
                     fun ModeToggle(flag: Char, label: String, description: String) {
                         val active = flag in activeModes
+                        fun toggle() {
+                            val enable = !active
+                            // Optimistic update for instant switch movement.
+                            activeModes = if (enable) {
+                                if (flag in activeModes) activeModes else activeModes + flag
+                            } else {
+                                activeModes.filter { it != flag }
+                            }
+                            onSend("/mode $selBufName ${if (enable) "+" else "-"}$flag")
+                        }
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    onSend("/mode $selBufName ${if (active) "-" else "+"}$flag")
-                                }
+                                .clickable { toggle() }
                                 .padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Switch(checked = active, onCheckedChange = {
-                                onSend("/mode $selBufName ${if (active) "-" else "+"}$flag")
-                            })
+                            Switch(checked = active, onCheckedChange = { toggle() })
                             Column(Modifier.weight(1f)) {
                                 Text(label, style = MaterialTheme.typography.bodyMedium)
                                 Text(
@@ -3978,7 +3993,10 @@ fun ChatScreen(
                         singleLine = true,
                         label = { Text(stringResource(R.string.chat_reason)) }
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         if (canKick) {
                             Button(
                                 onClick = {
@@ -4056,7 +4074,7 @@ fun ChatScreen(
 
                 var opTarget by remember { mutableStateOf("") }
                 var opReason by remember { mutableStateOf("") }
-                var opMask   by remember { mutableStateOf("") }
+                var opDuration by remember { mutableStateOf("") }
                 var opServer by remember { mutableStateOf("") }
                 var opMessage by remember { mutableStateOf("") }
 
@@ -4072,11 +4090,29 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
                     label = { Text(stringResource(R.string.chat_reason)) }
                 )
+                // Duration for the timed *-line / shun commands. Format is server-specific
+                // (e.g. "1d", "2h", "30" minutes); "0" usually means permanent.
+                OutlinedTextField(
+                    value = opDuration, onValueChange = { opDuration = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(stringResource(R.string.chat_duration_label)) },
+                    supportingText = { Text(stringResource(R.string.chat_duration_hint)) }
+                )
 
                 // Kill / K-line / Z-line
                 Text(stringResource(R.string.chat_punishments), fontWeight = FontWeight.Bold)
                 val noReasonStr = stringResource(R.string.chat_no_reason)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // The timed line/shun commands take <mask> <duration> [reason]; require both a
+                // target and a duration so we never send a bare "<mask> <reason>" that the
+                // server would misparse.
+                val canLine = opTarget.isNotBlank() && opDuration.isNotBlank()
+                // FlowRow so the buttons wrap onto extra lines on narrow screens instead of
+                // overflowing off the right edge. Both rows of punishments are merged into one
+                // wrapping group.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Button(
                         onClick = {
                             val t = opTarget.trim()
@@ -4090,58 +4126,56 @@ fun ChatScreen(
                     ) { Text(stringResource(R.string.ircop_kill)) }
                     OutlinedButton(
                         onClick = {
-                            val t = opTarget.trim()
-                            if (t.isNotBlank()) {
+                            val t = opTarget.trim(); val d = opDuration.trim()
+                            if (t.isNotBlank() && d.isNotBlank()) {
                                 val r = opReason.trim().ifBlank { noReasonStr }
-                                onSend("/kline $t $r")
+                                onSend("/kline $t $d $r")
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = opTarget.isNotBlank()
+                        enabled = canLine
                     ) { Text(stringResource(R.string.ircop_kline)) }
                     OutlinedButton(
                         onClick = {
-                            val t = opMask.trim().ifBlank { opTarget.trim() }
-                            if (t.isNotBlank()) {
+                            val t = opTarget.trim(); val d = opDuration.trim()
+                            if (t.isNotBlank() && d.isNotBlank()) {
                                 val r = opReason.trim().ifBlank { noReasonStr }
-                                onSend("/zline $t $r")
+                                onSend("/zline $t $d $r")
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = opTarget.isNotBlank()
+                        enabled = canLine
                     ) { Text(stringResource(R.string.ircop_zline)) }
                     OutlinedButton(
                         onClick = {
-                            val t = opTarget.trim()
-                            if (t.isNotBlank()) {
+                            val t = opTarget.trim(); val d = opDuration.trim()
+                            if (t.isNotBlank() && d.isNotBlank()) {
                                 val r = opReason.trim().ifBlank { noReasonStr }
-                                onSend("/gline $t $r")
+                                onSend("/gline $t $d $r")
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = opTarget.isNotBlank()
+                        enabled = canLine
                     ) { Text(stringResource(R.string.ircop_gline)) }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
-                            val t = opTarget.trim()
-                            if (t.isNotBlank()) {
+                            val t = opTarget.trim(); val d = opDuration.trim()
+                            if (t.isNotBlank() && d.isNotBlank()) {
                                 val r = opReason.trim().ifBlank { noReasonStr }
-                                onSend("/shun $t $r")
+                                onSend("/shun $t $d $r")
                             }
                         },
-                        enabled = opTarget.isNotBlank()
+                        enabled = canLine
                     ) { Text(stringResource(R.string.ircop_shun)) }
                     OutlinedButton(
                         onClick = {
-                            val t = opTarget.trim()
-                            if (t.isNotBlank()) {
+                            val t = opTarget.trim(); val d = opDuration.trim()
+                            if (t.isNotBlank() && d.isNotBlank()) {
                                 val r = opReason.trim().ifBlank { noReasonStr }
-                                onSend("/dline $t $r")
+                                onSend("/dline $t $d $r")
                             }
                         },
-                        enabled = opTarget.isNotBlank()
+                        enabled = canLine
                     ) { Text(stringResource(R.string.ircop_dline)) }
                 }
 
@@ -4149,16 +4183,15 @@ fun ChatScreen(
 
                 // Force join/part
                 Text(stringResource(R.string.chat_force_joinpart), fontWeight = FontWeight.Bold)
-                Row(
-                    Modifier.fillMaxWidth(),
+                OutlinedTextField(
+                    value = opServer, onValueChange = { opServer = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(stringResource(R.string.chat_channel_label)) }
+                )
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
-                        value = opServer, onValueChange = { opServer = it },
-                        modifier = Modifier.weight(1f), singleLine = true,
-                        label = { Text(stringResource(R.string.chat_channel_label)) }
-                    )
                     Button(
                         onClick = {
                             val t = opTarget.trim(); val ch = opServer.trim()
@@ -4184,7 +4217,10 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
                     label = { Text(stringResource(R.string.chat_message_label)) }
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Button(
                         onClick = { if (opMessage.isNotBlank()) onSend("/wallops ${opMessage.trim()}") },
                         enabled = opMessage.isNotBlank()
@@ -4203,7 +4239,10 @@ fun ChatScreen(
 
                 // Server queries
                 Text(stringResource(R.string.chat_server_queries), fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     OutlinedButton(onClick = { onSend("/motd"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_motd)) }
                     OutlinedButton(onClick = { onSend("/admin"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_admin)) }
                     OutlinedButton(onClick = { onSend("/stats u"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_uptime)) }
@@ -4954,6 +4993,7 @@ fun ChatScreen(
                 Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
@@ -5112,6 +5152,48 @@ fun ChatScreen(
                         showNickActions = false
                     }
                 )
+
+                // ── Channel privileges (ops only) ────────────────────────────
+                // Surfaces the +o/-o and +v/-v actions.
+                if (isChannel && (canMode || canKick) && !selectedNick.equals(myNick, ignoreCase = true)) {
+                    val targetPrefix = nickDisplayByBase[selectedNick.lowercase()]?.let { nickPrefix(it) }
+                    val hasOp    = targetPrefix in listOf('~', '&', '@')
+                    val hasVoice = targetPrefix == '+'
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        stringResource(R.string.nick_privileges),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+
+                    // Op / deop
+                    if (canMode) {
+                        ActionRow(
+                            icon = Icons.Default.Shield,
+                            label = if (hasOp) stringResource(R.string.nick_deop) else stringResource(R.string.nick_op),
+                            tint = if (hasOp) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
+                            onClick = {
+                                val sign = if (hasOp) "-o" else "+o"
+                                onSend("/mode $selBufName $sign $selectedNick")
+                                showNickActions = false
+                            }
+                        )
+                    }
+
+                    // Voice / devoice
+                    ActionRow(
+                        icon = Icons.Default.RecordVoiceOver,
+                        label = if (hasVoice) stringResource(R.string.nick_devoice) else stringResource(R.string.nick_voice),
+                        tint = if (hasVoice) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
+                        onClick = {
+                            val sign = if (hasVoice) "-v" else "+v"
+                            onSend("/mode $selBufName $sign $selectedNick")
+                            showNickActions = false
+                        }
+                    )
+                }
 
                 // ── Moderation (ops only) ────────────────────────────────────
                 if (isChannel && (canKick || canBan) && !selectedNick.equals(myNick, ignoreCase = true)) {

@@ -42,7 +42,7 @@ import com.boxlabs.hexdroid.R
 fun ListScreen(
     state: UiState,
     onBack: () -> Unit,
-    onRefresh: () -> Unit,
+    onRefresh: (minUsers: Int?, maxUsers: Int?) -> Unit,
     onFilterChange: (String) -> Unit,
     onSortChange: (String) -> Unit,
     onJoin: (String) -> Unit,
@@ -57,24 +57,22 @@ fun ListScreen(
     val minUsers = minUsersText.trim().toIntOrNull()?.coerceAtLeast(0)
     val maxUsers = maxUsersText.trim().toIntOrNull()?.coerceAtLeast(0)
 
-    // Apply filter then sort.
-    // The original key was `remember(state.channelDirectory, ...)`. Because
-    // `channelDirectory` is a List<ChannelListEntry>, any state update anywhere in the
-    // ViewModel (e.g. a message arriving in another buffer) creates a new list reference
-    // even if the channel data hasn't changed, causing an O(n·log n) sort to run on every
-    // recomposition. Using the list size as a proxy key means the sort only re-runs when
-    // channels are actually added or removed.
-    // The filter/sort/range inputs are still included so user-driven changes re-run immediately.
-    val directorySize = state.channelDirectory.size
-    val items = remember(directorySize, filter, sort, minUsers, maxUsers) {
-        val filtered = state.channelDirectory.filter { ch ->
-            val nameMatch = filter.isBlank() ||
-                ch.channel.contains(filter, ignoreCase = true) ||
-                ch.topic.contains(filter, ignoreCase = true)
-            val minOk = minUsers == null || ch.users >= minUsers
-            val maxOk = maxUsers == null || ch.users <= maxUsers
-            nameMatch && minOk && maxOk
-        }
+    // Apply dedup + filter + sort once, memoized. Keyed on the channelDirectory reference
+    // (plus the filter/sort inputs): a data-class copy() preserves the reference of fields it
+    // doesn't reassign
+    val items = remember(state.channelDirectory, filter, sort, minUsers, maxUsers) {
+        val filtered = state.channelDirectory
+            // /LIST replies routinely repeat a channel (mid-list refreshes, double-sending
+            // servers, netsplit echoes); dedup so LazyColumn's channel key stays unique.
+            .distinctBy { it.channel }
+            .filter { ch ->
+                val nameMatch = filter.isBlank() ||
+                    ch.channel.contains(filter, ignoreCase = true) ||
+                    ch.topic.contains(filter, ignoreCase = true)
+                val minOk = minUsers == null || ch.users >= minUsers
+                val maxOk = maxUsers == null || ch.users <= maxUsers
+                nameMatch && minOk && maxOk
+            }
         when (sort) {
             "size_asc"  -> filtered.sortedBy   { it.users }
             "name_asc"  -> filtered.sortedBy   { it.channel.lowercase() }
@@ -89,7 +87,7 @@ fun ListScreen(
                 title = { Text(stringResource(R.string.list_channels_title)) },
                 navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
                 actions = {
-                    IconButton(onClick = onRefresh) { Text("⟳") }
+                    IconButton(onClick = { onRefresh(minUsers, maxUsers) }) { Text("⟳") }
                     IconButton(onClick = onOpenSettings) { Text("⚙") }
                 }
             )
@@ -144,6 +142,30 @@ fun ListScreen(
                 )
             }
 
+            // Explain where the user-count bounds take effect, and (when server-side) give an
+            // explicit Apply control so it's clear a refetch happens. With ELIST the bounds go
+            // into the LIST query itself ("LIST >min,<max"); without it they filter the
+            // already-downloaded list locally.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (state.listElistUserFilter)
+                        stringResource(R.string.list_users_server_hint)
+                    else
+                        stringResource(R.string.list_users_local_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.listElistUserFilter) {
+                    TextButton(onClick = { onRefresh(minUsers, maxUsers) }) {
+                        Text(stringResource(R.string.list_users_apply))
+                    }
+                }
+            }
+
             // Sort chips row
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -193,12 +215,10 @@ fun ListScreen(
             HorizontalDivider()
 
             LazyColumn(Modifier.fillMaxSize()) {
-                // distinctBy { it.channel }: /LIST replies routinely contain the same channel
-                // twice (mid-list refreshes, servers that double-send, or netsplit echoes).
-                // Duplicate keys make Compose throw IllegalArgumentException from inside its
-                // measure pass (LayoutNodeSubcompositionsState.subcompose) the moment the list
-                // is flung, crashing the app. Dropping the duplicate row is harmless here.
-                items(items.distinctBy { it.channel }, key = { it.channel }) { ch ->
+                // `items` is already deduped by channel in the memoized block above, so the
+                // key lambda is safe (duplicate keys make Compose throw from its measure pass
+                // and crash on fling).
+                items(items, key = { it.channel }) { ch ->
                     Column(
                         Modifier
                             .fillMaxWidth()

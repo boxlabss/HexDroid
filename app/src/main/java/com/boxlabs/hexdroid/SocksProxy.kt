@@ -208,20 +208,18 @@ object SocksProxy {
                 throw ProxyException("SOCKS5: proxy selected unsupported auth method 0x${chosen.toString(16)}")
         }
 
-        // CONNECT request with the destination as a DOMAINNAME (remote DNS).
-        val hostBytes = destHost.toByteArray(Charsets.US_ASCII)
-        if (hostBytes.size > 255) {
-            throw ProxyException("SOCKS5: destination host name too long (${hostBytes.size} > 255 bytes)")
-        }
-        val request = ByteArray(4 + 1 + hostBytes.size + 2)
+        // CONNECT request. When the destination is a numeric IP literal we send it as an
+        // ATYP_IPV4 / ATYP_IPV6 address (nothing to resolve); otherwise we send a DOMAINNAME
+        // so a PROXY resolves it remotely
+        val (atyp, addr) = encodeSocks5Dest(destHost)
+        val request = ByteArray(4 + addr.size + 2)
         var i = 0
         request[i++] = SOCKS5_VERSION.toByte()
         request[i++] = SOCKS5_CMD_CONNECT.toByte()
         request[i++] = 0x00 // reserved
-        request[i++] = SOCKS5_ATYP_DOMAIN.toByte()
-        request[i++] = hostBytes.size.toByte()
-        System.arraycopy(hostBytes, 0, request, i, hostBytes.size)
-        i += hostBytes.size
+        request[i++] = atyp.toByte()
+        System.arraycopy(addr, 0, request, i, addr.size)
+        i += addr.size
         request[i++] = ((destPort ushr 8) and 0xFF).toByte()
         request[i] = (destPort and 0xFF).toByte()
         output.write(request)
@@ -282,6 +280,99 @@ object SocksProxy {
         }
     }
 
+    /**
+     * Encode the SOCKS5 CONNECT destination. Returns (ATYP, payload) where payload is:
+     * IPv4 literal  -> ATYP 0x01, 4 raw bytes
+     * IPv6 literal  -> ATYP 0x04, 16 raw bytes
+     * anything else -> ATYP 0x03 (DOMAINNAME), [len][ASCII host] for resolution AT THE
+     * PROXY (remote DNS; required for .onion and to avoid on-device lookups).
+     * [parseIpv4Literal]/[parseIpv6Literal] are purely textual and never resolve, so a real
+     * hostname always falls through to the DOMAINNAME branch.
+     */
+    private fun encodeSocks5Dest(destHost: String): Pair<Int, ByteArray> {
+        parseIpv4Literal(destHost)?.let { return SOCKS5_ATYP_IPV4 to it }
+        // IPv6 literals may arrive bracketed (e.g. a "[2001:db8::1]" entry); strip the brackets.
+        parseIpv6Literal(destHost.removePrefix("[").removeSuffix("]"))?.let { return SOCKS5_ATYP_IPV6 to it }
+        val hostBytes = destHost.toByteArray(Charsets.US_ASCII)
+        if (hostBytes.size > 255) {
+            throw ProxyException("SOCKS5: destination host name too long (${hostBytes.size} > 255 bytes)")
+        }
+        val payload = ByteArray(1 + hostBytes.size)
+        payload[0] = hostBytes.size.toByte()
+        System.arraycopy(hostBytes, 0, payload, 1, hostBytes.size)
+        return SOCKS5_ATYP_DOMAIN to payload
+    }
+
+    /** Parse a dotted-quad IPv4 literal to 4 bytes, or null if [s] isn't one. Never resolves. */
+    private fun parseIpv4Literal(s: String): ByteArray? {
+        val parts = s.split('.')
+        if (parts.size != 4) return null
+        val out = ByteArray(4)
+        for (idx in 0 until 4) {
+            val p = parts[idx]
+            if (p.isEmpty() || p.length > 3 || p.any { !it.isDigit() }) return null
+            val n = p.toInt()
+            if (n !in 0..255) return null
+            out[idx] = n.toByte()
+        }
+        return out
+    }
+
+    /**
+     * Parse an IPv6 literal to 16 bytes, or null if [s] isn't a syntactically valid literal.
+     * Handles "::" zero-compression and a trailing embedded IPv4 quad (e.g. ::ffff:192.0.2.1).
+     * Performs NO name resolution; scope ids ("%eth0") are rejected
+     */
+    private fun parseIpv6Literal(s: String): ByteArray? {
+        if (s.isEmpty() || s.length > 45 || s.contains('%')) return null
+
+        // Fold a trailing embedded IPv4 quad into two synthetic hex groups so the remainder
+        // parses as plain 16-bit groups below.
+        var work = s
+        val lastColon = s.lastIndexOf(':')
+        if (lastColon >= 0 && s.substring(lastColon + 1).contains('.')) {
+            val v4 = parseIpv4Literal(s.substring(lastColon + 1)) ?: return null
+            val g6 = ((v4[0].toInt() and 0xFF) shl 8) or (v4[1].toInt() and 0xFF)
+            val g7 = ((v4[2].toInt() and 0xFF) shl 8) or (v4[3].toInt() and 0xFF)
+            work = s.substring(0, lastColon) + ":" + g6.toString(16) + ":" + g7.toString(16)
+        }
+
+        // At most one "::".
+        val dc = work.indexOf("::")
+        if (dc != work.lastIndexOf("::")) return null
+
+        fun groups(part: String): IntArray? {
+            if (part.isEmpty()) return IntArray(0)
+            val gs = part.split(':')
+            val res = IntArray(gs.size)
+            for (idx in gs.indices) {
+                val g = gs[idx]
+                if (g.isEmpty() || g.length > 4 || g.any { it.lowercaseChar() !in "0123456789abcdef" }) return null
+                res[idx] = g.toInt(16)
+            }
+            return res
+        }
+
+        val all: IntArray = if (dc >= 0) {
+            val left = groups(work.substring(0, dc)) ?: return null
+            val right = groups(work.substring(dc + 2)) ?: return null
+            val total = left.size + right.size
+            if (total > 7) return null // "::" must stand in for >= 1 zero group
+            left + IntArray(8 - total) + right
+        } else {
+            val g = groups(work) ?: return null
+            if (g.size != 8) return null
+            g
+        }
+
+        val out = ByteArray(16)
+        for (idx in 0 until 8) {
+            out[2 * idx] = ((all[idx] ushr 8) and 0xFF).toByte()
+            out[2 * idx + 1] = (all[idx] and 0xFF).toByte()
+        }
+        return out
+    }
+
     private fun socks5ReplyMessage(rep: Int): String = when (rep) {
         0x01 -> "general proxy failure"
         0x02 -> "connection not allowed by ruleset"
@@ -303,6 +394,11 @@ object SocksProxy {
         destHost: String,
         destPort: Int,
     ) {
+        // SOCKS4/4a has no IPv6 address form. Rather than emit a request the proxy rejects
+        // opaquely, fail early with a clear, actionable message.
+        if (parseIpv6Literal(destHost.removePrefix("[").removeSuffix("]")) != null) {
+            throw ProxyException("SOCKS4a can't carry IPv6 destinations ($destHost); use a SOCKS5 proxy for IPv6.")
+        }
         // SOCKS4a request:
         //   VN=0x04, CD=0x01(CONNECT), DSTPORT(2), DSTIP(4)=0.0.0.x (x != 0), USERID, 0x00,
         //   then the literal hostname + 0x00 (this trailing host is the 'a' extension that
