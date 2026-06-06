@@ -2,6 +2,13 @@
 
 All notable changes to HexDroid are documented here.
 ---
+## [1.6.6] - 2026-06-06
+- **DCC**  Add support for file transfers larger than 4.3GB, IPv6 and proxy support. 
+- **Notifications** Added new per network Notification setting, ignore notifications/highlights per nick/IRC wildcard or regex.
+- **Connections** Added Tor and SOCKS5/4a support. Fixed a ping bug causing EOF on older RFC1459 IRCd's (ircd 2.9.x)
+- **Channel lists** Improved /list with ELIST support for larger networks.
+- **Media previews** Added an option to play X videos inline from X posts (Settings > Media Previews).
+
 ## [1.6.5] - 2026-06-01
 
 ### Notification Settings

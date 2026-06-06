@@ -25,6 +25,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -59,7 +60,9 @@ fun ListScreen(
 
     // Apply dedup + filter + sort once, memoized. Keyed on the channelDirectory reference
     // (plus the filter/sort inputs): a data-class copy() preserves the reference of fields it
-    // doesn't reassign
+    // doesn't reassign, so unrelated _state updates (a message in another buffer, etc.) keep
+    // the same list instance and do NOT re-run this, the reference only changes when a LIST
+    // event actually rebuilds the directory.
     val items = remember(state.channelDirectory, filter, sort, minUsers, maxUsers) {
         val filtered = state.channelDirectory
             // /LIST replies routinely repeat a channel (mid-list refreshes, double-sending
@@ -214,7 +217,18 @@ fun ListScreen(
 
             HorizontalDivider()
 
-            LazyColumn(Modifier.fillMaxSize()) {
+            // Keep the list pinned to the top when the user changes sort/filter/bounds.
+            val listState = rememberLazyListState()
+            LaunchedEffect(sort, filter, minUsers, maxUsers) {
+                listState.scrollToItem(0)
+            }
+
+            // Snap to the top both when a load begins AND when it finishes.
+            LaunchedEffect(state.listInProgress) {
+                listState.scrollToItem(0)
+            }
+
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 // `items` is already deduped by channel in the memoized block above, so the
                 // key lambda is safe (duplicate keys make Compose throw from its measure pass
                 // and crash on fling).
@@ -266,7 +280,7 @@ fun ListScreen(
  * A pair of sort controls for one dimension (e.g. "Size").
  *
  * When neither direction is active: shows a single outlined chip labelled with
- * the dimension name — tapping selects descending (the more useful default).
+ * the dimension name, tapping selects descending (the more useful default).
  *
  * When one direction is active: shows a filled chip with an arrow icon.
  * Tapping the active chip toggles to the opposite direction.

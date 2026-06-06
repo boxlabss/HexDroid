@@ -12,6 +12,7 @@ HexDroid is a clean, fast, open-source IRC client for modern Android. Connect to
 • Trust-On-First-Use pinning for self-signed certificates
 • Credentials encrypted with the Android Keystore, never plain text.
 • Secure Chat end-to-end encryption (AES-256-GCM, with Blowfish/FiSH fallback)
+• Tor and SOCKS proxy support
 
 <b>Modern IRC (IRCv3)</b>
 • Swipe to reply, with inline quote previews

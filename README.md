@@ -18,7 +18,7 @@
 
 ---
 
-HexDroid is a free and open source IRC client for Android. It provides a clean, modern interface while supporting the features users expect from a desktop client — including IRCv3 capabilities, SASL authentication, TLS encryption, bouncer support, DCC file transfers, end-to-end encrypted chat, and an array of commands.
+HexDroid is a free and open source IRC client for Android. It provides a clean, modern interface while supporting the features users expect from a desktop client — including IRCv3 capabilities, SASL authentication, TLS encryption, bouncer support, DCC file transfers, end-to-end encrypted chat, TOR, and an array of commands.
 
 > **Requirements:** Android 8.0 (API 26) or higher &nbsp;·&nbsp; **License:** GPLv3
 
@@ -36,13 +36,14 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 ## Features
  
 - Multiple networks at once, each with its own nick, SASL, TLS, autojoin, and encoding
+- Tor and SOCKS proxy support
 - IRCv3 (40+ caps incl. chathistory, MONITOR, typing, replies)
 - Bouncer support (ZNC, soju) with profile discovery
 - End-to-end encrypted chat per channel/PM: AES-256-GCM (`+AGM`) and Blowfish/FiSH (`+OK`)
 - TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates
-- DCC SEND/CHAT, including TLS-encrypted SSEND/SCHAT. RESUME support for file transfers
+- DCC SEND/CHAT, including TLS-encrypted SSEND/SCHAT. RESUME support for file transfers and IPv6 support
 - `irc://` / `ircs://` link handling, image/video previews, mIRC + ANSI colour and ASCII art rendering
-- Per-network ignore list, channel op tools, IRCop panel
+- Per-network ignore list, mute list, channel op tools, IRCop panel
 - Channel /list, lag indicator, nick `@` and `/command` autocompletion
 - Material Design 3 light, dark, and Matrix themes; adjustable fonts; 13 languages
 - Backup/restore: network profiles and settings exported as JSON
@@ -267,7 +268,7 @@ Bug reports and pull requests are welcome. Please open an issue before submittin
 
 **Developers:**
 
-Scripts exist for HexChat, irssi and WeeChat for the `+AGM` spec. The wire-format specification lives under `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
+The HexChat companion plugin and the `+AGM` wire-format specification live under `/aes-client-plugins/hexchat` and `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
 
 Translations are managed in the string resources under `app/src/main/res/values-*/`. If your language is missing or incomplete, a PR updating the relevant `strings.xml` is very welcome.
 

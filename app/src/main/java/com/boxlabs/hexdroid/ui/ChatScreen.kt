@@ -124,7 +124,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -2315,11 +2314,21 @@ fun ChatScreen(
 
     val topBar: @Composable () -> Unit = {
         val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val compact = state.settings.compactMode
         val barHeight = when {
-            cfg.orientation == Configuration.ORIENTATION_LANDSCAPE -> 44.dp
-            state.settings.compactMode -> 48.dp
+            cfg.orientation == Configuration.ORIENTATION_LANDSCAPE -> if (compact) 40.dp else 44.dp
+            compact -> 40.dp
             else -> 50.dp
         }
+        // Compact mode slims the bar: smaller icon-button touch targets, smaller
+        // accent buttons + glyphs, tighter spacing and a smaller title.
+        val iconBtnSize  = if (compact) 36.dp else 40.dp   // ☰ and ⋮ buttons
+        val accentBtnSize = if (compact) 22.dp else 25.dp  // colour + nicklist buttons
+        val accentGlyphSize = if (compact) 16.dp else 20.dp
+        val barHPadding  = if (compact) 2.dp else 4.dp
+        val barSpacing   = if (compact) 2.dp else 4.dp
+        val titleStyle   = if (compact) MaterialTheme.typography.titleSmall
+                           else MaterialTheme.typography.titleMedium
 
         val cs = MaterialTheme.colorScheme
         val topBarBrush = remember(cs) {
@@ -2345,19 +2354,23 @@ fun ChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(barHeight)
-                        .padding(horizontal = 4.dp),
+                        .padding(horizontal = barHPadding),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(barSpacing)
                 ) {
                     if (isWide) {
                         IconButton(
                             onClick = onToggleBufferList,
-                            modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
+                            modifier = Modifier
+                                .size(iconBtnSize)
+                                .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
                     } else {
                         IconButton(
                             onClick = { scope.launch { drawerState.open() } },
-                            modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
+                            modifier = Modifier
+                                .size(iconBtnSize)
+                                .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
                     }
 
@@ -2365,7 +2378,7 @@ fun ChatScreen(
                         text = topBarTitle,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = titleStyle,
                         modifier = Modifier.weight(1f)
                     )
 
@@ -2379,7 +2392,7 @@ fun ChatScreen(
 
                         Box(
                             modifier = Modifier
-                                .size(25.dp)
+                                .size(accentBtnSize)
                                 .scale(if (colorPressed) 0.92f else 1f)
                                 .background(
                                     brush = if (hasActiveFormatting) {
@@ -2444,7 +2457,7 @@ fun ChatScreen(
                                     imageVector = Icons.Filled.FormatColorText,
                                     contentDescription = stringResource(R.string.chat_text_formatting),
                                     tint = Color.White.copy(alpha = if (colorPressed) 0.7f else 0.9f),
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(accentGlyphSize)
                                 )
                             }
                         }
@@ -2456,7 +2469,7 @@ fun ChatScreen(
                         val nicklistPressed by nicklistInteraction.collectIsPressedAsState()
                         Box(
                             modifier = Modifier
-                                .size(25.dp)
+                                .size(accentBtnSize)
                                 .scale(if (nicklistPressed) 0.92f else 1f)
                                 .alpha(if (isChannel) 1f else 0.4f)
                                 .background(
@@ -2492,7 +2505,7 @@ fun ChatScreen(
                                 imageVector = Icons.Filled.People,
                                 contentDescription = stringResource(R.string.chat_user_list),
                                 tint = Color.White.copy(alpha = if (nicklistPressed) 0.7f else 0.9f),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(accentGlyphSize)
                             )
                         }
                     }
@@ -2500,73 +2513,61 @@ fun ChatScreen(
                     Box {
                         IconButton(
                             onClick = { overflowExpanded = true },
-                            modifier = Modifier.tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON)
+                            modifier = Modifier
+                                .size(iconBtnSize)
+                                .tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON)
                         ) { Text("⋮") }
                         DropdownMenu(
                             expanded = overflowExpanded,
                             onDismissRequest = { overflowExpanded = false }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_channel_list)) },
-                                onClick = { overflowExpanded = false; onOpenList() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_file_transfers)) },
-                                onClick = { overflowExpanded = false; onOpenTransfers() }
-                            )
-                            // Encryption is only meaningful for channel/query buffers, not
-                            // for the *server* / *status* tab — there is no remote party
-                            // to share a key with. selNetId can also be blank if the user
-                            // hasn't created any networks yet, in which case the entry is
-                            // hidden entirely rather than shown disabled. viewModel can be
-                            // null in preview/test scenarios.
+                            // Compact menu
+                            @Composable
+                            fun MenuRow(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 40.dp)
+                                        .clickable(enabled = enabled, onClick = onClick)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (enabled) MaterialTheme.colorScheme.onSurface
+                                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    )
+                                }
+                            }
+
+                            MenuRow(stringResource(R.string.menu_channel_list)) { overflowExpanded = false; onOpenList() }
+                            MenuRow(stringResource(R.string.menu_file_transfers)) { overflowExpanded = false; onOpenTransfers() }
+                            // Encryption is only meaningful for channel/query buffers, not the
+                            // *server*/*status* tab. selNetId can be blank if no networks exist
+                            // yet; viewModel can be null in preview/test.
                             if (viewModel != null &&
                                 selNetId.isNotBlank() &&
                                 selBufName.isNotBlank() &&
                                 selBufName != "*server*" &&
                                 selBufName != "*status*"
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Secure Chat") },
-                                                 onClick = {
-                                                     overflowExpanded = false
-                                                     showEncryptionDialog = true
-                                                 }
-                                )
+                                MenuRow("Secure Chat") { overflowExpanded = false; showEncryptionDialog = true }
                             }
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_settings)) },
-                                onClick = { overflowExpanded = false; onOpenSettings() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_networks)) },
-                                onClick = { overflowExpanded = false; onOpenNetworks() }
-                            )
+                            MenuRow(stringResource(R.string.menu_settings)) { overflowExpanded = false; onOpenSettings() }
+                            MenuRow(stringResource(R.string.menu_networks)) { overflowExpanded = false; onOpenNetworks() }
                             if (isIrcOper) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.menu_ircop_tools)) },
-                                    onClick = { overflowExpanded = false; showIrcOpTools = true }
-                                )
+                                MenuRow(stringResource(R.string.menu_ircop_tools)) { overflowExpanded = false; showIrcOpTools = true }
                             }
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_about)) },
-                                onClick = { overflowExpanded = false; onAbout() }
-                            )
+                            MenuRow(stringResource(R.string.menu_about)) { overflowExpanded = false; onAbout() }
                             HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_reconnect)) },
-                                enabled = state.networks.isNotEmpty() && !state.connecting,
-                                onClick = { overflowExpanded = false; onReconnect() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_disconnect)) },
-                                onClick = { overflowExpanded = false; onDisconnect() }
-                            )
+                            MenuRow(
+                                stringResource(R.string.menu_reconnect),
+                                enabled = state.networks.isNotEmpty() && !state.connecting
+                            ) { overflowExpanded = false; onReconnect() }
+                            MenuRow(stringResource(R.string.menu_disconnect)) { overflowExpanded = false; onDisconnect() }
                             HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.menu_exit)) },
-                                onClick = { overflowExpanded = false; onExit() }
-                            )
+                            MenuRow(stringResource(R.string.menu_exit)) { overflowExpanded = false; onExit() }
                         }
                     }
                 }

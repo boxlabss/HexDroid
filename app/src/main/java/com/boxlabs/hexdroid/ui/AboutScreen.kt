@@ -120,6 +120,7 @@ import android.graphics.Color as AColor
 fun AboutScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val website = "https://hexdroid.boxlabs.uk"
+    val sourceUrl = "https://github.com/boxlabss/HexDroid"
     val scroll = rememberScrollState()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -165,7 +166,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AboutContent(ctx, website)
+                    AboutContent(ctx, website, sourceUrl)
                 }
             }
         } else {
@@ -176,24 +177,24 @@ fun AboutScreen(onBack: () -> Unit) {
                     .background(Color(0xFF111111))
                     .padding(padding)
                     .verticalScroll(scroll)
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 FlaskHero(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(340.dp)
+                        .height(280.dp)
                 )
 
-                AboutContent(ctx, website)
+                AboutContent(ctx, website, sourceUrl)
             }
         }
     }
 }
 
 @Composable
-private fun AboutContent(ctx: Context, website: String) {
+private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
     // Cyan accent shared with the flask hero so the whole screen reads as one piece.
     val accent = Color(0xFF00B4F4)
 
@@ -209,22 +210,15 @@ private fun AboutContent(ctx: Context, website: String) {
         )
     )
 
-    // Version "pill" with a glowing accent dot.
+    // Version "pill".
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(accent.copy(alpha = 0.12f))
             .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(50))
             .padding(horizontal = 14.dp, vertical = 6.dp)
     ) {
-        Box(
-            Modifier
-                .size(7.dp)
-                .clip(RoundedCornerShape(50))
-                .background(accent)
-        )
         Text(
             "Version ${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelLarge,
@@ -232,8 +226,6 @@ private fun AboutContent(ctx: Context, website: String) {
             color = Color.White.copy(alpha = 0.9f)
         )
     }
-
-    Spacer(Modifier.height(6.dp))
 
     // Glass support card: soft radial glow behind, gradient hairline border,
     // an accent strip down the leading edge, and a gradient primary button.
@@ -324,12 +316,37 @@ private fun AboutContent(ctx: Context, website: String) {
 
     Spacer(Modifier.height(2.dp))
 
-    Text(
-        "GPLv3",
-        style = MaterialTheme.typography.bodySmall,
-        color = Color.White.copy(alpha = 0.45f),
-        textAlign = TextAlign.Center
-    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            "GPLv3",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.45f),
+            textAlign = TextAlign.Center
+        )
+        Text(
+            "·",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.3f)
+        )
+        Text(
+            "GitHub",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = accent.copy(alpha = 0.85f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.clickable {
+                runCatching {
+                    ctx.startActivity(
+                        Intent(Intent.ACTION_VIEW, sourceUrl.toUri())
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -662,13 +679,13 @@ private fun FlaskHero(
                 modifier = Modifier
                     .size(logoSize)
                     .align(Alignment.TopCenter)
-                    .padding(top = 8.dp)
+                    .padding(top = 2.dp)
             )
             Text(
                 "HexDroid - A free (and ad-free) app by",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = flaskSize + 14.dp),
+                    .padding(bottom = flaskSize + 8.dp),
                 style = MaterialTheme.typography.titleSmall,
                 color = Color.White.copy(alpha = 0.85f),
                 fontWeight = FontWeight.Medium
@@ -678,7 +695,7 @@ private fun FlaskHero(
                 modifier = Modifier
                     .size(flaskSize)
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 8.dp),
+                    .padding(bottom = 4.dp),
                 accent = accent,
                 fillFrac = liquidFill,
                 time = animTime
@@ -698,9 +715,9 @@ private fun ImprovedFlask(
 
     BoxWithConstraints(
         modifier = modifier
-            .shadow(12.dp, RoundedCornerShape(4.dp))
-            .clip(RoundedCornerShape(4.dp))
-            .border(2.dp, borderColor, RoundedCornerShape(4.dp))
+            .shadow(12.dp, RoundedCornerShape(0.dp))
+            .clip(RoundedCornerShape(0.dp))
+            .border(2.dp, borderColor, RoundedCornerShape(0.dp))
             .clipToBounds()
     ) {
         val wPx = with(LocalDensity.current) { maxWidth.toPx() }

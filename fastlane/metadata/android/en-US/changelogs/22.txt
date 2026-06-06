@@ -1,0 +1,5 @@
+Add support for file transfers larger than 4.3GB, IPv6 and proxy support. 
+Added new per network Notification setting, ignore notifications/highlights per nick/IRC wildcard or regex.
+Added Tor and SOCKS5/4a support. Fixed a ping bug causing EOF on older RFC1459 IRCd's (ircd 2.9.x)
+Improved /list with ELIST support for larger networks.
+Added an option to play X videos inline from X posts (Settings > Media Previews).
