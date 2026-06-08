@@ -95,7 +95,6 @@ data class CapPrefs(
     val sojuNoImplicitNames: Boolean = true,
     /**
      * IRCv3 standard-replies (FAIL/WARN/NOTE): structured error replies from modern IRCd.
-     * Ergo, Soju, and InspIRCd 4+ emit these instead of raw numerics.
      */
     val standardReplies: Boolean = true,
     /**
@@ -2298,7 +2297,11 @@ class IrcClient(val config: IrcConfig) {
 							// Detect +o/+O on our own nick - covers auto-oper via services,
 							// not just explicit /OPER (which triggers 381 RPL_YOUREOPER).
 							if (nickEquals(target, currentNick)) {
-								val modeStr = msg.params.getOrNull(1) ?: ""
+								// InspIRCd sends the final MODE parameter
+								// as a trailing parameter, e.g.  :nick!u@h MODE #chan -v :target
+								// the target nick then lives in msg.trailing, not msg.params. Fold trailing
+								// back in as the last positional parameter so mode arguments stay aligned.
+								val modeStr = msg.params.getOrNull(1) ?: msg.trailing ?: ""
 								var adding = true
 								for (ch in modeStr) {
 									when (ch) {
@@ -2317,8 +2320,9 @@ class IrcClient(val config: IrcConfig) {
 							return
 						}
 
-						val modeStr = msg.params.getOrNull(1) ?: return
-						val args = msg.params.drop(2)
+						val modeParams = msg.params + listOfNotNull(msg.trailing)
+						val modeStr = modeParams.getOrNull(1) ?: return
+						val args = modeParams.drop(2)
 
 						val isHistoryMode = playbackHistory || isHeuristicHistory(target, serverTimeMs, nowMs)
 
@@ -2523,7 +2527,7 @@ class IrcClient(val config: IrcConfig) {
 					}
 
 					// IRCv3 standard-replies (FAIL/WARN/NOTE): structured error/warning/info from
-					// modern IRCd (Ergo 2.x, soju, InspIRCd 4+).  Format:
+					// modern IRCd.  Format:
 					//   FAIL <command> <code> [<context>...] :<description>
 					//   WARN <command> <code> [<context>...] :<description>
 					//   NOTE <command> <code> [<context>...] :<description>
@@ -3657,10 +3661,11 @@ fun listModeHandlers(
     makeEnd: (chan: String, code: String, timeMs: Long?, isHistory: Boolean) -> IrcEvent
 ): List<Pair<String, suspend (IrcMessage, Long?, Boolean, Long) -> Unit>> = listOf(
     itemNumeric to handler@{ msg, serverTimeMs, playbackHistory, nowMs ->
-        val chan = msg.params.getOrNull(1) ?: return@handler
-        val mask = msg.params.getOrNull(2) ?: return@handler
-        val setBy = msg.params.getOrNull(3)
-        val setAtMs = msg.params.getOrNull(4)?.toLongOrNull()?.let { it * 1000L }
+        val p = msg.params + listOfNotNull(msg.trailing)
+        val chan = p.getOrNull(1) ?: return@handler
+        val mask = p.getOrNull(2) ?: return@handler
+        val setBy = p.getOrNull(3)
+        val setAtMs = p.getOrNull(4)?.toLongOrNull()?.let { it * 1000L }
         val hist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
         send(makeItem(chan, mask, setBy, setAtMs, serverTimeMs, hist))
     },
@@ -3763,7 +3768,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
     },
     "762" to handler@{ msg, _, _, _ ->
         val target = msg.params.getOrNull(1) ?: return@handler
-        val ts = msg.params.getOrNull(2) ?: ""
+        val ts = msg.params.getOrNull(2) ?: msg.trailing ?: ""
         send(IrcEvent.ServerText("  $target  $ts", code = "762"))
     },
     "763" to handler@{ _, _, _, _ ->
@@ -3782,7 +3787,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         // RPL_TOPICWHOTIME: <me> <#chan> <setter> <time>
         val chan = msg.params.getOrNull(1) ?: return@handler
         val setter = msg.params.getOrNull(2) ?: return@handler
-        val secs = msg.params.getOrNull(3)?.toLongOrNull()
+        val secs = (msg.params.getOrNull(3) ?: msg.trailing)?.toLongOrNull()
         val setAtMs = secs?.let { it * 1000L }
         val hist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
         send(IrcEvent.TopicWhoTime(chan, setter, setAtMs, timeMs = serverTimeMs, isHistory = hist))
@@ -3791,7 +3796,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
     "324" to handler@{ msg, _, _, _ ->
         // RPL_CHANNELMODEIS: <me> <#chan> <modes> [mode params...]
         val chan = msg.params.getOrNull(1) ?: return@handler
-        val modes = msg.params.drop(2).joinToString(" ").trim()
+        val modes = (msg.params.drop(2) + listOfNotNull(msg.trailing)).joinToString(" ").trim()
         if (modes.isNotBlank()) send(IrcEvent.ChannelModeIs(chan, modes, code = msg.command))
     },
     "381" to handler@{ msg, _, _, _ ->

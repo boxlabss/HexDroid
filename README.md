@@ -251,7 +251,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 |---|---|
 | Docs | [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/) |
 | Email | android@boxlabs.co.uk |
-| IRC | `#HexDroid` on `irc.afternet.org` |
+| IRC | [ircs://irc.afternet.org:6697/HexDroid](ircs://irc.afternet.org:6697/HexDroid) |
 
 ---
 
