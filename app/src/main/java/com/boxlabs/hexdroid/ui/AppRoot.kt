@@ -53,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import com.boxlabs.hexdroid.INTRO_TOUR_VERSION
 import com.boxlabs.hexdroid.ui.tour.IntroTourOverlay
@@ -246,6 +247,10 @@ fun AppRoot(
 
             Box(modifier = Modifier.fillMaxSize()) {
 
+            // Preserve each screen's rememberSaveable state across navigation.
+            val screenStateHolder = rememberSaveableStateHolder()
+            screenStateHolder.SaveableStateProvider(state.screen) {
+
             when (state.screen) {
                 AppScreen.CHAT -> ChatScreen(
                     state = state,
@@ -382,6 +387,7 @@ fun AppRoot(
                     onUnignoreNick = vm::unignoreNick,
                 )
 }
+            }
 
 
     val step = currentTourStep

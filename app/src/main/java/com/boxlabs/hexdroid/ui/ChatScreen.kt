@@ -1310,8 +1310,8 @@ fun ChatScreen(
     var inputSnapshot by remember(selected) { mutableStateOf("") }
 
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
-    var selectedFgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
-    var selectedBgColor by remember { mutableStateOf<Int?>(null) }   // 0-15 or null
+    var selectedFgColor by rememberSaveable { mutableStateOf<Int?>(null) }   // 0-15 or null
+    var selectedBgColor by rememberSaveable { mutableStateOf<Int?>(null) }   // 0-15 or null
     var boldActive by rememberSaveable { mutableStateOf(false) }
     var italicActive by rememberSaveable { mutableStateOf(false) }
     var underlineActive by rememberSaveable { mutableStateOf(false) }
