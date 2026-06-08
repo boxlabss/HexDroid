@@ -4972,7 +4972,12 @@ fun startAddNetwork() {
                 sendDccChatLine(currentKey, fullMessage, isAction = false)
                 return@launch
             }
-            if (c == null) {
+            // Verify the connection is actually live and tell the user,
+            // rather than swallowing the message. We accept either the live socket
+            // or the UI state reporting connected, so a brief state-drift can't false-block.
+            val liveConnected = c?.isConnectedNow() == true
+            val stateConnected = _state.value.connections[netId]?.connected == true
+            if (c == null || (!liveConnected && !stateConnected)) {
                 append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
                 return@launch
             }
@@ -5469,9 +5474,6 @@ fun startAddNetwork() {
                     //                            464 numeric
                     //   connection-limit class   server is at capacity OR we've hit a
                     //                            per-IP / per-account connection cap
-                    //   throttled                some ircds
-                    //                            explicitly throttle reconnects-too-fast and
-                    //                            extend the throttle each time we retry
                     //   access-denied / banned   catch-all for "you're not welcome here"
                     val lowerR = r.lowercase()
                     val recentServerErrorText = lastServerErrorByNet[netId]?.let { (msg, ts) ->
@@ -5508,8 +5510,6 @@ fun startAddNetwork() {
                             "too many connections", "too many clients", "too many users",
                             "connection limit", "max clients",
                         ) ||
-                        // throttled / rate-limit
-                        anyMatches("throttled", "reconnecting too fast") ||
                         // access-denied
                         anyMatches("access denied", "not authorized", "not authorised")
                     if (tlsUnrecoverable) {
@@ -5526,7 +5526,11 @@ fun startAddNetwork() {
                         setNetConn(netId) { it.copy(status = "TLS error: reconnect halted") }
                         return
                     }
-                    if (hostUnreachable) {
+                    // Only treat host-unreachable as a permanent halt if we never managed
+                    // to register on this server this session. A network that DID register
+                    // has a known-good host/port, so a sudden "unable to resolve host" /
+                    // "connection refused" is almost always transient.
+                    if (hostUnreachable && !everRegisteredThisSession.contains(netId)) {
                         authBlockedReconnect.add(netId)
                         appendConnStatus(
                             netId = netId,

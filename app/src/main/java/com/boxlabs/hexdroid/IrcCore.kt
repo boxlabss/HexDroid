@@ -2239,8 +2239,11 @@ class IrcClient(val config: IrcConfig) {
 						val kickerHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
 							?.takeIf { it.isNotBlank() }
 						val chan = msg.params.getOrNull(0) ?: return
-						val victim = msg.params.getOrNull(1) ?: return
-						val reason = msg.trailing
+						// KICK is "<channel> <user> [<comment>]". The comment is normally the
+						// trailing parameter, but a server may send the user itself as
+						// the trailing parameter when there's no comment (KICK #chan :user).
+						val victim = msg.params.getOrNull(1) ?: msg.trailing ?: return
+						val reason = if (msg.params.size >= 2) msg.trailing else null
 						val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
 						send(
 							IrcEvent.Kicked(
@@ -2297,7 +2300,7 @@ class IrcClient(val config: IrcConfig) {
 							// Detect +o/+O on our own nick - covers auto-oper via services,
 							// not just explicit /OPER (which triggers 381 RPL_YOUREOPER).
 							if (nickEquals(target, currentNick)) {
-								// InspIRCd sends the final MODE parameter
+								// Strict RFC2812 IRCd's send the final MODE parameter
 								// as a trailing parameter, e.g.  :nick!u@h MODE #chan -v :target
 								// the target nick then lives in msg.trailing, not msg.params. Fold trailing
 								// back in as the last positional parameter so mode arguments stay aligned.
@@ -2344,18 +2347,22 @@ class IrcClient(val config: IrcConfig) {
 					}
 
 					// IRCv3 CHGHOST: ident or hostname changed (requires chghost CAP)
+					// CHGHOST is "<user> <host>"; the host is the last param, so accept it from
+					// the trailing parameter too (CHGHOST user :host) instead of dropping the event.
 					"CHGHOST" -> {
 						val nick = msg.prefixNick() ?: return
 						val newUser = msg.params.getOrNull(0) ?: return
-						val newHost = msg.params.getOrNull(1) ?: return
+						val newHost = msg.params.getOrNull(1) ?: msg.trailing ?: return
 						send(IrcEvent.Chghost(nick, newUser, newHost, timeMs = serverTimeMs, isHistory = playbackHistory))
 					}
 
 					// IRCv3 ACCOUNT: services account changed (requires account-notify CAP)
 					// account name is params[0]; "*" means logged out
+					// account-notify carries the account as a single param; accept it from the
+					// trailing parameter too (ACCOUNT :name) so it isn't misread as a logout ("*").
 					"ACCOUNT" -> {
 						val nick = msg.prefixNick() ?: return
-						val account = msg.params.getOrNull(0) ?: "*"
+						val account = msg.params.getOrNull(0) ?: msg.trailing ?: "*"
 						send(IrcEvent.AccountChanged(nick, account, timeMs = serverTimeMs, isHistory = playbackHistory))
 					}
 
@@ -3676,6 +3683,59 @@ fun listModeHandlers(
     }
 )
 
+// Reclaim the configured nick after reconnecting on a fallback. When the primary nick
+// was taken at registration, most often our own ghost session lingering after a
+// mobile/Wi-Fi reconnect; try once, then retry QUIETLY in the background until it
+// frees, the user takes manual control, or we hit the give-up window.
+suspend fun runNickReclaim() {
+	val target = config.nick
+	val fallback = currentNick   // the nick the server registered us with
+	// Let SASL/services nick-reclaim and a fast ghost ping-timeout settle first.
+	delay(ConnectionConstants.NICK_RECLAIM_INITIAL_DELAY_MS)
+	if (userClosing || !nickEquals(currentNick, fallback)) return
+		if (nickEquals(currentNick, target)) {
+			send(IrcEvent.ServerText("*** Regained primary nick $target.", code = "NICK"))
+			return
+		}
+
+		// First attempt
+		send(IrcEvent.ServerText("*** Attempting to regain primary nick $target…", code = "NICK"))
+		runCatching { writeLine("NICK $target") }
+		delay(ConnectionConstants.NICK_RECLAIM_RESPONSE_GRACE_MS)
+		if (nickEquals(currentNick, target)) {
+			send(IrcEvent.ServerText("*** Regained primary nick $target.", code = "NICK"))
+			return
+		}
+		if (userClosing || !nickEquals(currentNick, fallback)) return
+
+			// Didn't free up immediately, almost always our own lingering session, which won't
+			// release the nick until the server times it out (~180s).
+			send(IrcEvent.ServerText(
+				"*** $target is still in use; retrying quietly in the background " +
+				"(a lingering session usually clears within a few minutes).", code = "NICK"))
+
+			val deadline = System.currentTimeMillis() + ConnectionConstants.NICK_RECLAIM_TOTAL_WINDOW_MS
+			while (System.currentTimeMillis() < deadline) {
+				delay(ConnectionConstants.NICK_RECLAIM_RETRY_INTERVAL_MS)
+				if (userClosing) return
+					if (nickEquals(currentNick, target)) {
+						send(IrcEvent.ServerText("*** Regained primary nick $target.", code = "NICK"))
+						return
+					}
+					// Don't fight a deliberate /nick or a server-forced rename.
+					if (!nickEquals(currentNick, fallback)) return
+						runCatching { writeLine("NICK $target") }
+						delay(ConnectionConstants.NICK_RECLAIM_RESPONSE_GRACE_MS)
+						if (nickEquals(currentNick, target)) {
+							send(IrcEvent.ServerText("*** Regained primary nick $target.", code = "NICK"))
+							return
+						}
+			}
+			send(IrcEvent.ServerText(
+				"*** Gave up trying to regain $target, still in use. Use /nick $target to retry.",
+				code = "NICK"))
+}
+
 val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> Unit> = mapOf(
     "001" to handler@{ msg, _, _, _ ->
         // Welcome: <me> ...
@@ -3684,6 +3744,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         registered = true
         registrationWatchdogJob.cancel()  // 001 received — connection is live
         send(IrcEvent.Registered(me))
+        // If the server handed us a fallback nick (the configured nick was taken,
+        // often our own ghost session lingering after a reconnect), try to reclaim it.
+        if (!nickEquals(me, config.nick)) {
+            launch { runNickReclaim() }
+        }
     },
 
     "005" to handler@{ msg, _, _, _ ->
@@ -3787,6 +3852,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         // RPL_TOPICWHOTIME: <me> <#chan> <setter> <time>
         val chan = msg.params.getOrNull(1) ?: return@handler
         val setter = msg.params.getOrNull(2) ?: return@handler
+        // InspIRCd 4 sends the set-time as a trailing parameter; fall back to it.
         val secs = (msg.params.getOrNull(3) ?: msg.trailing)?.toLongOrNull()
         val setAtMs = secs?.let { it * 1000L }
         val hist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
@@ -5238,7 +5304,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// Channel info
 			"328" -> t?.let { "Channel URL: $it" }
 			"329" -> {
-				val ts = p(2)?.toLongOrNull()?.times(1000L)
+				val ts = (p(2) ?: t)?.toLongOrNull()?.times(1000L)
 				val date = ts?.let {
 					val sdf = SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", Locale.getDefault())
 					sdf.format(java.util.Date(it))
