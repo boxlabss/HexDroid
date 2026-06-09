@@ -269,10 +269,21 @@ private suspend fun fetchBitmap(url: String, ctx: Context): FetchResult = withCo
                 //      alpha for ARGB_8888 with alpha channel; non-premultiplied throws
                 //      "Canvas: trying to use a non-premultiplied bitmap". Forcing
                 //      inPremultiplied = true normalises this.
-                val decodeOpts = BitmapFactory.Options().apply {
+
+                // Downsample to roughly the on-screen size
+                val targetMaxDim = 1600
+                var inSample = 1
+                BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { probe ->
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, probe)
+                    val largest = maxOf(probe.outWidth, probe.outHeight)
+                    while (largest > 0 && largest / inSample > targetMaxDim) inSample *= 2
+                }
+
+                    val decodeOpts = BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                     inPremultiplied = true
                     inMutable = false
+                    inSampleSize = inSample
                 }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)?.let {
                     // For GIFs keep the raw bytes so the animated drawable can be created later.
