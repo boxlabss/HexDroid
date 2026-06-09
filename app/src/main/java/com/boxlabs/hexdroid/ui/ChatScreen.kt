@@ -1509,8 +1509,8 @@ fun ChatScreen(
     }
 
     fun mention(nick: String) {
-        input =
-            if (input.text.isBlank()) TextFieldValue("$nick: ") else TextFieldValue(input.text + " $nick")
+        val newText = if (input.text.isBlank()) "$nick: " else input.text + " $nick"
+        input = TextFieldValue(newText, TextRange(newText.length))
     }
 
 	@Composable
