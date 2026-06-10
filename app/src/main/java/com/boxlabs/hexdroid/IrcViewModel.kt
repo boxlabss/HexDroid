@@ -602,6 +602,16 @@ class IrcViewModel(
          * shows once instead of twice after a reconnect.
          */
         const val SELF_SEND_RETAIN_MS = 15 * 60_000L
+
+        /** Fish used by the /slap command, picked at random. */
+        val SLAP_FISH = listOf(
+            "a large trout", "a slippery eel", "a giant squid", "a rubber halibut",
+            "a flapping salmon", "a tiny herring", "a fierce piranha", "a bucket of sardines",
+            "a frozen mackerel", "an irate pufferfish", "a soggy catfish", "a wet flounder",
+            "a tin of anchovies", "a startled clownfish", "a barracuda", "a sturgeon",
+            "a confused cod", "a haddock", "a swordfish (flat side)", "a jellyfish",
+            "an electric eel", "a koi carp", "a sardine", "an anchovy", "a kipper",
+        )
         /**
          * After a *reconnect*, how long self-JOIN echoes are treated as automatic rejoins
          * (and therefore do NOT switch the active buffer). Covers both the client-sent
@@ -620,7 +630,7 @@ class IrcViewModel(
         val names: LinkedHashSet<String> = linkedSetOf()
     )
 
-    
+
     data class NetSupport(
         val chantypes: String = "#&",
         val caseMapping: String = "rfc1459",
@@ -1338,6 +1348,33 @@ class IrcViewModel(
     private fun bufKey(netId: String, bufferName: String): String = "$netId::$bufferName"
 
     /**
+     * Nicks we've recently held on each network (current + recent past). Used so our own
+     * messages replayed via chathistory are recognised as ours even when we reconnected onto
+     * a fallback nick. e.g. registered as "eck_" because our own ghost session still held
+     * "eck" until its ping-timeout. Without this, [isFromMe] in [append] compares the replayed
+     * sender against only the *current* nick and misses the duplicate. Survives reconnect (like
+     * [recentSelfSends]) and self-expires after [SELF_SEND_RETAIN_MS]; refreshed on every
+     * self-send so an active nick stays "known" no matter how long the session has been up.
+     */
+    private val recentOwnNicks: MutableMap<String, MutableMap<String, Long>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    private fun recordOwnNick(netId: String, nick: String?) {
+        if (nick.isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        val m = recentOwnNicks.getOrPut(netId) { java.util.concurrent.ConcurrentHashMap() }
+        m[nick.lowercase()] = now
+        if (m.size > 16) m.entries.removeAll { now - it.value > SELF_SEND_RETAIN_MS }
+    }
+
+    private fun isRecentOwnNick(netId: String, nick: String?): Boolean {
+        if (nick == null) return false
+        val t = recentOwnNicks[netId]?.get(nick.lowercase()) ?: return false
+        return System.currentTimeMillis() - t <= SELF_SEND_RETAIN_MS
+    }
+
+
+    /**
      * Wrap [text] in mIRC colour-code framing (`\u0003<code>` + text + `\u0003`) when the
      * `colorChannelEvents` setting is on. The renderer's existing mIRC parser turns this
      * into a Compose SpanStyle on display: log files, copy-to-clipboard, and any other
@@ -1686,17 +1723,17 @@ class IrcViewModel(
                 maybeRestoreDesiredConnections()
             }
         }
-        
+
         registerNetworkCallback()
-        
+
         notifier.ensureChannels()
     }
-    
+
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    
+
     private fun registerNetworkCallback() {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
-        
+
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
                 // Network became available - check if any desired connections need reconnecting
@@ -1720,7 +1757,7 @@ class IrcViewModel(
                     }
                 }
             }
-            
+
             override fun onLost(network: android.net.Network) {
                 // Network lost - check if we still have connectivity via another network.
                 viewModelScope.launch {
@@ -1748,7 +1785,7 @@ class IrcViewModel(
                     }
                 }
             }
-            
+
             override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
                 // IrcCore's ping cycle handles stale sockets; nothing to do here.
             }
@@ -2334,7 +2371,7 @@ class IrcViewModel(
 
     // Network
 
-    
+
     /**
      * Restore the built-in AfterNET profile (used for support) if the user deleted it.
      * Safe to call multiple times; it no-ops if a profile named/id AfterNET already exists.
@@ -3667,7 +3704,7 @@ fun startAddNetwork() {
                 KeepAliveService.releaseScopedWakeLock(netId)
             }
         }
-		
+
         // FALLBACK ONLY: if the collector exits without ever emitting Disconnected,
         // clean up and schedule reconnect. In the NORMAL path the IrcCore read loop
         // does emit Disconnected; that fires handleEvent/Disconnected handler which
@@ -4743,6 +4780,34 @@ fun startAddNetwork() {
                         return@launch
                     }
 
+                    "slap" -> {
+                        if (c == null) {
+                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            return@launch
+                        }
+                        val victim = cmdLine.substringAfter(' ', "").trim().substringBefore(' ').trim()
+                        if (victim.isBlank()) {
+                            append(currentKey, from = null, text = "*** Usage: /slap <nick>", doNotify = false)
+                            return@launch
+                        }
+                        val msg = "slaps $victim around a bit with ${SLAP_FISH.random()}"
+
+                        // DCC CHAT buffer: send over the DCC socket instead of IRC.
+                        if (isDccChatBufferName(bufferName)) {
+                            sendDccChatLine(currentKey, msg, isAction = true)
+                            return@launch
+                        }
+
+                        val target = if (bufferName == "*server*") return@launch else bufferName
+                        // Route through ctcp() so privmsg()'s E2E hook can encrypt the ACTION
+                        // body when a per-target key is set, exactly like /me above.
+                        c.ctcp(target, "ACTION $msg")
+                        val actionEnc = e2eKeyStore.get(netId, target)?.scheme
+                        append(currentKey, from = st.connections[netId]?.myNick ?: st.myNick, text = msg, isAction = true, isLocal = true, encryption = actionEnc)
+                        recordLocalSend(netId, currentKey, msg, isAction = true)
+                        return@launch
+                    }
+
                     "banlist" -> {
                         if (c == null) {
                             append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
@@ -4962,12 +5027,12 @@ fun startAddNetwork() {
             // Only split if the message exceeds the server's max line length.
             // The IRC protocol limit is typically 512 bytes (including CRLF), but many
             // servers support more via ISUPPORT LINELEN.
-            
+
             // Replace newlines with spaces to create one continuous message
             val fullMessage = trimmed.replace('\n', ' ').replace('\r', ' ').replace("  ", " ").trim()
-            
+
             if (fullMessage.isEmpty()) return@launch
-            
+
             if (isDccChatBufferName(bufferName)) {
                 sendDccChatLine(currentKey, fullMessage, isAction = false)
                 return@launch
@@ -4985,7 +5050,7 @@ fun startAddNetwork() {
                 c.sendRaw(fullMessage)
                 return@launch
             }
-            
+
             // Calculate max message length for PRIVMSG
             // Format: ":nick!user@host PRIVMSG <target> :<message>\r\n"
             // We derive the limit from the server's LINELEN ISUPPORT token when available.
@@ -5035,7 +5100,7 @@ fun startAddNetwork() {
             }
         }
     }
-    
+
     /**
      * Split a message into chunks that don't exceed [maxLen] bytes (UTF-8).
      *
@@ -5936,6 +6001,7 @@ if (code == "442") {
 
             is IrcEvent.Registered -> {
                 runtimes[netId]?.myNick = ev.nick
+                recordOwnNick(netId, ev.nick)
                 val rt0 = runtimes[netId]
                 val hasReact = rt0 != null &&
                     (rt0.client.hasCap("message-tags") || rt0.client.hasCap("draft/message-reactions"))
@@ -6142,13 +6208,14 @@ if (code == "442") {
                     // If it's our nick, update runtime + UI connection state first.
                     if (isMe) {
                         runtimes[netId]?.myNick = ev.newNick
+                        recordOwnNick(netId, ev.newNick)
                         setNetConn(netId) { it.copy(myNick = ev.newNick) }
                     }
 
                     // Re-read state after appends/setNetConn so we don't overwrite newer state.
                     val st1 = _state.value
 
-                    
+
                     // Update nicklists for this network (multi-status safe).
                     moveNickAcrossChannels(netId, ev.oldNick, ev.newNick)
 
@@ -6592,7 +6659,7 @@ if (code == "442") {
                 val (selNet, _) = splitKey(sel)
                 val destKey = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
                 ensureBuffer(destKey)
-                
+
                 val text = when (ev.command.uppercase()) {
                     "PING" -> {
                         // Calculate round-trip time if args is a timestamp we sent
@@ -6696,7 +6763,7 @@ if (code == "442") {
                     )
                 }
 
-                
+
                 val myNickNow = st0.connections[netId]?.myNick ?: st0.myNick
                 val isMeNow = casefoldText(netId, ev.nick) == casefoldText(netId, myNickNow)
 
@@ -6802,7 +6869,7 @@ if (code == "442") {
                 }
             }
 
-            
+
             is IrcEvent.Parted -> {
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
@@ -7664,8 +7731,8 @@ if (code == "442") {
 
                 // Only show scrollback marker if there are actual old messages (not from current session)
                 // and there's a meaningful time gap between scrollback and live messages.
-                val showMarker = cur.settings.loggingEnabled && 
-                    olderLoaded.isNotEmpty() && 
+                val showMarker = cur.settings.loggingEnabled &&
+                    olderLoaded.isNotEmpty() &&
                     liveDuringLoad.isNotEmpty() &&
                     (firstLiveTime - olderLoaded.maxOf { it.timeMs }) > 5000L  // At least 5 second gap
 
@@ -8006,7 +8073,11 @@ if (code == "442") {
         // a tracker entry (a side effect that must not run on a CAS retry).
         val (selfNetId, _) = splitKey(bufferKey)
         val myNick = _state.value.connections[selfNetId]?.myNick ?: runtimes[selfNetId]?.myNick
-        val isFromMe = from != null && myNick != null && from.equals(myNick, ignoreCase = true)
+        // Accept the current nick OR any nick we've recently held, after a reconnect onto a
+        // fallback nick, our chathistory-replayed lines still carry the nick we sent them under.
+        val isFromMe = from != null && (
+            (myNick != null && from.equals(myNick, ignoreCase = true)) || isRecentOwnNick(selfNetId, from)
+        )
         val isSelfEchoReplayDuplicate =
             isFromMe && isHistory && consumeSelfSendIfMatch(bufferKey, text, isAction)
 
@@ -8152,6 +8223,7 @@ if (code == "442") {
         // returned above.
         if (isFromMe && !isHistory && isLocal) {
             recordSelfSend(bufferKey, text, isAction)
+            recordOwnNick(selfNetId, from)
         }
 
         // Maintain the chathistory marker tracker. Done after a non-duplicate state update so a
