@@ -1,0 +1,669 @@
+<resources>
+    <string name="app_name">HexDroid IRC</string>
+
+    <!-- Welcome / Setup Screen -->
+    <string name="welcome_title">Üdvözöl a HexDroid</string>
+    <string name="welcome_subtitle">Mielőtt belevágnánk, lássuk a beállításokat.</string>
+    <string name="welcome_language_label">Nyelv</string>
+    <string name="welcome_nick_label">Becenév</string>
+    <string name="welcome_nick_hint">Válassz IRC becenevet</string>
+    <string name="welcome_nick_helper">Ezt fogjuk használni az alapértelmezett szerver profilokhoz.</string>
+    <string name="welcome_continue">Tovább</string>
+    <string name="welcome_nick_error_empty">A becenév nem hiányozhat</string>
+    <string name="welcome_nick_error_invalid">A becenév érvénytelen karaktereket tartalmaz</string>
+    <string name="welcome_nick_error_long">A becenév legfeljebb 16 karakterből állhat</string>
+
+    <!-- Common / Navigation -->
+    <string name="back">Vissza</string>
+    <string name="cancel">Mégse</string>
+    <string name="save">Mentés</string>
+    <string name="delete">Törlés</string>
+    <string name="close">Bezár</string>
+    <string name="done">Kész</string>
+    <string name="next">Következő</string>
+    <string name="skip">Kihagy</string>
+    <string name="run">Futtatás</string>
+    <string name="set">Beállít</string>
+    <string name="reset">Újrakezd</string>
+    <string name="manage">Kezelés</string>
+    <string name="not_now">Később</string>
+    <string name="copy_text">Másol</string>
+
+    <!-- Buffer-list sidepanel toolbar -->
+    <string name="buffer_toolbar_collapse_all">Hálózatok összecsukása</string>
+    <string name="buffer_toolbar_mark_all_read">Összes jelölése olvasottként</string>
+    <string name="buffer_toolbar_search">Keresés a pufferben</string>
+    <string name="buffer_toolbar_search_dialog_title">Keresés a pufferben</string>
+    <string name="buffer_toolbar_search_placeholder">Szöveg vagy feladó…</string>
+    <string name="buffer_toolbar_search_global">Keresés a hálózaton minden pufferben</string>
+    <string name="buffer_toolbar_search_action">Keresés</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Beállítások</string>
+    <string name="settings_intro_tour">Bevezető</string>
+    <string name="settings_intro_tour_desc">Főbb ablakok és vezérlők áttekintése.</string>
+    <string name="section_appearance">Megjelenés</string>
+    <string name="section_ui">Felület</string>
+    <string name="section_landscape">Vízszintes Oldalsáv Beállítások</string>
+    <string name="section_portrait">Függőleges Becenévlista</string>
+    <string name="section_highlights">Kiemelések</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">Értesítések</string>
+    <string name="section_logging">Naplózás</string>
+    <string name="section_privacy">Adatvédelem</string>
+    <string name="section_ircv3_history">IRCv3 Előzmény</string>
+    <string name="section_file_transfers">Fájlátvitelek</string>
+    <string name="setting_font_size">Betűméret</string>
+    <string name="setting_colorise_nicks">Becenév színezés</string>
+    <string name="setting_own_nick_colour_title">Becenevem színe</string>
+    <string name="setting_own_nick_colour_auto">Auto</string>
+    <string name="setting_own_nick_colour_custom">Egyedi</string>
+    <string name="setting_own_nick_colour_pick">Színválasztás</string>
+    <string name="setting_own_nick_colour_reset">Visszaállítás</string>
+    <string name="setting_mirc_colours">mIRC színek bekapcsolása</string>
+    <string name="setting_ansi_colours">ANSI színek bekapcsolása</string>
+    <string name="setting_show_topic_bar">Topiksáv megjelenítése</string>
+    <string name="setting_show_timestamps">Időbélyegek megjelenítése</string>
+    <string name="setting_timestamp_format">Időbélyeg formátum (Java)</string>
+    <string name="setting_hide_motd">MOTD elrejtése kapcsolódáskor</string>
+    <string name="setting_hide_joinpartquit">join/part/quit üzenetek elrejtése</string>
+    <string name="setting_hide_away_notify">away/back üzenetek elrejtése</string>
+    <string name="setting_color_channel_events">Színes csatorna események</string>
+    <string name="setting_hide_topic_on_entry">Topik elrejtése belépéskor</string>
+    <string name="setting_show_buffers_default">Hálózat/csatornák megjelenítése alapértelmezésben</string>
+    <string name="setting_show_nicklist_default">Becenévlista megjelenítése alapértelmezésben</string>
+    <string name="setting_highlight_on_nick">Becenév kiemelése</string>
+    <string name="setting_extra_highlights">Extra kiemelő szavak (soronként egy)</string>
+    <string name="setting_compact_mode">Kompakt mód</string>
+    <string name="setting_portrait_nicklist_overlay">Oldalpanel becenévlista</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Becenévlista megjelenítése méretezhető oldalpanelként, felugró ablak helyett. Bekapcsolva, a becenévlista gomb állandó mutat/elrejt kapcsoló.</string>
+    <string name="setting_ignore_list">Mellőzés lista</string>
+    <string name="setting_ignore_list_desc">Adott becenevektől származó üzenetek és DCC kérések elrejtése (hálózatonként).</string>
+    <string name="setting_quit_message">Bezárási üzenet</string>
+    <string name="setting_part_message">Kilépési üzenet</string>
+    <string name="setting_auto_reconnect">Auto-újrakapcsolódás</string>
+    <string name="setting_reconnect_interval">Újrakapcsolódási időköz (másodperc)</string>
+    <string name="setting_reconnect_interval_desc">Próbálkozások gyakorisága a kapcsolat megszakadásakor.</string>
+    <string name="setting_seconds">Másodperc</string>
+    <string name="setting_auto_connect_startup">Auto-kapcsolódás indításkor</string>
+    <string name="setting_rejoin_on_kick">Visszalépés kirúgáskor</string>
+    <string name="setting_rejoin_on_kick_desc">Kirúgást követő automatikus visszalépés csatornára. Ugyanazon csatornáról 60 mp-en belüli második kirúgáskor nincs visszalépés, elkerülendő a +i/+k/+b módok miatti végtelen ismétlődést.</string>
+    <string name="setting_enable_notifications">Értesítések bekapcsolása</string>
+    <string name="setting_notify_highlights">Értesítések kiemelése</string>
+    <string name="setting_notify_pm">Privát üzenet értesítések</string>
+    <string name="setting_connection_status">Kapcsolati állapotértesítések megjelenítése</string>
+    <string name="setting_sound_highlight">Hang kiemeléskor</string>
+    <string name="setting_vibrate_highlight">Rezgés kiemeléskor</string>
+    <string name="setting_enable_logging">Naplózás bekapcsolása</string>
+    <string name="setting_log_server">Szerverpuffer napló</string>
+    <string name="setting_log_folder">Naplózási mappa</string>
+    <string name="setting_choose_folder">Válassz mappát</string>
+    <string name="setting_retention_days">Megőrzési idő</string>
+    <string name="setting_max_scrollback">Visszagörgethető sorok száma</string>
+    <string name="setting_history_limit">Előzménykorlát</string>
+    <string name="setting_history_limit_desc">Csatornánként belépéskor kérhető üzenetek száma (CHATHISTORY LATEST). Kikapcsoláshoz 0.</string>
+    <string name="setting_messages">Üzenetek</string>
+    <string name="setting_count_unread">Lekért előzmények olvasatlanként</string>
+    <string name="setting_trigger_notif">Értesítések a lekért előzményekről</string>
+    <string name="setting_download_folder">Letöltési mappa</string>
+    <string name="setting_incoming_port_min">Bejövő port min</string>
+    <string name="setting_incoming_port_max">Bejövő port max</string>
+    <string name="setting_keep_alive">Kapcsolat fenntartása</string>
+    <string name="setting_enable_dcc">DCC bekapcsolása</string>
+    <string name="setting_open_app_settings">Alkalmazásbeállítások megnyitása</string>
+    <string name="setting_battery_optimization">Akku optimalizálási lista</string>
+
+    <!-- Theme picker -->
+    <string name="theme_label">Téma</string>
+    <string name="theme_dark">Sötét</string>
+    <string name="theme_light">Világos</string>
+    <string name="theme_system">Rendszer</string>
+
+    <!-- Font picker -->
+    <string name="font_open_sans">Open Sans</string>
+    <string name="font_inter">Inter</string>
+    <string name="font_monospace">Monospace</string>
+    <string name="font_custom">Egyedi betűtípus…</string>
+
+    <!-- Chat font style -->
+    <string name="chat_font_style">Csevegés betűstílus</string>
+    <string name="style_regular">Szokásos</string>
+    <string name="style_bold">Kövér</string>
+    <string name="style_italic">Dőlt</string>
+    <string name="style_bold_italic">Kövér + Dőlt</string>
+
+    <!-- Vibration -->
+    <string name="vibration_intensity">Rezgés erőssége</string>
+    <string name="vibration_low">Csekély</string>
+    <string name="vibration_medium">Közepes</string>
+    <string name="vibration_high">Nagy</string>
+
+    <!-- Chat Screen -->
+    <string name="chat_nicklist">Becenévlista</string>
+    <string name="chat_users_format">%1$s • %2$d felhasználó</string>
+    <string name="chat_no_channel">Nincs csatornán</string>
+    <string name="chat_disconnected">Lecsatlakozva</string>
+    <string name="chat_type_message">Írj üzenetet…</string>
+    <string name="chat_channel_tools">Csatorna eszközök</string>
+    <string name="chat_topic">Topik</string>
+    <string name="chat_new_topic">Új topik</string>
+    <string name="chat_kick_ban">Kirúg / Kitilt</string>
+    <string name="chat_nick">Becenév</string>
+    <string name="chat_reason">Indok</string>
+    <string name="chat_duration_label">Időtartam</string>
+    <string name="chat_duration_hint">pl. 1 nap, 2 óra; 0 általában végleges</string>
+    <string name="chat_kick">Kirúg</string>
+    <string name="chat_ban">Kitilt</string>
+    <string name="chat_kick_ban_btn">Kirúg+Kitilt</string>
+
+    <!-- Network screens -->
+    <string name="networks_title">Hálózatok</string>
+    <string name="networks_connect">Kspcsolódás</string>
+    <string name="networks_disconnect">Lecsatlakozás</string>
+    <string name="networks_edit">Szerkeszt</string>
+    <string name="networks_add">Hálózat hozzáadás</string>
+    <string name="networks_auto_connect">Auto-kapcsolódás</string>
+    <string name="network_edit_title">Hálózat szerkesztés</string>
+    <string name="network_add_title">Hálózat hozzáadás</string>
+    <string name="network_name">Név</string>
+    <string name="network_host">Kiszolgáló</string>
+    <string name="network_port">Port</string>
+    <string name="network_use_tls">TLS (SSL) alkalmazása</string>
+    <string name="network_allow_invalid_certs">Érvénytelen tanúsítványok jóváhagyása</string>
+    <string name="network_pinned_cert_label">Rögzített tanúsítvány ujjlenyomatai (TOFU)</string>
+    <string name="network_pinned_cert_dormant">A TOFU rögzítés csak akkor lép életbe, ha az \"Érvénytelen tanúsítványok jóváhagyása\" be van kapcsolva. Az alábbi ujjlenyomatok referenciaként szolgálnak; a jelenlegi kapcsolatot a rendszer hitelesítésszolgáltatói lánca ellenőrzi.</string>
+    <string name="network_reset_pinned_cert">Visszaállítás &amp; újrarögzítés (mindent töröl)</string>
+    <string name="network_trust_extra_pinned_cert">Ez a szerver is megbízható (round-robin DNS)</string>
+    <string name="network_nick">Becenév</string>
+    <string name="network_alt_nick">Másod becenév</string>
+    <string name="network_username">Felhasználónév</string>
+    <string name="network_realname">Valódi név</string>
+
+    <!-- Tour steps -->
+    <string name="tour_add_network_title">Hálózataid</string>
+    <string name="tour_add_network_body">Szerver hozzáadásához koppints: +, vagy szerkessz itt meglévőket. A HexDroid alapból tartalmaz néhányat.</string>
+    <string name="tour_connect_title">Kapcsolódás</string>
+    <string name="tour_connect_body">Koppints a Kapcsolódás-ra a csatlakozáshoz. Több hálózathoz is kapcsolódhatsz egyidőben.</string>
+    <string name="tour_switcher_title">Puffer lista</string>
+    <string name="tour_switcher_body">Ez a panel listáz minden szervert, csatornát és megnyitott privát üzenetet. Húzd el, vagy koppints a ☰ gombra a megjelenítéshez. Koppints bármely elemre a váltáshoz</string>
+    <string name="tour_send_title">Üzenetküldés</string>
+    <string name="tour_send_body">Ide írva cseveghetsz. Perjeles parancsok is használhatók: /join #csatorna, /msg becenév szöveg, /part, /whois becenév, /me cselekvés szöveg, stb.</string>
+    <string name="tour_more_title">További műveletek</string>
+    <string name="tour_more_body">Ebben a menüben érhető el a csatornalista, fájlátvitelek, mellőzési lista, hálózati beállítások és egyebek. Emellett csatonamódokat és topikkezelést is tartalmaz, ha Op vagy.</string>
+    <string name="tour_settings_title">Megjelenés &amp; beállítások</string>
+    <string name="tour_settings_body">Válassz témát, állítsd be a betűméretet, értesítési hangokat, adatvédelmi lehetőségeket és még sok egyebet. A módosítások azonnaliak.</string>
+    <string name="tour_dcc_title">Fájlátvitelek (DCC)</string>
+    <string name="tour_dcc_body">Közvetlenül DCC segítségével küldhetők és fogadhatók fájlok felhasználók között. Router mögül, a Passzív DCC nyújthat megoldást port-továbbítási gondokra. Az SDCC szintén támogatott.</string>
+    <string name="tour_send_file_title">Fájlküldés</string>
+    <string name="tour_send_file_body">Add meg a címzett becenevét, majd válassz fájt a tárhelyről. A bejövő DCC kérések is ide érkeznek, melyeket értesítésekből elfogadhatsz, vagy elutasíthatsz.</string>
+    <string name="tour_support_title">További segítség</string>
+    <string name="tour_support_body">Támogatásért, javaslatokhoz, vagy csak csevegni a többi HexDroid felhasználóval, kapcsolódj az AfterNET szerverhez és lépj be a #HexDroid csatornára.</string>
+    <string name="tour_support_fallback">Az AfterNET még nincs a listádon: támogatásért koppints az AfterNET hozzáadására, majd kapcsolódj és lépj be a #HexDroid csatornára.</string>
+    <string name="tour_support_action">AfterNET hozzáadása</string>
+    <string name="tour_replay_title">Bemutató újrakezdése</string>
+    <string name="tour_replay_body">Az áttekintést bármikor újrakezdheted innen: Beállítások - Névjegy. Befejezéshez koppints erre: Kész</string>
+
+    <!-- About -->
+    <string name="about_title">Névjegy</string>
+
+    <!-- Transfers -->
+    <string name="transfers_title">Fájlátvitelek</string>
+
+    <!-- Ignore -->
+    <string name="ignore_title">Mellőzési lista</string>
+
+    <!-- List -->
+    <string name="list_title">Csatornalista</string>
+
+    <!-- Language names -->
+    <string name="lang_en" translatable="false">English</string>
+    <string name="lang_de" translatable="false">Deutsch</string>
+    <string name="lang_es" translatable="false">Español</string>
+    <string name="lang_fr" translatable="false">Français</string>
+    <string name="lang_it" translatable="false">Italiano</string>
+    <string name="lang_nl" translatable="false">Nederlands</string>
+    <string name="lang_pl" translatable="false">Polski</string>
+    <string name="lang_pt" translatable="false">Português</string>
+    <string name="lang_ru" translatable="false">Русский</string>
+    <string name="lang_tr" translatable="false">Türkçe</string>
+    <string name="lang_ar" translatable="false">العربية</string>
+    <string name="lang_ja" translatable="false">日本語</string>
+    <string name="lang_ko" translatable="false">한국어</string>
+    <string name="lang_zh" translatable="false">中文</string>
+	
+    <string name="network_edit_advanced_caps">Haladó IRCv3 képességek</string>
+    <string name="network_edit_caps_hint">Az alap IRCv3 funkciók eleve aktívak. Kapcsold be a haladó beállításokhoz.</string>
+    <string name="network_edit_bouncer_caps">Bouncer képességek</string>
+
+    <!-- DCC / Transfers Screen -->
+    <string name="transfers_enable_dcc">DCC bekapcsolása</string>
+    <string name="transfers_dcc_send_mode">DCC küldési mód</string>
+    <string name="transfers_send_file">Fájlküldés</string>
+    <string name="transfers_target_nick">Címzett becenév</string>
+    <string name="transfers_pick_file">Válassz küldendő fájlt</string>
+    <string name="transfers_dcc_chat">DCC Csevegés</string>
+    <string name="transfers_start_dcc_chat">DCC CHAT indítás</string>
+    <string name="transfers_incoming_chat_offers">Bejövő csevegési kérések</string>
+    <string name="transfers_incoming_offers">Bejövő fájlkérések</string>
+    <string name="transfers_no_chat_offers">Még nincs csevegési kérelem.</string>
+    <string name="transfers_no_offers">Még nincs fájlfogadási kérelem.</string>
+    <string name="transfers_accept">Elfogad</string>
+    <string name="transfers_reject">Elutasít</string>
+    <string name="transfers_resume">Folytat</string>
+    <string name="transfers_resuming_from">Folytatás innen: %1$s</string>
+    <string name="transfers_partial_available">%1$s részben van letöltve. Folytatod?</string>
+    <string name="transfers_accept_open">Elfogadás &amp; Megnyitás</string>
+    <string name="transfers_active">Aktív átvitelek</string>
+    <string name="transfers_no_transfers">Nincs átvitel folyamatban.</string>
+    <string name="transfers_share_file">Fájlmegosztás</string>
+
+    <!-- Nick completion hints -->
+    <string name="nick_hint_tap_to_mention">Koppints a megemlítéshez</string>
+
+    <!-- Notification channel names (displayed in Android Settings) -->
+    <string name="notif_channel_connection">IRC Kapcsolat</string>
+    <string name="notif_channel_highlight_silent">IRC Kiemelések (Néma)</string>
+    <string name="notif_channel_highlight_sound">IRC Kiemelések</string>
+    <string name="notif_channel_pm">IRC Privát Üzenetek</string>
+    <string name="notif_channel_dcc">DCC Kérelmek</string>
+
+    <!-- DCC notification strings -->
+    <string name="notif_dcc_incoming_chat_title">Bejövő DCC csevegés tőle: %1$s</string>
+    <string name="notif_dcc_incoming_chat_text">Megnyitáshoz koppints, vagy elfogadáshoz/elutasításhoz használd az Átvitelek menüt.</string>
+    <string name="notif_dcc_incoming_file_title">Bejövő fájl tőle: %1$s</string>
+    <string name="notif_dcc_file_done_title">DCC befejeződött</string>
+    <string name="notif_dcc_file_done_text">%1$s mentve ide: %2$s</string>
+    <string name="notif_open_transfers">Nyitott Átvitelek</string>
+
+    <!-- draft/typing indicator strings -->
+    <string name="typing_one">%1$s gépel…</string>
+    <string name="typing_two">%1$s és %2$s gépel…</string>
+    <string name="typing_several">Többen is gépelnek…</string>
+
+    <!-- Settings: typing privacy -->
+    <string name="setting_send_typing">Gépelési jelzés küldése</string>
+    <string name="setting_send_typing_desc">Mindenki láthatja, amikor éppen üzenetet írsz (piszkozat/gépelés). Adatvédelemi okból, alapból kikapcsolva.</string>
+    <string name="setting_receive_typing">Többiek gépelési jelének megjelenítése</string>
+    <string name="setting_receive_typing_desc">Tájékoztatás megjelenítése, amikor valaki más csatornán, vagy privátban üzenetet ír.</string>
+
+    <!-- draft/channel-rename -->
+    <string name="channel_renamed">A %1$s csatorna átnevezve erre: %2$s</string>
+
+    <!-- draft/message-reactions -->
+    <string name="reaction_added">%1$s reagált: %2$s</string>
+    <string name="reaction_removed">%1$s törölte a reakciót: %2$s</string>
+
+    <!-- CHATHISTORY TARGETS section title -->
+    <string name="chathistory_targets_title">Elérhető előzmények</string>
+
+    <!-- Network edit screen -->
+    <string name="network_name_label">Hálózatnév</string>
+    <string name="network_host_label">Kiszolgáló</string>
+    <string name="network_port_label">Port</string>
+    <string name="network_nickname_label">Becenév</string>
+    <string name="network_alt_nick_label">Második Becenév</string>
+    <string name="network_username_label">Felhasználónév (ident)</string>
+    <string name="network_bouncer_username_label">Felhasználónév</string>
+    <string name="network_username_bouncer_hint">Bouncer profiloknál, ez a <b>bejelentkezési neved a bounceren</b></string>
+    <string name="network_realname_label">Valódi Név</string>
+    <string name="network_use_tls_label">TLS alkalmazása</string>
+    <string name="network_allow_plaintext">Nem biztonságos egyszerű szöveg engedélyezés</string>
+    <string name="network_auto_connect_label">Kapcsolódás az alkalmazás indításakor</string>
+    <string name="network_auto_reconnect_label">Auto-újrakapcsolódás lecsatlakozáskor</string>
+    <string name="network_bouncer_label">Bouncer Mód</string>
+    <string name="network_bouncer_kind_label">Bouncer fajta</string>
+    <string name="network_bouncer_kind_none">Nincs / meghatározatlan</string>
+    <string name="network_bouncer_kind_soju">soju  (felhasználó/hálózat@kliensid)</string>
+    <string name="network_bouncer_kind_znc">ZNC  (felhasználó@kliensidid/hálózat)</string>
+    <string name="network_bouncer_kind_generic">Általános  (felhasználó/hálózat)</string>
+    <string name="network_bouncer_network_label">Hálózatnév (elhagyható)</string>
+    <string name="network_bouncer_network_help">Mely upstream hálózatot célozza ez a profil a bounceren (pl. \"afternet\", \"libera\"). A fenti bouncer felhasználónév mezővel együttesen és attól függően, milyen hitelesítési módot választasz az SASL, vagy PASS sorban.</string>
+    <string name="network_bouncer_clientid_label">Kliens ID (elhagyható)</string>
+    <string name="network_bouncer_clientid_help">Az eszköz egy rövid azonosítója, pl. \"telefon\" vagy \"hexdroid\". Lehetővé teszi a kliensenkénti puffert és előzményeket, ha a bouncer támogatja (ZNC klienspuffer, soju kliensenkénti előzmények). Minden kliens számára közös pufferhez, hagyd üresen.</string>
+    <string name="network_server_password_label">Szerver jelszó (PASS)</string>
+    <string name="network_enable_sasl">SASL bekapcsolása</string>
+    <string name="network_sasl_mechanism_label">Eljárás</string>
+    <string name="network_sasl_username_label">Felhasználónév (authcid)</string>
+    <string name="network_sasl_password_label">Jelszó</string>
+    <string name="network_sasl_recommended_for_bouncers">Bouncerekhez javasolt (A fenti Általános részben lévő bouncer felhasználónév használatához, hagyd üresen a felhasználónév mezőt.)</string>
+    <string name="network_cert_format_label">Tanúsítvány formátum</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
+    <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
+    <string name="network_key_password_label">Kulcs jelszó (ha titkosított)</string>
+    <string name="network_encoding_label">Titkosítás</string>
+    <string name="network_command_delay_label">Parancsok előtti késleltetés (másodperc)</string>
+    <string name="network_command_delay_desc">Parancsok futtatása előtt, kapcsolódást követően, várakozás ennyi másodpercig</string>
+    <string name="network_service_auth_label">Szolgáltatás hitelesítési parancs</string>
+    <string name="network_service_auth_hint">pl. /msg NickServ IDENTIFY jelszó</string>
+    <string name="network_commands_hint">Soronként egy parancs. Majd fűzd hozzá a sorhoz: ;wait N egy N másodperces szünethez, pl. /msg NickServ identify jelszó ;wait 3</string>
+    <string name="network_no_network_selected">Nincs választott hálózat</string>
+    <string name="network_undo_remove">Törlés visszavonása</string>
+
+    <!-- Networks screen -->
+    <string name="networks_selected">Választott</string>
+    <string name="networks_add_favourite">Kedvencekhez adás</string>
+    <string name="networks_remove_favourite">Törlés a kedvencekből</string>
+    <string name="networks_drag_reorder">Húzd az átrendezéshez</string>
+    <string name="networks_insecure_title">Nem biztonságos kapcsolat blokkolva</string>
+    <string name="networks_local_title">Helyi hálózati hozzáférés szükséges</string>
+    <string name="networks_local_body">Helyi Hálózati jogosultság szükséges a kapcsolódáshoz: {0} .
+
+Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez való kapcsolódáshoz (otthoni hálózat, bouncer, stb.).</string>
+    <string name="networks_local_grant">Engedélyezés</string>
+    <string name="networks_insecure_body">Az egyszerű szöveges IRC kapcsolatok nem titkosítottak, így az üzeneteid és jelszavaid könnyen kideríthetők.</string>
+    <string name="networks_insecure_body2">Egyértelműen engedélyezned kell a nem biztonságos egyszerű szöveges kapcsolatot a hálózathoz, ha TLS nélkül szeretnél kapcsolódni ide: %1$s .</string>
+    <string name="networks_allow_connect">Engedélyezés &amp; Kapcsolódás</string>
+    <string name="networks_reconnect">Újrakapcsolódás</string>
+
+    <!-- Channel / List screen -->
+    <string name="list_channels_title">Csatornák</string>
+    <string name="list_search_hint">Csatornák / topik keresése</string>
+
+    <!-- Chat screen — channel tools -->
+    <string name="chat_fetch_modes">Jelenlegi módok lekérdezése</string>
+    <string name="chat_key_password_label">Kulcs / jelszó</string>
+    <string name="chat_max_users_label">Legtöbb felhasználó</string>
+    <string name="chat_message_label">Üzenet</string>
+    <string name="chat_channel_label">Csatorna</string>
+    <string name="chat_nick_mask_label">Becenév vagy host mask</string>
+    <string name="chat_bans_title">Kitiltások</string>
+    <string name="chat_quiets_title">Némítások</string>
+    <string name="chat_except_title">Kivétel</string>
+    <string name="chat_invex_title">Meghívás-mentesség</string>
+    <string name="chat_text_formatting">Szövegformázás</string>
+    <string name="chat_send_message">Üzenetküldés</string>
+    <string name="chat_user_list">Felhasználólista</string>
+    <string name="chat_drag_reorder">Húzd az átrendezéshez</string>
+    <string name="chat_clear_all">Összes törlése</string>
+
+    <!-- Chat screen — menu items -->
+    <string name="menu_channel_list">Csatornalista</string>
+    <string name="menu_file_transfers">Fájlátvitelek</string>
+    <string name="menu_settings">Beállítások</string>
+    <string name="menu_networks">Hálózatok</string>
+    <string name="menu_system_info">Rendszer info</string>
+    <string name="menu_ircop_tools">IRCop eszközök</string>
+    <string name="menu_about">Névjegy</string>
+    <string name="menu_reconnect">Újrakapcsolódás</string>
+    <string name="menu_disconnect">Lecsatlakozás</string>
+    <string name="menu_exit">Kilépés</string>
+
+    <!-- IRCop tools -->
+    <string name="ircop_kline">K-line</string>
+    <string name="ircop_gline">G-line</string>
+    <string name="ircop_dline">D-line</string>
+    <string name="ircop_zline">Z-line</string>
+    <string name="ircop_shun">Shun</string>
+    <string name="ircop_kill">Kill</string>
+    <string name="ircop_sajoin">SAJoin</string>
+    <string name="ircop_sapart">SAPart</string>
+    <string name="ircop_wallops">WALLOPS</string>
+    <string name="ircop_globops">GLOBOPS</string>
+    <string name="ircop_locops">LOCOPS</string>
+    <string name="ircop_admin">ADMIN</string>
+    <string name="ircop_motd">MOTD</string>
+    <string name="ircop_links">Hivatkozások</string>
+    <string name="ircop_uptime">Üzemidő</string>
+
+    <!-- Ignore list screen -->
+    <string name="ignore_nick_label">Mellőzendő becenév</string>
+    <string name="ignore_no_nicks">Nincs mellőzendő becenév.</string>
+    <string name="ignore_no_networks">Még nincs beállított hálózat.</string>
+    <string name="ignore_add">Hozzáad</string>
+    <string name="ignore_remove">Töröl</string>
+
+    <!-- Settings screen — extras -->
+    <string name="settings_export_backup">Mentés exportálása</string>
+    <string name="settings_restore_backup">Mentés visszaállítása</string>
+    <string name="settings_restore_confirm_title">Visszaállítod a mentést?</string>
+    <string name="settings_restore_confirm_ok">Visszaállít</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">Rendszer alapértelmezés</string>
+    <string name="settings_matrix_theme">Mátrix</string>
+    <string name="settings_custom_font">Egyedi betűtípus…</string>
+
+    <!-- Transfers screen — extras -->
+    <string name="transfers_share_open">Fájl Megosztás / Megnyitás</string>
+
+    <!-- About screen -->
+    <string name="about_open_website">Weblap Megnyitás</string>
+
+    <!-- DCC mode options -->
+    <string name="transfers_dcc_auto">Auto</string>
+    <string name="transfers_dcc_active">Aktív</string>
+    <string name="transfers_dcc_passive">Passzív</string>
+
+    <!-- Channel tools -->
+    <string name="chat_channel_lists">Csatornalisták…</string>
+
+    <!-- Network edit: clear certificate -->
+    <string name="network_clear">Töröl</string>
+
+
+    <!-- NetworkEditScreen: section headers -->
+    <string name="network_section_connection">Kapcsolat</string>
+    <string name="network_section_identity">Identitás</string>
+    <string name="network_section_autoconnect">Auto-kapcsolódás &amp; Jelszó</string>
+    <string name="network_section_sasl">SASL Hitelesítés</string>
+    <string name="network_section_tls_cert">TLS Kliens Tanúsítvány</string>
+    <string name="network_section_autojoin">Auto-belépés Csatornákra</string>
+    <string name="network_section_postcmds">Kapcsolódás utáni Parancsok</string>
+    <string name="network_section_encoding">Karakterkódolás</string>
+    <string name="network_section_ircv3">IRCv3.x Képességek</string>
+    <!-- NetworkEditScreen: proxy/Tor -->
+    <string name="network_section_proxy">Proxy (SOCKS/Tor)</string>
+    <string name="network_proxy_type_label">Proxy fajta</string>
+    <string name="network_proxy_type_none">Nincs (közvetlen kapcsolat)</string>
+    <string name="network_proxy_type_socks5">SOCKS5</string>
+    <string name="network_proxy_type_socks4a">SOCKS4a</string>
+    <string name="network_proxy_host_label">Proxy kiszolgáló</string>
+    <string name="network_proxy_port_label">Port</string>
+    <string name="network_proxy_username_label">Felhasználónév (elhagyható)</string>
+    <string name="network_proxy_password_label">Jelszó (elhagyható)</string>
+    <string name="network_proxy_preset_orbot">Tor (Orbot)</string>
+    <string name="network_proxy_preset_tor_browser">Tor Böngésző</string>
+    <string name="network_proxy_hint">A cél feloldása a proxynál történik (távoli DNS), így működnek az .onion címek és a szerver állomásnevére sem derül fény a helyi hálózatodon belül. Tor esetén, futtass Orbot-ot és a 127.0.0.1 címen használd a 9050 portot. A DCC fájlküldés automatikusan a proxyn keresztül zajlik, passzív módban; a passzív kérések fogadása és a DCC csevegés gazda mód azonban nem elérhető, míg a proxy aktív, mivel azok a folyosón kívül kell figyeljenek.</string>
+    <!-- NetworkEditScreen: notifications -->
+    <string name="network_section_notifications">Értesítések</string>
+    <string name="network_notify_errors_label">Értesítés hibákról</string>
+    <string name="network_notify_errors_desc">Szerver és kapcsolati hibákról értesít. Alapból ki van kapcsolva; az átmeneti újrakapcsolódásokról sosincs értesítés.</string>
+    <string name="network_highlight_ignore_label">Kiemelések némítása tőle:</string>
+    <string name="network_highlight_ignore_hint">pl. GitHub, *-bot, vagy /^(travis|circleci)/ [Soronként egy]</string>
+    <string name="network_highlight_ignore_desc">Soronként egy küldő, melynek üzeneteiről nem lesz értesítés, sem kiemelés. Lehet sima becenév, IRC helyettesítő karakter (* és ?), vagy /perjelek/ közé csomagolt reguláris kifejezés. Az üzenetek továbbra is megjelennek az adott csatornán.</string>
+    <!-- NetworkEditScreen: misc -->
+    <string name="network_default_name">Hálózat</string>
+    <string name="network_bouncer_desc">Auto-belépés kihagyása, hiányzó üzenetek lekérése</string>
+    <string name="network_sasl_external_desc">TLS kliens tanúsítvány használata hitelesítéshez</string>
+    <string name="network_cert_selected">Választott: %1$s</string>
+    <string name="network_cert_none">Nincs kiválasztott tanúsítvány.</string>
+    <string name="network_cert_pem_hint">A .pem fájl kell tartalmazza mind a tanúsítványt, mind a privát kulcsot.</string>
+    <string name="network_cert_choose_pem">PEM választás</string>
+    <string name="network_cert_replace_pem">PEM cseréje</string>
+    <string name="network_cert_choose_crt">.crt választás</string>
+    <string name="network_cert_replace_crt">.crt cseréje</string>
+    <string name="network_cert_choose_key">.key választás</string>
+    <string name="network_cert_replace_key">.key cseréje</string>
+    <string name="network_cert_choose_p12">.p12/.pfx választás</string>
+    <string name="network_cert_replace_p12">.p12/.pfx cseréje</string>
+    <string name="network_cert_p12_hint">Ha a fájl jelszóval védett, azt alább add meg.</string>
+    <string name="network_cert_label">Tanúsítvány: %1$s</string>
+    <string name="network_key_label">Kulcs: %1$s</string>
+    <string name="network_autojoin_hint">Soronként egy. Formátum: #csatorna [kulcs]</string>
+    <string name="network_postcmds_hint">További parancsok (soronként egy):</string>
+    <string name="network_encoding_auto_desc">Javasolt. UTF-8-cal kezdődik, majd a további kódolást automatikusan felismeri.</string>
+    <string name="network_encoding_cyrillic_desc">Bolgár, Orosz, Szerb és egyéb Cirill hálózatoknál használatos.</string>
+    <string name="network_encoding_utf8_desc">Szabvány Unicode. Megfelelő a legtöbb korszerű IRC hálózat számára.</string>
+    <string name="network_encoding_manual_desc">Kézi kódolás választás régi hálózatokhoz.</string>
+    <string name="network_cert_error">Válassz tanúsítványt és kulcsot</string>
+    <!-- SettingsScreen -->
+    <string name="setting_intro_tour">Bevezető</string>
+    <string name="setting_intro_tour_desc">Főbb ablakok és vezérlők áttekintése.</string>
+    <string name="setting_ui_font">Felület betűtípus</string>
+    <string name="setting_chat_font">Csevegés betűtípus</string>
+    <string name="setting_font_size_label">Betűméret</string>
+    <string name="setting_log_internal">Belső tárhely</string>
+    <string name="setting_log_custom">Választott saját mappa</string>
+    <string name="setting_dcc_downloads_default">Letöltések (alapértelmezett)</string>
+    <string name="setting_dcc_downloads_custom">Egyedi mappa</string>
+    <string name="section_backup_restore">Mentés &amp; Visszaállítás</string>
+    <string name="setting_backup_export_desc">Hálózati- és alkalmazásbeállítások exportálása JSON fájlba. Jelszavakat és TLS tanúsítványokat nem tartalmaz.</string>
+    <string name="setting_restore_desc">A visszaállítás felülír minden jelenlegi hálózatot és beállítást.</string>
+    <string name="setting_restore_confirm">Ez felülír minden jelenlegi hálózatot és beállítást a mentett fájlban lévőkkel. Jelszó azonban nem lett eltárolva, ezért azokat ismét meg kell adni. A művelet nem visszavonható.</string>
+    <string name="setting_backup_error">Hiba</string>
+    <string name="setting_backup_done">Kész</string>
+    <string name="setting_battery_tip">A kapcsolat éjjeli fenntartásához, kapcsold ki az Akkumulátor Optimalizálást az alkalmazáshoz és engedélyezd a háttérfolyamatokat.</string>
+    <string name="setting_battery_oneplus">OnePlus tipp: zárold az alkalmazást a Legutóbbiak-ban (lakat) és ellenőrizd, hogy a háttérfolyamatok / auto-indítás engedélyezett az akkumulátorbeállításokban.</string>
+    <string name="setting_lang_system">Rendszer</string>
+    <string name="theme_matrix">Mátrix</string>
+    <string name="theme_terminal">Terminal</string>
+    <string name="section_media_previews">Média Előnézet</string>
+    <string name="setting_image_previews">Kép &amp; videó előnézet bekapcsolása</string>
+    <string name="setting_image_previews_desc">Csevegésben közzétett kép és YouTube link előnézet engedélyezése. A Twitter/X linkek feloldása fxtwitter.com-on keresztül történik - Az előnézet nem automatikus.</string>
+    <string name="setting_previews_wifi_only">Csak Wi-Fi</string>
+    <string name="setting_previews_wifi_only_desc">Előnézet betöltése kizárólag Wi-Fi kapcsolat esetén, elkerülve mobil adat felhasználását.</string>
+    <string name="theme_system_default">Rendszer alapértelmezés</string>
+    <!-- TransfersScreen -->
+    <string name="transfers_send_file_section">Fájlküldés</string>
+    <string name="transfers_dcc_chat_section">DCC CSEVEGÉS</string>
+    <string name="transfers_dcc_disabled">A DCC jelenleg ki van kapcsolva. Fájlok küldéséhez/fogadásához kapcsold be.</string>
+    <string name="transfers_dcc_auto_desc">Auto: Passzív DCC módot próbál, vagy visszatér Aktív-hoz, ha nincs válasz.</string>
+    <string name="transfers_dcc_active_desc">Aktív: klasszikus DCC SEND (a fogadó csatlakozik hozzád).</string>
+    <string name="transfers_dcc_passive_desc">Passzív: portnyitási kérés küldése a fogadónak, majd csatlakozás hozzá.</string>
+    <string name="transfers_chat_offers_section">Bejövő csevegési kérelmek</string>
+    <string name="transfers_offers_section">Bejövő kérelmek</string>
+    <string name="transfers_in_progress_section">Átvitelek</string>
+    <string name="transfers_unknown_size">ismeretlen méret</string>
+    <string name="transfers_passive_port">passzív (várakozás portra)</string>
+    <string name="transfers_error">Hiba: %1$s</string>
+    <!-- ChatScreen: channel mode panel -->
+    <string name="chat_topic_panel">Topik</string>
+    <string name="chat_modes_panel">Csatornamódok</string>
+    <string name="chat_mode_no_external">Nincs külső üzenet</string>
+    <string name="chat_mode_no_external_desc">Csatornán kívüli felhasználók üzeneteinek blokkolása</string>
+    <string name="chat_mode_ops_topic">Topik csak Op-oknak</string>
+    <string name="chat_mode_ops_topic_desc">A topikot csak Op módosíthatja</string>
+    <string name="chat_mode_moderated">Moderált</string>
+    <string name="chat_mode_moderated_desc">Csak op és voice felhasználó írhat</string>
+    <string name="chat_mode_invite_only">Csak meghívással</string>
+    <string name="chat_mode_invite_only_desc">Kizárólag meghívott felhasználó léphet be</string>
+    <string name="chat_mode_secret">Titkos</string>
+    <string name="chat_mode_secret_desc">A /LIST és /WHOIS parancsok nem jelenítik meg a csatornát</string>
+    <string name="chat_mode_private">Privát</string>
+    <string name="chat_mode_private_desc">A /LIST paranccsal privátként jelenik meg a csatorna</string>
+    <string name="chat_mode_registered">Csak regisztráltaknak</string>
+    <string name="chat_mode_registered_desc">Csak regisztrált becenévvel lehet belépni</string>
+    <string name="chat_mode_no_colour">Szín nélkül</string>
+    <string name="chat_mode_no_colour_desc">mIRC színkódok levágása az üzenetekről</string>
+    <string name="chat_mode_no_ctcp">CTCP nélkül</string>
+    <string name="chat_mode_no_ctcp_desc">CTCP üzenetek blokkolása a csatornán</string>
+    <string name="chat_mode_key_label">Csatorna kulcs (+k)</string>
+    <string name="chat_mode_limit_label">Létszám korlát (+l)</string>
+    <string name="chat_mode_kick_ban">Kirúgás / Kitiltás</string>
+    <string name="chat_current_modes">Jelenlegi módok: %1$s</string>
+    <string name="chat_ircop_tools">IRCop eszközök</string>
+    <string name="chat_target_label">Cél</string>
+    <string name="chat_punishments">Büntetések</string>
+    <string name="chat_no_reason">Nincs indok</string>
+    <string name="chat_force_joinpart">Belépés / kilépés kényszerítése</string>
+    <string name="chat_broadcast">Sugárzás</string>
+    <string name="chat_server_queries">Szerver lekérdezések</string>
+    <string name="chat_text_colour">Szövegszín</string>
+    <string name="chat_bg_colour">Háttér</string>
+    <string name="chat_colour_code">Kód %1$s  %2$s</string>
+    <string name="chat_no_entries">Nincs bejegyzés.</string>
+    <string name="chat_set_by">beállította: %1$s</string>
+    <string name="chat_refresh">Frissítés</string>
+    <string name="chat_no_quiet_support">Ez a szerver nem támogat Némítás listát</string>
+    <string name="chat_no_except_support">Ez a szerver nem támogat Kivétel listát</string>
+    <string name="chat_no_invex_support">Ez a szerver nem támogat Meghívás-mentesség listát</string>
+    <string name="chat_no_quiet_server">Ez a szerver nem tesz közzé +q némítás listát.</string>
+    <string name="chat_no_except_server">Ez a szerver nem tesz közzé +e kivétel listát.</string>
+    <string name="chat_no_invex_server">Ez a szerver nem tesz közzé +I meghívás-mentesség listát.</string>
+    <string name="chat_ban_list">Kitiltás lista (+b)</string>
+    <string name="chat_quiet_list">Némítás lista (+q)</string>
+    <string name="chat_except_list">Kivétel lista (+e)</string>
+    <string name="chat_invex_list">Meghívás-mentesség lista (+I)</string>
+    <string name="chat_unban">Kitiltás törlés</string>
+    <string name="chat_unquiet">Némítás törlés</string>
+    <string name="chat_remove">Eltávolítás</string>
+    <string name="chat_irc_colour_title">IRC Szín</string>
+    <!-- ChatScreen: nick action sheet -->
+    <string name="nick_open_query">Privát üzenet írás</string>
+    <string name="nick_open_query_desc">Privát beszélgetés kezdeményezése</string>
+    <string name="nick_whois">Whois</string>
+    <string name="nick_whois_desc">Felhasználói adatok, csatornák, tétlenségi idő megjelenítése</string>
+    <string name="nick_mention">Említés</string>
+    <string name="nick_mention_desc">Beszúrja az üzenetedbe: @%1$s</string>
+    <string name="nick_dcc_section">Közvetlen kapcsolat (DCC)</string>
+    <string name="nick_send_file">Fájlküldés</string>
+    <string name="nick_send_file_desc">Fájlküldés DCC SEND segítségével</string>
+    <string name="nick_dcc_disabled">A DCC ki van kapcsolva a beállításokban</string>
+    <string name="nick_dcc_chat">DCC Csevegés</string>
+    <string name="nick_dcc_chat_desc">Közvetlen, végpontok közötti csevegés megnyitása</string>
+    <string name="nick_ignore">Mellőzés</string>
+    <string name="nick_unignore">Mellőzés visszavonása</string>
+    <string name="nick_ignore_desc">Felhasználó összes üzenetének elrejtése</string>
+    <string name="nick_unignore_desc">Felhasználó üzeneteinek újraengedélyezése</string>
+    <string name="nick_ignore_notifs">Némítási értesítések</string>
+    <string name="nick_unignore_notifs">Némítás-törlési értesítések</string>
+    <string name="nick_ignore_notifs_desc">Kiemelés &amp; PÜ riasztás némítása; az üzenetek továbbra is megjelennek</string>
+    <string name="nick_unignore_notifs_desc">Riasztások újraengedélyezése ehhez a felhasználóhoz</string>
+    <string name="nick_moderation">Moderálás</string>
+    <string name="nick_kick_ban">Kirúg / Kitilt…</string>
+    <string name="nick_kick_ban_desc">%1$s eltávolítása, vagy kitiltása a csatornáról</string>
+    <string name="nick_privileges">Csatorna jogosultságok</string>
+    <string name="nick_op">Op adása (+o)</string>
+    <string name="nick_deop">Op elvétele (-o)</string>
+    <string name="nick_voice">Voice (+v)</string>
+    <string name="nick_devoice">Voice elvétele (-v)</string>
+    <!-- IgnoreListScreen -->
+    <string name="ignore_network_label">Hálózat</string>
+    <string name="ignore_list_desc">A mellőzött becenevek kis-nagybetű függetlenek és érvényesek a csevegésre + értesítésekre + bejövő DCC kérelmekre a szerveren.</string>
+    <string name="ignore_list_tip">Tipp: mellőzhetsz valakit a becenévlistáról is, vagy a nevére koppintva a csevegésben.</string>
+    <!-- ListScreen -->
+    <string name="list_loading">Betöltés… (%1$d)</string>
+    <string name="list_join_button">Belépés</string>
+    <!-- AboutScreen -->
+    <string name="about_tagline">IRC Kliens Androidra</string>
+    <string name="about_support_title">Dokumentáció &amp; Támogatás</string>
+    <string name="about_support_desc">Útmutatásért látogass el a honlapra, nézd meg a GyIK-et (FAQ), valamint problémákat is ott jelezhetsz.</string>
+
+    <!-- SDCC settings -->
+    <string name="setting_dcc_secure">SDCC használata (TLS titkosítás)</string>
+    <string name="setting_dcc_secure_desc">A kimenő fájlátvitelhez DCC SSEND (TLS-csomagban) használatos. A távoli kliensnek is támogatnia kell az SDCC-t.</string>
+
+    <!-- Channel list user count filter -->
+    <string name="list_users_filter_label">Felhasználók:</string>
+    <string name="list_users_min">Min</string>
+    <string name="list_users_max">Max</string>
+    <string name="list_users_server_hint">újabb lekéréshez ezekkel a korlátokkal, koppints az Alkalmaz-ra</string>
+    <string name="list_users_local_hint">A betöltött lista szűrése (ez a szerver nem képes méret szerint távolról szűrni)</string>
+    <string name="list_users_apply">Alkalmaz</string>
+
+    <!-- Topic quick-edit dialog -->
+    <string name="topic_edit_title">Topik szerkesztése</string>
+    <string name="topic_edit_label">Topik</string>
+    <string name="topic_set">Beállít</string>
+
+    <!-- Bouncer multinetwork UI -->
+    <string name="bouncer_networks_section_title">Bouncer hálózatok</string>
+    <string name="bouncer_networks_section_subtitle">Upstreameket jelentett: %1$s</string>
+    <string name="bouncer_networks_refresh">Frissítés</string>
+    <string name="bouncer_networks_empty">Még nincs jelentett upstream. Koppints a frissítésre, amint a bouncer regisztrálva van.</string>
+    <string name="bouncer_networks_state_connected">kapcsolódva</string>
+    <string name="bouncer_networks_state_connecting">kapcsolódás</string>
+    <string name="bouncer_networks_state_disconnected">lecsatlakozva</string>
+    <string name="bouncer_networks_state_unknown">ismeretlen</string>
+    <string name="bouncer_networks_import">Importálás</string>
+    <string name="bouncer_networks_already_imported">Importálva</string>
+    <string name="bouncer_networks_unnamed">(névtelen upstream)</string>
+    <string name="bouncer_networks_clone_dismiss">Elutasít</string>
+
+    <!-- Bouncer-aware password field hint -->
+    <string name="network_server_password_bouncer_hint">Bouncerekhez SASL javasolt. Ha inkább a PASS mezőt használnád, csak add meg a jelszót; a fenti mezőkből származó bouncer felhasználónév és hálózat automatikusan előtag lesz. A teljes <b>felhasználónév/hálózat:jelszó</b> szintén működik.</string>
+    
+    <!-- Suggestion: Translator creds -->
+    <string name="contrib_translator">Fordítás: Greg M. (cyberdyne-sys)</string>
+    <string name="contrib_translator_contact">Kapcsolat: email@domain.tld</string>
+</resources>
