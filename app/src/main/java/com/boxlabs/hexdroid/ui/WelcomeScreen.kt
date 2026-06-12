@@ -68,6 +68,7 @@ val SUPPORTED_LANGUAGES = listOf(
     SupportedLanguage("de", "Deutsch"),
     SupportedLanguage("es", "Español"),
     SupportedLanguage("fr", "Français"),
+    SupportedLanguage("hu", "Magyar"),
     SupportedLanguage("it", "Italiano"),
     SupportedLanguage("nl", "Nederlands"),
     SupportedLanguage("pl", "Polski"),
