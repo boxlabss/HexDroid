@@ -662,8 +662,6 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
 
     <!-- Bouncer-aware password field hint -->
     <string name="network_server_password_bouncer_hint">Bouncerekhez SASL javasolt. Ha inkább a PASS mezőt használnád, csak add meg a jelszót; a fenti mezőkből származó bouncer felhasználónév és hálózat automatikusan előtag lesz. A teljes <b>felhasználónév/hálózat:jelszó</b> szintén működik.</string>
-    
-    <!-- Suggestion: Translator creds -->
-    <string name="contrib_translator">Fordítás: Greg M. (cyberdyne-sys)</string>
-    <string name="contrib_translator_contact">Kapcsolat: email@domain.tld</string>
+
+    <!-- Translator creds moved to AboutScreen.kt -->
 </resources>

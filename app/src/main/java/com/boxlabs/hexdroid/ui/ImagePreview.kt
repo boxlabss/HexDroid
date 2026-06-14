@@ -180,7 +180,25 @@ fun isOnWifi(context: Context): Boolean {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     val net = cm.activeNetwork ?: return false
     val caps = cm.getNetworkCapabilities(net) ?: return false
-    return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+
+    // Direct case: the active network is itself Wi-Fi.
+    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return true
+
+    // VPN case: the active network is the tunnel (TRANSPORT_VPN), which does not report the
+    // underlying link transport, so the check above misses Wi-Fi-under-VPN and "Wi-Fi only"
+    // previews never load while a VPN is connected. The underlying Wi-Fi network still exists
+    // alongside the VPN, so look for a validated Wi-Fi network among all current networks.
+    // We deliberately do NOT treat VPN as Wi-Fi unconditionally.
+    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+        @Suppress("DEPRECATION")
+        return cm.allNetworks.any { n ->
+            cm.getNetworkCapabilities(n)?.let {
+                it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            } == true
+        }
+    }
+    return false
 }
 
 private val allowedMimeTypes = setOf(
@@ -188,7 +206,7 @@ private val allowedMimeTypes = setOf(
 )
 
 private sealed interface FetchResult {
-    data class Success(val bitmap: Bitmap, val rawBytes: ByteArray? = null, val isGif: Boolean = false) : FetchResult
+    data class Success(val bitmap: Bitmap?, val rawBytes: ByteArray? = null, val isGif: Boolean = false) : FetchResult
     data object TooLarge : FetchResult
     data object Error : FetchResult   // network, 404, decode failure, timeout, etc.
 }
@@ -258,6 +276,14 @@ private suspend fun fetchBitmap(url: String, ctx: Context): FetchResult = withCo
 
                 val bytes = output.toByteArray()
                 val isGif = mime == "image/gif"
+
+                // Animated GIFs are rendered from rawBytes via ImageDecoder/Movie in
+                // AnimatedGif; Skip the decode entirely and carry
+                // only the raw bytes. bitmap is null for GIFs.
+                if (isGif) return@runCatching FetchResult.Success(
+                    bitmap = null, rawBytes = bytes, isGif = true
+                )
+
                 // Decode with explicit options to avoid the two bitmap-state edge cases
                 // that crash BaseRecordingCanvas.drawBitmap via throwIfCannotDraw():
                 //   1. Hardware bitmaps - some BitmapFactory paths on Android 9+ can
@@ -286,8 +312,7 @@ private suspend fun fetchBitmap(url: String, ctx: Context): FetchResult = withCo
                     inSampleSize = inSample
                 }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)?.let {
-                    // For GIFs keep the raw bytes so the animated drawable can be created later.
-                    FetchResult.Success(it, rawBytes = if (isGif) bytes else null, isGif = isGif)
+                    FetchResult.Success(it, rawBytes = null, isGif = false)
                 } ?: FetchResult.Error
             }
         }
@@ -300,7 +325,7 @@ private sealed interface PreviewState {
     data object Idle    : PreviewState
     data object Loading : PreviewState
     data class  Ready(
-        val bitmap: Bitmap,
+        val bitmap: Bitmap?,
         val rawBytes: ByteArray? = null,
         val isGif: Boolean = false,
         val isYouTube: Boolean = false,
@@ -702,7 +727,7 @@ fun InlinePreview(
                                 bytes = s.rawBytes,
                                 modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                             )
-                        } else if (!s.bitmap.isRecycled && s.bitmap.width > 0 && s.bitmap.height > 0) {
+                        } else if (s.bitmap != null && !s.bitmap.isRecycled && s.bitmap.width > 0 && s.bitmap.height > 0) {
                             // Drawing a recycled or zero-dimension bitmap throws RuntimeException
                             // from BaseRecordingCanvas.drawBitmap → throwIfCannotDraw, taking down
                             // the whole composition. The bitmap is held by PreviewState.Ready so

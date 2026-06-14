@@ -9,8 +9,8 @@ android {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.6.6"
+        versionCode = 23
+        versionName = "1.6.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -80,6 +80,7 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.collections.immutable)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:13.0.0")

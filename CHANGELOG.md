@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
+## [1.6.7] - 2026-06-14
+- **New commands** Add /clear, /alias [list | add <name> <expansion> | remove <name>] and /slap <target>
+- **Log retention** "0" keeps logs indefinitely
+- **Media** Optimise image/gif's for Image Previews
+- **Nick regaining** Client attempts to regain primary nick after a reconnect
+- **Bug fixes** Font styles & topic display settings weren't being saved after restart. Fix strict RFC2812 trailing param for MODE and others (InspIRCd). No longer show yourself as typing.
+- **Hungarian translation** Added by Greg M. [https://github.com/cyberdyne-sys]
+
 ---
 ## [1.6.6] - 2026-06-06
 - **DCC**  Add support for file transfers larger than 4.3GB, IPv6 and proxy support. 

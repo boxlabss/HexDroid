@@ -41,6 +41,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -114,6 +116,33 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 import android.graphics.Color as AColor
+
+/*
+ *  CONTRIBUTORS
+ */
+private data class Credit(val name: String, val detail: String? = null, val url: String? = null)
+private data class CreditGroup(val title: String, val members: List<Credit>)
+
+private val CREDITS: List<CreditGroup> = listOf(
+    CreditGroup(
+        "Development",
+        listOf(
+            Credit("eck", "Lead", "https://github.com/boxlabss"),
+        ),
+    ),
+    CreditGroup(
+        "Translations",
+        listOf(
+            Credit("cyberdyne-sys", "Hungarian", "https://github.com/cyberdyne-sys"),
+        ),
+    ),
+    CreditGroup(
+        "Special thanks",
+        listOf(
+            //Credit("name", "something", "url")
+        ),
+    ),
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -314,6 +343,8 @@ private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
         }
     }
 
+    CreditsCard(ctx, accent, sourceUrl)
+
     Spacer(Modifier.height(2.dp))
 
     Row(
@@ -346,6 +377,127 @@ private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
                 }
             }
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CreditsCard(ctx: Context, accent: Color, repoUrl: String) {
+    val groups = remember { CREDITS.filter { it.members.isNotEmpty() } }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 400.dp)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(accent.copy(alpha = 0.45f), Color.White.copy(alpha = 0.06f))
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                ),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
+        ) {
+            Row(Modifier.height(IntrinsicSize.Min)) {
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(
+                            Brush.verticalGradient(listOf(accent, accent.copy(alpha = 0.25f)))
+                        )
+                )
+                Column(
+                    Modifier
+                        .padding(20.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.about_credits_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+
+                    // Each non-empty group: an accent label + a wrapping flow of name chips,
+                    // so any number of contributors stays tidy and never overflows.
+                    groups.forEach { group ->
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                group.title.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = accent.copy(alpha = 0.85f)
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                group.members.forEach { CreditChip(ctx, it, accent) }
+                            }
+                        }
+                    }
+
+                    Text(
+                        stringResource(R.string.about_credits_contribute),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = accent.copy(alpha = 0.85f),
+                        modifier = Modifier.clickable {
+                            runCatching {
+                                ctx.startActivity(
+                                    Intent(Intent.ACTION_VIEW, repoUrl.toUri())
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreditChip(ctx: Context, credit: Credit, accent: Color) {
+    val hasLink = !credit.url.isNullOrBlank()
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(accent.copy(alpha = 0.10f))
+            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(50))
+            .then(
+                if (hasLink) Modifier.clickable {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(Intent.ACTION_VIEW, credit.url.toUri())
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                } else Modifier
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            credit.name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.92f)
+        )
+        if (!credit.detail.isNullOrBlank()) {
+            Text(
+                " · ${credit.detail}",
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.5f)
+            )
+        }
     }
 }
 

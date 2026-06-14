@@ -253,7 +253,17 @@ data class IrcConfig(
      * SOCKS proxy to tunnel this connection through. Default [ProxyConfig] has
      * type NONE (direct connection)
      */
-    val proxy: com.boxlabs.hexdroid.connection.ProxyConfig = com.boxlabs.hexdroid.connection.ProxyConfig()
+    val proxy: com.boxlabs.hexdroid.connection.ProxyConfig = com.boxlabs.hexdroid.connection.ProxyConfig(),
+    /**
+     * Android [android.net.Network] to pin this connection's socket to, or null for default
+     * routing. When set, the underlying TCP socket is bound to this network before connect
+     * (and on the direct path, DNS is also resolved on it), so the socket rides exactly that
+     * interface for its lifetime. A Wi-Fi<->cellular handoff then tears the socket down
+     * promptly instead of leaving a half-dead socket that blocks reads until the socket read
+     * timeout. The view-model records the same Network so its ConnectivityManager onLost
+     * callback can match the lost interface and reconnect immediately.
+     */
+    val pinnedNetwork: android.net.Network? = null
 ) {
     /**
      * Assemble the authentication identity string for this connection, applying the bouncer-
@@ -4742,6 +4752,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					soTimeoutMs = config.readTimeoutMs,
 					tcpNoDelay = config.tcpNoDelay,
 					keepAlive = config.keepAlive,
+					pinnedNetwork = config.pinnedNetwork,
 				)
 			}
 			// FAIL CLOSED: if a proxy was selected but is misconfigured (e.g. blank host or
@@ -4758,8 +4769,12 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// try each in turn (sequential-fallback Happy Eyeballs), accepting the first that
 			// connects. This is the same approach OkHttp / curl / SSH default to and copes with
 			// hosts that publish an AAAA record but have no working IPv6 path.
+			//
+			// When pinned to a specific Network, resolve on that network too so resolution and
+			// connection use the same interface (avoids resolving on Wi-Fi but connecting on
+			// mobile under split-horizon DNS/captive portals).
 			val resolved: Array<InetAddress> = try {
-				InetAddress.getAllByName(config.host)
+				config.pinnedNetwork?.getAllByName(config.host) ?: InetAddress.getAllByName(config.host)
 			} catch (uhe: java.net.UnknownHostException) {
 				throw java.net.UnknownHostException("Unable to resolve ${config.host}: ${uhe.message ?: "no DNS record"}")
 			}
@@ -4768,6 +4783,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			for (addr in resolved) {
 				val s = baseSocket()
 				try {
+					// Pin to the chosen interface BEFORE connect (bindSocket requires an
+					// unconnected socket). runCatching: if the network vanished between
+					// selection and now, fall through to default routing. the connect will
+					// then fail on a dead network and auto-reconnect handles it.
+					config.pinnedNetwork?.let { net -> runCatching { net.bindSocket(s) } }
 					s.connect(InetSocketAddress(addr, config.port), config.connectTimeoutMs)
 					return s
 				} catch (t: Throwable) {

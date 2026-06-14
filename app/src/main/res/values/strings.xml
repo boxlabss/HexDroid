@@ -99,6 +99,8 @@
     <string name="setting_log_folder">Log folder</string>
     <string name="setting_choose_folder">Choose folder</string>
     <string name="setting_retention_days">Retention days</string>
+    <string name="setting_retention_days_hint">0 = keep forever</string>
+    <string name="setting_retention_forever">Keeping logs forever (auto-delete off)</string>
     <string name="setting_max_scrollback">Max scrollback lines</string>
     <string name="setting_history_limit">History fetch limit</string>
     <string name="setting_history_limit_desc">Number of messages to request per channel on join (CHATHISTORY LATEST). Set to 0 to disable.</string>
@@ -230,7 +232,7 @@
     <string name="lang_ja" translatable="false">日本語</string>
     <string name="lang_ko" translatable="false">한국어</string>
     <string name="lang_zh" translatable="false">中文</string>
-	
+
     <string name="network_edit_advanced_caps">Advanced IRCv3 caps</string>
     <string name="network_edit_caps_hint">Basic IRCv3 features enabled by default. Switch on to see advanced options.</string>
     <string name="network_edit_bouncer_caps">Bouncer caps</string>
@@ -349,7 +351,7 @@
     <string name="networks_local_title">Local network access required</string>
     <string name="networks_local_body">Connecting to {0} requires the Local Network permission.
 
-This is a new Android 17 requirement for connecting to servers on your local network (home network, bouncer, etc.).</string>
+        This is a new Android 17 requirement for connecting to servers on your local network (home network, bouncer, etc.).</string>
     <string name="networks_local_grant">Grant permission</string>
     <string name="networks_insecure_body">Plaintext IRC connections are not encrypted and can expose your messages and password.</string>
     <string name="networks_insecure_body2">To connect to %1$s without TLS, you must explicitly allow insecure plaintext connections for this network.</string>
@@ -628,6 +630,8 @@ This is a new Android 17 requirement for connecting to servers on your local net
     <string name="about_tagline">IRC Client for Android</string>
     <string name="about_support_title">Documentation &amp; Support</string>
     <string name="about_support_desc">Visit the website for guides, FAQs, and to report issues.</string>
+    <string name="about_credits_title">Contribs</string>
+    <string name="about_credits_contribute">Want to contribute?</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">Use SDCC (TLS encryption)</string>

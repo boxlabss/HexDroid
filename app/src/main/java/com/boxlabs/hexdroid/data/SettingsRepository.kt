@@ -236,8 +236,11 @@ class SettingsRepository(private val ctx: Context) {
                 chatFontStyle = runCatching {
                     ChatFontStyle.valueOf(o.optString("chatFontStyle", ChatFontStyle.REGULAR.name))
                 }.getOrDefault(ChatFontStyle.REGULAR),
+                customFontPath = o.optString("customFontPath", "").takeIf { it.isNotBlank() },
+                customChatFontPath = o.optString("customChatFontPath", "").takeIf { it.isNotBlank() },
 
                 showTopicBar = o.optBoolean("showTopicBar", true),
+                hideTopicOnEntry = o.optBoolean("hideTopicOnEntry", false),
                 hideMotdOnConnect = o.optBoolean("hideMotdOnConnect", false),
                 defaultShowNickList = o.optBoolean("defaultShowNickList", true),
                 defaultShowBufferList = o.optBoolean("defaultShowBufferList", true),
@@ -307,6 +310,14 @@ class SettingsRepository(private val ctx: Context) {
                 receiveTypingIndicator = o.optBoolean("receiveTypingIndicator", true),
                 imagePreviewsEnabled = o.optBoolean("imagePreviewsEnabled", false),
                 imagePreviewsWifiOnly = o.optBoolean("imagePreviewsWifiOnly", true),
+                commandAliases = o.optJSONObject("commandAliases")?.let { ao ->
+                    buildMap {
+                        ao.keys().forEach { k ->
+                            val v = ao.optString(k, "")
+                            if (k.isNotBlank() && v.isNotBlank()) put(k.lowercase(), v)
+                        }
+                    }
+                } ?: emptyMap(),
             )
         } catch (_: Throwable) {
             UiSettings()
@@ -324,8 +335,11 @@ class SettingsRepository(private val ctx: Context) {
         o.put("fontChoice", s.fontChoice.name)
         o.put("chatFontChoice", s.chatFontChoice.name)
         o.put("chatFontStyle", s.chatFontStyle.name)
+        o.put("customFontPath", s.customFontPath ?: "")
+        o.put("customChatFontPath", s.customChatFontPath ?: "")
 
         o.put("showTopicBar", s.showTopicBar)
+        o.put("hideTopicOnEntry", s.hideTopicOnEntry)
         o.put("hideMotdOnConnect", s.hideMotdOnConnect)
         o.put("defaultShowNickList", s.defaultShowNickList)
         o.put("defaultShowBufferList", s.defaultShowBufferList)
@@ -386,6 +400,9 @@ class SettingsRepository(private val ctx: Context) {
         o.put("receiveTypingIndicator", s.receiveTypingIndicator)
         o.put("imagePreviewsEnabled", s.imagePreviewsEnabled)
         o.put("imagePreviewsWifiOnly", s.imagePreviewsWifiOnly)
+        o.put("commandAliases", JSONObject().apply {
+            s.commandAliases.forEach { (k, v) -> put(k, v) }
+        })
 
         return o
     }

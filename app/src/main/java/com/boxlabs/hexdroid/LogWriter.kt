@@ -229,6 +229,8 @@ class LogWriter(private val ctx: Context) {
 
     // Purge logs according to the retention policy
     fun purgeOlderThan(days: Int, logFolderUri: String?) {
+        // 0 means "keep logs forever"
+        if (days <= 0) return
         val cutoff = System.currentTimeMillis() - days.coerceIn(1, 365) * 24L * 60L * 60L * 1000L
         if (logFolderUri.isNullOrBlank()) {
             // Internal storage: walk the file tree and delete old files.

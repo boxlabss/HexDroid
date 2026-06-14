@@ -119,7 +119,7 @@ private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: S
     return try {
         val inputStream = ctx.contentResolver.openInputStream(uri) ?: return null
         val fontsDir = File(ctx.filesDir, "fonts").apply { mkdirs() }
-        
+
         // Get original filename or use a default
         val cursor = ctx.contentResolver.query(uri, null, null, null, null)
         val fileName = cursor?.use {
@@ -128,7 +128,7 @@ private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: S
                 if (idx >= 0) it.getString(idx) else null
             } else null
         } ?: "custom_font.ttf"
-        
+
         val destFile = File(fontsDir, "${prefix}_$fileName")
         destFile.outputStream().use { out ->
             inputStream.copyTo(out)
@@ -646,6 +646,76 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_show_buffers_default), s.defaultShowBufferList) { onUpdate { copy(defaultShowBufferList = !defaultShowBufferList) } } }
             item { SettingToggle(stringResource(R.string.setting_show_nicklist_default), s.defaultShowNickList) { onUpdate { copy(defaultShowNickList = !defaultShowNickList) } } }
 
+            item { HorizontalDivider() }
+            item { SectionTitle("Custom Aliases") }
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    Text(
+                        "Define your own commands. In the expansion use \$channel (current buffer), " +
+                        "\$network/\$server, \$1–\$9 (arguments), \$* (all arguments), \$me (your nick). " +
+                        "Example: name “bl”, expansion “msg *backlog \$channel \$1” lets you type /bl 50.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    val aliases = s.commandAliases.toSortedMap()
+                    if (aliases.isEmpty()) {
+                        Text("No aliases yet.", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        aliases.forEach { (name, expansion) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("/$name", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        expansion,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(onClick = { onUpdate { copy(commandAliases = commandAliases - name) } }) {
+                                    Text("Remove")
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    var newName by remember { mutableStateOf("") }
+                    var newExpansion by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Alias name (no “/”)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = newExpansion,
+                        onValueChange = { newExpansion = it },
+                        label = { Text("Expansion (a command, no “/”)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val cleanName = newName.trim().removePrefix("/").lowercase()
+                    val valid = cleanName.isNotBlank() && newExpansion.isNotBlank() &&
+                        cleanName.none { it.isWhitespace() || it == '/' }
+                    Button(
+                        onClick = {
+                            onUpdate { copy(commandAliases = commandAliases + (cleanName to newExpansion.trim())) }
+                            newName = ""
+                            newExpansion = ""
+                        },
+                        enabled = valid,
+                    ) { Text("Add alias") }
+                }
+            }
+
             item { SectionTitle(stringResource(R.string.section_portrait)) }
             item {
                 Column {
@@ -659,7 +729,7 @@ fun SettingsScreen(
                     )
                 }
             }
-			
+
             item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_highlights)) }
@@ -684,7 +754,7 @@ fun SettingsScreen(
             item { HorizontalDivider() }
 
             item { SectionTitle(stringResource(R.string.section_irc)) }
-			
+
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Row(
@@ -699,7 +769,7 @@ fun SettingsScreen(
                     }
                 }
             }
-			
+
             item {
                 Text(stringResource(R.string.setting_quit_message), style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
@@ -709,7 +779,7 @@ fun SettingsScreen(
                     singleLine = true
                 )
             }
-			
+
             item {
                 Text(stringResource(R.string.setting_part_message), style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
@@ -867,9 +937,16 @@ fun SettingsScreen(
                     value = s.retentionDays.toString(),
                     onValueChange = { v ->
                         val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                        onUpdate { copy(retentionDays = n.coerceIn(1, 365)) }
+                        // 0 = keep logs forever (purge disabled); otherwise clamp to 1..365.
+                        onUpdate { copy(retentionDays = n.coerceIn(0, 365)) }
                     },
                     label = { Text(stringResource(R.string.setting_retention_days)) },
+                    supportingText = {
+                        Text(
+                            if (s.retentionDays <= 0) stringResource(R.string.setting_retention_forever)
+                            else stringResource(R.string.setting_retention_days_hint)
+                        )
+                    },
                     singleLine = true
                 )
             }
@@ -1262,7 +1339,7 @@ private fun FontPicker(
             if (onPickCustom != null) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.settings_custom_font)) },
-                    onClick = { 
+                    onClick = {
                         expanded = false
                         onPickCustom()
                     }

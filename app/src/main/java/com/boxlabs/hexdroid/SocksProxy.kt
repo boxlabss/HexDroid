@@ -123,6 +123,7 @@ object SocksProxy {
         soTimeoutMs: Int,
         tcpNoDelay: Boolean,
         keepAlive: Boolean,
+        pinnedNetwork: android.net.Network? = null,
     ): Socket {
         require(cfg.enabled) { "SocksProxy.connect called with a disabled proxy config" }
 
@@ -131,6 +132,12 @@ object SocksProxy {
             this.keepAlive = keepAlive
         }
         try {
+            // Pin the socket-to-proxy hop to the chosen interface before connect, mirroring
+            // the direct path in IrcCore.openSocket. For a localhost Tor/SOCKS proxy the bind
+            // is a no-op on loopback traffic; for a remote proxy host it ensures the hop rides
+            // the same network the rest of the connection is pinned to. runCatching: degrade
+            // to default routing if the network vanished between selection and now.
+            pinnedNetwork?.let { net -> runCatching { net.bindSocket(socket) } }
             // Connect to the PROXY (not the destination). The proxy address is a literal
             // host:port the user configured, so a local resolve here is fine and expected;
             // it's usually 127.0.0.1 for Tor anyway.

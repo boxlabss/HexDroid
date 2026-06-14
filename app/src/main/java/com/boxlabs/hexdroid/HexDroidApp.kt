@@ -1,20 +1,20 @@
 /*
-* HexDroidIRC - An IRC Client for Android
-* Copyright (C) 2026 boxlabs
-*
-* This program is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ * HexDroidIRC - An IRC Client for Android
+ * Copyright (C) 2026 boxlabs
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 package com.boxlabs.hexdroid
 
@@ -34,7 +34,7 @@ import com.boxlabs.hexdroid.data.SettingsRepository
 class HexDroidApp : Application() {
 
     lateinit var repo: SettingsRepository
-        private set
+    private set
 
     /**
      * Process-wide singleton for the IRC ViewModel.
@@ -89,6 +89,10 @@ class HexDroidApp : Application() {
                 mainHandler.removeCallbacks(goBackgroundRunnable)
                 started = (started + 1).coerceAtLeast(1)
                 AppVisibility.isForeground = true
+                // If we suppressed auto-reconnect for a swipe-away teardown but the process
+                // outlived it and the user came back, clear that suppression so connections
+                // resume normally.
+                ircViewModel.onAppForegrounded()
                 // Clear the unread counter on the currently-selected buffer if any.
                 // Messages that arrived while the app was backgrounded increment unread
                 // (because isSelected uses isForeground in its predicate), and on

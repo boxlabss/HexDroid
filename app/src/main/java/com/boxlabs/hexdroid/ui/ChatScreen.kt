@@ -254,6 +254,7 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("names",      "/names [channel]",               "List users in a channel"),
 
     // Buffer management
+    IrcCommand("clear",      "/clear",                         "Clear current buffer"),
     IrcCommand("close",      "/close",                         "Close the current buffer"),
     IrcCommand("closekey",   "/closekey <net::buffer>",        "Close a specific buffer by key"),
     IrcCommand("find",       "/find <text>",                   "Search messages in the current buffer"),
@@ -330,6 +331,8 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("operwall",   "/operwall <message>",            "Send an OPERWALL message (IRCop)"),
 
     // Misc
+    IrcCommand("alias",        "/alias [list | add <name> <expansion> | remove <name>]",                 "List, create, or delete an alias cmd. With no argument, lists your aliases"),
+    IrcCommand("slap",        "/slap <nick>",                 "Slap a user with a fish"),
     IrcCommand("raw",        "/raw <command>",                 "Send a raw IRC line to the server"),
     IrcCommand("quote",      "/quote <command>",               "Alias for /raw — send a raw IRC line to the server"),
     IrcCommand("sysinfo",    "/sysinfo",                       "Post device system info to chat"),
@@ -3518,7 +3521,7 @@ fun ChatScreen(
         } // closes Column(Modifier.fillMaxWidth) wrapping typing indicator + Row
         } // closes Surface
         } // closes Column wrapper for CommandHints + Surface
-	
+
     val scaffoldContent: @Composable (PaddingValues) -> Unit = { padding ->
         if (!isWide) {
             // Portrait: either full-width messages, or split messages + nicklist pane
@@ -5485,6 +5488,11 @@ private fun splitTrailingPunctuation(token: String): Pair<String, String> {
 }
 
 private fun computeLinkSpans(text: String): List<LinkSpan> {
+    // Fast path: this runs two regexes, and mIRC-coloured text (especially ASCII art) is split
+    // into hundreds of short runs that each call here. If a run can't contain a URL ("://") or a
+    // channel ("#"), there's nothing to find and skip the regex work entirely. Same result, far
+    // less CPU when building/scrolling heavily-coloured lines.
+    if (!text.contains("://") && text.indexOf('#') < 0) return emptyList()
     // Find URLs first; then find channels that are NOT inside URLs.
     val urlMatches = urlRegex.findAll(text).mapNotNull { m ->
         val raw = m.value
