@@ -99,6 +99,8 @@
     <string name="setting_log_folder">Naplózási mappa</string>
     <string name="setting_choose_folder">Válassz mappát</string>
     <string name="setting_retention_days">Megőrzési idő</string>
+    <string name="setting_retention_days_hint">0 = bármeddig</string>
+    <string name="setting_retention_forever">Naplók megőrzése korlátlanul (auto-törlés ki)</string>
     <string name="setting_max_scrollback">Visszagörgethető sorok száma</string>
     <string name="setting_history_limit">Előzménykorlát</string>
     <string name="setting_history_limit_desc">Csatornánként belépéskor kérhető üzenetek száma (CHATHISTORY LATEST). Kikapcsoláshoz 0.</string>
@@ -230,7 +232,7 @@
     <string name="lang_ja" translatable="false">日本語</string>
     <string name="lang_ko" translatable="false">한국어</string>
     <string name="lang_zh" translatable="false">中文</string>
-	
+
     <string name="network_edit_advanced_caps">Haladó IRCv3 képességek</string>
     <string name="network_edit_caps_hint">Az alap IRCv3 funkciók eleve aktívak. Kapcsold be a haladó beállításokhoz.</string>
     <string name="network_edit_bouncer_caps">Bouncer képességek</string>
@@ -349,7 +351,7 @@
     <string name="networks_local_title">Helyi hálózati hozzáférés szükséges</string>
     <string name="networks_local_body">Helyi Hálózati jogosultság szükséges a kapcsolódáshoz: {0} .
 
-Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez való kapcsolódáshoz (otthoni hálózat, bouncer, stb.).</string>
+        Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez való kapcsolódáshoz (otthoni hálózat, bouncer, stb.).</string>
     <string name="networks_local_grant">Engedélyezés</string>
     <string name="networks_insecure_body">Az egyszerű szöveges IRC kapcsolatok nem titkosítottak, így az üzeneteid és jelszavaid könnyen kideríthetők.</string>
     <string name="networks_insecure_body2">Egyértelműen engedélyezned kell a nem biztonságos egyszerű szöveges kapcsolatot a hálózathoz, ha TLS nélkül szeretnél kapcsolódni ide: %1$s .</string>
@@ -628,6 +630,8 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="about_tagline">IRC Kliens Androidra</string>
     <string name="about_support_title">Dokumentáció &amp; Támogatás</string>
     <string name="about_support_desc">Útmutatásért látogass el a honlapra, nézd meg a GyIK-et (FAQ), valamint problémákat is ott jelezhetsz.</string>
+    <string name="about_credits_title">Közreműködők</string>
+    <string name="about_credits_contribute">Te is segítenél?</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">SDCC használata (TLS titkosítás)</string>
@@ -662,6 +666,4 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
 
     <!-- Bouncer-aware password field hint -->
     <string name="network_server_password_bouncer_hint">Bouncerekhez SASL javasolt. Ha inkább a PASS mezőt használnád, csak add meg a jelszót; a fenti mezőkből származó bouncer felhasználónév és hálózat automatikusan előtag lesz. A teljes <b>felhasználónév/hálózat:jelszó</b> szintén működik.</string>
-
-    <!-- Translator creds moved to AboutScreen.kt -->
 </resources>
