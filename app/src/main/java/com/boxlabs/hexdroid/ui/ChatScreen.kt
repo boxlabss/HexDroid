@@ -5961,31 +5961,6 @@ private fun IrcLinkifiedText(
 }
 
 /**
- * This exists to stop colour-heavy *text* (relay bots that paint the network
- * tag and nick, lively coloured chat) from being misclassified as ASCII/ANSI
- * art and shrunk to an unreadable size.
- */
-private fun looksLikeProse(plain: String): Boolean {
-    var words = 0
-    var run = 0
-    var letters = 0
-    var nonSpace = 0
-    for (ch in plain) {
-        if (ch.isLetter()) {
-            run++
-            letters++
-        } else {
-            if (run >= 2) words++
-            run = 0
-        }
-        if (!ch.isWhitespace()) nonSpace++
-    }
-    if (run >= 2) words++
-    val letterRatio = if (nonSpace > 0) letters.toFloat() / nonSpace else 0f
-    return words >= 3 && letterRatio >= 0.55f
-}
-
-/**
  * Returns true when a chat message line looks like it belongs to a bot-generated
  * ASCII/ANSI art block rather than normal coloured conversation.
  */
@@ -6020,7 +5995,7 @@ private fun looksLikeArt(text: String): Boolean {
             else -> i++
         }
     }
-    if (mircCount >= 4 && !looksLikeProse(plain)) return true
+    if (mircCount >= 4) return true
 
     // Signal 1: ≥2 leading spaces AND the content looks like a structural/art line.
     //
