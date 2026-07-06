@@ -192,10 +192,11 @@ AGM v1 protects:
 - Accidental plaintext leakage on the sender side (senders fail closed on any
   encryption error rather than transmitting cleartext).
 
-A v2 scheme (`+AGE`) is planned to add per-conversation X25519 key exchange
-and a double-ratchet for forward secrecy / post-compromise security. v1
-intentionally ships first because it's a strict improvement over FiSH
-without protocol complexity.
+The `+AGE` scheme (see [age-wire-format.md](age-wire-format.md)) adds per-identity
+X25519 key exchange, a forward-secret group channel, and a 1:1 double ratchet for
+forward secrecy / post-compromise security. It is an addition alongside `+AGM`, not a
+replacement: `+AGM` remains the simple PSK option and a strict improvement over FiSH,
+while `+AGE` is the asymmetric, no-PSK path for group/game traffic and private messages.
 
 ## Reference implementations
 

@@ -1,6 +1,6 @@
 # HexDroid `+AGE` wire format
 
-Version 1. Curve25519 identity, sealed boxes, an encrypted group channel, and a 1:1
+Version 1. Ed25519 + X25519 identity, sealed boxes, an encrypted group channel, and a 1:1
 double ratchet for IRC.
 
 This document is the authoritative reference for the `+AGE` scheme. Any client that
@@ -60,8 +60,15 @@ padding optional on receive). Line shapes:
 AGE IDENT 1 <b64(edPub)> <b64(dhPub)> <createdAt> <b64(sig)>
 AGE INVITE <id> <i>/<n> <b64(blobChunk)>
 AGE MSG <gameId> <senderFp> <epoch> <seq> <b64(ciphertext)>
+AGE CHAT <target> <senderFp> <epoch> <seq> <b64(ciphertext)>
 AGE REKEY <gameId> <epoch>
 ```
+
+`AGE CHAT` is the manual (typed) sibling of `AGE MSG`: identical framing and identical
+sign-then-encrypt-under-K_G construction, but its payload is chat text rather than a
+scripted game move, and `<target>` is a channel name or, for a 1:1, the peer's nick. It is
+produced by the hostless manual-chat path (see the handshake spec, "Manual channel & PM
+chat"). Non-`+AGE` clients and any peer without the channel's `K_G` see only ciphertext.
 
 Tokens are single-space separated. `createdAt` is decimal seconds; `epoch` and `seq` are
 decimal integers; `<i>/<n>` is the 1-based chunk index over total. A receiver MUST reject
@@ -169,30 +176,42 @@ fresh random 256-bit key per game, that alone gives forward secrecy *between* ga
 ## Channel messages (sign-then-encrypt)
 
 Every `#game` line is signed with the sender's Ed25519, then `inner || sig` is encrypted
-under the group key `K_G`:
+under a **per-sender message key `k_s`** derived from the group key `K_G`:
 
 ```
 inner  := str(gameId) || u32(epoch) || u32(seq) || str(senderFp) || field(move)
 sig    := Ed25519_sign(senderSigSeed, "hexdroid/+AGE/msg-sign/v1" || inner)
 signed := field(inner) || field(sig)
+k_s    := HKDF-SHA256(ikm=K_G, salt=0^32, info="hexdroid/+AGE/msg-key/v1" || lower(senderFp) || u32_be(epoch), L=32)
 nonce  := senderFp[0:8] || u32_be(seq)                 # 12 bytes; unique per (sender, seq)
 aad    := "hexdroid/+AGE/msg/v1" || gameId || senderFp || u32_be(seq)    # raw concat
-ct     := AES-256-GCM(K_G, nonce, signed, aad)
+ct     := AES-256-GCM(k_s, nonce, signed, aad)
 ```
 
 Wire: `AGE MSG <gameId> <senderFp> <epoch> <seq> <b64(ct)>`. The nonce is **not**
 transmitted, the receiver reconstructs it from `senderFp` and `seq`, both on the wire.
 `senderFp[0:8]` is the first 8 bytes (16 hex chars) of the sender's fingerprint.
 
+**Why a per-sender key, not `K_G` directly.** The nonce carries only the first 8 bytes of
+`senderFp`, so cross-sender nonce uniqueness rests on 64 bits. Under one shared key, two
+members with a grindable 64-bit fingerprint-prefix collision (~2^64 targeted, ~2^32 by
+birthday for two attacker-chosen identities) would reuse a `(key, nonce)` pair and break
+GCM. Deriving `k_s` by binding the **full** `senderFp` (plus `epoch`) means distinct
+identities always get distinct keys, so a prefix collision is harmless. The inner Ed25519
+signature independently prevents impersonation; `k_s` closes the AEAD-layer confidentiality
+gap so the group cipher meets its 128-bit target on its own. `senderFp` is lowercased in the
+derivation so both sides agree regardless of wire-case. The wire framing is unchanged.
+
 Receiver, in order, failing closed (drop, never render) at any step:
 1. `gameId` matches and `epoch` matches the current epoch (else drop as stale/foreign).
 2. `senderFp` is a known member → its pinned Ed25519 key.
-3. AES-GCM-open under `K_G` with the reconstructed nonce and AAD.
+3. Derive `k_s` from `K_G`, `senderFp`, `epoch`; AES-GCM-open with the reconstructed nonce and AAD.
 4. Verify `sig` over `"msg-sign/v1" || inner` against the sender's pinned key.
 5. Re-parse `inner` and cross-check `gameId/epoch/seq/senderFp` against the wire header,
    so a tampered cleartext header can't desync from the signed content.
 6. Enforce **strictly increasing** `seq` per sender within an epoch (replay/reorder
-   guard). The sign tag (`msg-sign/v1`) and the AAD tag (`msg/v1`) are distinct labels.
+   guard). The sign tag (`msg-sign/v1`), AAD tag (`msg/v1`), and key-derivation tag
+   (`msg-key/v1`) are distinct labels.
 
 ## Membership and rekey
 
@@ -289,8 +308,9 @@ still warrants an independent cryptographic review before it is relied on.
 
 **HexDroid** (`app/src/main/java/com/boxlabs/hexdroid/crypto/`)
 
-- **`AgeCore.kt`** primitives (`AgePrimitives`, `Curve25519AgePrimitives`), the canonical
-  TLV writer/reader and base64 (`AgeCodec`), and the identity fingerprint (`AgeFingerprint`).
+- **`AgeCore.kt`** primitives (`AgePrimitives`, `JcaAgePrimitives`,
+  `BouncyCastleAgePrimitives`), the canonical TLV writer/reader and base64 (`AgeCodec`),
+  and the identity fingerprint (`AgeFingerprint`).
 - **`AgeIdentity.kt`** identity types (`AgeIdentity`, `AgePublicIdentity`), the TOFU pin
   store (`AgeStore`), and the signed IDENT announce/verify (`AgeIdent`).
 - **`AgeProtocol.kt`** sealed box (`AgeSeal`), game invites (`AgeInvite`), the channel
