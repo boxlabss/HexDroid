@@ -62,7 +62,13 @@ AGE INVITE <id> <i>/<n> <b64(blobChunk)>
 AGE MSG <gameId> <senderFp> <epoch> <seq> <b64(ciphertext)>
 AGE CHAT <target> <senderFp> <epoch> <seq> <b64(ciphertext)>
 AGE REKEY <gameId> <epoch>
+AGE FRAG <id> <i>/<n> <b64(lineChunk)>
 ```
+
+`AGE FRAG` is a transport wrapper, not a scheme message: it carries a fragment of any of the
+other lines above when that line is too long for a single PRIVMSG. It is reassembled and
+unwrapped before any of the verb handling below runs, so from the protocol's point of view it
+does not exist. It is specified in full under "Fragmentation" below.
 
 `AGE CHAT` is the manual (typed) sibling of `AGE MSG`: identical framing and identical
 sign-then-encrypt-under-K_G construction, but its payload is chat text rather than a
@@ -73,6 +79,49 @@ chat"). Non-`+AGE` clients and any peer without the channel's `K_G` see only cip
 Tokens are single-space separated. `createdAt` is decimal seconds; `epoch` and `seq` are
 decimal integers; `<i>/<n>` is the 1-based chunk index over total. A receiver MUST reject
 any line whose token count or separators don't match exactly.
+
+## Fragmentation (`AGE FRAG`)
+
+A single IRC PRIVMSG is bounded to 512 bytes including `PRIVMSG <target> :` and the trailing
+CRLF, and servers may add tags or truncate silently. An encrypted group move can exceed that
+on its own: a scripted poker table broadcasts its full state, which base64s well past one
+line. `AGE INVITE` solves this only for invite blobs (it chunks the sealed blob itself). Every
+other verb needs a transport-independent way to survive the line limit, so `+AGE` adds a
+generic fragmentation wrapper applied by the sender just before transmission.
+
+The sender takes the complete, already-formed `AGE ...` line, base64s the whole line (RFC 4648,
+no wrap), splits the base64 into chunks of at most `CHUNK` (350) characters, and emits:
+
+```
+AGE FRAG <id> <i>/<n> <b64(lineChunk)>
+```
+
+`<id>` correlates the pieces of one line; `<i>/<n>` is the 1-based index over the total, same
+shape as `AGE INVITE`. The whole line is base64'd (rather than split raw) so a server that
+trims trailing whitespace or collapses runs of spaces cannot corrupt a chunk boundary.
+
+Fragmentation is decided purely by length. A sender fragments only when
+`8 + len(target) + 2 + 2 + len(line)` (the `PRIVMSG ` prefix, the ` :` separator, and CRLF)
+exceeds a conservative 480-byte budget; short lines, which is the common case for handshake
+frames and small moves, go out verbatim with zero overhead. At most `FRAG_MAX` (64) fragments
+are emitted for one line; a line that would need more is dropped at the sender rather than
+partially transmitted.
+
+Reassembly is keyed by `(senderNick, id)`:
+
+- A receiver buffers chunks into an `n`-slot array. If a later chunk for a reused `id` arrives
+  with a different `n`, the buffer is reset (a reused id must not merge two different lines).
+- `i`, `n` MUST satisfy `1 <= i <= n <= FRAG_MAX`; anything else is dropped.
+- In-flight partial reassemblies are capped (32); past the cap the buffers are cleared, so a
+  flood of never-completing fragments cannot grow memory without bound.
+- On the final chunk the base64 is decoded back to the original UTF-8 line, which is then
+  re-dispatched through the normal verb handling exactly as if it had arrived unfragmented.
+- A reassembled line that does not begin `AGE `, or that is itself an `AGE FRAG`, is rejected:
+  fragments never nest and a fragment can never expand into another fragment.
+
+Because `AGE FRAG` is unwrapped before verb handling, none of the crypto rules below (signing,
+sealing, per-sender `seq`, epoch checks) are aware of it, and no verb needs a fragmented and an
+unfragmented form. It is a pure link-layer accommodation for IRC's line limit.
 
 ## Identity, IDENT announcement, and TOFU
 
@@ -316,6 +365,5 @@ still warrants an independent cryptographic review before it is relied on.
 - **`AgeProtocol.kt`** sealed box (`AgeSeal`), game invites (`AgeInvite`), the channel
   sign-then-encrypt group layer (`AgeChannel`), the 1:1 X3DH-style handshake (`AgeHandshake`)
   and double ratchet (`AgeRatchet`), and the verb framing + chunking (`AgeWire`).
-- **`AgeSelfTest.kt`** conformance tests (`AgeSelfTest`, `AgeRatchetSelfTest`).
 
 Shared with `+AGM`: `crypto/AesGcm.kt`, `crypto/Crockford32.kt`.

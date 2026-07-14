@@ -143,6 +143,7 @@ One command per statement (verb first). Full set:
 | `raw <line>` | send a raw IRC line |
 | `signal <name> [args…]` | fire `SIGNAL:<name>` now |
 | `timer <ms> <signal> [args…]` | fire `SIGNAL:<signal>` after `<ms>` |
+| `log <text>` / `debug <text>` | write `<text>` to the script debug log (development aid) |
 | `sidebar add\|remove...` | manage a sidebar launcher (see §11) |
 | `http.get <url> <signal> [ctx…]` | async GET, result to `SIGNAL:<signal>` (§10) |
 | `http.post <url> <body> <signal> [ctx…]` | async POST (§10) |
@@ -179,15 +180,16 @@ script sigil). An invalid pattern makes `re_match`/`re_find`/`re_group` return e
 `re_replace` return the input unchanged.
 
 **Math:** `$calc(expr)` (arithmetic `+ - * / %` with parens, e.g. `$calc((%pot + %bet) % 2)`)
-`$mod(a,b)` `$int(x)` (floor) `$round(x[,dp])` `$ceil(x)` `$abs(x)` `$pow(a,b)`
+`$mod(a,b)` `$idiv(a,b)` (integer/floor division) `$int(x)` (floor) `$round(x[,dp])` `$ceil(x)` `$abs(x)` `$pow(a,b)`
 `$clamp(x,lo,hi)` `$rand(n)`→0..n−1 / `$rand(lo,hi)`>inclusive.
 `$min(…)`/`$max(…)` take either several numeric args **or** a single list
 `$max(3,9,2)` and `$max(%scores)` both work.
 
 > **`/` is floating-point division.** `$calc(5 / 2)` is `2.5`, not `2`. For whole-number
-> results (chip counts, indices, anything you store or compare as an integer) wrap it:
-> `$int($calc(5 / 2))` → `2`, and take the remainder with `%`: `$calc(5 % 2)` → `1`. A
-> stray fractional value that reaches a stored quantity will surprise you later.
+> results (chip counts, indices, anything you store or compare as an integer) use
+> `$idiv(5, 2)` → `2`, and take the remainder with `%`: `$calc(5 % 2)` → `1`. (`$int($calc(5 / 2))`
+> works too but reads worse.) A stray fractional value that reaches a stored quantity will
+> surprise you later.
 
 **Collections:** `$list(…)` `$map(k,v,k,v,…)` `$get(coll,key)` `$len(coll)`
 `$keys(map)` `$values(map)` `$has(coll,key)`→bool `$sort(coll)` `$reverse(coll)`

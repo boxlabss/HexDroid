@@ -344,6 +344,7 @@ AGE INVITE <id> <i>/<n> <b64(blobChunk)>
 AGE MSG   <id> <senderFp> <epoch> <seq> <b64(ciphertext)>
 AGE CHAT  <id> <senderFp> <epoch> <seq> <b64(ciphertext)>
 AGE REKEY <id> <epoch>
+AGE FRAG  <id> <i>/<n> <b64(lineChunk)>
 ```
 
 Tokens are single-space separated; `createdAt` is decimal seconds; `epoch`, `pn`, `n`, and
@@ -351,6 +352,15 @@ Tokens are single-space separated; `createdAt` is decimal seconds; `epoch`, `pn`
 rejects any line whose token count or separators do not match exactly. Every HKDF and AAD
 carries a versioned `"hexdroid/+AGE/*/vN"` domain-separation label, so a future scheme or a
 v2 coexists cleanly.
+
+`AGE INVITE` chunks the sealed invite blob. `AGE FRAG` is the general form: it wraps a
+fragment of *any* over-long `AGE ...` line (the whole line is base64'd, then split into
+`<=350`-char chunks, at most 64 fragments). The sender fragments only when the assembled
+PRIVMSG would exceed a conservative 480-byte budget; short lines go out verbatim. The
+receiver reassembles by `(sender, id)`, decodes back to the original line, and re-dispatches
+it through the normal verb handling, so fragmentation is invisible to every rule above and
+below. Fragments never nest. See the wire-format reference ("Fragmentation") for the exact
+bounds and reset behaviour.
 
 ---
 
