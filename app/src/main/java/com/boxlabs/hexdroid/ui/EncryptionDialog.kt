@@ -66,21 +66,16 @@ import com.boxlabs.hexdroid.crypto.E2eScheme
 /**
  * Per-target end-to-end encryption settings dialog.
  *
- * Lets users:
- *   - Pick the cipher scheme (AES-GCM = HexDroid's +AGM', Blowfish =
- *     legacy FiSH)
- *   - Generate or import a key for that scheme
- *   - View the safety number (fingerprint) for out-of-band verification
- *   - Share / copy the key bytes
- *   - Clear the key
+ * Three schemes:
+ *   - +AGM (AES-256-GCM): HexDroid's symmetric default. One shared 256-bit key you
+ *     generate and hand to the other party out of band.
+ *   - +AGE: identity-based and forward-secret. No key to paste, each device has a
+ *     pinned identity (trust-on-first-use), verified by comparing safety numbers.
+ *   - Blowfish (FiSH): legacy interop with fishlim.
  *
- * Two-step "reveal key" gate stays the default-hidden state for sensitive bytes.
- *
- * Scheme switching: when the user changes the toggle, any existing key for the
- * previous scheme stays in the keystore (the toggle is "what would you set", not
- * "what's currently active"). Only when the user actually generates or imports
- * does the active scheme change. This avoids accidental clobbering when someone
- * is just inspecting their config.
+ * AGM/Blowfish are "set a key" flows; +AGE is an "enable + verify identities" flow,
+ * so its panel shows your safety number, the contact's pin/verify status, and a
+ * toggle rather than a key field.
  */
 @Composable
 fun EncryptionDialog(
@@ -91,27 +86,29 @@ fun EncryptionDialog(
 ) {
     val ctx = LocalContext.current
 
-    // Current state of the key for this target. Re-read on each viewModel
-    // mutation via the state.e2eKeyVersion-bumped invalidation; the LaunchedEffect
-    // below resyncs after generate/import/clear.
-    var current by remember { mutableStateOf(viewModel.getE2eKeyInfo(networkId, target)) }
+    // All dialog state is keyed to (networkId, target) so reopening the dialog for a different
+    // conversation always starts from that conversation's real state instead of a stale snapshot.
+    var current by remember(networkId, target) { mutableStateOf(viewModel.getE2eKeyInfo(networkId, target)) }
+    var ageInfo by remember(networkId, target) { mutableStateOf(viewModel.getAgeUiInfo(networkId, target)) }
 
-    // Scheme the user has selected for the next action. Defaults to the active
-    // scheme if one is configured, otherwise AGM (the recommended default).
-    var pickedScheme by remember { mutableStateOf(current?.scheme ?: E2eScheme.AGM) }
+    // Scheme the user has selected for the next action. Defaults to whatever is actually active for
+    // sending: +AGE wins when it is on (the send path checks it first), otherwise the configured keyed
+    // scheme, otherwise AGM. Landing on the active scheme's panel avoids the dialog opening on AGM while
+    // +AGE is the thing really encrypting the conversation.
+    var pickedScheme by remember(networkId, target) {
+        mutableStateOf(if (ageInfo.enabled) E2eScheme.AGE else current?.scheme ?: E2eScheme.AGM)
+    }
 
-    var revealKey by remember { mutableStateOf(false) }
-    var importText by remember { mutableStateOf("") }
-    var importError by remember { mutableStateOf<String?>(null) }
-    var blowfishPassphrase by remember { mutableStateOf("") }
-    var pendingClear by remember { mutableStateOf(false) }
-    var pendingRegen by remember { mutableStateOf(false) }
+    var revealKey by remember(networkId, target) { mutableStateOf(false) }
+    var importText by remember(networkId, target) { mutableStateOf("") }
+    var importError by remember(networkId, target) { mutableStateOf<String?>(null) }
+    var blowfishPassphrase by remember(networkId, target) { mutableStateOf("") }
+    var pendingClear by remember(networkId, target) { mutableStateOf(false) }
+    var pendingRegen by remember(networkId, target) { mutableStateOf(false) }
 
-    // If an action mutates the keystore through the ViewModel, re-pull the
-    // current snapshot so the dialog reflects it immediately without waiting
-    // for the next compose pass to read state.e2eKeyVersion.
     fun resync() {
         current = viewModel.getE2eKeyInfo(networkId, target)
+        ageInfo = viewModel.getAgeUiInfo(networkId, target)
         revealKey = false
         importText = ""
         importError = null
@@ -120,14 +117,20 @@ fun EncryptionDialog(
         pendingRegen = false
     }
 
+    // What is actually used for sending right now, for the title + header line. +AGE takes precedence
+    // over a keyed scheme because the send path checks +AGE first, so report it first too rather than
+    // letting a leftover AGM/Blowfish key claim to be active while +AGE is really doing the work.
+    val activeLabel: String? = if (ageInfo.enabled) E2eScheme.AGE.displayName else current?.scheme?.displayName
+    val anythingActive = activeLabel != null
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = if (current != null) Icons.Default.Lock else Icons.Default.LockOpen,
+                    imageVector = if (anythingActive) Icons.Default.Lock else Icons.Default.LockOpen,
                      contentDescription = null,
-                     tint = if (current != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                     tint = if (anythingActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text("Encryption", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -136,16 +139,13 @@ fun EncryptionDialog(
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                   // Without this, the AlertDialog's text slot clips its content on
-                   // short screens (and grows past the buttons after an import/generate
-                   // reveals the share section). Scrolling keeps every control reachable.
                    modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
                 Text("for $target", style = MaterialTheme.typography.labelMedium)
 
                 // ── Current state ─────────────────────────────────────────────────
                 val cur = current
-                if (cur == null) {
+                if (!anythingActive) {
                     Text(
                         "Messages in this ${targetTypeLabel(target)} are sent and received in cleartext.",
                          style = MaterialTheme.typography.bodyMedium,
@@ -154,23 +154,37 @@ fun EncryptionDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Active: ", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            cur.scheme.displayName,
+                            activeLabel ?: "",
                              style = MaterialTheme.typography.bodyMedium,
                              color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    Text("Safety number", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    SelectionContainer {
-                        Text(
-                            cur.fingerprint,
-                             style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+                    when {
+                        // Both configured: +AGE is what the send path uses, so the keyed scheme's key is
+                        // dormant. Say so plainly instead of showing that key's safety number as if it were
+                        // the active one (the +AGE safety number lives in the +AGE panel below).
+                        ageInfo.enabled && cur != null -> Text(
+                            "+AGE is on and encrypts messages here. Your saved ${cur.scheme.displayName} " +
+                                "key is kept but stays unused until you turn +AGE off.",
+                             style = MaterialTheme.typography.bodySmall,
+                             color = MaterialTheme.colorScheme.tertiary,
                         )
+                        // A keyed scheme is active (no +AGE): show its safety number to compare out of band.
+                        cur != null -> {
+                            Text("Safety number", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SelectionContainer {
+                                Text(
+                                    cur.fingerprint,
+                                     style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+                                )
+                            }
+                            Text(
+                                "Verify this matches what the other party sees.",
+                                 style = MaterialTheme.typography.bodySmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                    Text(
-                        "Verify this matches what the other party sees.",
-                         style = MaterialTheme.typography.bodySmall,
-                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
 
                 HorizontalDivider()
@@ -181,32 +195,41 @@ fun EncryptionDialog(
                     FilterChip(
                         selected = pickedScheme == E2eScheme.AGM,
                         onClick = { pickedScheme = E2eScheme.AGM; importError = null },
-                        label = { Text("AES-256-GCM") },
+                        label = { Text("AES-GCM") },
                                leadingIcon = if (pickedScheme == E2eScheme.AGM) {
                                    { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
                                } else null,
                     )
                     FilterChip(
+                        selected = pickedScheme == E2eScheme.AGE,
+                        onClick = { pickedScheme = E2eScheme.AGE; importError = null },
+                        label = { Text("+AGE") },
+                               leadingIcon = if (pickedScheme == E2eScheme.AGE) {
+                                   { Text("🛡") }
+                               } else null,
+                    )
+                    FilterChip(
                         selected = pickedScheme == E2eScheme.BLOWFISH,
                         onClick = { pickedScheme = E2eScheme.BLOWFISH; importError = null },
-                        label = { Text("Blowfish") },
+                        label = { Text("FiSH") },
                     )
                 }
                 when (pickedScheme) {
-                    E2eScheme.AGM -> {
-                        Text(
-                            "HexDroid's +AGM. 256-bit random key, per-message authenticated encryption.",
-                             style = MaterialTheme.typography.bodySmall,
-                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    E2eScheme.BLOWFISH -> {
-                        Text(
-                            "Only use FiSH when the other side can't speak +AGM.",
-                             style = MaterialTheme.typography.bodySmall,
-                             color = MaterialTheme.colorScheme.tertiary,
-                        )
-                    }
+                    E2eScheme.AGM -> Text(
+                        "HexDroid's Authenticated Group Messaging.  One 256-bit random key, per-message authenticated encryption. You share the key.",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    E2eScheme.AGE -> Text(
+                        "Authenticated Group Exchange.  Keys are negotiated automatically and rotate forward. Forward-secrecy for PMs.",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    E2eScheme.BLOWFISH -> Text(
+                        "Only use FiSH when the other side can't speak +AGM or +AGE.",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.tertiary,
+                    )
                 }
 
                 HorizontalDivider()
@@ -231,14 +254,18 @@ fun EncryptionDialog(
                                                  },
                                                  onImport = {
                                                      when (val r = viewModel.importE2eKey(networkId, target, importText)) {
-                                                         is IrcViewModel.E2eImportResult.Success -> {
-                                                             resync()
-                                                             // resync() re-reads from the ViewModel so current
-                                                             // is already the new key info; nothing else to do.
-                                                         }
+                                                         is IrcViewModel.E2eImportResult.Success -> resync()
                                                          is IrcViewModel.E2eImportResult.Failure -> { importError = r.reason }
                                                      }
                                                  },
+                    )
+                    E2eScheme.AGE -> AgeControls(
+                        ctx = ctx,
+                        target = target,
+                        info = ageInfo,
+                        onEnable = { viewModel.enableAge(networkId, target); resync() },
+                        onDisable = { viewModel.disableAge(networkId, target); resync() },
+                        onVerify = { viewModel.markAgeContactVerified(networkId, target); resync() },
                     )
                     E2eScheme.BLOWFISH -> BlowfishControls(
                         ctx = ctx,
@@ -265,12 +292,7 @@ fun EncryptionDialog(
                     )
                 }
 
-                // ── Manage existing key (regenerate / clear) ──────────────────────
-                // These live inside the scrollable body rather than in the dialog's
-                // button row. The AlertDialog button row can only lay out a single
-                // confirm + dismiss before it overflows on narrow screens; packing
-                // "Regenerate" + "Clear" + "Close" there clipped the labels. Keeping
-                // them here lets them be full-width, wrap cleanly, and stay reachable.
+                // ── Manage existing keyed scheme (regenerate / clear) ─────────────
                 val curManage = current
                 if (curManage != null && !pendingClear && !pendingRegen) {
                     HorizontalDivider()
@@ -327,9 +349,7 @@ fun EncryptionDialog(
             }
         },
         confirmButton = {
-            // Only the "first key" action lives in the dialog button row, so the row
-            // never holds more than this one confirm plus the Close dismiss. All
-            // management actions (regenerate / clear) are inline in the body above.
+            // Only the AGM "first key" action lives in the button row.
             val cur = current
             if (cur == null && pickedScheme == E2eScheme.AGM) {
                 Button(onClick = {
@@ -338,8 +358,6 @@ fun EncryptionDialog(
                     revealKey = true
                 }) { Text("Generate key") }
             }
-            // Blowfish has no "Generate" affordance: its keys are user-typed
-            // passphrases set via the inline "Set" button in BlowfishControls.
         },
         dismissButton = {
             TextButton(onClick = {
@@ -349,6 +367,123 @@ fun EncryptionDialog(
             }) { Text("Close") }
         },
     )
+}
+
+@Composable
+private fun AgeControls(
+    ctx: Context,
+    target: String,
+    info: IrcViewModel.AgeUiInfo,
+    onEnable: () -> Unit,
+    onDisable: () -> Unit,
+    onVerify: () -> Unit,
+) {
+    if (!info.available) {
+        Text(
+            "+AGE isn't available on this device.",
+             style = MaterialTheme.typography.bodyMedium,
+             color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+
+    // Your identity safety number.
+    Text("Your +AGE safety number", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+    ) {
+        SelectionContainer {
+            Text(
+                info.myFingerprint,
+                 style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+                 modifier = Modifier.padding(8.dp),
+            )
+        }
+    }
+    OutlinedButton(
+        onClick = { copyToClipboard(ctx, "+AGE safety number", info.myFingerprint) },
+           modifier = Modifier.fillMaxWidth(),
+    ) { Text("Copy safety number") }
+    Text(
+        "Share this so contacts can confirm they're really talking to you.",
+         style = MaterialTheme.typography.bodySmall,
+         color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    HorizontalDivider()
+
+    if (info.isChannel) {
+        Text("This channel", style = MaterialTheme.typography.labelMedium)
+        Text(
+            "+AGE encrypts to a per-channel group key shared by invite; every member's messages are signed with their own identity, and the key is rotated when a member leaves.",
+             style = MaterialTheme.typography.bodySmall,
+             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        Text("This contact", style = MaterialTheme.typography.labelMedium)
+        Text(
+            "+AGE runs a short handshake, then seals each message with its own key (a double ratchet), so earlier messages stay protected even if a later key is exposed.",
+             style = MaterialTheme.typography.bodySmall,
+             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!info.peerKnown || info.peerFingerprint == null) {
+            Text(
+                "No +AGE identity seen for $target yet. It pins automatically the first time they advertise one (trust-on-first-use); then you can verify it here.",
+                 style = MaterialTheme.typography.bodySmall,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+            ) {
+                SelectionContainer {
+                    Text(
+                        info.peerFingerprint,
+                         style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                         modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
+            if (info.peerVerified) {
+                Text(
+                    "Verified.",
+                     style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Text(
+                    "Pinned but not verified. Compare this with what $target reads out, then confirm.",
+                     style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.tertiary,
+                )
+                OutlinedButton(onClick = onVerify, modifier = Modifier.fillMaxWidth()) { Text("Mark verified") }
+            }
+        }
+    }
+
+    HorizontalDivider()
+
+    if (info.enabled) {
+        Text(
+            "+AGE is on for this ${targetTypeLabel(target)}.",
+             style = MaterialTheme.typography.bodyMedium,
+             color = MaterialTheme.colorScheme.primary,
+        )
+        OutlinedButton(onClick = onDisable, modifier = Modifier.fillMaxWidth()) {
+            Text("Turn off +AGE", color = MaterialTheme.colorScheme.error)
+        }
+    } else {
+        Text(
+            "Turn on identity-based (Ed25519) forward-secret (X25519/X3DH) encryption here. Keys are exchanged automatically once both sides advertise +AGE.",
+             style = MaterialTheme.typography.bodySmall,
+             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(onClick = onEnable, modifier = Modifier.fillMaxWidth()) { Text("Turn on +AGE") }
+    }
 }
 
 @Composable
@@ -364,7 +499,6 @@ private fun AgmControls(
                         onImport: () -> Unit,
 ) {
     if (cur != null) {
-        // Reveal-and-share section (only relevant when an AGM key is active).
         if (!revealKey) {
             OutlinedButton(onClick = onRevealKey, modifier = Modifier.fillMaxWidth()) {
                 Text("Reveal key to share")
@@ -403,7 +537,6 @@ private fun AgmControls(
         HorizontalDivider()
     }
 
-    // Import (paste a key from the other party).
     Text("Paste a key from another user", style = MaterialTheme.typography.labelMedium)
     OutlinedTextField(
         value = importText,
@@ -435,10 +568,6 @@ private fun BlowfishControls(
                              onSetPassphrase: () -> Unit,
 ) {
     if (cur != null) {
-        // Show the active passphrase reveal section. For Blowfish the stored
-        // bytes ARE the passphrase, so a "reveal" shows the original string the
-        // user typed (after a base64 round-trip through E2eKeyInfo, which is
-        // why we decode it here).
         if (!revealKey) {
             OutlinedButton(onClick = onRevealKey, modifier = Modifier.fillMaxWidth()) {
                 Text("Reveal passphrase")
@@ -474,7 +603,7 @@ private fun BlowfishControls(
     }
 
     Text(
-        "Type the same passphrase your HexChat/fishlim contact will use.",
+        "Type the same passphrase your FiSH contact will use.",
          style = MaterialTheme.typography.bodySmall,
          color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -505,34 +634,32 @@ private fun BlowfishControls(
     }
 }
 
-/**
- * Returns "channel" or "query" based on whether [target] looks like a channel name.
- */
+/** Returns "channel" or "query" based on whether [target] looks like a channel name. */
 private fun targetTypeLabel(target: String): String =
     if (target.firstOrNull() in setOf('#', '&', '+', '!')) "channel" else "query"
 
-        private fun copyToClipboard(ctx: Context, label: String, text: String) {
-            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-            cm.setPrimaryClip(ClipData.newPlainText(label, text))
-        }
+private fun copyToClipboard(ctx: Context, label: String, text: String) {
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    cm.setPrimaryClip(ClipData.newPlainText(label, text))
+}
 
-        private fun shareAgmKey(ctx: Context, keyB64: String, fingerprint: String) {
-            val body = buildString {
-                appendLine("HexDroid end-to-end encryption key")
-                appendLine()
-                appendLine("Scheme: AES-256-GCM (+AGM)")
-                appendLine("Safety number: $fingerprint")
-                appendLine()
-                appendLine("Key (base64):")
-                appendLine(keyB64)
-            }
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, body)
-                putExtra(Intent.EXTRA_SUBJECT, "HexDroid encryption key")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            ctx.startActivity(Intent.createChooser(intent, "Share encryption key").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
-        }
+private fun shareAgmKey(ctx: Context, keyB64: String, fingerprint: String) {
+    val body = buildString {
+        appendLine("HexDroid end-to-end encryption key")
+        appendLine()
+        appendLine("Scheme: AES-256-GCM (+AGM)")
+        appendLine("Safety number: $fingerprint")
+        appendLine()
+        appendLine("Key (base64):")
+        appendLine(keyB64)
+    }
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, body)
+        putExtra(Intent.EXTRA_SUBJECT, "HexDroid encryption key")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    ctx.startActivity(Intent.createChooser(intent, "Share encryption key").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    })
+}

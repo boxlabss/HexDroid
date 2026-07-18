@@ -551,4 +551,57 @@ class SecretStore(private val ctx: Context) {
         for (k in toRemove) ed.remove(k)
         ed.apply()
     }
+
+    // ---- +AGE identity & TOFU pins (same Keystore-AES-GCM envelope as everything else) ----
+
+    /** Serialized +AGE device identity (private seeds), or null if none stored yet. */
+    fun getAgeIdentity(): ByteArray? {
+        val enc = prefs.getString("age:identity", null) ?: return null
+        return decryptFromB64(enc)
+    }
+
+    fun setAgeIdentity(blob: ByteArray) {
+        prefs.edit().putString("age:identity", encryptToB64(blob)).apply()
+    }
+
+    fun clearAgeIdentity() {
+        prefs.edit().remove("age:identity").apply()
+    }
+
+    /** Serialized +AGE TOFU pin table, or null if none stored yet. */
+    fun getAgePins(): ByteArray? {
+        val enc = prefs.getString("age:pins", null) ?: return null
+        return decryptFromB64(enc)
+    }
+
+    fun setAgePins(blob: ByteArray) {
+        prefs.edit().putString("age:pins", encryptToB64(blob)).apply()
+    }
+
+    fun clearAgePins() {
+        prefs.edit().remove("age:pins").apply()
+    }
+
+    // ---- +AGE held-PM outbox (durable store-and-forward for messages queued behind a handshake) ----
+    //
+    // When a +AGE PM is composed before the peer's ratchet handshake completes, the message is HELD
+    // rather than sent in clear or under a key the peer can't read. That queue was memory-only, so an
+    // app kill in the hold window lost the message, the exact failure HexDroid exists to avoid. We
+    // persist it through the same Android-Keystore-wrapped AES-GCM envelope as the +AGE identity, so
+    // the held plaintext is encrypted at rest and unrecoverable if the Keystore key is invalidated
+    // (lock-screen change, etc.), degrading to "held messages lost" rather than leaking. One blob per
+    // network; the bridge serialises/deserialises the peer -> messages map itself.
+
+    fun getAgePmOutbox(networkId: String): ByteArray? {
+        val enc = prefs.getString("age:pmoutbox:$networkId", null) ?: return null
+        return decryptFromB64(enc) ?: run { clearAgePmOutbox(networkId); null }
+    }
+
+    fun setAgePmOutbox(networkId: String, blob: ByteArray) {
+        prefs.edit().putString("age:pmoutbox:$networkId", encryptToB64(blob)).apply()
+    }
+
+    fun clearAgePmOutbox(networkId: String) {
+        prefs.edit().remove("age:pmoutbox:$networkId").apply()
+    }
 }

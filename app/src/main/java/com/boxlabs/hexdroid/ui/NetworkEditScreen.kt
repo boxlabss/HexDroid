@@ -138,6 +138,7 @@ fun NetworkEditScreen(
 
     var serverPassword by remember(n0.id, n0.serverPassword) { mutableStateOf(n0.serverPassword ?: "") }
     var autoConnect by remember(n0.id) { mutableStateOf(n0.autoConnect) }
+    var showInSidebar by remember(n0.id) { mutableStateOf(n0.showInSidebar) }
     var autoReconnect by remember(n0.id) { mutableStateOf(n0.autoReconnect) }
     var notifyOnErrors by remember(n0.id) { mutableStateOf(n0.notifyOnErrors) }
     var highlightIgnoreText by remember(n0.id) {
@@ -359,6 +360,7 @@ fun NetworkEditScreen(
                                 caps = caps,
                                 autoJoin = aj,
                                 autoConnect = autoConnect,
+                                showInSidebar = showInSidebar,
                                 autoReconnect = autoReconnect,
                                 notifyOnErrors = notifyOnErrors,
                                 highlightIgnoreMasks = highlightIgnoreText
@@ -656,6 +658,14 @@ fun NetworkEditScreen(
                 ) {
                     Text(stringResource(R.string.network_auto_connect_label))
                     Switch(checked = autoConnect, onCheckedChange = { autoConnect = it })
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.network_show_in_switcher_label))
+                    Switch(checked = showInSidebar, onCheckedChange = { showInSidebar = it })
                 }
                 Row(
                     Modifier.fillMaxWidth(),

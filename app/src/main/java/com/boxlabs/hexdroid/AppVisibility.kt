@@ -30,4 +30,22 @@ package com.boxlabs.hexdroid
 object AppVisibility {
     @Volatile
     var isForeground: Boolean = false
+
+    /**
+     * True while at least one Activity is in the STARTED state, updated with NO debounce.
+     *
+     * [isForeground] debounces the foreground > background transition by 500 ms to absorb
+     * OEM overlay stop/start blips. That debounce is correct for side effects (typing/logs),
+     * but it makes [isForeground] briefly stale-true while the app is actually going to the
+     * background. Using that stale value to gate ContextCompat.startForegroundService() is
+     * what produces ForegroundServiceDidNotStartInTimeException: we arm the ~10 s "must call
+     * startForeground()" watchdog, then the service's startForeground() is refused because the
+     * app is no longer foreground, and the watchdog fires a process-level crash.
+     *
+     * This flag flips to false the instant the last Activity stops, so it is the correct
+     * predicate for "are we allowed to start a foreground service right now". Erring toward
+     * false here is safe: the caller falls back to a plain notification instead of crashing.
+     */
+    @Volatile
+    var isActivityStarted: Boolean = false
 }

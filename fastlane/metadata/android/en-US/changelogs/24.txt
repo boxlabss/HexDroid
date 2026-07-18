@@ -1,0 +1,4 @@
+**+AGE encryption** New identity-based, forward-secret E2E scheme alongside +AGM and FiSH. Pinned device identity, safety-number verification, no key to paste.
+**.hex scripting** New sandboxed scripting engine. Scripts react to chat, draw UI and add slash-commands. Bundled: translate (/tr). Settings > Scripts.
+**InspIRCd** SASL PLAIN no longer fails where the challenge is a trailing param. Typing honours CLIENTTAGDENY.
+**Also** Network tab strip, bottom channel switcher, DCC over IPv6.

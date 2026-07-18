@@ -92,6 +92,7 @@ fun NetworksScreen(
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     onSetAutoConnect: (String, Boolean) -> Unit,
+    onSetShowInSidebar: (String, Boolean) -> Unit,
     onConnect: (String) -> Unit,
     onDisconnect: (String) -> Unit,
     onAllowPlaintextConnect: (String) -> Unit,
@@ -362,6 +363,18 @@ fun NetworksScreen(
                                     Switch(
                                         checked = n.autoConnect,
                                         onCheckedChange = { onSetAutoConnect(n.id, it) }
+                                    )
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        stringResource(R.string.network_show_in_switcher_label),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = n.showInSidebar,
+                                        onCheckedChange = { onSetShowInSidebar(n.id, it) }
                                     )
                                 }
 

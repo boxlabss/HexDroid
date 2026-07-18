@@ -561,9 +561,17 @@ sealed class IrcEvent {
          * text is shown verbatim in the latter case so the user can investigate).
          */
         val encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
+        /**
+         * IRCv3 labeled-response `label` tag echoed back on our OWN messages (echo-message +
+         * labeled-response). Lets the ViewModel correlate a server echo to the exact optimistic
+         * local echo we already displayed, an exact match that replaces fuzzy content-matching on
+         * servers that support it. Null on servers without labeled-response and on other people's
+         * messages, where the content-fingerprint/consumeEchoIfMatch fallback still applies.
+         */
+        val label: String? = null,
     ) : IrcEvent()
 
-    data class Notice(
+data class Notice(
         val from: String,
         // IRC target param (channel, our nick, etc.)
         val target: String,
@@ -635,7 +643,7 @@ sealed class IrcEvent {
     data class NamesEnd(val channel: String) : IrcEvent()
 
     data class Topic(val channel: String, val topic: String?, val setter: String? = null, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
-    
+
     // Topic text reurned by server (RPL_TOPIC / 332) sent after JOIN or /TOPIC.
     data class TopicReply(val channel: String, val topic: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
 
@@ -988,6 +996,31 @@ internal fun parseZncListNetworksLine(line: String): IrcEvent.BouncerNetwork? {
 class IrcClient(val config: IrcConfig) {
     private val parser = IrcParser()
     private val outbound = Channel<String>(capacity = 300)
+
+    /**
+     * Immediately discard already-queued outbound lines matching [pred] so a closed game's paced-out
+     * flood backlog is dropped now instead of trickling to the server for minutes. It drains the
+     * buffered queue with non-suspending [Channel.tryReceive] (the channel allows extra receivers)
+     * and re-enqueues the survivors, so it runs from any thread without waiting for the writer to
+     * chew through the very backlog we're trying to drop. Non-matching lines are never lost; the only
+     * effect of a concurrent writer/producer is that at most one droppable line may still be written,
+     * or survivors may be reordered slightly relative to a line enqueued during the drain. Both are
+     * harmless for teardown traffic.
+     */
+    fun purgeOutbound(pred: (String) -> Boolean) {
+        val survivors = ArrayList<String>()
+        while (true) {
+            val l = outbound.tryReceive().getOrNull() ?: break
+            if (!pred(l)) survivors.add(l)
+        }
+        for (l in survivors) outbound.trySend(l)
+    }
+
+    // Outbound flood pacing (applied in the writer loop). IRC servers charge a per-line penalty of
+    // roughly 2s + length/120s and cut you for "excess flood" once you get ~10s ahead of real time.
+    private val floodPenaltyMs = 2_200L      // base cost charged per outbound line
+    private val floodPerCharMs = 8L          // plus ~length/120s, about 8ms per character
+    private val floodBurstMs = 8_000L        // how far ahead of real time we may burst before pacing
     private val rng = SecureRandom()
 
     /**
@@ -1001,6 +1034,9 @@ class IrcClient(val config: IrcConfig) {
      * overhead (one null-check, no method dispatch).
      */
     @Volatile var e2eCodec: com.boxlabs.hexdroid.crypto.E2eCodec? = null
+    /** Set by the VM: returns true when the user has manually turned on +AGE for [target].
+     *  Used by [privmsg] to fail closed so a +AGE buffer never ships plaintext (see guard there). */
+    @Volatile var ageEnabledForTarget: ((target: String) -> Boolean)? = null
 
     companion object {
         /** Pre-allocated CRLF terminator reused on every line send to avoid a ByteArray allocation per write. */
@@ -1096,6 +1132,34 @@ class IrcClient(val config: IrcConfig) {
      * uses this to surface a clear message in the server buffer when MONITOR is unsupported.
      */
     @Volatile private var monitorLimit: Int = -1
+
+    /**
+     * CLIENTTAGDENY from ISUPPORT: client-only tags this server won't relay. Null = no restriction.
+     * Comma-separated; "*" denies all, "-name" re-allows one. Interpreted by [clientTagAllowed].
+     */
+    @Volatile private var clientTagDeny: String? = null
+
+    /**
+     * True if [tag] may be sent as a client-only tag. Pass the bare name ("typing", not "+typing"):
+     * the sigil is a marker, not part of the name, and CLIENTTAGDENY spells tags without it.
+     *
+     * Advisory per the spec, so only consulted for TAGMSG, whose sole tag being stripped leaves an
+     * empty message. PRIVMSG keeps its text and is never gated on this.
+     */
+    private fun clientTagAllowed(tag: String): Boolean {
+        val policy = clientTagDeny ?: return true
+        var allowed = true
+        for (entry in policy.split(',')) {
+            val e = entry.trim()
+            if (e.isEmpty()) continue
+            when {
+                e == "*" -> allowed = false
+                e.startsWith("-") -> if (e.drop(1).equals(tag, true)) allowed = true
+                e.equals(tag, true) -> allowed = false
+            }
+        }
+        return allowed
+    }
     /**
      * LINELEN from ISUPPORT 005: maximum bytes per IRC line including trailing CRLF.
      * RFC 1459 = 512; Ergo / InspIRCd often advertise 4096.
@@ -1125,9 +1189,6 @@ class IrcClient(val config: IrcConfig) {
 
     /** True if either the soju.im/read or draft/read-marker cap is enabled. */
     private fun hasReadMarkerCap(): Boolean = hasCap("draft/read-marker") || hasCap("soju.im/read")
-
-    /** True if the draft/typing or graduated typing cap is enabled. */
-    private fun hasTypingCap(): Boolean = hasCap("draft/typing") || hasCap("typing")
 
     /** True if either the graduated or draft pre-away cap is enabled. */
     private fun hasPreAwayCap(): Boolean = hasCap("pre-away") || hasCap("draft/pre-away")
@@ -1963,6 +2024,8 @@ class IrcClient(val config: IrcConfig) {
 								// IRCv3 account-tag: services account of the sender.
 								senderAccount = msg.tags["account"]?.takeIf { it.isNotBlank() && it != "*" },
 								encryption = encryption,
+								// labeled-response echo correlation (our own messages only, in practice).
+								label = msg.tags["label"],
 							)
 						)
 					}
@@ -2676,7 +2739,7 @@ class IrcClient(val config: IrcConfig) {
     @Volatile private var pendingHostnameMismatchSans: List<String>? = null
 
     fun tlsInfo(): String? = lastTlsInfo
-	
+
 	fun isConnectedNow(): Boolean {
 		val s = socket ?: return false
 		if (!s.isConnected || s.isClosed) return false
@@ -2738,6 +2801,9 @@ class IrcClient(val config: IrcConfig) {
             // If the channel is closed or full, the line is silently dropped - this is
             // safe because the connection is already gone or saturated.
             val result = outbound.trySend(sanitized)
+            if (sanitized.contains("AGE ")) {
+                android.util.Log.d("AGEDBG", "IrcCore.sendRaw AGE success=${result.isSuccess} closed=${result.isClosed} line=${sanitized.take(64)}")
+            }
             if (result.isFailure && !result.isClosed) {
                 // Channel is full (capacity=300) but still open - fall back to a
                 // suspending send so legitimate bursts are not silently discarded.
@@ -2783,7 +2849,15 @@ class IrcClient(val config: IrcConfig) {
         sendRaw("${labelTag()}CHATHISTORY AFTER $target timestamp=$afterTimestamp $limit")
     }
 
-    suspend fun privmsg(target: String, text: String, replyToMsgId: String? = null) {
+    /**
+     * Send a PRIVMSG (E2E-encrypted and/or labeled as configured).
+     *
+     * Returns the labeled-response `label` we attached (echo-message + labeled-response both
+     * negotiated), or null. Callers that optimistically local-echo record this so the server's
+     * echo can be correlated back EXACTLY by label rather than by fuzzy content matching. On
+     * servers without labeled-response the return is null and the content-match fallback applies.
+     */
+    suspend fun privmsg(target: String, text: String, replyToMsgId: String? = null): String? {
         // This is a safeguard in case callers don't pre-split multiline messages.
         val sanitizedText = text.replace("\r", "").replace("\n", " ")
 
@@ -2828,12 +2902,25 @@ class IrcClient(val config: IrcConfig) {
         //                   normal send, so dedup behaves identically).
         //   - +draft/reply: present only for a reply, and only when message-tags is
         //                   negotiated.
+        val label: String? =
+            if (hasCap("echo-message") && hasCap("labeled-response")) nextLabel() else null
         val tagPairs = buildList {
-            if (hasCap("echo-message") && hasCap("labeled-response")) add("label=${nextLabel()}")
+            if (label != null) add("label=$label")
             if (replyToMsgId != null && hasCap("message-tags")) add("+draft/reply=$replyToMsgId")
         }
         val tag = if (tagPairs.isEmpty()) "" else tagPairs.joinToString(";", prefix = "@", postfix = " ")
+        // +AGE fail-closed backstop. Manual and scripted +AGE both emit AGE-prefixed ciphertext, so a
+        // payload reaching here WITHOUT that prefix for an +AGE-enabled target means something tried to
+        // put plaintext on the wire while the UI shows a padlock. Refuse.
+        if (ageEnabledForTarget?.invoke(target) == true &&
+            !payload.startsWith("${com.boxlabs.hexdroid.crypto.E2eScheme.AGE.wirePrefix} ")) {
+            commandEvents.send(IrcEvent.Error(
+                "+AGE is on for $target but this message wasn't encrypted, so it was NOT sent " +
+                "(HexDroid will not put it on the wire in the clear). Turn off +AGE here to chat normally."))
+            return null
+        }
         sendRaw("${tag}PRIVMSG $target :$payload")
+        return label
     }
 
     /**
@@ -2845,16 +2932,11 @@ class IrcClient(val config: IrcConfig) {
      * No-op if the draft/typing capability was not negotiated.
      */
     suspend fun sendTypingStatus(target: String, state: String) {
-        // Require either a dedicated typing cap OR the base message-tags cap.
-        // Servers like Libera advertise CLIENTTAGDENY=*,-typing rather than a separate
-        // typing cap - they permit the tag via message-tags without advertising it separately.
-        val hasTyping = hasCap("typing") || hasCap("draft/typing")
-        val hasTagsPermit = hasCap("message-tags")
-        if (!hasTyping && !hasTagsPermit) return
-        // Graduated "typing" cap uses the standard tag name (no "+" prefix).
-        // Draft or message-tags fallback uses the vendor tag "+typing".
-        val tag = if (hasCap("typing")) "typing=$state" else "+typing=$state"
-        sendRaw("@$tag TAGMSG $target")
+        // Typing is a client tag on message-tags; there is no typing capability to negotiate.
+        if (!hasCap("message-tags")) return
+        // A server that denies the tag strips it, leaving an empty TAGMSG the server then rejects.
+        if (!clientTagAllowed("typing")) return
+        sendRaw("@+typing=$state TAGMSG $target")
     }
 
     /**
@@ -2864,6 +2946,8 @@ class IrcClient(val config: IrcConfig) {
      */
     suspend fun sendReaction(target: String, msgId: String, emoji: String, remove: Boolean = false) {
         if (!hasCap("message-tags") && !hasCap("draft/message-reactions")) return
+        // Stripped react tag leaves an empty TAGMSG; the reply tag alone carries no reaction.
+        if (!clientTagAllowed(if (remove) "draft/react-removed" else "draft/react")) return
         val tagName = if (remove) "+draft/react-removed" else "+draft/react"
         // Single IRCv3 tag group - the optional label, the react tag, and the reply
         // tag must share one '@...' prefix joined by ';'. Emitting "@label=… @+draft/…"
@@ -2904,9 +2988,10 @@ class IrcClient(val config: IrcConfig) {
         sendRaw("${labelTag()}CHATHISTORY TARGETS * timestamp=* $limit")
     }
 
-    suspend fun ctcp(target: String, payload: String) {
-        // CTCP wrapped with 0x01
-        privmsg(target, "\u0001$payload\u0001")
+    suspend fun ctcp(target: String, payload: String): String? {
+        // CTCP wrapped with 0x01. Returns the labeled-response label (if any) so /me actions get
+        // the same exact echo correlation as normal messages.
+        return privmsg(target, "\u0001$payload\u0001")
     }
 
     suspend fun handleSlashCommand(cmdLine: String, currentBuffer: String) {
@@ -3230,7 +3315,7 @@ class IrcClient(val config: IrcConfig) {
                 val target = parts.getOrNull(1) ?: return
                 val payload = parts.drop(2).joinToString(" ").trim().uppercase()
                 if (payload.isBlank()) return
-                
+
                 // For PING, add timestamp if not provided
                 val actualPayload = if (payload == "PING") {
                     "PING ${System.currentTimeMillis()}"
@@ -3525,7 +3610,7 @@ class IrcClient(val config: IrcConfig) {
 
         // Create line reader with encoding detection
         val lineReader = EncodingLineReader(bufferedInput, config.encoding)
-        
+
         // Only notify about the encoding when a non-default encoding is explicitly configured.
         // Auto-detect mode is silent on connect - a notification fires later only if a
         // non-UTF-8 encoding is actually detected (see the encodingNotified block below).
@@ -3561,8 +3646,22 @@ class IrcClient(val config: IrcConfig) {
         }
 
         val writerJob = launch(Dispatchers.IO) {
+            // flood pacing so bursts don't get us flood-disconnected mid-handshake.
+            // Registration lines are exempt: servers are lenient before 001 and pacing them would
+            // slow every connect. A `floodClock` tracks the virtual time by which the queued penalty
+            // is "paid"; when it runs more than floodBurstMs ahead of now we wait for it to catch up.
+            var floodClock = System.currentTimeMillis()
             try {
-                for (line in outbound) writeLine(line)
+                for (line in outbound) {
+                    if (registered) {
+                        val now = System.currentTimeMillis()
+                        if (floodClock < now) floodClock = now
+                        floodClock += floodPenaltyMs + line.length * floodPerCharMs
+                        val ahead = floodClock - now - floodBurstMs
+                        if (ahead > 0) delay(ahead)
+                    }
+                    writeLine(line)
+                }
             } catch (t: Throwable) {
                 // If writes start failing (common during network handovers or SSL close),
                 // force-close the socket so the read loop can notice and emit Disconnected.
@@ -3658,6 +3757,7 @@ class IrcClient(val config: IrcConfig) {
         netsplitBuffer.clear()
         monitorListBuffer.clear()
         monitorLimit = -1
+        clientTagDeny = null
         openMultilineBatches.clear()
 
 // Numeric dispatch table (RFC + common de-facto numerics)
@@ -3794,6 +3894,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                 "LINELEN" -> v?.toIntOrNull()?.takeIf { it in 512..65535 }?.let { ll = it }
                 // WHOX is a flag token (no value): server supports extended WHO %fields,querytype
                 "WHOX" -> whoxSupported = true
+                "CLIENTTAGDENY" -> clientTagDeny = v?.takeIf { it.isNotBlank() }
                 // ELIST=<chars>: server-side LIST search extensions (U = user-count filtering, etc).
                 "ELIST" -> if (!v.isNullOrBlank()) elistTokens = v.uppercase(Locale.ROOT)
                 // MONITOR=<n> declares the maximum watch list size per client. Empty value
@@ -4129,7 +4230,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					}
 					continue
 				}
-				
+
 				// Notify user if encoding was auto-detected and changed
 				if (!encodingNotified && lineReader.hasDetectedNonUtf8() && prevEncoding != lineReader.encoding) {
 					// Give the detected encoding a friendly label (e.g. "Cyrillic (Windows-1251)")
@@ -4157,7 +4258,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					send(IrcEvent.ServerText("*** Auto-detected legacy encoding: $label — you can set this explicitly in Network Settings"))
 					encodingNotified = true
 				}
-				
+
 				send(IrcEvent.ServerLine(line))
 				val msg = parser.parse(line) ?: continue
 
@@ -4328,6 +4429,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 										msgId = msgid,
 										replyToMsgId = replyTo,
 										senderAccount = account,
+										label = mlState.openTags["label"],
 									))
 								}
 							}
@@ -5259,7 +5361,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 	private fun formatNumeric(msg: IrcMessage): String? {
 		val code = msg.command
 		if (code.length != 3 || !code.all { it.isDigit() }) return null
-		
+
 		// Don't double-emit for numerics that already have dedicated events.
 		// SASL numerics 903-908 are emitted as IrcEvent.Status/Error by IrcSession's
 		// CAP/SASL state machine; they must be suppressed here or the user sees the
@@ -5286,7 +5388,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			"372" -> t ?: p(1) ?: ""
 			"376" -> t ?: "— End of MOTD command —"
 			"422" -> t ?: "No MOTD found"
-			
+
 			// ISUPPORT
 			"005" -> {
 				val tokens = msg.params.drop(1).filter { it.isNotBlank() }
@@ -5316,7 +5418,12 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				val tail = t ?: "channels formed"
 				"$n $tail"
 			}
-			"253" -> t ?: "${p(1) ?: "?"} unknown connection(s)"
+			// Count is a middle param, wording is the trailing; both halves needed (cf. 252/254).
+			"253" -> {
+				val n = p(1) ?: return t
+				val tail = t ?: "unknown connection(s)"
+				"$n $tail"
+			}
 			"255" -> t ?: "I have ${p(1) ?: "?"} clients and ${p(2) ?: "?"} servers"
 			"265" -> t ?: "Current local users: ${p(1) ?: "?"}  Max: ${p(2) ?: "?"}"
 			"266" -> t ?: "Current global users: ${p(1) ?: "?"}  Max: ${p(2) ?: "?"}"
@@ -5426,10 +5533,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// Common errors
 			"401" -> t ?: "No such nickname/channel"
 			"402" -> t ?: "No such server"
-			"403" -> t ?: "No such channel"
+			"403" -> p(1)?.takeIf { it.isNotBlank() }?.let { "No such channel: $it" } ?: (t ?: "No such channel")
 			"404" -> t ?: "Cannot send to channel"
 			"406" -> t ?: "There was no such nickname"
-			"421" -> t ?: "Unknown command"
+			"421" -> p(1)?.takeIf { it.isNotBlank() }?.let { "Unknown command: $it" } ?: (t ?: "Unknown command")
 			"433" -> t ?: "Nickname is already in use"
 			"442" -> t ?: "You're not on that channel"
 			"461" -> t ?: "Not enough parameters"

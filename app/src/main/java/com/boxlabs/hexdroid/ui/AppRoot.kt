@@ -36,6 +36,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -45,6 +46,8 @@ import androidx.compose.ui.unit.Density
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.boxlabs.hexdroid.AppScreen
+import com.boxlabs.hexdroid.ui.script.ScriptsScreen
+import com.boxlabs.hexdroid.ui.script.ScriptViewHost
 import com.boxlabs.hexdroid.IrcViewModel
 import com.boxlabs.hexdroid.data.ThemeMode
 import com.boxlabs.hexdroid.ui.theme.HexDroidIRCTheme
@@ -68,6 +71,8 @@ fun AppRoot(
     onExit: () -> Unit = {}
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val scriptLaunchers by vm.scriptLaunchers.collectAsState()
+    val mountedScriptView by vm.scriptView.collectAsState()
 
 	val tourRegistry = remember { TourRegistry() }
 	var tourActive by rememberSaveable { mutableStateOf(false) }
@@ -88,6 +93,7 @@ fun AppRoot(
 
 	// Track whether the welcome screen was shown and completed this session.
 	var welcomeCompletedThisSession by rememberSaveable { mutableStateOf(false) }
+	LaunchedEffect(Unit) { vm.initScripts() }
 
 	// Show the welcome screen on first launch (before the tour).
 	// It's gated on settingsLoaded so we don't flash it before prefs are read.
@@ -223,6 +229,7 @@ fun AppRoot(
                     AppScreen.LIST,
                     AppScreen.SETTINGS,
                     AppScreen.TRANSFERS,
+                    AppScreen.SCRIPTS,
                     AppScreen.ABOUT -> vm.backToChat()
                     AppScreen.IGNORE -> vm.goTo(AppScreen.SETTINGS)
                     AppScreen.NETWORKS -> vm.backToChat()
@@ -277,6 +284,9 @@ fun AppRoot(
                     onDccChat = vm::startDccChat,
                     onOpenList = { vm.goTo(AppScreen.LIST) },
                     onOpenSettings = { vm.goTo(AppScreen.SETTINGS) },
+                    onOpenScripts = { vm.goTo(AppScreen.SCRIPTS) },
+                    scriptLaunchers = scriptLaunchers.map { it.label to it.command },
+                    onRunLauncher = vm::runScriptLauncher,
                     onOpenNetworks = { vm.goTo(AppScreen.NETWORKS) },
                     onOpenTransfers = { vm.goTo(AppScreen.TRANSFERS) },
                     onSysInfo = { vm.sendInput("/sysinfo") },
@@ -306,6 +316,7 @@ fun AppRoot(
                     onEdit = vm::startEditNetwork,
                     onDelete = vm::deleteNetwork,
                     onSetAutoConnect = vm::setNetworkAutoConnect,
+                    onSetShowInSidebar = vm::setNetworkShowInSidebar,
                     onConnect = vm::connectNetwork,
                     onDisconnect = vm::disconnectNetwork,
                     onAllowPlaintextConnect = vm::allowPlaintextAndConnect,
@@ -350,12 +361,42 @@ fun AppRoot(
                     },
                     onOpenNetworks = { vm.goTo(AppScreen.NETWORKS) },
                     onOpenIgnoreList = vm::openIgnoreList,
+                    onOpenScripts = { vm.goTo(AppScreen.SCRIPTS) },
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                     onExportBackup = vm::exportBackup,
                     onImportBackup = vm::importBackup,
                     onClearBackupMessage = vm::clearBackupMessage,
                 )
+
+                AppScreen.SCRIPTS -> {
+                    val scriptsState by vm.scriptsState.collectAsState()
+                    val scriptCtx = LocalContext.current
+                    val importLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument()
+                    ) { uri ->
+                        if (uri != null) runCatching {
+                            val nm = scriptCtx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                if (i >= 0 && c.moveToFirst()) c.getString(i) else null
+                            } ?: "imported.hex"
+                            val src = scriptCtx.contentResolver.openInputStream(uri)
+                                ?.bufferedReader()?.use { it.readText() }
+                            if (src != null) vm.installScript(nm, src)
+                        }
+                    }
+                    ScriptsScreen(
+                        state = scriptsState,
+                        onBack = vm::backToChat,
+                        onToggle = { name, enabled -> vm.setScriptEnabled(name, enabled) },
+                        onRemove = { name -> vm.removeScript(name) },
+                        onReloadAll = { vm.reloadScripts() },
+                        onImportFile = { importLauncher.launch(arrayOf("*/*")) },
+                        onPaste = { name, source -> vm.installScript(name, source) },
+                        onRead = { name -> vm.readScript(name) },
+                        onRevert = { name -> vm.revertScript(name) },
+                    )
+                }
 
                 AppScreen.TRANSFERS -> TransfersScreen(
                     state = state,
@@ -415,6 +456,10 @@ fun AppRoot(
                 }
             },
         )
+    }
+
+    mountedScriptView?.let { mv ->
+        ScriptViewHost(view = mv, onAction = vm::scriptViewAction, onClose = vm::closeScriptView)
     }
 }
 

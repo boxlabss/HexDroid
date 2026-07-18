@@ -21,9 +21,6 @@ package com.boxlabs.hexdroid.crypto
 import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
-import javax.crypto.Cipher
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * AES-256-GCM encryption for the `+AGM` wire scheme.
@@ -56,13 +53,10 @@ internal class AesGcmCipher(private val key: ByteArray) : E2eCipher {
 
     override val scheme: E2eScheme = E2eScheme.AGM
 
-    private val secretKey = SecretKeySpec(key, "AES")
     private val rng = SecureRandom()
 
     override fun encrypt(plaintext: String, aadContext: String): String {
         val nonce = ByteArray(NONCE_LEN).also { rng.nextBytes(it) }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(TAG_BITS, nonce))
         // AAD binds the conversation into the auth tag - replaying #foo's ciphertext
         // into #bar (or one query into another) fails the integrity check.
         // lowercase(Locale.ROOT) is mandatory here, NOT the default-locale
@@ -70,8 +64,11 @@ internal class AesGcmCipher(private val key: ByteArray) : E2eCipher {
         // (dotless i), so the AAD bytes would differ from an English device's "#irc"
         // and two users in the same channel on different locales would fail
         // every decrypt. Locale.ROOT does Unicode locale-independent case folding.
-        cipher.updateAAD(aadContext.lowercase(java.util.Locale.ROOT).toByteArray(StandardCharsets.UTF_8))
-        val ct = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
+        val ct = AesGcm.seal(
+            key, nonce,
+            plaintext.toByteArray(StandardCharsets.UTF_8),
+            aadContext.lowercase(java.util.Locale.ROOT).toByteArray(StandardCharsets.UTF_8),
+        )
 
         val out = ByteArray(1 + NONCE_LEN + ct.size)
         out[0] = VERSION
@@ -101,18 +98,13 @@ internal class AesGcmCipher(private val key: ByteArray) : E2eCipher {
                     // can never disagree about how the conversation id is folded.
                     val convLower = aadContext.lowercase(java.util.Locale.ROOT)
 
-                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                    cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(TAG_BITS, nonce))
-                    cipher.updateAAD(convLower.toByteArray(StandardCharsets.UTF_8))
-                    val plaintext = try {
-                        // doFinal throws AEADBadTagException on a bad tag (wrong key, tamper, or
-                        // wrong AAD i.e. replayed-across-conversations). Return null and let the
-                        // caller surface a "decryption failed" hint to the user rather than
-                        // swallowing.
-                        String(cipher.doFinal(ctAndTag), StandardCharsets.UTF_8)
-                    } catch (_: Throwable) {
-                        return null
-                    }
+                    // AesGcm.open returns null on a bad tag (wrong key, tamper, or wrong AAD
+                    // i.e. replayed-across-conversations); surface that as a failed decrypt.
+                    val ptBytes = AesGcm.open(
+                        key, nonce, ctAndTag,
+                        convLower.toByteArray(StandardCharsets.UTF_8),
+                    ) ?: return null
+                    val plaintext = String(ptBytes, StandardCharsets.UTF_8)
 
                     // Replay guard
                     val replayKey = convLower + "\u0000" +

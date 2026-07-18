@@ -9,8 +9,8 @@ android {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.6.7"
+        versionCode = 24
+        versionName = "1.6.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -91,6 +91,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.10.0")
     implementation("androidx.media3:media3-ui:1.10.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
+    // +AGE crypto backend: BouncyCastle lightweight API (native Ed25519 + X25519). We use the
+    // low-level org.bouncycastle.crypto.* classes directly (no JCA provider registration), so it
+    // never collides with Android's platform-repackaged com.android.org.bouncycastle.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

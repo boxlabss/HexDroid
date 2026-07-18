@@ -80,7 +80,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         val out = mutableListOf<IrcAction>()
 
         if (m.command == "CAP" && m.params.getOrNull(1) == "LS") {
-            val capsPart = m.trailing ?: ""
+            // Cap list is the last param, so it may be a trailing or a middle. The "*" continuation
+            // marker never is, hence m.params for that check.
+            val capsPart = m.allParams.getOrNull(if (m.params.getOrNull(2) == "*") 3 else 2) ?: ""
             serverCaps.addAll(capsPart.split(' ')
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
@@ -110,7 +112,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         // CAP NEW: server advertises new capabilities dynamically after registration (IRCv3.2).
         // Request any that we want and don't already have.
         if (m.command == "CAP" && m.params.getOrNull(1) == "NEW") {
-            val newCaps = (m.trailing ?: "").split(' ')
+            val newCaps = (m.allParams.getOrNull(2) ?: "").split(' ')
                 .map { it.trim().substringBefore('=').lowercase() }
                 .filter { it.isNotBlank() }
             serverCaps.addAll(newCaps)
@@ -125,7 +127,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 
         // CAP DEL: server withdraws a capability (e.g., after services link-break).
         if (m.command == "CAP" && m.params.getOrNull(1) == "DEL") {
-            val delCaps = (m.trailing ?: "").split(' ')
+            val delCaps = (m.allParams.getOrNull(2) ?: "").split(' ')
                 .map { it.trim().substringBefore('=').lowercase() }
                 .filter { it.isNotBlank() }
             serverCaps.removeAll(delCaps.toSet())
@@ -136,7 +138,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         }
 
         if (m.command == "CAP" && m.params.getOrNull(1) == "ACK") {
-            val ack = (m.trailing ?: "").split(' ')
+            val ack = (m.allParams.getOrNull(2) ?: "").split(' ')
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
                 .map { it.substringBefore('=') }
@@ -162,7 +164,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         }
 
         if (m.command == "CAP" && m.params.getOrNull(1) == "NAK") {
-            out += IrcAction.EmitError("CAP NAK: ${m.trailing ?: ""}")
+            out += IrcAction.EmitError("CAP NAK: ${m.allParams.getOrNull(2) ?: ""}")
             if (pendingCapReqs > 0) pendingCapReqs--
             if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
             return out
@@ -204,10 +206,15 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             // 908: server does not support our mechanism; it advertises alternatives.
             // Abort cleanly so CAP END is sent and the connection is not left stalled.
             "908" -> {
-                val alternatives = m.trailing ?: m.params.drop(1).joinToString(",")
+                // `<nick> <mechanisms> :are available SASL mechanisms` - the list is param 1 and
+                // the trailing is prose, so read by index rather than reaching for trailing.
+                val alternatives = m.allParams.getOrNull(1) ?: ""
                 saslDone = true; saslInProgress = false
                 out += IrcAction.EmitError(
-                    "SASL: mechanism not supported by server. Supported: $alternatives"
+                    if (alternatives.isNotBlank())
+                        "SASL: mechanism not supported by server. Supported: $alternatives"
+                    else
+                        "SASL: mechanism not supported by server"
                 )
                 if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
                 return out
@@ -215,7 +222,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         }
 
         if (m.command == "AUTHENTICATE" && saslInProgress) {
-            val payload = m.params.firstOrNull() ?: ""
+            // May arrive as a middle ("+") or a trailing (":+"); allParams covers both.
+            val payload = m.allParams.firstOrNull() ?: ""
             out += handleAuthenticate(payload)
             return out
         }
@@ -273,13 +281,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         // account-tag: include services account name in PRIVMSG/NOTICE message tags
         if (config.capPrefs.accountTag) req += "account-tag"
 
-        // draft/typing / typing: typing status indicators (send/receive).
-        // "draft/typing" is the legacy name; Libera and modern servers advertise the
-        // graduated "typing" cap. Request both so we negotiate whichever the server offers.
-        if (config.capPrefs.typingIndicator) {
-            req += "draft/typing"
-            req += "typing"          // graduated (Libera, Ergo 2.14+, InspIRCd 4+)
-        }
+        // No typing cap is requested: typing is a client tag carried by message-tags, and whether
+        // the server relays it is advertised via CLIENTTAGDENY (see IrcCore.clientTagAllowed).
 
         // IRCv3 standard-replies (FAIL/WARN/NOTE): structured errors from Ergo, Soju, InspIRCd 4+.
         // Request both the graduated name and its draft alias for compatibility with older servers.

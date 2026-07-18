@@ -85,7 +85,7 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
-enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE }
+enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE, SCRIPTS }
 
 /**
  * UI-level message model.
@@ -120,6 +120,13 @@ data class UiMessage(
      * sent in clear and merely *intended* to be encrypted).
      */
     val encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
+    /**
+     * True while this is a locally-echoed +AGE message being HELD pending key agreement (the peer's
+     * handshake hasn't completed, so it hasn't gone on the wire yet). Cleared to false once the bridge
+     * flushes the held queue. The UI dims such lines and shows a small clock so an optimistic echo is
+     * never mistaken for a delivered message, the exact "looks sent but wasn't" trap this guards against.
+     */
+    val pending: Boolean = false,
 )
 data class UiBuffer(
     val name: String,
@@ -191,6 +198,14 @@ enum class DccSendMode { AUTO, ACTIVE, PASSIVE }
 data class UiSettings(
     val themeMode: ThemeMode = ThemeMode.DARK,
     val compactMode: Boolean = false,
+    // Buffer-drawer navigation. networkTabs replaces the vertical network tree with a
+    // horizontal tab strip (one tab per network, showing that network's buffers below).
+    // Which networks appear is controlled per-network by NetworkProfile.showInSidebar,
+    // not a global setting.
+    val networkTabs: Boolean = false,
+    // Pin a network quick-switcher bar at the bottom of the chat, just above the message input,
+    // independent of the drawer's tree/tabs mode. Tapping a network jumps to it.
+    val networkTabsAtBottom: Boolean = false,
     val showTimestamps: Boolean = true,
     val timestampFormat: String = "HH:mm:ss",
     val fontScale: Float = 1.0f,
@@ -1645,6 +1660,44 @@ class IrcViewModel(
         return true
     }
 
+    /**
+     * Pending labeled-response labels for our own outbound messages, per network. When
+     * echo-message + labeled-response are both negotiated privmsg() attaches a unique @label
+     * and returns it; we record it here so the echoed copy which carries the SAME label
+     * can be correlated EXACTLY, independent of text, timestamp, or E2E transformation.
+     *
+     * We still call recordLocalSend() in parallel, so a server that advertises labeled-response
+     * but fails to echo the label (a server bug) degrades gracefully to consumeEchoIfMatch rather
+     * than showing a duplicate. Entries self-expire and are capped like the echo deque.
+     */
+    private val pendingLabelsByNet: MutableMap<String, ArrayDeque<Pair<Long, String>>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    private fun recordSentLabel(netId: String, label: String?) {
+        if (label.isNullOrEmpty()) return
+        val now = System.currentTimeMillis()
+        val dq = pendingLabelsByNet.getOrPut(netId) { ArrayDeque(32) }
+        synchronized(dq) {
+            dq.addLast(now to label)
+            while (dq.isNotEmpty() && now - dq.first().first > 20_000) dq.removeFirst()
+            while (dq.size > 64) dq.removeFirst()
+        }
+    }
+
+    /** True (and consumes the entry) if [label] matches a message we sent within the window. */
+    private fun consumeLabelIfMatch(netId: String, label: String?): Boolean {
+        if (label.isNullOrEmpty()) return false
+        val dq = pendingLabelsByNet[netId] ?: return false
+        val now = System.currentTimeMillis()
+        synchronized(dq) {
+            while (dq.isNotEmpty() && now - dq.first().first > 20_000) dq.removeFirst()
+            val idx = dq.indexOfLast { it.second == label }
+            if (idx < 0) return false
+            dq.removeAt(idx)
+            return true
+        }
+    }
+
     init {
         // Let KeepAliveService request a clean QUIT if the user swipes the app away while
         // background persistence is off (see onTaskRemovedGracefulQuit). Cleared in onCleared.
@@ -2348,11 +2401,13 @@ class IrcViewModel(
                 // also builds a single well-formed tag group (@label=…;+draft/reply=…).
                 hasReplyTagCap && msgId != null -> {
                     val sanitised = text.replace("\r", "").replace("\n", " ")
-                    client.privmsg(buffer, sanitised, replyToMsgId = msgId)
+                    val lbl = client.privmsg(buffer, sanitised, replyToMsgId = msgId)
                     // Record so incoming echo-message is consumed rather than shown twice.
                     // Dedup is content-based (buffer + decrypted text), so recording the
                     // plaintext matches the decrypted echo regardless of wire encryption.
                     recordLocalSend(networkId, key, sanitised, isAction = false)
+                    // Exact echo correlation on labeled-response servers (falls back to content).
+                    recordSentLabel(networkId, lbl)
                     sanitised
                 }
                 // Channel without reply-tag support: prepend "Nick: (quote..) - reply"
@@ -2368,8 +2423,9 @@ class IrcViewModel(
 
             // For all non-tag paths, use privmsg() which handles echo-message + label correctly.
             if (!(hasReplyTagCap && msgId != null)) {
-                client.privmsg(buffer, outText)
+                val lbl = client.privmsg(buffer, outText)
                 recordLocalSend(networkId, key, outText, isAction = false)
+                recordSentLabel(networkId, lbl)
             }
 
             // Pass replyToMsgId so our own local echo shows the reply quote UI,
@@ -2408,6 +2464,9 @@ class IrcViewModel(
 
     fun setActiveNetwork(id: String) {
         val st = _state.value
+        // A mounted script view is tied to the network/buffer it was opened
+        // from, and its game state is global to the single script engine.
+        if (id != st.activeNetworkId && _scriptView.value != null) closeScriptView()
         val next = st.copy(activeNetworkId = id)
         _state.value = syncActiveNetworkSummary(next)
         ensureServerBuffer(id)
@@ -2703,6 +2762,8 @@ fun startAddNetwork() {
         nickAwayState.remove(netId)
         // Echo dedup queue
         pendingSendsByNet.remove(netId)
+        // Labeled-response correlation labels (parallel to the echo dedup queue).
+        pendingLabelsByNet.remove(netId)
         // NOTE: recentSelfSends is deliberately NOT cleared here. cleanupNetworkMaps runs
         // on every disconnect, including the unexpected-drop path that immediately auto-
         // reconnects - and the whole point of recentSelfSends is to dedup our own messages
@@ -3081,6 +3142,15 @@ fun startAddNetwork() {
         }
     }
 
+    /** Set whether a network appears in the buffer drawer / channel switcher. */
+    fun setNetworkShowInSidebar(netId: String, show: Boolean) {
+        viewModelScope.launch {
+            val profile = _state.value.networks.firstOrNull { it.id == netId } ?: return@launch
+            if (profile.showInSidebar == show) return@launch
+            repo.upsertNetwork(profile.copy(showInSidebar = show))
+        }
+    }
+
     /**
      * Ask a bouncer to (re-)send its current upstream-network list. Per-kind dispatch:
      *
@@ -3356,6 +3426,657 @@ fun startAddNetwork() {
         val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(entry.scheme, entry.key)
         val b64 = android.util.Base64.encodeToString(entry.key, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
         return E2eKeyInfo(entry.scheme, fp, b64)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  +AGE encryption-dialog surface.
+    //
+    //  Unlike AGM/Blowfish there is no paste-a-key: +AGE uses a per-device identity,
+    //  trust-on-first-use pinning of peers, and a forward-secret ratchet (1:1). This
+    //  surface backs the dialog's +AGE panel: show our safety number, the contact's
+    //  pin/verify status, mark-verified, and an enable flag per target. Everything is
+    //  lazy + runCatching so a primitives/keystore hiccup degrades to "unavailable"
+    //  rather than crashing the dialog.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private val ageP: com.boxlabs.hexdroid.crypto.AgePrimitives? by lazy {
+        // Backend: BouncyCastle (native Ed25519 + X25519, audited). runCatching guards
+        // class-init (missing provider class etc.) so a backend problem degrades +AGE to
+        // unavailable rather than crashing the VM.
+        runCatching { com.boxlabs.hexdroid.crypto.BouncyCastleAgePrimitives() }.getOrNull()
+    }
+    private val ageIdentityStore by lazy {
+        com.boxlabs.hexdroid.crypto.AgeIdentityStore(repo.secretStore)
+    }
+    private val ageStore: com.boxlabs.hexdroid.crypto.AgeStore? by lazy {
+        val p = ageP ?: return@lazy null
+        runCatching {
+            com.boxlabs.hexdroid.crypto.AgeStore(
+                p,
+                restore = { ageIdentityStore.restorePins() },
+                persist = { ageIdentityStore.persistPins(it) },
+            )
+        }.getOrNull()
+    }
+    private val ageEnabledPrefs by lazy {
+        appContext.getSharedPreferences("hexdroid_age_enabled", Context.MODE_PRIVATE)
+    }
+    private fun ageKey(networkId: String, target: String) = "$networkId\u0000${target.lowercase()}"
+    private fun isChannelTarget(target: String) = target.firstOrNull() in setOf('#', '&', '+', '!')
+
+    /** Everything the Encryption dialog needs to render the +AGE panel for a target. */
+    data class AgeUiInfo(
+        val available: Boolean,         // false if curve/keystore init failed on this device
+        val myFingerprint: String,      // our +AGE safety number (Crockford quads), or ""
+        val isChannel: Boolean,
+        val peerKnown: Boolean,         // (queries) have we pinned this contact's key?
+        val peerFingerprint: String?,   // their safety number, if known
+        val peerVerified: Boolean,
+        val enabled: Boolean,           // is +AGE turned on for this target?
+    )
+
+    fun getAgeUiInfo(networkId: String, target: String): AgeUiInfo {
+        val p = ageP
+        val store = ageStore
+        val isChan = isChannelTarget(target)
+        if (p == null || store == null) return AgeUiInfo(false, "", isChan, false, null, false, false)
+
+        val me = runCatching { ageIdentityStore.loadOrCreate(p) }.getOrNull()
+        val myFp = me?.let {
+            com.boxlabs.hexdroid.crypto.AgeFingerprint.display(
+                com.boxlabs.hexdroid.crypto.AgeFingerprint.of(p, it.publicBundle()))
+        } ?: ""
+
+        var peerKnown = false; var peerFp: String? = null; var peerVerified = false
+        if (!isChan) {
+            val pin = runCatching { store.lookupByNick(target) }.getOrNull()
+            if (pin != null) {
+                peerKnown = true
+                val fpBytes = com.boxlabs.hexdroid.crypto.AgeFingerprint.of(p, pin)
+                peerFp = com.boxlabs.hexdroid.crypto.AgeFingerprint.display(fpBytes)
+                peerVerified = store.isVerified(com.boxlabs.hexdroid.crypto.AgeFingerprint.hex(fpBytes))
+            }
+        }
+        val enabled = ageEnabledPrefs.getBoolean(ageKey(networkId, target), false)
+        return AgeUiInfo(myFp.isNotEmpty(), myFp, isChan, peerKnown, peerFp, peerVerified, enabled)
+    }
+
+    fun enableAge(networkId: String, target: String) {
+        ageEnabledPrefs.edit().putBoolean(ageKey(networkId, target), true).apply()
+        ageP?.let { runCatching { ageIdentityStore.loadOrCreate(it) } }   // ensure we have an identity to announce
+        val bridge = ageBridgeFor(networkId)
+        android.util.Log.d("AGEDBG", "enableAge net=$networkId target=$target isChan=${isChannelTarget(target)} " +
+            "bridge=${if (bridge == null) "NULL" else "ok"} runtime=${if (runtimes[networkId] == null) "NULL" else "ok"} " +
+            "runtimeKeys=${runtimes.keys}")
+        if (isChannelTarget(target)) bridge?.enableChat(target)  // channels: announce + hostless key agreement
+        else {
+            bridge?.enablePm(target)                             // 1:1 PM: announce + X3DH handshake
+            // Start the reliability retry loop now, so the handshake completes (and shows Established)
+            // even if the user enables without sending a message. No-op once the ratchet is up.
+            if (bridge != null && !bridge.pmReady(target)) scheduleAgePmGrace(networkId, target, bridge)
+        }
+    }
+
+    fun disableAge(networkId: String, target: String) {
+        ageEnabledPrefs.edit().remove(ageKey(networkId, target)).apply()
+        ageBridgeFor(networkId)?.disableChat(target)
+        ageBridgeFor(networkId)?.disablePm(target)
+    }
+
+    fun markAgeContactVerified(networkId: String, target: String) {
+        val p = ageP ?: return
+        val store = ageStore ?: return
+        val pin = runCatching { store.lookupByNick(target) }.getOrNull() ?: return
+        store.markVerified(com.boxlabs.hexdroid.crypto.AgeFingerprint.hex(
+            com.boxlabs.hexdroid.crypto.AgeFingerprint.of(p, pin)))
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  Script runtime owns the engine/manager and the bridge HexDroidScriptHost
+    //  delegates to. Lazy: nothing is built until scripts are first touched. Call
+    //  initScripts() once after startup so enabled scripts load and can handle events.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private val scriptHost: com.boxlabs.hexdroid.script.ScriptHost by lazy {
+        com.boxlabs.hexdroid.script.HexDroidScriptHost(this)
+    }
+    val scriptEngine: com.boxlabs.hexdroid.script.ScriptEngine by lazy {
+        com.boxlabs.hexdroid.script.ScriptEngine(scriptHost, com.boxlabs.hexdroid.script.HexScriptBackend())
+    }
+    private val scriptManager: com.boxlabs.hexdroid.script.ScriptManager by lazy {
+        com.boxlabs.hexdroid.script.ScriptManager(
+            appContext,
+            scriptEngine,
+            appContext.getSharedPreferences("hexdroid_scripts", Context.MODE_PRIVATE),
+        )
+    }
+
+    /** Reactive scripts state for the Scripts UI — updates on seed/install/toggle/remove/reload. */
+    private val _scriptsState = kotlinx.coroutines.flow.MutableStateFlow(
+        com.boxlabs.hexdroid.script.ScriptsUiState(emptyList(), "hex")
+    )
+    val scriptsState: kotlinx.coroutines.flow.StateFlow<com.boxlabs.hexdroid.script.ScriptsUiState> = _scriptsState
+    private fun refreshScripts() { runCatching { _scriptsState.value = scriptManager.state() } }
+
+    /** Load all enabled scripts (seeding bundled ones first). Call once after IrcCore is ready. */
+    fun initScripts() { _scriptLaunchers.value = emptyList(); runCatching { scriptManager.seedBundled(); scriptManager.reloadAll() }; refreshScripts() }
+
+    // ---- Scripts UI plumbing (every mutation refreshes the StateFlow) ----
+    fun scriptsUiState(): com.boxlabs.hexdroid.script.ScriptsUiState = scriptManager.state()
+    fun setScriptEnabled(name: String, enabled: Boolean) { _scriptLaunchers.value = emptyList(); scriptManager.setEnabled(name, enabled); refreshScripts() }
+    fun installScript(name: String, source: String) { _scriptLaunchers.value = emptyList(); scriptManager.install(name, source); refreshScripts() }
+    fun removeScript(name: String) { _scriptLaunchers.value = emptyList(); scriptManager.remove(name); refreshScripts() }
+    fun reloadScripts() { _scriptLaunchers.value = emptyList(); scriptManager.reloadAll(); refreshScripts() }
+    fun readScript(name: String): String? = scriptManager.read(name)
+
+    /** Reset a bundled script to its shipped default; returns the restored source (or null). */
+    fun revertScript(name: String): String? {
+        _scriptLaunchers.value = emptyList()
+        val src = scriptManager.revertToBundled(name)
+        refreshScripts()
+        return src
+    }
+
+    // ---- script-contributed launchers (a menu that appears when scripts register entries) ----
+    data class ScriptLauncher(val id: String, val label: String, val command: String)
+    private val _scriptLaunchers = kotlinx.coroutines.flow.MutableStateFlow<List<ScriptLauncher>>(emptyList())
+    val scriptLaunchers: kotlinx.coroutines.flow.StateFlow<List<ScriptLauncher>> = _scriptLaunchers
+    fun scriptRegisterLauncher(id: String, label: String, command: String) {
+        _scriptLaunchers.value = _scriptLaunchers.value.filterNot { it.id == id } + ScriptLauncher(id, label, command)
+    }
+    fun scriptUnregisterLauncher(id: String) { _scriptLaunchers.value = _scriptLaunchers.value.filterNot { it.id == id } }
+
+    // ---- a mounted script view (e.g. the poker table), shown as an overlay ----
+    private val _scriptView = kotlinx.coroutines.flow.MutableStateFlow<com.boxlabs.hexdroid.script.ScriptView?>(null)
+    val scriptView: kotlinx.coroutines.flow.StateFlow<com.boxlabs.hexdroid.script.ScriptView?> = _scriptView
+    fun scriptMountView(view: com.boxlabs.hexdroid.script.ScriptView) { _scriptView.value = view }
+
+    /**
+     * Show a transient toast for a script's `toast <text>` statement. Script work runs on the
+     * engine thread, so hop to the main thread; [appContext] keeps it safe if no Activity is up.
+     */
+    fun scriptToast(message: String) {
+        if (message.isBlank()) return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(appContext, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun closeScriptView() {
+        _scriptView.value = null
+        // Also tell the script to stop driving its view; otherwise a pending timer (e.g. poker's
+        // scheduled bot loop) re-renders and the table pops straight back. Generic signal that any
+        // view-mounting script can listen for to halt.
+        runCatching {
+            scriptEngine.dispatch(
+                "SIGNAL:VIEW_CLOSED",
+                com.boxlabs.hexdroid.script.EventData(
+                    network = _state.value.activeNetworkId ?: "",
+                    buffer = _state.value.selectedBuffer ?: "",
+                ),
+            )
+        }
+    }
+
+    /**
+     * Run a script-defined action by name. View-button actions and launchers may be written
+     * either as an `alias` (a command) or as an `on SIGNAL:<name>` handler, so try the command
+     * first and fall back to raising the signal.
+     */
+    private fun runScriptAction(name: String, args: List<String>) {
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            val net = _state.value.activeNetworkId
+            val buf = _state.value.selectedBuffer
+            val ran = runCatching {
+                scriptEngine.runCommand(name, args.joinToString(" "), net, buf)
+            }.getOrDefault(false)
+            if (!ran) runCatching {
+                scriptEngine.dispatch(
+                    "SIGNAL:${name.uppercase()}",
+                    com.boxlabs.hexdroid.script.EventData(network = net ?: "", buffer = buf ?: "", args = args),
+                )
+            }
+        }
+    }
+
+    /** Run a launcher's command/signal (opens its view). */
+    fun runScriptLauncher(command: String) = runScriptAction(command, emptyList())
+
+    /** A tap inside a mounted script view -> run the alias or fire the signal named by the button. */
+    fun scriptViewAction(actionId: String, args: List<String>) = runScriptAction(actionId, args)
+
+    // ---- script `age.*` transport (loopback) -------------------------------------------------
+    // Makes scripted games actually play: a script's own `age.send`/`age.seal` are
+    // delivered back into the script as `age_msg` / `age_deal` events, so the local client's moves
+    // take effect immediately. `age.local <from> ..` injects an event as another seat (practice bots).
+    // Real encrypted multiplayer routes the same events through AgeScriptCapabilities + IRC instead
+    private fun scriptMe(): String {
+        val p = ageP
+        if (p != null) {
+            val me = runCatching { ageIdentityStore.loadOrCreate(p) }.getOrNull()
+            if (me != null) return runCatching {
+                com.boxlabs.hexdroid.crypto.AgeFingerprint.hex(
+                    com.boxlabs.hexdroid.crypto.AgeFingerprint.of(p, me.publicBundle()))
+            }.getOrDefault(_state.value.myNick)
+        }
+        return _state.value.myNick
+    }
+    fun scriptAgeMe(): String = scriptMe()
+
+    /**
+     * True if [channel] is a channel buffer the user is actually in on some network. This is the
+     * gate for the +AGE bridge: real (joined) channels transmit over IRC; the practice loopback
+     * channel (e.g. #practice, never joined) is skipped so the local game still runs via age.local.
+     */
+    private fun scriptInChannel(channel: String): Boolean {
+        if (channel.isBlank()) return false
+        return _state.value.buffers.keys.any { k ->
+            val (net, name) = splitKey(k)
+            name.equals(channel, ignoreCase = true) && isChannelOnNet(net, name)
+        }
+    }
+
+    fun scriptAgeRand(n: Int): String {
+        val bytes = ageP?.randomBytes(n)
+            ?: ByteArray(n).also { java.security.SecureRandom().nextBytes(it) }
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+    fun scriptAgeSha(s: String): String {
+        val d = ageP?.sha256(s.encodeToByteArray())
+            ?: java.security.MessageDigest.getInstance("SHA-256").digest(s.encodeToByteArray())
+        return d.joinToString("") { "%02x".format(it) }
+    }
+    /**
+     * Single entry point for every script `age.*` call (the host delegates here)
+     * encrypts and transmits to peers through [ageBridge]. Solo practice needs no bridge at all.
+     */
+    fun scriptAgeCapability(name: String, args: List<String>): String = when (name) {
+        "age.me"   -> scriptAgeMe()
+        "age.rand" -> scriptAgeRand(args.getOrNull(0)?.toIntOrNull() ?: 16)
+        "age.sha"  -> scriptAgeSha(args.getOrNull(0) ?: "")
+        "age.join" -> { if (scriptInChannel(args.getOrNull(0) ?: "")) ageBridge?.let { it.announceIdent(args.getOrNull(0) ?: ""); it.call("age.join", args) }; "" }
+        "age.host" -> { if (scriptInChannel(args.getOrNull(0) ?: "")) ageBridge?.hostTable(args.getOrNull(0) ?: ""); "" }
+        "age.send" -> {                                                          // [chan, tokens…]
+            // local echo of my own move lands now, tagged with the channel it belongs to so a script
+            // (or a game framework) can route it by $chan exactly like an inbound peer message.
+            raiseAgeMsg(scriptMe(), args.drop(1), args.getOrNull(0) ?: "")
+            if (scriptInChannel(args.getOrNull(0) ?: "")) ageBridge?.call("age.send", args)  // + peers (fail-closed until keyed)
+            ""
+        }
+        "age.close" -> { args.getOrNull(0)?.takeIf { it.isNotEmpty() }?.let { ageBridge?.closeGame(it) }; "" }  // drop keys/roster for a closed table
+        "age.purge" -> {                                                        // [chan] drop queued flood for a closed table
+            val chan = args.getOrNull(0)?.takeIf { it.isNotEmpty() }
+            val net = _state.value.activeNetworkId
+            if (chan != null && net != null) {
+                // Match by PRIVMSG target, not the AGE payload: FRAG hides its gameId inside a base64
+                // wrapper, but the outbound line is `PRIVMSG <chan> :AGE (MSG|FRAG) …`, so the target
+                // scopes the purge to this channel and never touches another game's / chat's fragments.
+                val prefix = "PRIVMSG $chan :AGE "
+                runtimes[net]?.client?.purgeOutbound { line ->
+                    line.startsWith(prefix) &&
+                        line.substring(prefix.length).substringBefore(' ').let { it == "MSG" || it == "FRAG" }
+                }
+            }
+            ""
+        }
+        "age.local" -> { args.firstOrNull()?.let { raiseAgeMsg(it, args.drop(1)) }; "" }  // practice bots (local only)
+        "age.seal" -> {                                                         // [fp, c1, c2]
+            val fp = args.firstOrNull()
+            if (fp == scriptMe()) raiseAgeDeal(fp, args.drop(1).joinToString(" "))         // my hole, locally
+            else ageBridge?.takeIf { it.ready(it.activeChannel()) }?.call("age.seal", args) // seal to a peer
+            ""
+        }
+        else -> ageBridge?.call(name, args) ?: ""
+    }
+
+    /** Host a real encrypted table for [members] = (nick, fpHex) on [channel] (mints + shares K_G). */
+    fun scriptHostTable(channel: String, members: List<Pair<String, String>>) =
+        ageBridge?.hostTable(channel, members) ?: Unit
+
+    /** Inbound tap: route an `AGE …` wire line to [netId]'s bridge; returns true if consumed. */
+    fun onAgeWireLine(netId: String?, channel: String, from: String, line: String): Boolean =
+        ageBridgeFor(netId)?.onAgeLine(channel, from, line) ?: false
+
+    /** True if [text] is one of the bridge's wire verbs, so it must never be shown as chat. */
+    private fun isAgeProtocolVerb(text: String): Boolean =
+        text.substringAfter("AGE ", "").substringBefore(' ') in
+            setOf("IDENT", "MSG", "CHAT", "DEAL", "INVITE", "REKEY", "HELLO", "ACK", "PM", "FRAG")
+
+    private fun raiseAgeMsg(from: String, tokens: List<String>, chan: String = "") =
+        dispatchAge(
+            "SIGNAL:AGE_MSG",
+            if (chan.isNotEmpty()) mapOf("from" to from, "chan" to chan) else mapOf("from" to from),
+            tokens,
+        )
+    private fun raiseAgeDeal(from: String, data: String) =
+        dispatchAge("SIGNAL:AGE_DEAL", mapOf("from" to from, "data" to data), emptyList())
+    private fun dispatchAge(event: String, fields: Map<String, String>, args: List<String>, netId: String? = null) {
+        runCatching {
+            scriptEngine.dispatch(
+                event,
+                com.boxlabs.hexdroid.script.EventData(
+                    network = netId ?: _state.value.activeNetworkId ?: "",
+                    buffer = _state.value.selectedBuffer ?: "",
+                    fields = fields, args = args,
+                ),
+            )
+        }
+    }
+
+    /** Deliver a decrypted inbound +AGE channel message into the chat buffer (shown with a padlock). */
+    private fun appendIncomingAgeChat(channel: String, fromNick: String, text: String, netId: String? = null) {
+        val net = netId ?: _state.value.activeNetworkId ?: return
+        append(bufKey(net, channel), from = fromNick, text = text,
+               encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
+    }
+
+    /**
+     * The bridge has flushed [peer]'s held PM queue to the wire, so any local echoes we drew as
+     * pending are now genuinely sent: clear their pending flag. Keyed to [netId]'s PM buffer, since
+     * each bridge is per-network. Mirrors the in-place message-edit pattern used elsewhere.
+     */
+    private fun markAgePmDelivered(netId: String, peer: String) {
+        val key = bufKey(netId, peer)
+        _state.update { st ->
+            val buf = st.buffers[key] ?: return@update st
+            if (buf.messages.none { it.pending }) return@update st
+            val newMessages = buf.messages
+                .map { if (it.pending) it.copy(pending = false) else it }
+                .toPersistentList()
+            st.copy(buffers = st.buffers + (key to buf.copy(messages = newMessages)))
+        }
+    }
+
+
+    private val ageBridges =
+        java.util.concurrent.ConcurrentHashMap<String, com.boxlabs.hexdroid.script.cap.AgeScriptBridge>()
+    /**
+     * Per-network encrypted-transport bridges: one [AgeScriptBridge] per netId, each wired to send,
+     * deliver, dispatch and read our nick on THAT network. Previously a single active-network-bound
+     * bridge routed all +AGE traffic onto whichever network was on screen, so a background network's
+     * channel/PM crypto was misdelivered (sent on the wrong connection, decrypted into the wrong buffer,
+     * signed/verified against the wrong nick). Keying it by netId fixes that.
+     *
+     * A FAILED build is NOT cached: if the identity isn't ready yet (e.g. an inbound AGE line arrives
+     * during startup or a bouncer's CHATHISTORY replay) we return null and retry on the next access, so
+     * +AGE is never permanently wedged by one transient miss.
+     */
+    private fun ageBridgeFor(netId: String?): com.boxlabs.hexdroid.script.cap.AgeScriptBridge? {
+        val net = netId ?: _state.value.activeNetworkId ?: return null
+        ageBridges[net]?.let { return it }
+        return synchronized(ageBridges) {
+            ageBridges[net] ?: run build@{
+                // Each guard must bail out of THIS builder run (return@build), not the inner elvis-RHS
+                // run. Without the label, return@run targets the nearest enclosing run (the little
+                // logging block), so the elvis just yields null and p/store/me come out nullable.
+                val p = ageP ?: run { android.util.Log.w("AGEDBG", "ageBridgeFor($net) NULL: ageP null"); return@build null }
+                val store = ageStore ?: run { android.util.Log.w("AGEDBG", "ageBridgeFor($net) NULL: ageStore null"); return@build null }
+                val me = runCatching { ageIdentityStore.loadOrCreate(p) }.getOrNull() ?: run { android.util.Log.w("AGEDBG", "ageBridgeFor($net) NULL: identity load failed"); return@build null }
+                com.boxlabs.hexdroid.script.cap.AgeScriptBridge(
+                    p = p,
+                    me = me,
+                    store = store,
+                    sendPrivmsg = { chan, line -> scriptSendRaw(net, "PRIVMSG $chan :$line") },
+                    raiseSignal = { ev, fields, args -> dispatchAge(ev, fields, args, net) },
+                    myNick = { scriptNick(net) ?: _state.value.myNick },
+                    deliverChat = { chan, nick, text -> appendIncomingAgeChat(chan, nick, text, net) },
+                    onPmFlushed = { peer -> markAgePmDelivered(net, peer) },
+                    saveOutbox = { blob -> runCatching { repo.secretStore.setAgePmOutbox(net, blob.toByteArray(Charsets.UTF_8)) } },
+                    loadOutbox = { runCatching { repo.secretStore.getAgePmOutbox(net)?.toString(Charsets.UTF_8) }.getOrNull() },
+                    debug = { msg -> android.util.Log.d("AGEDBG", "pm[$net] $msg") },
+                    onPmState = { peer, state, detail ->
+                        val line = when (state) {
+                            "NEGOTIATING" -> "*** Establishing +AGE encryption with $peer\u2026"
+                            "ESTABLISHED" -> "*** +AGE encryption established with $peer. Messages are end-to-end encrypted."
+                            "FAILED"      -> "*** +AGE encryption with $peer failed: $detail. Messages are NOT encrypted."
+                            else          -> "*** +AGE with $peer: $state"
+                        }
+                        append(bufKey(net, peer), from = null, text = line, isLocal = true, doNotify = false)
+                    },
+                    onPmInterest = { peer ->
+                        append(
+                            bufKey(net, peer), from = null,
+                            text = "*** $peer wants to talk with +AGE end-to-end encryption. Turn it on from the lock menu to encrypt this conversation.",
+                            isLocal = true, doNotify = false,
+                        )
+                    },
+                    onIdentConflict = { target, nick, newFp, pinnedFp ->
+                        // The key was NOT pinned; it waits for the user. Fail loud and in the buffer
+                        // they're looking at, and notify: silently accepting was the old behaviour and
+                        // is exactly what makes a nick takeover invisible.
+                        append(
+                            bufKey(net, target), from = null,
+                            text = "*** +AGE WARNING: $nick announced a different key (${newFp.take(16)}) " +
+                                "to the one pinned for that nick (${pinnedFp.take(16)}). " +
+                                "Normal after a reinstall or on a second device, and also what a nick takeover looks like. " +
+                                "Their +AGE messages are ignored until you decide. " +
+                                "Verify the fingerprint out of band, then: /age trust $nick  or  /age reject $nick",
+                            isLocal = true, doNotify = true,
+                        )
+                    },
+                ).also { ageBridges[net] = it }
+            }
+        }
+    }
+
+    /** The active network's bridge, for script capabilities and user actions that run on the current buffer. */
+    private val ageBridge: com.boxlabs.hexdroid.script.cap.AgeScriptBridge?
+        get() = ageBridgeFor(_state.value.activeNetworkId)
+
+    // Conversations ("netId\u0000peer") with a running +AGE PM grace timer, so we schedule exactly one.
+    private val agePmGracePending = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val AGE_PM_GRACE_MS = 3000L
+    // How many times the reliability layer re-drives an unestablished PM handshake before giving up
+    // (about AGE_PM_GRACE_MS apart). Held messages still flush the instant the ratchet comes up, even
+    // if that is after the cap; this only bounds the active retransmit nudging.
+    private val AGE_PM_MAX_RETRIES = 5
+    // Ceiling for the exponential handshake-retry backoff, so the interval never grows unbounded.
+    private val AGE_PM_RETRY_CAP_MS = 24000L
+
+    /**
+     * Resolve +AGE PM messages that [AgeScriptBridge.sendOrHoldPm] held for [peer]. IRC has no prekey
+     * server, so we can't encrypt a first message to a not-yet-established session the way Signal does;
+     * instead, since both clients are online, we wait for the live handshake:
+     *   - the peer's ratchet comes up  -> the bridge already flushed the held messages through it;
+     *   - no AGE IDENT within the grace -> the peer runs no +AGE client, so self-key + flush as garbled
+     *                                      AGE CHAT (future PMs to them self-key immediately);
+     *   - IDENT seen but handshake slow -> grant one more grace before self-keying, so a laggy handshake
+     *                                      doesn't garble the opening line.
+     * [bridge] is captured at call time so a network switch mid-grace flushes the right instance.
+     */
+    private fun scheduleAgePmGrace(netId: String, peer: String, bridge: com.boxlabs.hexdroid.script.cap.AgeScriptBridge?) {
+        bridge ?: return
+        val key = "$netId\u0000$peer"
+        if (!agePmGracePending.add(key)) return
+        viewModelScope.launch {
+            try {
+                // Reliability layer. A held +AGE PM waits for the ratchet handshake and then flushes
+                // DECRYPTABLY via flushPmOutboxRatchet (driven by onPmHello/onPmAck). While it waits we
+                // periodically re-drive the handshake (retryPmHandshake) so a lost or mistimed
+                // IDENT/HELLO/ACK recovers on its own instead of stranding the message. retryPmHandshake
+                // is idempotent and reuses existing keys, so re-driving never desyncs an in-flight or
+                // established session.
+                //
+                // We still deliberately do NOT self-key a 1:1 PM on a timeout. Self-keying works for a
+                // *channel* because the minted group key is shared with members, but a PM self-key
+                // encrypts under a key only WE hold, so the peer can't decrypt it. So we only keep
+                // nudging the handshake until it establishes or we hit the attempt cap; the message
+                // stays echoed-but-pending until then and flushes the instant both ends are on.
+                // Back off exponentially (3s, 6s, 12s, 24s, capped): on FIRST contact the peer may take
+                // many seconds to actually tap "enable", and a fixed short interval would re-announce
+                // repeatedly in that window and trip server flood limits. Backing off keeps recovery
+                // quick for a genuinely lost frame while spreading out the wait for a slow peer.
+                repeat(AGE_PM_MAX_RETRIES) { attempt ->
+                    delay((AGE_PM_GRACE_MS shl attempt).coerceAtMost(AGE_PM_RETRY_CAP_MS))
+                    if (bridge.pmReady(peer)) return@launch          // ratchet up: outbox already flushed
+                    if (!bridge.retryPmHandshake(peer)) return@launch // no longer pending (disabled / failed)
+                }
+            } finally {
+                agePmGracePending.remove(key)
+            }
+        }
+    }
+
+    fun scriptEcho(network: String?, buffer: String?, from: String?, text: String) {
+        val net = network ?: _state.value.activeNetworkId ?: return
+        val buf = buffer ?: _state.value.selectedBuffer.takeIf { it.isNotBlank() } ?: return
+        append(bufKey(net, buf), from = from, text = text, doNotify = false)
+    }
+    fun scriptSendMessage(network: String?, buffer: String, text: String) {
+        val net = network ?: _state.value.activeNetworkId ?: return
+        val rt = runtimes[net] ?: return
+        viewModelScope.launch { runCatching { rt.client.privmsg(buffer, text) } }
+    }
+    fun scriptSendRaw(network: String?, line: String) {
+        val net = network ?: _state.value.activeNetworkId
+        if (net == null) {
+            android.util.Log.w("AGEDBG", "scriptSendRaw DROP no-net: network=$network active=${_state.value.activeNetworkId} line=${line.take(48)}")
+            return
+        }
+        val rt = runtimes[net]
+        if (rt == null) {
+            android.util.Log.w("AGEDBG", "scriptSendRaw DROP no-runtime: net=$net runtimeKeys=${runtimes.keys} line=${line.take(48)}")
+            return
+        }
+        android.util.Log.d("AGEDBG", "scriptSendRaw OK net=$net line=${line.take(64)}")
+        viewModelScope.launch { runCatching { rt.client.sendRaw(line) } }
+    }
+    fun scriptNick(network: String?): String? {
+        val net = network ?: _state.value.activeNetworkId ?: return _state.value.myNick
+        return _state.value.connections[net]?.myNick ?: _state.value.myNick
+    }
+    fun scriptActiveNetwork(): String? = _state.value.activeNetworkId
+    fun scriptActiveBuffer(): String? = _state.value.selectedBuffer.takeIf { it.isNotBlank() }
+    fun scriptSetting(key: String): String? = when (key) {
+        "applang", "lang" -> java.util.Locale.getDefault().language.ifBlank { "en" }
+        else -> null
+    }
+    /**
+     * Egress policy for script HTTP (`http.get` / `http.post`). Fails closed.
+     *
+     * The critical case is a proxied network. Script HTTP is a plain HttpURLConnection with no Proxy
+     * (HexDroidScriptHost.httpRequest), so it egresses DIRECTLY and resolves DNS locally. Allowing
+     * that while the IRC link runs over Tor/SOCKS would hand the user's real IP and DNS to a third
+     * party while they believe they are anonymous, from nothing more than loading a script that
+     * fetches (the bundled translate.hex does exactly that). Silent direct egress is the one outcome
+     * that must never happen, so while any live network is proxied, scripts do not get to make
+     * requests at all. Routing script HTTP through SocksProxy with remote DNS is the richer fix and
+     * would let this return true again; note that java.net's SOCKS support resolves the hostname
+     * locally, so it must go through SocksProxy.connect rather than Proxy.Type.SOCKS.
+     */
+    fun scriptNetworkAllowed(url: String): Boolean = scriptNetworkAllowed(url, resolve = false)
+
+    /**
+     * Enforcing check for the HTTP path: resolves the host and tests every address, so the
+     * literal-form gaps in [isLocalOrPrivateHost] (127.1, 2130706433, ::ffff:127.0.0.1) cannot walk
+     * past it. Blocking DNS, so call it off the script thread.
+     *
+     * Known gap: resolve-then-connect is a TOCTOU, since HttpURLConnection resolves again when it
+     * dials. Closing it needs a SocketFactory that checks the address actually being connected to.
+     */
+    fun scriptNetworkAllowedResolved(url: String): Boolean = scriptNetworkAllowed(url, resolve = true)
+
+    private fun scriptNetworkAllowed(url: String, resolve: Boolean): Boolean {
+        val u = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return false
+        val scheme = u.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return false           // no file:/content:/ftp:/…
+        val host = u.host?.lowercase()?.trim('[', ']')?.takeIf { it.isNotEmpty() } ?: return false
+        // Deny while a proxied network is live. Checked against networks that actually have a runtime,
+        // so an unused proxied profile doesn't disable scripting everywhere. The engine gives us only
+        // the URL, not the requesting network, so we cannot narrow this to "the script's network".
+        val proxiedLive = _state.value.networks.any { n ->
+            n.proxyType != com.boxlabs.hexdroid.connection.ProxyType.NONE && runtimes.containsKey(n.id)
+        }
+        if (proxiedLive) return false
+        if (isLocalOrPrivateHost(host)) return false                       // no device-local or LAN targets
+        // Resolve LAST: every check above is decidable from the text, and resolving first would put
+        // a plaintext lookup on the wire for a request we refuse anyway - including while proxied.
+        if (resolve) {
+            val addrs = runCatching { java.net.InetAddress.getAllByName(host) }.getOrNull() ?: return false
+            if (addrs.isEmpty()) return false
+            if (addrs.any { isPrivateAddress(it) }) return false   // any private answer denies
+        }
+        return true
+    }
+
+    /**
+     * True for hosts a script has no business reaching: the device itself and the local network.
+     * Literal addresses only, deliberately: resolving a name here would mean a blocking DNS lookup on
+     * the script thread. A name that resolves into private space (DNS rebinding) is therefore NOT
+     * caught; closing that needs the check to move next to the socket, after resolution.
+     */
+    private fun isLocalOrPrivateHost(host: String): Boolean {
+        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true
+        if (host.contains(':')) {                                          // IPv6 literal
+            val h = host.substringBefore('%')
+            if (h == "::1" || h == "::") return true
+            val p = h.removePrefix("::").lowercase()
+            return p.startsWith("fc") || p.startsWith("fd") || p.startsWith("fe80")
+        }
+        val o = host.split('.')
+        if (o.size != 4) return false                                      // not an IPv4 literal
+        val b = o.map { it.toIntOrNull() ?: return false }
+        if (b.any { it !in 0..255 }) return false
+        return when {
+            b[0] == 127 || b[0] == 0 -> true                               // loopback / this-host
+            b[0] == 10 -> true                                             // 10/8
+            b[0] == 192 && b[1] == 168 -> true                             // 192.168/16
+            b[0] == 172 && b[1] in 16..31 -> true                          // 172.16/12
+            b[0] == 169 && b[1] == 254 -> true                             // link-local (incl. metadata)
+            b[0] == 100 && b[1] in 64..127 -> true                         // CGNAT 100.64/10
+            else -> false
+        }
+    }
+
+    /**
+     * True for a RESOLVED address a script must not reach. CGNAT and IPv6 ULA are checked by hand:
+     * the JDK covers loopback/any/link-local/IPv4-site-local, but Inet6Address.isSiteLocalAddress
+     * only matches the deprecated fec0::/10, not fc00::/7.
+     */
+    private fun isPrivateAddress(a: java.net.InetAddress): Boolean {
+        if (a.isLoopbackAddress || a.isAnyLocalAddress || a.isLinkLocalAddress ||
+            a.isSiteLocalAddress || a.isMulticastAddress
+        ) return true
+        val raw = a.address
+        if (raw.size == 4) {
+            val o0 = raw[0].toInt() and 0xff
+            val o1 = raw[1].toInt() and 0xff
+            if (o0 == 100 && o1 in 64..127) return true                    // CGNAT 100.64/10
+            return false
+        }
+        if (raw.size == 16) {
+            val f = raw[0].toInt() and 0xfe
+            if (f == 0xfc) return true                                      // ULA fc00::/7
+        }
+        return false
+    }
+    fun scriptAppCommand(network: String?, buffer: String?, line: String) {
+        val cmd = line.trim()
+        if (cmd.isEmpty()) return
+        // The .hex backend forwards permitted bare verbs here (e.g. "join #chan", "mode #chan +m").
+        // sendInput treats a leading '/' as a command and anything else as literal chat, so restore
+        // the slash the script author omitted. An explicit '/' from the script is kept as-is.
+        val raw = if (cmd.startsWith("/")) cmd else "/$cmd"
+        // Run the command where it came from. The engine now hands us the dispatch's own network and
+        // buffer, so a handler that fires on network A no longer executes against whichever buffer the
+        // user happens to have selected (previously every script command arrived as network = null,
+        // meaning "active", and silently targeted the wrong place whenever the user was elsewhere).
+        val originKey = if (!network.isNullOrBlank() && !buffer.isNullOrBlank()) bufKey(network, buffer) else null
+        if (originKey != null && _state.value.buffers.containsKey(originKey)) {
+            sendInput(raw, originKey)
+            return
+        }
+        // No resolvable origin buffer (e.g. a signal raised with no buffer context). Falling back to
+        // the selected buffer is only safe when the command belongs to the network being looked at;
+        // otherwise drop it rather than fire it into an unrelated network, and say why.
+        val active = _state.value.activeNetworkId
+        if (!network.isNullOrBlank() && active != null && network != active) {
+            android.util.Log.w(
+                "IrcViewModel",
+                "scriptAppCommand dropped: network=$network active=$active and no origin buffer for '$cmd'"
+            )
+            return
+        }
+        sendInput(raw)
     }
 
     /**
@@ -3641,8 +4362,21 @@ fun startAddNetwork() {
         // the ConnectivityManager onLost callback match the lost interface and reconnect at once
         // rather than waiting out SOCKET_READ_TIMEOUT_MS. Captured here (not at Connected) so the
         // pinned network and the recorded network are always the same one.
+        //
+        // EXCEPTION: never pin when the active network is a VPN. Binding a socket to a specific
+        // Network object is wrong for VPNs, which replace that object constantly (rekey, roam,
+        // and every underlying Wi-Fi<->cellular handoff produces a fresh VPN Network). Each
+        // replacement kills the bound socket, and our NetworkCallback uses a default
+        // NetworkRequest which implicitly carries NET_CAPABILITY_NOT_VPN so it never sees the
+        // VPN network drop and can't trigger a prompt reconnect. Leaving it unpinned lets the
+        // OS route through the VPN and migrate the connection across underlying-network changes
+        // transparently, which is what a VPN is supposed to do. boundNetwork stays null too, so
+        // the onLost "riding the lost interface" branch correctly never fires for a VPN session.
         val chosenNetwork = runCatching {
-            (appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)?.activeNetwork
+            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val active = cm?.activeNetwork
+            val caps = active?.let { cm.getNetworkCapabilities(it) }
+            if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) null else active
         }.getOrNull()
 
         val client = IrcClient(cfg.copy(pinnedNetwork = chosenNetwork))
@@ -3653,6 +4387,9 @@ fun startAddNetwork() {
         // network with no keys configured pays only the per-message null-check
         // since encryptOutgoing/decryptIncoming short-circuit on an empty cache.
         client.e2eCodec = com.boxlabs.hexdroid.crypto.E2eCodec(netId, e2eKeyStore)
+        // Fail-closed predicate for the +AGE manual path: tells IrcCore.privmsg to refuse plaintext
+        // on any buffer where the user has turned on +AGE (typed +AGE messaging isn't wired yet).
+        client.ageEnabledForTarget = { tgt -> ageEnabledPrefs.getBoolean(ageKey(netId, tgt), false) }
         val thisClient = client
         val rt = NetRuntime(netId = netId, client = client, myNick = cfg.nick, suppressMotd = _state.value.settings.hideMotdOnConnect)
         rt.boundNetwork = chosenNetwork
@@ -3806,9 +4543,14 @@ fun startAddNetwork() {
     fun reconnectActive() {
         val netId = _state.value.activeNetworkId ?: return
         val cur = _state.value.connections[netId]
-        // If we were never connected / no runtime exists, treat reconnect as a connect.
+        // If we were never connected / no runtime exists, treat reconnect as a connect. This is also
+        // the usual state during a long auto-reconnect backoff so we MUST clear the backoff/flap/auth state here too.
         if ((cur?.connected != true && cur?.connecting != true) && runtimes[netId] == null) {
-            connectNetwork(netId, force = true)
+            autoReconnectJobs.remove(netId)?.cancel()
+            reconnectAttempts.remove(netId)
+            clearFlapPaused(netId)
+            pingTimeoutTimestamps.remove(netId)
+            connectNetwork(netId, force = true, clearAuthBlock = true)
             return
         }
         reconnectNetwork(netId)
@@ -4498,11 +5240,16 @@ fun startAddNetwork() {
         }.trim()
     }
 
-    fun sendInput(raw: String) = sendInputInternal(raw, 0)
+    fun sendInput(raw: String, targetKey: String? = null) = sendInputInternal(raw, 0, targetKey)
 
-    private fun sendInputInternal(raw: String, aliasDepth: Int) {
+    /**
+     * [targetKey] dispatches the command against a specific buffer instead of the selected one, so a
+     * script command runs where it originated rather than wherever the user is looking. Null keeps
+     * the composer's behaviour (the selected buffer).
+     */
+    private fun sendInputInternal(raw: String, aliasDepth: Int, targetKey: String? = null) {
         val st = _state.value
-        val currentKey = st.selectedBuffer
+        val currentKey = targetKey?.takeIf { it.isNotBlank() && st.buffers.containsKey(it) } ?: st.selectedBuffer
         if (currentKey.isBlank()) return
         val (netId, bufferName) = splitKey(currentKey)
         // Some commands (/SYSINFO) should work even when disconnected.
@@ -4548,6 +5295,35 @@ fun startAddNetwork() {
                 }
 
                 when (cmd) {
+                    "age" -> {
+                        // /age trust <nick> | /age reject <nick> | /age pending
+                        // Resolves an identity conflict that onIdentConflict parked. Deliberately a
+                        // typed command: accepting a new key for a known nick is a trust decision, so
+                        // it should be deliberate rather than a tap someone can fire off reflexively.
+                        val rest = cmdLine.substringAfter(' ', "").trim()
+                        val sub = rest.substringBefore(' ').lowercase()
+                        val who = rest.substringAfter(' ', "").trim()
+                        val br = ageBridgeFor(netId)
+                        val say = { t: String -> append(currentKey, from = null, text = t, isLocal = true, doNotify = false) }
+                        when {
+                            br == null -> say("*** +AGE is not available on this network.")
+                            sub == "pending" -> {
+                                val ps = br.pendingIdentNicks()
+                                say(if (ps.isEmpty()) "*** +AGE: no identities awaiting a decision."
+                                    else "*** +AGE awaiting a decision: " + ps.joinToString(", ") { n -> "$n (${br.pendingIdentFp(n)?.take(16)})" })
+                            }
+                            who.isEmpty() -> say("*** Usage: /age trust <nick> | /age reject <nick> | /age pending")
+                            sub == "trust" -> say(
+                                if (br.trustPendingIdent(who)) "*** +AGE: pinned $who's new key. Their messages will verify again."
+                                else "*** +AGE: nothing pending for $who."
+                            )
+                            sub == "reject" -> say(
+                                if (br.rejectPendingIdent(who)) "*** +AGE: discarded $who's new key; the previously pinned key stays authoritative."
+                                else "*** +AGE: nothing pending for $who."
+                            )
+                            else -> say("*** Usage: /age trust <nick> | /age reject <nick> | /age pending")
+                        }
+                    }
                     "quit", "disconnect" -> {
                         // User-initiated disconnect. Send QUIT (so the server / bouncer sees
                         // a graceful goodbye and any active channels announce a clean exit
@@ -4748,10 +5524,11 @@ fun startAddNetwork() {
                         val fromNick = st.connections[netId]?.myNick ?: st.myNick
                         // If we're in a channel/query and connected, send it as a normal message.
                         if (bufferName != "*server*" && c != null) {
-                            c.privmsg(bufferName, line)
+                            val siLabel = c.privmsg(bufferName, line)
                             val enc = e2eKeyStore.get(netId, bufferName)?.scheme
                             append(currentKey, from = fromNick, text = line, isLocal = true, encryption = enc)
                             recordLocalSend(netId, currentKey, line, isAction = false)
+                            recordSentLabel(netId, siLabel)
                         } else {
                             append(currentKey, from = fromNick, text = line, isLocal = true)
                         }
@@ -4974,7 +5751,7 @@ fun startAddNetwork() {
                         // for /me lines only - a particularly confusing partial-failure
                         // for anyone debugging "why does my chat message look encrypted
                         // but my /me line doesn't?".
-                        c.ctcp(target, "ACTION $msg")
+                        c.ctcp(target, "ACTION $msg").also { recordSentLabel(netId, it) }
                         val actionEnc = e2eKeyStore.get(netId, target)?.scheme
                         append(currentKey, from = st.connections[netId]?.myNick ?: st.myNick, text = msg, isAction = true, isLocal = true, encryption = actionEnc)
                         recordLocalSend(netId, currentKey, msg, isAction = true)
@@ -5002,10 +5779,11 @@ fun startAddNetwork() {
                         val target = if (bufferName == "*server*") return@launch else bufferName
                         // Route through ctcp() so privmsg()'s E2E hook can encrypt the ACTION
                         // body when a per-target key is set, exactly like /me above.
-                        c.ctcp(target, "ACTION $msg")
+                        val actLabel = c.ctcp(target, "ACTION $msg")
                         val actionEnc = e2eKeyStore.get(netId, target)?.scheme
                         append(currentKey, from = st.connections[netId]?.myNick ?: st.myNick, text = msg, isAction = true, isLocal = true, encryption = actionEnc)
                         recordLocalSend(netId, currentKey, msg, isAction = true)
+                        recordSentLabel(netId, actLabel)
                         return@launch
                     }
 
@@ -5230,6 +6008,15 @@ fun startAddNetwork() {
                             if (expanded.isNotBlank()) sendInputInternal("/$expanded", aliasDepth + 1)
                             return@launch
                         }
+                        // A loaded .hex script may register this as a command (every script `alias`
+                        // becomes one via registerCommand). Route it to the engine before handing off
+                        // to the server, so a script command like /tr reaches its handler. This runs
+                        // even when offline, since script commands (translate, tools, ...) don't need
+                        // an IRC connection.
+                        if (scriptEngine.hasCommand(cmd)) {
+                            scriptEngine.runCommand(cmd, cmdLine.substringAfter(' ', "").trim(), netId, bufferName)
+                            return@launch
+                        }
                         if (c == null) {
                             append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
                             return@launch
@@ -5271,6 +6058,67 @@ fun startAddNetwork() {
                 c.sendRaw(fullMessage)
                 return@launch
             }
+            // +AGE typed messages. On a keyed channel, encrypt over the group key and ship as AGE CHAT,
+            // chunking the PLAINTEXT conservatively so each encrypted line stays under the IRC limit.
+            // +AGE is on: encrypt (channel group key or 1:1 PM ratchet). If the secure session isn't
+            // established yet, fail closed - never put plaintext on the wire. Self-heal: after a restart
+            // the bridge is empty though the pref persists, so (re)start key agreement here.
+            if (ageEnabledPrefs.getBoolean(ageKey(netId, bufferName), false)) {
+                val bridge = ageBridgeFor(netId)
+                if (bridge?.isActive(bufferName) != true) {
+                    if (isChannelTarget(bufferName)) bridge?.enableChat(bufferName) else bridge?.enablePm(bufferName)
+                }
+                val myNickNow = st.connections[netId]?.myNick ?: st.myNick
+                if (isChannelTarget(bufferName) && bridge?.chatReady(bufferName) == true) {
+                    for (chunk in splitMessageByLength(fullMessage, 120)) {
+                        if (chunk.isEmpty()) continue
+                        if (bridge?.sendChat(bufferName, chunk) == true) {
+                            append(currentKey, from = myNickNow, text = chunk, isLocal = true,
+                                   encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
+                            recordLocalSend(netId, currentKey, chunk, isAction = false)
+                        } else append(currentKey, from = null, doNotify = false,
+                                   text = "*** +AGE send failed; message not sent.")
+                    }
+                } else if (!isChannelTarget(bufferName)) {
+                    // PM. sendOrHoldPm chooses: send now over the ratchet if it's up; self-key + AGE CHAT
+                    // if we've already decided the peer has no +AGE; otherwise HOLD the message. Held
+                    // messages are flushed through the ratchet the moment the handshake completes (so a
+                    // +AGE peer decrypts them properly), or self-keyed as garbled AGE CHAT if the grace
+                    // period below lapses with no AGE IDENT from the peer. We echo locally either way,
+                    // since it's our own text. Fail-closed throughout: nothing plaintext hits the wire.
+                    var anyHeldOrSent = false
+                    for (chunk in splitMessageByLength(fullMessage, 120)) {
+                        if (chunk.isEmpty()) continue
+                        when (bridge?.sendOrHoldPm(bufferName, chunk)) {
+                            com.boxlabs.hexdroid.script.cap.AgeScriptBridge.PmSend.SENT -> {
+                                anyHeldOrSent = true
+                                append(currentKey, from = myNickNow, text = chunk, isLocal = true,
+                                       encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
+                                recordLocalSend(netId, currentKey, chunk, isAction = false)
+                            }
+                            com.boxlabs.hexdroid.script.cap.AgeScriptBridge.PmSend.HELD -> {
+                                anyHeldOrSent = true
+                                // Echo now, but marked pending: it's queued behind the handshake, not yet
+                                // on the wire. onPmFlushed -> markAgePmDelivered clears it once it ships.
+                                append(currentKey, from = myNickNow, text = chunk, isLocal = true,
+                                       encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE, pending = true)
+                                recordLocalSend(netId, currentKey, chunk, isAction = false)
+                            }
+                            else -> append(currentKey, from = null, doNotify = false,
+                                       text = "*** +AGE send failed; message not sent.")
+                        }
+                    }
+                    if (anyHeldOrSent) scheduleAgePmGrace(netId, bufferName, bridge)
+                } else {
+                    // Channel that isn't keyed for us yet. With owner self-keying this only happens to a
+                    // non-owner during the brief window before the owner's invite arrives; it resolves on
+                    // its own, so keep the message short and transient rather than a hard failure.
+                    append(currentKey, from = null, doNotify = false, text =
+                        "*** +AGE for $bufferName is still keying with the other +AGE members. Your " +
+                        "message was NOT sent. Try again in a moment.")
+                }
+                return@launch
+            }
 
             // Calculate max message length for PRIVMSG
             // Format: ":nick!user@host PRIVMSG <target> :<message>\r\n"
@@ -5299,6 +6147,10 @@ fun startAddNetwork() {
                     ((baseBudget - 5) * 3 / 4) - 29 - 2          // "+AGM " + base64(1+12+P+16)
                 com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH ->
                     ((baseBudget - 5) * 3 / 4) - 15 - 2          // "+OK *" + base64(8 IV + P + ≤7 pad)
+                com.boxlabs.hexdroid.crypto.E2eScheme.AGE ->
+                    ((baseBudget - 5) * 3 / 4) - 29 - 2          // unreachable: +AGE is framed/chunked by
+                                                                 // AgeChannel, never sent via this PSK split
+                                                                 // path; conservative fallback (mirrors AGM).
                 null -> baseBudget
             }.coerceAtLeast(64)
 
@@ -5315,9 +6167,10 @@ fun startAddNetwork() {
 
             for (chunk in chunks) {
                 if (chunk.isEmpty()) continue
-                c.privmsg(bufferName, chunk)
+                val chunkLabel = c.privmsg(bufferName, chunk)
                 append(currentKey, from = myNick, text = chunk, isLocal = true, encryption = sendEncryption)
                 recordLocalSend(netId, currentKey, chunk, isAction = false)
+                recordSentLabel(netId, chunkLabel)
             }
         }
     }
@@ -5681,7 +6534,11 @@ fun startAddNetwork() {
                 //                               overridden to "Connection timed out" above).
                 //   - "connection reset"      : friendlyErrorMessage("Connection reset by server").
                 //   - "ping timeout"          : server-sent "Closing Link: ... (Ping timeout)".
-                val isPingTimeout = r != null && (
+                val isConnectAttemptFailure = r != null && (
+                    r.startsWith("Connect failed:", ignoreCase = true) ||
+                    r.startsWith("Connection failed:", ignoreCase = true)
+                )
+                val isPingTimeout = r != null && !isConnectAttemptFailure && (
                     r.contains("ping timeout", ignoreCase = true) ||
                     r.contains("ping time out", ignoreCase = true) ||
                     r.contains("connection reset", ignoreCase = true) ||
@@ -6287,6 +7144,13 @@ if (code == "442") {
                         System.currentTimeMillis() + AUTO_JOIN_SWITCH_SUPPRESS_MS
                 }
 
+                // soju bouncer-networks: proactively request the upstream network list on every
+                // registration when we actually negotiated soju.im/bouncer-networks when not bound to an upstream
+                if (profile?.bouncerKind == BouncerKind.SOJU &&
+                    rt.client.hasCap("soju.im/bouncer-networks")) {
+                    refreshBouncerNetworks(netId)
+                }
+
                 viewModelScope.launch {
                     // Service auth command (e.g. /msg NickServ IDENTIFY password)
                     //    Runs first, before autojoin, so channels with +r can be joined.
@@ -6638,6 +7502,24 @@ if (code == "442") {
                 }
             }
             is IrcEvent.ChatMessage -> {
+                // +AGE transport tap: AGE MSG/DEAL/IDENT/INVITE/REKEY lines are protocol, not chat.
+                // Hand them to the bridge (which raises age_msg/age_deal into scripts) and, if it
+                // consumed the line, suppress it from the buffer. Cheap prefix guard first.
+                val ageConv = if (isChannelTarget(ev.target)) ev.target else ev.from
+                // Self-heal after a restart: the +AGE pref persists but the bridge is recreated
+                // empty. An inbound AGE line for a target we have +AGE on, but no live session for, must (re)start key agreement.
+                if (ev.text.startsWith("AGE ") &&
+                    ageEnabledPrefs.getBoolean(ageKey(netId, ageConv), false) &&
+                    ageBridgeFor(netId)?.isActive(ageConv) != true) {
+                    if (isChannelTarget(ev.target)) ageBridgeFor(netId)?.enableChat(ageConv)
+                    else ageBridgeFor(netId)?.enablePm(ageConv)
+                }
+                if (ev.text.startsWith("AGE ")) {
+                    onAgeWireLine(netId, ageConv, ev.from, ev.text)
+                    // Never render raw +AGE protocol in the buffer, even if the bridge was momentarily
+                    // unavailable when the line arrived (it retries, so key agreement recovers).
+                    if (isAgeProtocolVerb(ev.text)) return
+                }
                 // Drop PRIVMSGs whose body is literally empty (zero bytes of trailing).
                 // Common sources: malformed CTCP wrappers that left only the SOH sentinel,
                 // a bouncer flushing a buffered control line with empty trailing, or a
@@ -6659,7 +7541,15 @@ if (code == "442") {
                 val allowNotify = if (ev.isHistory) st.settings.ircHistoryTriggersNotifications else true
                 val targetKey = resolveIncomingBufferKey(netId, ev.target)
 
-                if (!ev.isHistory && fromMe && consumeEchoIfMatch(netId, targetKey, ev.text, ev.isAction)) {
+                // Echo of our OWN message. Correlate EXACTLY by the labeled-response label when the
+                // server echoed one independent of text, timestamp, or E2E transformation.
+                // Fall back to content matching for servers that don't support labeled-response, so older-server behaviour is unchanged.
+                // The label is consumed first so a well-behaved server never even reaches the fuzzy path.
+                val echoIsOurs = !ev.isHistory && fromMe && (
+                    consumeLabelIfMatch(netId, ev.label) ||
+                    consumeEchoIfMatch(netId, targetKey, ev.text, ev.isAction)
+                )
+                if (echoIsOurs) {
                     // We deliberately drop this echo (it's a duplicate of our local echo), but the
                     // server echo is the ONLY copy that carries the message's msgid. Two things to
                     // do with it:
@@ -6700,11 +7590,29 @@ if (code == "442") {
                         } else st
                     }
                 }
-                val highlight = if (fromMe) false else isHighlight(netId, ev.text, ev.isPrivate)
+                // Script TEXT hook: lets scripts react to incoming lines (e.g. translate.hex echoes
+                // a translation underneath) and optionally transform or suppress them. Runs only for
+                // live messages, since history replays on reconnect must not re-fire it. No-op until the
+                // script engine is started and only if a TEXT handler is registered.
+                val dupByMsgId = !ev.msgId.isNullOrBlank() &&
+                    (_state.value.buffers[targetKey]?.seenMsgIds?.contains(ev.msgId) == true)
+                val shownText: String = if (!ev.isHistory && !dupByMsgId) {
+                    val r = runCatching {
+                        scriptEngine.onText(
+                            com.boxlabs.hexdroid.script.TextEvent(
+                                network = netId, buffer = ev.target, from = ev.from, text = ev.text,
+                                isAction = ev.isAction, isPrivate = ev.isPrivate, isMine = fromMe,
+                            ),
+                        )
+                    }.getOrNull()
+                    if (r?.halted == true) return
+                    r?.text ?: ev.text
+                } else ev.text
+                val highlight = if (fromMe) false else isHighlight(netId, shownText, ev.isPrivate)
                 append(
                     targetKey,
                     from = ev.from,
-                    text = ev.text,
+                    text = shownText,
                     isAction = ev.isAction,
                     isHighlight = highlight,
                     isPrivate = ev.isPrivate,
@@ -7002,11 +7910,22 @@ if (code == "442") {
                 val myNickNow = st0.connections[netId]?.myNick ?: st0.myNick
                 val isMeNow = casefoldText(netId, ev.nick) == casefoldText(netId, myNickNow)
 
+                // +AGE: tell the bridge a peer joined, so it knows they missed any IDENT we already
+                // sent on this channel and re-announces for them (and ONLY for them, so two clients
+                // that were both already present don't each answer an IDENT the other already has).
+                // Deliberately not gated on the chat +AGE pref: a scripted game channel keys itself
+                // through age.join without that pref ever being set. The bridge no-ops for channels
+                // we have never announced on, so this is cheap for every other JOIN.
+                if (!isMeNow) ageBridgeFor(netId)?.onMemberJoined(ev.channel, ev.nick)
+
                 // Track our own join times for the notice-routing recently-joined-channel
                 // fallback. Stamps the per-buffer key when WE join (not when other users
                 // join), and only for live joins (history replays don't represent a "we
                 // just walked into this channel" moment that bots would greet on).
                 if (isMeNow && !ev.isHistory) {
+                    // Resume +AGE key agreement after a (re)join: the pref persists across restarts but
+                    // the bridge is recreated empty, so re-announce our identity to the channel here.
+                    if (ageEnabledPrefs.getBoolean(ageKey(netId, ev.channel), false)) ageBridgeFor(netId)?.enableChat(ev.channel)
                     val now = System.currentTimeMillis()
                     recentJoinAtMs[chanKey] = now
                     // Cap map size: we only ever read entries within a 5 s window in the
@@ -8257,6 +9176,8 @@ if (code == "442") {
          * case for system lines, server numerics, etc.).
          */
         encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
+        /** True for a locally-echoed +AGE message still being held pending key agreement (see UiMessage.pending). */
+        pending: Boolean = false,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         // A sender on this network's highlight-ignore list never highlights or alerts; the
@@ -8274,6 +9195,7 @@ if (code == "442") {
             msgId = msgId,
             replyToMsgId = replyToMsgId,
             encryption = encryption,
+            pending = pending,
         )
 
         // Content-fingerprint dedup. `time=` is server-stamped on replayed messages so two
@@ -8812,6 +9734,9 @@ private fun removeNickFromChannel(netId: String, chanKey: String, nick: String) 
     chanNickStatus[chanKey]?.remove(fold)
     if (chanNickCase[chanKey]?.isEmpty() == true) chanNickCase.remove(chanKey)
     if (chanNickStatus[chanKey]?.isEmpty() == true) chanNickStatus.remove(chanKey)
+    // +AGE: if a member leaves a channel the user has +AGE on, let the bridge rekey (revoke them).
+    val ageChan = chanKey.removePrefix("$netId::")
+    if (ageEnabledPrefs.getBoolean(ageKey(netId, ageChan), false)) ageBridgeFor(netId)?.onMemberLeft(ageChan, nick)
 }
 
 private fun setNicklistState(netId: String, chanKey: String) {
@@ -8928,7 +9853,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 runCatching {
                     if (KeepAliveService.isRunning) {
                         appContext.startService(i)
-                    } else if (AppVisibility.isForeground) {
+                    } else if (AppVisibility.isActivityStarted) {
                         ContextCompat.startForegroundService(appContext, i)
                     } else {
                         notifier.showConnection(netIdForIntent, labelWanted, statusTxt)
@@ -8986,7 +9911,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
             runCatching {
                 if (KeepAliveService.isRunning) {
                     appContext.startService(i)
-                } else if (AppVisibility.isForeground) {
+                } else if (AppVisibility.isActivityStarted) {
                     ContextCompat.startForegroundService(appContext, i)
                 } else {
                     // Background-start of a foreground service may be blocked on Android 12+.

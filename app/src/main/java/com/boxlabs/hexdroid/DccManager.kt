@@ -22,6 +22,7 @@ package com.boxlabs.hexdroid
 
 import android.content.ContentValues
 import android.content.Context
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -202,8 +203,58 @@ class DccManager(ctx: Context) {
                 keepAlive = true,
             )
         } else {
-            Socket(host, port)
+            Socket(resolveConnectTarget(host), port)
         }
+    }
+
+    /**
+     * Resolve a connect target, attaching a scope id when [host] is a bare IPv6 link-local literal
+     * (fe80::...). DCC advertises link-local without a zone id (it is meaningful only on the sender's
+     * own host); connecting to one requires telling the kernel which interface to egress on. On the
+     * single-link networks where link-local DCC happens there is exactly one such interface, so we
+     * bind the address to it.
+     */
+    private fun resolveConnectTarget(host: String): java.net.InetAddress {
+        val addr = java.net.InetAddress.getByName(host)
+        if (addr is Inet6Address && addr.isLinkLocalAddress && addr.scopeId == 0 && addr.scopedInterface == null) {
+            linkLocalInterface()?.let { nif ->
+                return Inet6Address.getByAddress(null, addr.address, nif)
+            }
+        }
+        return addr
+    }
+
+    /**
+     * The single up, non-loopback interface carrying an IPv6 link-local address, or null.
+     *
+     * Used to attach a scope id when dialing a bare fe80:: DCC target. Tries NetworkInterface first
+     * (guarded per-interface so one throwing interface can't abort the scan) and, when that comes
+     * back empty, resolves the active network's interface NAME via ConnectivityManager/LinkProperties
+     * and re-looks-it-up with NetworkInterface.getByName.
+     */
+    private fun linkLocalInterface(): NetworkInterface? {
+        try {
+            val ifaces = NetworkInterface.getNetworkInterfaces()
+            if (ifaces != null) {
+                for (iface in Collections.list(ifaces)) {
+                    try {
+                        if (iface.isUp && !iface.isLoopback &&
+                            Collections.list(iface.inetAddresses).any { it is Inet6Address && it.isLinkLocalAddress }
+                        ) return iface
+                    } catch (_: Throwable) {
+                        // skip this interface, keep scanning the rest
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            // fall through to the ConnectivityManager name fallback
+        }
+        return try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val net = cm?.activeNetwork
+            val name = if (cm != null && net != null) cm.getLinkProperties(net)?.interfaceName else null
+            if (!name.isNullOrEmpty()) NetworkInterface.getByName(name) else null
+        } catch (_: Throwable) { null }
     }
 
     /**
@@ -245,10 +296,12 @@ class DccManager(ctx: Context) {
         }
         if (addr.isLoopbackAddress)
             throw IllegalArgumentException("DCC: refusing connection to loopback address $ip")
-        if (addr.isLinkLocalAddress)
-            throw IllegalArgumentException("DCC: refusing connection to link-local address $ip")
         if (addr.isAnyLocalAddress)
-            throw IllegalArgumentException("DCC: refusing connection to wildcard address $ip")
+            throw IllegalArgumentException(
+                "DCC: peer advertised an unusable address ($ip). Its client could not determine a " +
+                "routable local address, often an IPv6-only network with no global/ULA address. " +
+                "Ask them to retry, or use a network with a routable address."
+            )
         if (addr.isMulticastAddress)
             throw IllegalArgumentException("DCC: refusing connection to multicast address $ip")
     }
@@ -435,24 +488,58 @@ class DccManager(ctx: Context) {
         return Pair(FileOutputStream(file), file.absolutePath)
     }
 
-    // local IPv4 in dotted notation
-    fun localIpv4OrNull(): String? {
-        return try {
-            val ifaces = Collections.list(NetworkInterface.getNetworkInterfaces())
-            for (iface in ifaces) {
-                if (!iface.isUp || iface.isLoopback) continue
-                val addrs = Collections.list(iface.inetAddresses)
-                for (a in addrs) {
-                    if (a is Inet4Address && !a.isLoopbackAddress && !a.isLinkLocalAddress) {
-                        return a.hostAddress
+    /**
+     * Every unicast address on an up, non-loopback interface, as (interfaceName, address) pairs.
+     *
+     * PRIMARY source is java.net.NetworkInterface, which keeps the original enumeration order and
+     * behaviour whenever it works.iterated PER INTERFACE inside its own try/catch, so a
+     * single interface whose isUp()/inetAddresses access throws (seen on some Android Wi-Fi stacks)
+     * can no longer abort the whole enumeration and leave us with nothing.
+     *
+     * FALLBACK is ConnectivityManager/LinkProperties, a public, enumeration-independent source that
+     * still reports the active network's link-local / ULA / global addresses when the java.net view
+     * comes back empty.
+     */
+    private fun enumInterfaceAddrs(): List<Pair<String, java.net.InetAddress>> {
+        val out = ArrayList<Pair<String, java.net.InetAddress>>()
+        try {
+            val ifaces = NetworkInterface.getNetworkInterfaces()
+            if (ifaces != null) {
+                for (iface in Collections.list(ifaces)) {
+                    try {
+                        if (!iface.isUp || iface.isLoopback) continue
+                        for (a in Collections.list(iface.inetAddresses)) out.add(iface.name to a)
+                    } catch (_: Throwable) {
+                        // skip this interface, keep the rest
                     }
                 }
             }
-            null
         } catch (_: Throwable) {
-            null
+            // fall through to the ConnectivityManager fallback below
         }
+        if (out.isNotEmpty()) return out
+        try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val net = cm?.activeNetwork
+            val lp = if (cm != null && net != null) cm.getLinkProperties(net) else null
+            if (lp != null) {
+                val ifName = lp.interfaceName ?: ""
+                for (la in lp.linkAddresses) {
+                    val a = la.address ?: continue
+                    out.add(ifName to a)
+                }
+            }
+        } catch (_: Throwable) {
+            // nothing usable from either path
+        }
+        return out
     }
+
+    // local IPv4 in dotted notation
+    fun localIpv4OrNull(): String? =
+        enumInterfaceAddrs().firstOrNull { (_, a) ->
+            a is Inet4Address && !a.isLoopbackAddress && !a.isLinkLocalAddress
+        }?.second?.hostAddress
 
     // local IPv4 as an unsigned 32-bit integer (decimal string in CTCP)
     fun localIpv4AsInt(): Long {
@@ -469,26 +556,24 @@ class DccManager(ctx: Context) {
      * may be an RFC-4941 privacy/temporary address or a stable one depending on enumeration
      * order.
      */
-    fun localIpv6OrNull(): String? {
-        return try {
-            val ifaces = Collections.list(NetworkInterface.getNetworkInterfaces())
-            for (iface in ifaces) {
-                if (!iface.isUp || iface.isLoopback) continue
-                val addrs = Collections.list(iface.inetAddresses)
-                for (a in addrs) {
-                    if (a is Inet6Address &&
-                        !a.isLoopbackAddress && !a.isLinkLocalAddress &&
-                        !a.isAnyLocalAddress && !a.isMulticastAddress
-                    ) {
-                        return a.hostAddress?.substringBefore('%')
-                    }
-                }
-            }
-            null
-        } catch (_: Throwable) {
-            null
-        }
-    }
+    fun localIpv6OrNull(): String? =
+        enumInterfaceAddrs().firstOrNull { (_, a) ->
+            a is Inet6Address &&
+                !a.isLoopbackAddress && !a.isLinkLocalAddress &&
+                !a.isAnyLocalAddress && !a.isMulticastAddress
+        }?.second?.hostAddress?.substringBefore('%')
+
+    /**
+     * First IPv6 link-local address (fe80::...) in colon notation with any scope id stripped, or
+     * null. Used ONLY as a last resort for DCC on an isolated link (Wi-Fi Direct / ad-hoc LAN /
+     * a switch with no router handing out ULA or global prefixes), where link-local is the sole
+     * usable address. The scope is stripped for the wire because a zone id is meaningful only on
+     * the originating host; the connecting side re-attaches its own scope (see resolveConnectTarget).
+     */
+    fun localIpv6LinkLocalOrNull(): String? =
+        enumInterfaceAddrs().firstOrNull { (_, a) ->
+            a is Inet6Address && a.isLinkLocalAddress && !a.isMulticastAddress
+        }?.second?.hostAddress?.substringBefore('%')
 
     /**
      * The local address to advertise in a DCC offer's address field.
@@ -502,7 +587,49 @@ class DccManager(ctx: Context) {
     fun dccAddressField(): String {
         localIpv4OrNull()?.let { return ipv4ToLongBestEffort(it).toString() }
         localIpv6OrNull()?.let { return it }
+        // Isolated IPv6 link (no v4, no ULA/global v6): advertise link-local rather than "0",
+        // which a peer would otherwise parse as the 0.0.0.0 wildcard and refuse. See DLC/local DCC.
+        // localIpv6LinkLocalOrNull now consults ConnectivityManager/LinkProperties when the java.net
+        // enumeration is empty, so an isolated IPv6 LAN (the reported "error about 0.0.0.0" case)
+        // surfaces its fe80:: address here instead of falling through to "0".
+        localIpv6LinkLocalOrNull()?.let { return it }
+        // Last resort: interface enumeration returned nothing usable (observed on some IPv6-only
+        // Android Wi-Fi setups, where it left us advertising "0" and the peer then refused the
+        // resulting 0.0.0.0). Ask the OS routing table which local address it would use to reach
+        // the outside world. This does not enumerate interfaces and sends no packet (a UDP
+        // "connect" only pins the route), so it works where both enumeration paths fail.
+        routedLocalAddress()?.let { return it }
         return "0"
+    }
+
+    /**
+     * Local address the OS routing table would use to reach the internet, formatted for the DCC
+     * address field (IPv4 as a 32-bit integer, IPv6 as a colon literal), or null if none.
+     * Prefers IPv4 (understood by far more clients), then IPv6.
+     */
+    private fun routedLocalAddress(): String? {
+        routedLocalFor("8.8.8.8")?.let { return it }              // IPv4 route probe
+        routedLocalFor("2001:4860:4860::8888")?.let { return it } // IPv6 route probe
+        return null
+    }
+
+    private fun routedLocalFor(target: String): String? {
+        return try {
+            java.net.DatagramSocket().use { s ->
+                // No DNS (target is a literal) and no packet leaves the device; connect() only
+                // resolves the route so localAddress reflects the chosen source address.
+                s.connect(java.net.InetAddress.getByName(target), 9)
+                val a = s.localAddress ?: return null
+                if (a.isAnyLocalAddress || a.isLoopbackAddress || a.isMulticastAddress || a.isLinkLocalAddress) return null
+                when (a) {
+                    is Inet4Address -> ipv4ToLongBestEffort(a.hostAddress).toString()
+                    is Inet6Address -> a.hostAddress?.substringBefore('%')
+                    else -> null
+                }
+            }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     /**

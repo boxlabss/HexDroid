@@ -27,14 +27,15 @@ package com.boxlabs.hexdroid.crypto
  *
  *   +OK  <base64>     FiSH Blowfish-CBC.    Legacy. Read-only by default.
  *   +AGM <base64>     HexDroid AES-256-GCM. Modern. PSK-based. v1 of this scheme.
- *
- * Adding a future scheme (e.g. AES-GCM with X25519 ratchet -> +AGE) means appending
- * an enum value, a new prefix constant, and a new [E2eCipher] implementation. The
- * dispatcher in [E2eCodec] picks by prefix so old clients keep working.
+ *   +AGE: identity/forward-secret group scheme. Appended LAST so the AGM/BLOWFISH
+ *   ordinals (used in E2eFingerprint) never shift. Recognised here (detect/fromName,
+ *   wire prefix, lock icon) but the message path is AgeChannel/AgeWire, not the 1:1
+ *   E2eCodec cipher route, see cipherFor.
  */
 enum class E2eScheme(val wirePrefix: String, val displayName: String) {
     AGM("+AGM", "AES-256-GCM"),
-    BLOWFISH("+OK", "Blowfish (FiSH)");
+    BLOWFISH("+OK", "FiSH"),
+    AGE("+AGE", "Authenticated Group Exchange");
 
     companion object {
         /** Returns the scheme whose wire prefix matches the start of [text], or null. */
@@ -45,6 +46,7 @@ enum class E2eScheme(val wirePrefix: String, val displayName: String) {
             "BLOWFISH",
             "FISH",
             "OK"       -> BLOWFISH
+            "AGE"      -> AGE
             else       -> null
         }
     }

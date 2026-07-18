@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
+## [1.6.8] - 2026-07-14
+- **+AGE encryption** Added "+AGE" (Authenticated Group Exchange), an identity-based, forward-secret E2E scheme alongside +AGM and FiSH. Each device has a pinned identity (Ed25519 sign + X25519 DH using BouncyCastle. PMs get a Signal-style handshake (NEGOTIATING/ESTABLISHED states, forward-secret ratchet, reliability retry loop) and channels get real encrypted "tables" via a shared group key. 
+- **hex scripting** Added a sandboxed .hex scripting system (parser, backend, view renderer) that ships inside the APK. Scripts react to chat events, talk to the network, draw UI, and call HTTP/JSON. Script aliases register as slash-commands (e.g. /tr), script launchers appear in the chat UI, and mounted script views render as overlays (for game scripts in the future). Games can run over +AGE-encrypted channels via a script bridge. Manage from Settings > Scripts. See docs/hex-scripting.md.
+- **Network tabs** New Setting to show networks as a horizontal tab strip instead of the vertical tree.
+- **Conversation switcher** New Settings option to pin a network/channel switcher just above the message input.
+- **IRCv3 labeled-response** Own messages are now correlated to their server echo by exact label (echo-message + labeled-response)
+- **DCC over IPv6 link-local** now works when transfering files between local devices.
+- **Bug fix: foreground-service crash** Fixed a ForegroundServiceDidNotStartInTimeException process crash. A non-debounced isActivityStarted signal now gates startForegroundService(), so the FGS watchdog is no longer armed while the app is actually going to the background.
+- **Bug fix:** SASL on InspIRCd. PLAIN aborted with unexpected server challenge "" on servers that send the challenge as a trailing parameter. Affects EXTERNAL and SCRAM too.
+- **Bug fix:** now honour CLIENTTAGDENY instead of drawing 412 on every keystroke. Reactions too, which is user-visible: they'll silently stop on servers that deny the tag.
+
+
 ## [1.6.7] - 2026-06-14
 - **New commands** Add /clear, /alias [list | add <name> <expansion> | remove <name>] and /slap <target>
 - **Log retention** "0" keeps logs indefinitely

@@ -269,6 +269,11 @@ owner, mints `K_G` and seals an invite (section 10) to each other announced memb
 non-owners wait for that invite. Later `+AGE` joiners are re-sealed the existing `K_G` as
 they announce.
 
+This election governs **chat channels only**. A scripted game's channel is hosted by
+whichever player opens the table, and resolves a simultaneous open by fingerprint instead of
+electing up front; see section 10.1 rule 3 for why, and for the authorisation rules that
+keep the two regimes apart.
+
 **Self-key on enable.** A channel almost never contains only `+AGE` clients, so the owner
 mints `K_G` immediately on enable even with an empty roster, rather than waiting for a
 second `+AGE` member. The channel is then usable at once. Non-`+AGE` members, and any
@@ -326,6 +331,47 @@ recipient reassembles, opens, verifies the owner signature against the **pinned*
 `owner_sig_pub` (warn if not already pinned), checks `expires_at`, an unseen `id`, and that
 they appear in `members`, then stores `K_G`. Because `K_G` is fresh per session, forward
 secrecy holds between sessions; for FS within a session, rely on rekey.
+
+### 10.1 Accepting a key: authorisation
+
+Opening an invite only proves it is internally consistent (validly signed by whatever key it
+names). It does **not** prove the sender may set this channel's key. Without a separate
+authorisation step, any peer holding our public IDENT could self-sign an invite naming
+itself owner, seal it to us, and rotate us onto a key it controls. So:
+
+- **First key for a channel is trust-on-first-use.** We hold no key, so there is nothing to
+  steal; this is the same first-contact exposure as identity pinning.
+- **Re-keying a channel we already hold a key for** is refused unless one of the following
+  holds. On refusal the current key is kept and the invite is dropped silently.
+
+| # | Rule | Applies to | Rationale |
+|---|------|-----------|-----------|
+| 1 | Invite is signed by the **current key's minter** | all channels | The host rotating its own key (membership change, epoch bump). |
+| 2 | Invite is signed by the channel's **elected owner** (lowest fingerprint among announced members) | **chat channels only** | A lower-fingerprint member legitimately taking over a hostless channel (section 8). |
+| 3 | Invite is signed by a **strictly lower fingerprint** than ours, **and** the key we currently hold is one **we minted** | **game channels only** | Simultaneous-open tie-break, below. |
+
+**Why games need rule 3.** A scripted game's table is hosted by whoever opens it, not by the
+lowest fingerprint (deciding it by fingerprint means the player who taps Open stands down
+whenever they are not the lowest, while the elected owner never taps, so nobody mints and
+the table deadlocks). Hosting by action reintroduces one race: two players tapping Open at
+the same moment each mint a `K_G` and invite the other. Rule 3 resolves it with no extra
+round-trip, since both sides compute the same verdict from data they already hold: the lower
+fingerprint's key wins, the loser adopts it and stops hosting.
+
+Rule 3 is deliberately narrow, so it cannot become a key-injection primitive:
+
+- it applies only when the key we hold is one **we minted**: a key we merely adopted is
+  never rotated by this path, so an attacker cannot chain rotations;
+- it applies only to a **strictly lower** fingerprint than our own, so a higher fingerprint
+  can never rotate us, and the relation is a strict total order, so the race cannot cycle;
+- the fingerprint must already be **pinned in our roster for that channel**, matched by its
+  signing key rather than by nick, so the invite must come from an identity we pinned from
+  an `AGE IDENT` on that channel.
+
+The residual, stated plainly: on a game channel a pinned member can mint a `K_G` and invite
+us to a table we did not ask for. They learn nothing we do not then send to that table, and
+the invite is signed by a pinned identity. Chat channels keep the strict rule 2, where key
+injection would actually cost confidentiality; only games loosen.
 
 ---
 

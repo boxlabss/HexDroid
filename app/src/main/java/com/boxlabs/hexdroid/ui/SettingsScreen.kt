@@ -280,6 +280,7 @@ fun SettingsScreen(
     onRunTour: () -> Unit,
     onOpenNetworks: () -> Unit,
     onOpenIgnoreList: () -> Unit,
+    onOpenScripts: () -> Unit = {},
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
     onExportBackup: (Uri) -> Unit = {},
@@ -471,6 +472,27 @@ fun SettingsScreen(
 
             item {
                 SettingToggle(stringResource(R.string.setting_compact_mode), s.compactMode) { onUpdate { copy(compactMode = !compactMode) } }
+            }
+
+            item {
+                Column {
+                    SettingToggle(stringResource(R.string.setting_network_tabs), s.networkTabs) {
+                        onUpdate { copy(networkTabs = !networkTabs) }
+                    }
+                    Text(
+                        stringResource(R.string.setting_network_tabs_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
+                    )
+                    SettingToggle(stringResource(R.string.setting_network_tabs_bottom), s.networkTabsAtBottom) {
+                        onUpdate { copy(networkTabsAtBottom = !networkTabsAtBottom) }
+                    }
+                    Text(
+                        stringResource(R.string.setting_network_tabs_bottom_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
+                    )
+                }
             }
 
             item {
@@ -766,6 +788,21 @@ fun SettingsScreen(
                             Text(stringResource(R.string.setting_ignore_list_desc), style = MaterialTheme.typography.bodySmall)
                         }
                         OutlinedButton(onClick = onOpenIgnoreList) { Text(stringResource(R.string.manage)) }
+                    }
+                }
+            }
+
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Scripts", style = MaterialTheme.typography.titleSmall)
+                            Text("Load and manage .hex scripts (games, tools, custom commands).", style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedButton(onClick = onOpenScripts) { Text("Manage") }
                     }
                 }
             }

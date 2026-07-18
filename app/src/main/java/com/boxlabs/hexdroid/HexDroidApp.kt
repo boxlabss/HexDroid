@@ -89,6 +89,9 @@ class HexDroidApp : Application() {
                 mainHandler.removeCallbacks(goBackgroundRunnable)
                 started = (started + 1).coerceAtLeast(1)
                 AppVisibility.isForeground = true
+                // Non-debounced signal used to gate startForegroundService(). Set true the
+                // instant an activity is started so the FGS-start gate matches reality.
+                AppVisibility.isActivityStarted = true
                 // If we suppressed auto-reconnect for a swipe-away teardown but the process
                 // outlived it and the user came back, clear that suppression so connections
                 // resume normally.
@@ -109,6 +112,10 @@ class HexDroidApp : Application() {
             override fun onActivityStopped(activity: Activity) {
                 started = (started - 1).coerceAtLeast(0)
                 if (started <= 0) {
+                    // Flip the FGS-start gate to false IMMEDIATELY (no debounce). Once no
+                    // activity is started we can no longer call startForeground(), so
+                    // we must stop arming the watchdog right away.
+                    AppVisibility.isActivityStarted = false
                     // Debounce: don't flip to background immediately. OEM overlays can fire
                     // a stop/start pair within milliseconds; we only go background if nothing
                     // restarts the activity within the debounce window.

@@ -1,0 +1,193 @@
+; Auto translations for HexDroid
+;
+; auto-translate incoming foreign-language lines.
+; A foreign line gets its translation echoed beneath it as a "↳ nick (src→dst): ..." line,
+; on the SAME network and buffer the line came from, attributed to the sender.
+;
+; ENDPOINT: point %ep at any LibreTranslate server. A bare base URL is fine, the script
+; appends the "/translate" API path for you.
+;
+; The public https://libretranslate.com endpoint REQUIRES an API key; a self-hosted
+; instance usually does not. Edit via Scripts -> translate.hex -> Edit, then Reload.
+;
+; WHAT COUNTS AS "FOREIGN": by default the script only spends a server round-trip on a
+; line written in a script you DON'T read (Cyrillic, CJK, Arabic, Greek, ... for a Latin
+; reader). That is a cheap, reliable local check, so ordinary same-language chat never
+; hits the network. To also auto-translate same-script languages (eg French for an English
+; reader) set %auto_samescript 1 below, at the cost of many more requests. /tr always
+; translates on demand regardless.
+
+; Map a language code ($1) to the Unicode script it is written in (a Java \p{Is<name>}
+; script name), so we can tell locally whether a line is in a script you don't read.
+; Defaults to Latin, which is correct for English and most European languages.
+alias home_script {
+  set -l %l $lower($left($1, 2))
+  if ($has($list(ru,uk,be,bg,sr,mk,kk,ky,mn,tg), %l) == true) { return Cyrillic }
+  if ($has($list(zh,ja,yue), %l) == true) { return Han }
+  if ($has($list(ko), %l) == true) { return Hangul }
+  if ($has($list(ar,fa,ur,ps,ckb), %l) == true) { return Arabic }
+  if ($has($list(el), %l) == true) { return Greek }
+  if ($has($list(he,yi), %l) == true) { return Hebrew }
+  if ($has($list(hi,mr,ne,sa), %l) == true) { return Devanagari }
+  if ($has($list(bn,as), %l) == true) { return Bengali }
+  if ($has($list(ta), %l) == true) { return Tamil }
+  if ($has($list(th), %l) == true) { return Thai }
+  return Latin
+}
+
+; Cheap local "is this line in my own language" test for Latin/English, by looking for
+; common function words (%stopwords). Returns true on a hit. Only consulted for same-script
+; lines when %auto_samescript is on, to keep your-own-language chatter off the network.
+; Extend %stopwords for another Latin language, or leave %auto_samescript off.
+alias is_home_language {
+  set -l %w $split($lower($1-))
+  foreach %s %stopwords {
+    if ($has(%w, %s) == true) { return true }
+  }
+  return false
+}
+
+on LOAD {
+  set %lang $setting(applang)
+  if ($len(%lang) == 0) { set %lang en }
+  ; ===== EDIT THESE =================================================
+  set %ep https://translate.boxlabs.uk ; your LibreTranslate server (base URL is fine)
+  set %apikey                          ; API key (blank = none / self-hosted)
+  set %auto_samescript 0               ; 0 = only translate a DIFFERENT script from yours
+                                       ; 1 = also translate same-script langs (more requests)
+  ; =================================================================
+  set %trwarned 0                      ; so a failing endpoint warns once, not per line
+  set %maxlen 500                      ; don't ship very long lines to the endpoint
+  set %minconf 50                      ; ignore translations the detector isn't sure about (0-100)
+  set %minforeign 40                   ; % of a line's letters that must be in a script you don't
+                                       ; read before we auto-translate it (mixed lines)
+  set %recent $list()                  ; recently-seen lines, to skip bouncer/CHATHISTORY repeats
+  set %homescript $home_script(%lang)  ; the Unicode script your language is written in
+  ; function words used to spot your-own-language lines locally (English/Latin only)
+  set %stopwords $list(the,and,you,are,for,that,this,with,have,not,but,was,what,your,from,they,will,just,like,dont,cant,its,here,there,when,then,them,how,why,who,yeah,lol)
+  ; normalise %ep to the POST /translate path: drop a trailing slash, then add /translate
+  ; unless it's already there (matching the path, not the "translate" that may be in a host).
+  if ($right(%ep, 1) == /) { set %ep $left(%ep, $calc($len(%ep) - 1)) }
+  if ($right(%ep, 10) != /translate) { set %ep %ep/translate }
+}
+
+; Build the LibreTranslate request body for text $1-, honouring an optional API key. The
+; values are url-encoded, so the result is a single space-free token, which is what
+; http.post needs since it splits its arguments on spaces.
+alias tr_body {
+  if ($len(%apikey) > 0) { return q=$urlencode($1-)&source=auto&target=%lang&api_key=%apikey }
+  return q=$urlencode($1-)&source=auto&target=%lang
+}
+
+; Turn an HTTP status into a human hint ($1 = status).
+alias tr_diag {
+  if ($1 == 405) { return status 405 (Method Not Allowed) from %ep. }
+  if ($1 == 403) { return status 403: the endpoint needs an API key, set %apikey (or the key is wrong). }
+  if ($1 == 400) { return status 400: the server rejected the request (often a missing API key or unsupported language). }
+  if ($1 == 0)   { return could not reach %ep, check the URL/TLS and that the server is up. }
+  return status $1
+}
+
+; Auto-translate incoming lines that look like they're in a language you don't read.
+; The buffer, sender nick, and original text are threaded through as context
+; ($1 = buffer, $2 = nick, $3- = original) so the callback can place the result, attribute
+; it, show the language pair, skip our own language, and reject same-language garble.
+on TEXT {
+  ; --- never translate our own lines. $isme is the primary signal, but a bouncer replaying
+  ; our messages (CHATHISTORY / echo-message) can arrive without it, so also match our nick.
+  if ($isme == true) { return }
+  if ($nick == $me) { return }
+  ; --- cheap skips: blanks, URLs, over-long lines
+  if ($len($text) < 2) { return }
+  if ($left($text, 4) == http) { return }
+  if ($len($text) > %maxlen) { return }
+  ; --- skip ALL-CAPS Latin acronyms / shouting (LOL, BRB, AFK): uppercase-Latin/digits/spaces
+  ; only. This never matches lowercase Latin or non-Latin scripts, so real foreign text is kept.
+  if ($re_match($text, ^[A-Z0-9 ]+$) == true) { return }
+  ; --- skip lines that are mostly not letters (timestamps, scores, "+50 -3 (id 42)"): strip
+  ; everything that isn't a letter (\p{L} keeps Cyrillic/CJK/accented too) and require the
+  ; remaining letters to be at least half the length, so number/symbol noise never gets sent.
+  set %letters $re_replace($text, [^\p{L}], )
+  if ($calc($len(%letters) * 2) < $len($text)) { return }
+  ; --- LOCAL language gate. THIS is what stops a request on every message: decide locally
+  ; whether the line is even plausibly foreign before touching the network. Letters NOT in your
+  ; own script (%homescript) are the strong, cheap signal, so cross-script text is auto-sent and
+  ; same-script chat is not (unless you opt in below).
+  set %inhome $re_replace(%letters, [^\p{Is%homescript}], )
+  set %foreign $calc($len(%letters) - $len(%inhome))
+  set %fpct 0
+  if ($len(%letters) > 0) { set %fpct $int($calc(%foreign * 100 / $len(%letters))) }
+  if (%fpct < %minforeign) {
+    ; Essentially all in your own script. Don't auto-translate by default (that's the fix for
+    ; "calls the server every time someone talks"). Opt in with %auto_samescript to also catch
+    ; same-script languages, and even then drop lines that read as your own language.
+    if (%auto_samescript == 0) { return }
+    if ($is_home_language($text) == true) { return }
+  }
+  ; --- de-duplicate: a bouncer often delivers the same line live AND from history. Skip a line
+  ; we translated recently (keyed by network+buffer so identical text on two nets still works).
+  ; Note: '|' is the command separator, so the key uses '~' as its delimiter.
+  set %key $network~$buffer~$text
+  if ($has(%recent, %key) == true) { return }
+  push %recent %key
+  if ($len(%recent) > 24) { set %recent $slice(%recent, 1, $len(%recent)) }
+  ; source=auto makes LibreTranslate report the detected language so we can skip our own
+  http.post %ep $tr_body($text) tr_auto $buffer $nick $text
+}
+
+on SIGNAL:tr_auto {
+  if ($httpok == true) {
+    set %src $json($httpbody, detectedLanguage.language)
+    set %conf $json($httpbody, detectedLanguage.confidence)
+    set %out $json($httpbody, translatedText)
+    set %orig $3-
+    ; if the server omitted a confidence, don't let that filter everything out
+    if ($len(%conf) == 0) { set %conf 100 }
+    if ($len(%src) == 0) { set %src ? }
+    if ($len(%out) == 0) { return }
+    ; detected source must differ from our language (skip English/acronyms read as English)
+    if (%src == %lang) { return }
+    ; detector must be reasonably sure
+    if (%conf < %minconf) { return }
+    ; output must actually differ from the original (a same-language round-trip is identical)
+    if (%out == %orig) { return }
+    ; --- word-overlap guard: a real translation replaces most words, so if half or more of the
+    ; translation's words were already in the original it is almost certainly a same-language
+    ; garble (LibreTranslate mis-detecting informal English, eg "peanutbutter banana sandwich"
+    ; -> "banana banana butter sandwich"). Drop those; genuine foreign text shares ~no words.
+    set %tw $split($lower(%out))
+    set %ow $split($lower(%orig))
+    set %tn $len(%tw)
+    set %hit 0
+    set %i 0
+    while (%i < %tn) {
+      set %w $get(%tw, %i)
+      if ($has(%ow, %w) == true) { inc %hit }
+      inc %i
+    }
+    if ($calc(%hit * 2) >= %tn) { return }
+    ; passed every guard - show it, attributed to the sender with the src->dst language pair
+    echo $1 ↳ $2 (%src→%lang): %out
+  }
+  else {
+    ; surface a failure once, with a status-specific hint so the real cause is obvious
+    if (%trwarned == 0) {
+      set %trwarned 1
+      echo $1 *** translate: request failed. $tr_diag($httpstatus)
+    }
+  }
+}
+
+; manual: /tr <text>  (always translates, ignoring the auto-skips)
+alias tr {
+  if ($len($1-) == 0) { echo $chan usage: /tr <text> | return }
+  http.post %ep $tr_body($1-) tr_show $chan
+}
+on SIGNAL:tr_show {
+  if ($httpok == true) {
+    set %src $json($httpbody, detectedLanguage.language)
+    if ($len(%src) == 0) { set %src ? }
+    echo $1 ↳ (%src→%lang): $json($httpbody, translatedText)
+  }
+  else { echo $1 *** translate failed. $tr_diag($httpstatus) }
+}

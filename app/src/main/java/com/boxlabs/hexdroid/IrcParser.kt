@@ -26,6 +26,14 @@ data class IrcMessage(
     val trailing: String?
 ) {
     fun prefixNick(): String? = prefix?.substringBefore('!')?.takeIf { it.isNotBlank() }
+
+    /**
+     * Every parameter, trailing included. Per RFC 1459 2.3.1, a parameter matched by <trailing> and
+     * one matched by <middle> are the same parameter, so a server may send the last one either way.
+     *
+     * Use this, not [params], whenever the parameter you want could be the last one.
+     */
+    val allParams: List<String> get() = if (trailing != null) params + trailing else params
 }
 
 /**
@@ -75,8 +83,12 @@ class IrcParser {
             val rawTags = line.substring(1, end)
             rawTags.split(';').forEach { kv ->
                 val eq = kv.indexOf('=')
-                if (eq >= 0) tags[kv.substring(0, eq)] = unescapeTagValue(kv.substring(eq + 1))
-                else tags[kv] = null
+                val key = if (eq >= 0) kv.substring(0, eq) else kv
+                if (key.isEmpty()) return@forEach          // "@;a=b" / "@a=b;" - nothing to record
+                // "foo=" and "foo" MUST mean the same thing, and the spec allows normalising only
+                // empty -> missing, never the reverse. So null is "present, no value"; use
+                // containsKey to test presence.
+                tags[key] = if (eq >= 0) unescapeTagValue(kv.substring(eq + 1)).ifEmpty { null } else null
             }
             i = end + 1
         }

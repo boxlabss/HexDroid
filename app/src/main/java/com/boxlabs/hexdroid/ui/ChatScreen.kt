@@ -86,8 +86,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -109,7 +111,8 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.RecentActors
+import androidx.compose.material.icons.filled.IntegrationInstructions
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MarkChatRead
@@ -118,12 +121,14 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -140,6 +145,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -153,6 +159,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -168,10 +175,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -193,6 +203,8 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -210,6 +222,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.boxlabs.hexdroid.ChatFontStyle
@@ -591,10 +604,11 @@ private fun subCommandMaxSpaces(parentCmd: String): Int {
 @Composable
 private fun CommandHints(
     query: String,           // text after the leading '/' - must be non-empty
+    scriptCommands: List<IrcCommand> = emptyList(), // user-facing commands from loaded .hex scripts
     onPick: (String) -> Unit // called with "/command " ready to type args
 ) {
-    val matches = remember(query) {
-        IRC_COMMANDS.filter { it.name.startsWith(query, ignoreCase = true) }
+    val matches = remember(query, scriptCommands) {
+        (IRC_COMMANDS + scriptCommands).filter { it.name.startsWith(query, ignoreCase = true) }
     }
 
     // Track which chip the user has highlighted (defaults to first match)
@@ -873,17 +887,17 @@ private fun NickHints(
                                 MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier.clickable {
                                 highlighted = nick
-                                // "nick: " if cursor is at start of blank input, "@nick " otherwise
+                                // "nick: " if cursor is at start of blank input, "nick " otherwise
                                 val completion = if (inputText.trimStart().startsWith("@$prefix", ignoreCase = true) &&
                                                      inputText.trimStart().length <= prefix.length + 1)
                                     "$baseNickText: "
                                 else
-                                    "@$baseNickText "
+                                    "$baseNickText "
                                 onPick(completion)
                             }
                         ) {
                             Text(
-                                text = nick, // show with mode prefix (e.g. "@admin")
+                                text = nick,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isHighlighted)
@@ -906,7 +920,7 @@ private fun NickHints(
                                                      inputText.trimStart().length <= prefix.length + 1)
                                     "$baseNickText: "
                                 else
-                                    "@$baseNickText "
+                                    "$baseNickText "
                                 onPick(completion)
                             }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -1087,6 +1101,9 @@ fun ChatScreen(
     onDccChat: ((targetNick: String) -> Unit)? = null,
     onOpenList: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenScripts: () -> Unit = {},
+    scriptLaunchers: List<Pair<String, String>> = emptyList(),
+    onRunLauncher: (command: String) -> Unit = {},
     onOpenNetworks: () -> Unit,
     onOpenTransfers: () -> Unit,
     onSysInfo: () -> Unit,
@@ -1280,12 +1297,6 @@ fun ChatScreen(
             } else if (unread > 0 && messages.size >= unread) {
                 // Timestamp search found no messages newer than the read marker, but the
                 // bouncer still reports unread messages.
-                // NOTE: openBuffer() clears unread=0 before ChatScreen renders, so this
-                // branch is almost never taken once the buffer is open. It only fires in
-                // the narrow window before the buffer is selected (e.g. buffer-list preview).
-                // The reliable fix for "no unread bar after bouncer reconnect" is in the
-                // CHATHISTORY load path: once messages with timeMs > lastReadMs arrive,
-                // the timestamp branch above correctly finds them without needing this fallback.
                 messages.size - unread
             } else {
                 -1
@@ -1431,6 +1442,7 @@ fun ChatScreen(
     var topicHasOverflow by remember(selected, topic) { mutableStateOf(false) }
 
     var overflowExpanded by remember { mutableStateOf(false) }
+    var launcherExpanded by remember { mutableStateOf(false) }
 
     // Tour: on the "More actions" step, open the overflow menu so users can see what's inside.
     LaunchedEffect(tourActive, tourTarget) {
@@ -1523,17 +1535,28 @@ fun ChatScreen(
 		// null means "use the natural sort order".
 		var dragNetworkOrder by remember { mutableStateOf<List<String>?>(null) }
 
-		val sidebarItems = remember(state.networks, buffersByNet, state.channelsOnly, selected, state.collapsedNetworkIds, dragNetworkOrder) {
-			val out = mutableListOf<SidebarItem>()
+		// Network of the buffer currently open, so it's never hidden and the tab strip can
+		// follow what the user is viewing.
+		val openNetId = remember(selected) { splitKey(selected).first }
+
+		// The networks shown in the drawer, after applying the sort order, any live drag
+		// reorder, and the per-network "Show in channel switcher" flag. Shared by tree and tabs.
+		val visibleNets = remember(state.networks, openNetId, dragNetworkOrder) {
 			val naturalOrder = state.networks
 				.sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
 			val sortedNets = if (dragNetworkOrder != null) {
-				// Reorder according to live drag state - nets not in the drag list fall back to end
 				val map = naturalOrder.associateBy { it.id }
 				dragNetworkOrder!!.mapNotNull { map[it] } +
 					naturalOrder.filter { it.id !in dragNetworkOrder!! }
 			} else naturalOrder
-			for (net in sortedNets) {
+			// Show networks the user keeps in the switcher, plus whichever network holds the
+			// buffer you're currently viewing (so opening a hidden network never loses your place).
+			sortedNets.filter { it.showInSidebar || it.id == openNetId }
+		}
+
+		val sidebarItems = remember(visibleNets, buffersByNet, state.channelsOnly, selected, state.collapsedNetworkIds) {
+			val out = mutableListOf<SidebarItem>()
+			for (net in visibleNets) {
 				val nId = net.id
 				val header = net.name
 				val grouped = buffersByNet[nId]
@@ -1724,6 +1747,93 @@ fun ChatScreen(
 			// netId -> measured height (updated freely, used for swap threshold)
 			val slotHeights = remember { mutableMapOf<String, Float>() }
 
+			if (state.settings.networkTabs) {
+				// Tabs mode: a horizontal channel switcher.
+				// Avoids a long vertical tree that scrolls poorly, and pairs naturally with the
+				// hide-disconnected filter above.
+				if (visibleNets.isNotEmpty()) {
+					// The active tab follows the open buffer's network (remember re-seeds when
+					// openNetId changes); tapping another tab browses it without forcing a switch.
+					var pickedNet by remember(openNetId) { mutableStateOf(openNetId) }
+					val activeNet = if (visibleNets.any { it.id == pickedNet }) pickedNet
+						else visibleNets.first().id
+					val selIdx = visibleNets.indexOfFirst { it.id == activeNet }.coerceIn(0, visibleNets.lastIndex)
+
+					// key() on the visible-network set: same ScrollableTabRow count-change guard as the bottom
+					// bar, a shrinking tab list can leave the cached selected index one past the new list during
+					// layout and crash. A fresh identity per set discards that stale state.
+					key(visibleNets.map { it.id }) {
+					ScrollableTabRow(
+						selectedTabIndex = selIdx,
+						edgePadding = 0.dp,
+						containerColor = Color.Transparent,
+					) {
+						visibleNets.forEachIndexed { i, net ->
+							val con = state.connections[net.id]
+							val dot = when {
+								con?.connected == true  -> MaterialTheme.colorScheme.primary
+								con?.connecting == true -> Color(0xFFE0A030)
+								else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+							}
+							val grouped = buffersByNet[net.id]
+							val keys = listOfNotNull(grouped?.serverKey) + (grouped?.others ?: emptyList())
+							var unread = 0; var hi = 0
+							for (k in keys) { val b = state.buffers[k] ?: continue; unread += b.unread; hi += b.highlights }
+							Tab(
+								selected = i == selIdx,
+								onClick = { pickedNet = net.id },
+								text = {
+									Row(
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(6.dp)
+									) {
+										Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
+										Text(net.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+										if (unread > 0) {
+											Badge(
+												containerColor = if (hi > 0) MaterialTheme.colorScheme.error
+												                 else MaterialTheme.colorScheme.secondary
+											) { Text(if (unread > 99) "99+" else "$unread") }
+										}
+									}
+								},
+							)
+						}
+					}
+					}
+
+					val grouped = buffersByNet[activeNet]
+					val serverKey = grouped?.serverKey ?: "$activeNet::*server*"
+					val otherKeys = grouped?.others ?: emptyList()
+					val netName = visibleNets.first { it.id == activeNet }.name
+					val tabLag = lagInfoByNet[activeNet]
+
+					LazyColumn(
+						state = listState,
+						modifier = Modifier
+							.fillMaxSize()
+							.tourTarget(TourTarget.CHAT_BUFFER_DRAWER),
+						contentPadding = PaddingValues(vertical = 6.dp)
+					) {
+						item(key = "tabsrv:$serverKey") {
+							BufferRow(
+								key = serverKey, label = netName, selected = selected,
+								meta = state.buffers[serverKey], indent = 0.dp,
+								closable = false, onClose = {},
+								lagLabel = tabLag?.first, lagProgress = tabLag?.second,
+							)
+						}
+						items(otherKeys, key = { "tabbuf:$it" }) { k ->
+							val (_, nm) = splitKey(k)
+							BufferRow(
+								key = k, label = nm, selected = selected,
+								meta = state.buffers[k], indent = 14.dp,
+								closable = true, onClose = { onSend("/closekey $k") },
+							)
+						}
+					}
+				}
+			} else {
 			LazyColumn(
 				state = listState,
 				modifier = Modifier
@@ -1885,11 +1995,25 @@ fun ChatScreen(
 										)
 									}
 									Box(modifier = Modifier.weight(1f)) {
+										// Roll the whole network's unread + highlights up into the header while collapsed. When expanded,
+										// each child shows its own badge, so the header stays the server buffer's own count.
+										val rowMeta = if (item.isNetworkHeader && item.netId != null && !item.expanded) {
+											val serverBuf = state.buffers[item.key]
+											val childKeys = buffersByNet[item.netId]?.others ?: emptyList()
+											var uSum = serverBuf?.unread ?: 0
+											var hSum = serverBuf?.highlights ?: 0
+											for (ck in childKeys) {
+												val cb = state.buffers[ck] ?: continue
+												uSum += cb.unread
+												hSum += cb.highlights
+											}
+											(serverBuf ?: state.buffers[item.key])?.copy(unread = uSum, highlights = hSum)
+										} else state.buffers[item.key]
 										BufferRow(
 											key = item.key,
 											label = item.label,
 											selected = selected,
-											meta = state.buffers[item.key],
+											meta = rowMeta,
 											indent = item.indent,
 											closable = closable,
 											onClose = { onSend("/closekey ${item.key}") },
@@ -1973,6 +2097,7 @@ fun ChatScreen(
 						}
 					}
 				}
+			}
 			}
 		}
 	}
@@ -2287,7 +2412,7 @@ fun ChatScreen(
     }
 
     val chatTextStyle = MaterialTheme.typography.bodyMedium.copy(
-        fontFamily = fontFamilyForChoice(state.settings.chatFontChoice),
+        fontFamily = fontFamilyForChoice(state.settings.chatFontChoice, state.settings.customChatFontPath),
         fontWeight = baseWeight,
         fontStyle = baseStyle
     )
@@ -2368,7 +2493,8 @@ fun ChatScreen(
                                 .size(iconBtnSize)
                                 .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
-                    } else {
+                    } else if (!state.settings.networkTabsAtBottom) {
+                        // The bottom bar replaces the drawer in this mode, so drop the opener.
                         IconButton(
                             onClick = { scope.launch { drawerState.open() } },
                             modifier = Modifier
@@ -2385,53 +2511,34 @@ fun ChatScreen(
                         modifier = Modifier.weight(1f)
                     )
 
-                    // Colour/formatting picker button with active state indicator
+                    // Colour/formatting picker button. No background: the sweep gradient
+                    // is painted onto the FormatColorText glyph itself (SrcAtop over an
+                    // offscreen layer masks it to the icon shape). When formatting is
+                    // active, the B/I/U/A indicator is tinted with the selected foreground
+                    // colour if one is set, else the same sweep brush.
                     run {
                         val colorInteraction = remember { MutableInteractionSource() }
                         val colorPressed by colorInteraction.collectIsPressedAsState()
                         val hasActiveFormatting =
                             selectedFgColor != null || selectedBgColor != null ||
                                     boldActive || italicActive || underlineActive || reverseActive
+                        val fontSweep = remember {
+                            Brush.sweepGradient(
+                                colors = listOf(
+                                    Color(0xFFFF6B6B),
+                                    Color(0xFFFFE66D),
+                                    Color(0xFF4ECDC4),
+                                    Color(0xFF45B7D1),
+                                    Color(0xFFDDA0DD),
+                                    Color(0xFFFF6B6B)
+                                )
+                            )
+                        }
 
                         Box(
                             modifier = Modifier
                                 .size(accentBtnSize)
                                 .scale(if (colorPressed) 0.92f else 1f)
-                                .background(
-                                    brush = if (hasActiveFormatting) {
-                                        // Show the active foreground color or a gradient if formatting is active
-                                        val fgCol = selectedFgColor?.let { mircColor(it) } ?: Color(
-                                            0xFFFF6B6B
-                                        )
-                                        Brush.linearGradient(
-                                            listOf(
-                                                fgCol,
-                                                fgCol.copy(alpha = 0.7f)
-                                            )
-                                        )
-                                    } else {
-                                        Brush.sweepGradient(
-                                            colors = listOf(
-                                                Color(0xFFFF6B6B),
-                                                Color(0xFFFFE66D),
-                                                Color(0xFF4ECDC4),
-                                                Color(0xFF45B7D1),
-                                                Color(0xFFDDA0DD),
-                                                Color(0xFFFF6B6B)
-                                            )
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(10.dp)
-                                )
-                                .then(
-                                    if (hasActiveFormatting) {
-                                        Modifier.border(
-                                            2.dp,
-                                            Color.White.copy(alpha = 0.8f),
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                    } else Modifier
-                                )
                                 .clickable(
                                     interactionSource = colorInteraction,
                                     indication = ripple(bounded = false),
@@ -2440,15 +2547,15 @@ fun ChatScreen(
                                 .padding(4.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Show formatting indicators or the icon
                             if (hasActiveFormatting) {
+                                val activeFg = selectedFgColor?.let { mircColor(it) }
                                 Text(
                                     text = buildString {
                                         if (boldActive) append("B")
                                         if (italicActive) append("I")
                                         if (underlineActive) append("U")
                                     }.ifEmpty { "A" },
-                                    color = Color.White,
+                                    color = activeFg ?: MaterialTheme.colorScheme.primary,
                                     fontWeight = if (boldActive) FontWeight.Bold else FontWeight.Medium,
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontStyle = if (italicActive) FontStyle.Italic else FontStyle.Normal,
@@ -2459,14 +2566,25 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Filled.FormatColorText,
                                     contentDescription = stringResource(R.string.chat_text_formatting),
-                                    tint = Color.White.copy(alpha = if (colorPressed) 0.7f else 0.9f),
-                                    modifier = Modifier.size(accentGlyphSize)
+                                    tint = Color.Black,   // opaque base; replaced by the gradient below
+                                    modifier = Modifier
+                                        .size(accentGlyphSize)
+                                        .graphicsLayer {
+                                            compositingStrategy = CompositingStrategy.Offscreen
+                                            alpha = if (colorPressed) 0.7f else 1f
+                                        }
+                                        .drawWithContent {
+                                            drawContent()
+                                            drawRect(brush = fontSweep, blendMode = BlendMode.SrcAtop)
+                                        }
                                 )
                             }
                         }
                     }
 
-                    // Nicklist button
+                    // Nicklist button. No background: flat theme-tinted icon (dimmed to
+                    // 40% when the current buffer isn't a channel, so it still reads as
+                    // unavailable now that the coloured pill is gone).
                     run {
                         val nicklistInteraction = remember { MutableInteractionSource() }
                         val nicklistPressed by nicklistInteraction.collectIsPressedAsState()
@@ -2475,15 +2593,6 @@ fun ChatScreen(
                                 .size(accentBtnSize)
                                 .scale(if (nicklistPressed) 0.92f else 1f)
                                 .alpha(if (isChannel) 1f else 0.4f)
-                                .background(
-                                    brush = Brush.linearGradient(
-                                        colors = listOf(
-                                            Color(0xFF5B86E5),  // Blue
-                                            Color(0xFF36D1DC)   // Cyan
-                                        )
-                                    ),
-                                    shape = MaterialTheme.shapes.small
-                                )
                                 .then(
                                     if (isChannel) {
                                         Modifier.clickable(
@@ -2505,11 +2614,41 @@ fun ChatScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.People,
+                                imageVector = Icons.Filled.RecentActors,
                                 contentDescription = stringResource(R.string.chat_user_list),
-                                tint = Color.White.copy(alpha = if (nicklistPressed) 0.7f else 0.9f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .copy(alpha = if (nicklistPressed) 0.6f else 1f),
                                 modifier = Modifier.size(accentGlyphSize)
                             )
+                        }
+                    }
+
+                    if (scriptLaunchers.isNotEmpty()) {
+                        Box {
+                            IconButton(
+                                onClick = { launcherExpanded = true },
+                                modifier = Modifier.size(iconBtnSize)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.IntegrationInstructions,
+                                     contentDescription = "Launch scripts",
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                     .copy(alpha = 0.6f),
+
+                                     modifier = Modifier.size(accentGlyphSize)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = launcherExpanded,
+                                onDismissRequest = { launcherExpanded = false }
+                            ) {
+                                scriptLaunchers.forEach { (label, command) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                                     onClick = { launcherExpanded = false; onRunLauncher(command) }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -2558,6 +2697,7 @@ fun ChatScreen(
                                 MenuRow("Secure Chat") { overflowExpanded = false; showEncryptionDialog = true }
                             }
                             MenuRow(stringResource(R.string.menu_settings)) { overflowExpanded = false; onOpenSettings() }
+                            MenuRow("Scripts") { overflowExpanded = false; onOpenScripts() }
                             MenuRow(stringResource(R.string.menu_networks)) { overflowExpanded = false; onOpenNetworks() }
                             if (isIrcOper) {
                                 MenuRow(stringResource(R.string.menu_ircop_tools)) { overflowExpanded = false; showIrcOpTools = true }
@@ -2833,25 +2973,15 @@ fun ChatScreen(
                         val m = item.msg
                         val ts =
                             if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
-                        // Per-scheme padlock glyph rendered just before the timestamp so
-                        // it's the first thing the eye lands on in the row. Inline unicode
-                        // keeps the rendering path identical to a plain text message (one
-                        // AnnotatedString, one Text node) - no Row/Icon restructuring
-                        // needed for the dev preview. The full UI in a later commit will
-                        // swap this for a proper Material Icon at the left edge.
-                        //   🔒  AGM  (AES-256-GCM, current modern scheme)
-                        //   🐟  +OK  (Blowfish / FiSH, legacy compat)
-                        val tsWithLock = when (m.encryption) {
-                            com.boxlabs.hexdroid.crypto.E2eScheme.AGM      -> "🔒 $ts"
-                            com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH -> "🐟 $ts"
-                            null                                           -> ts
-                        }
+                        // The per-scheme encryption badge is now rendered inside
+                        // SingleMessageItem as a Material icon (InlineTextContent) from
+                        // m.encryption, so nothing scheme-specific is baked into `ts` here.
                         val isFindMatch = findOverlay != null &&
                             (findOverlay.bufferKey == selected || findOverlay.bufferKey.startsWith("GLOBAL:")) &&
                             findOverlay.matchIds.contains(m.id)
                         SingleMessageItem(
                             m = m,
-                            ts = tsWithLock,
+                            ts = ts,
                             isFlickering = flickerMsgId == m.id,
                             flickerAlphaValue = flickerAlpha.value,
                             isFindMatch = isFindMatch,
@@ -3157,6 +3287,91 @@ fun ChatScreen(
             .navigationBarsPadding()
             .imePadding()
         ) {
+            // Conversation switcher pinned just above the input bar (Settings > Network tabs > Tabs at
+            // bottom). It lists EVERY network and all of its buffers in one scrollable row: each
+            // network's server tab (network name + connection dot) followed by that network's channels
+            // and PMs. It replaces the drawer, which is disabled while this mode is on.
+            if (state.settings.networkTabsAtBottom) {
+                // Same network ordering/visibility the drawer uses (favourites first, then sort order,
+                // then name; only networks kept in the switcher, plus whichever one you're viewing),
+                // recomputed here from state because visibleNets is scoped to the drawer.
+                val barOpenNet = splitKey(selected).first
+                val barNets = state.networks
+                    .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+                    .filter { it.showInSidebar || it.id == barOpenNet }
+                val allTabKeys = barNets.flatMap { net ->
+                    val g = buffersByNet[net.id]
+                    listOf(g?.serverKey ?: "${net.id}::*server*") + (g?.others ?: emptyList())
+                }
+                if (allTabKeys.isNotEmpty()) {
+                    val barSelIdx = allTabKeys.indexOf(selected).coerceIn(0, allTabKeys.lastIndex)
+                    // key() on the tab set. ScrollableTabRow caches its subcomposition and reads
+                    // tabPositions[selectedTabIndex] during layout; when the set shrinks (a network
+                    // disconnects, a buffer closes) that cached index can momentarily point one past the
+                    // new, shorter list and throw IndexOutOfBounds. A fresh identity per set discards the
+                    // stale layout state and sidesteps the crash.
+                    key(allTabKeys) {
+                    ScrollableTabRow(
+                        selectedTabIndex = barSelIdx,
+                        edgePadding = 0.dp,
+                        containerColor = Color.Transparent,
+                    ) {
+                        allTabKeys.forEachIndexed { i, key ->
+                            val (keyNet, keyName) = splitKey(key)
+                            val isServerTab = keyName == "*server*"
+                            // server tab shows the network name; channel/PM tabs show the buffer name
+                            // (channels already carry their #/& sigil, so PMs read as bare nicks).
+                            val label = if (isServerTab) netName(keyNet) else keyName
+                            val con = state.connections[keyNet]
+                            val dot = when {
+                                con?.connected == true  -> MaterialTheme.colorScheme.primary
+                                con?.connecting == true -> Color(0xFFE0A030)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            }
+                            val b = state.buffers[key]
+                            val unread = b?.unread ?: 0
+                            val hi = b?.highlights ?: 0
+                            Tab(
+                                selected = i == barSelIdx,
+                                onClick = { onSelectBuffer(key) },
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        // The connection dot rides each network's server tab; the
+                                        // conversation tabs under it are named alone.
+                                        if (isServerTab) {
+                                            Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
+                                        }
+                                        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (unread > 0) {
+                                            Badge(
+                                                containerColor = if (hi > 0) MaterialTheme.colorScheme.error
+                                                                 else MaterialTheme.colorScheme.secondary
+                                            ) { Text(if (unread > 99) "99+" else "$unread") }
+                                        }
+                                        // Close button on conversation tabs.
+                                        if (!isServerTab) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Close $label",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    .copy(alpha = 0.6f),
+                                                modifier = Modifier
+                                                    .size(16.dp)
+                                                    .clip(CircleShape)
+                                                    .clickable { onSend("/closekey $key") }
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    }
+                }
+            }
             // Priority: nick hints > subcommand hints > command hints. Nick hints
             // win on channels (user is mid-@mention). Subcommand hints win when
             // we're past the parent-command space. Command hints are the baseline.
@@ -3188,8 +3403,18 @@ fun ChatScreen(
             }
             // Command hints popup - rendered above the input row inside a Column
             else if (cmdQuery != null) {
+                // User-facing commands from loaded .hex scripts (e.g. /tr). Every script alias becomes
+                // a command, so drop internal helpers (which contain '_') and anything that duplicates
+                // a built-in. This surfaces script commands in the chips without the helper noise.
+                val scriptCmdHints = remember(viewModel) {
+                    (viewModel?.scriptEngine?.commandNames() ?: emptyList())
+                        .filter { '_' !in it && IRC_COMMANDS.none { c -> c.name.equals(it, ignoreCase = true) } }
+                        .sorted()
+                        .map { IrcCommand(it, "/$it", "Script command") }
+                }
                 CommandHints(
                     query = cmdQuery,
+                    scriptCommands = scriptCmdHints,
                     onPick = { completion ->
                         input = TextFieldValue(completion, TextRange(completion.length))
                     }
@@ -3440,7 +3665,7 @@ fun ChatScreen(
 									isError = false,
 									interactionSource = interactionSource,
 									colors = tfColors,
-									shape = RoundedCornerShape(10.dp)
+									shape = RoundedCornerShape(4.dp)
 								)
 							}
 						)
@@ -3463,7 +3688,7 @@ fun ChatScreen(
                                         Color(0xFFFF5E3A)   // Red-orange
                                     )
                                 ),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(4.dp)
                             )
                             .clickable(
                                 interactionSource = opsInteraction,
@@ -3498,7 +3723,7 @@ fun ChatScreen(
 										Color(0xFF36D1DC)   // Cyan
                                     )
                                 ),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(4.dp)
                             )
                             .clickable(
                                 interactionSource = sendInteraction,
@@ -3760,6 +3985,9 @@ fun ChatScreen(
     if (!isWide) {
         ModalNavigationDrawer(
             drawerState = drawerState,
+            // The bottom bar lists every network and buffer, so the drawer is redundant then: block the
+            // swipe-to-open gesture (the drawer button is hidden to match).
+            gesturesEnabled = !state.settings.networkTabsAtBottom,
             drawerContent = {
                 // Match the landscape pane exactly: surface colour at 1 dp tonal elevation.
                 // Without this the portrait drawer uses a different tonal surface token,
@@ -3837,8 +4065,6 @@ fun ChatScreen(
                 }
             }
             HorizontalDivider()
-            // Scrollable body — imePadding inside here would cause the bounce.
-            // Instead it sits on the Column wrapping the whole sheet content.
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -5285,7 +5511,53 @@ private fun SingleMessageItem(
     val swipeOffsetX = remember { Animatable(0f) }
     val canSwipeReply = fromNick != null && !m.isMotd
 
-    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+    // Encryption badge: a Material icon rendered inline at the very start of the message
+    // line (replacing the old unicode padlock/fish/shield glyphs). Kept as an
+    // InlineTextContent placeholder so the line stays a single Text node - selection,
+    // copy and link-tap offsets are unaffected.
+    //   AGM  -> filled Lock   (AES-256-GCM, modern PSK)      primary tint
+    //   AGE  -> filled Shield (double-ratchet, forward secret) primary tint
+    //   +OK  -> outlined Lock (Blowfish/FiSH, legacy compat)  amber tint (reads as "weaker")
+    // Tints are intentionally simple; tweak here if you want per-scheme colour semantics.
+    val encScheme = m.encryption
+    val encAlt = when (encScheme) {
+        com.boxlabs.hexdroid.crypto.E2eScheme.AGM      -> "\uD83D\uDD12"  // 🔒 fallback / copy text
+        com.boxlabs.hexdroid.crypto.E2eScheme.AGE      -> "\uD83D\uDEE1" // 🛡
+        com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH -> "\uD83D\uDD13" // 🔓 (legacy)
+        null                                           -> ""
+    }
+    val encInline: Map<String, InlineTextContent> = encScheme?.let { scheme ->
+        mapOf(
+            ENC_INLINE_ID to InlineTextContent(
+                Placeholder(
+                    width = 1.3.em,
+                    height = 1.0.em,
+                    placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+                )
+            ) {
+                val (icon, tint) = when (scheme) {
+                    com.boxlabs.hexdroid.crypto.E2eScheme.AGM      ->
+                        Icons.Filled.Lock to MaterialTheme.colorScheme.primary
+                    com.boxlabs.hexdroid.crypto.E2eScheme.AGE      ->
+                        Icons.Filled.Shield to MaterialTheme.colorScheme.primary
+                    com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH ->
+                        Icons.Outlined.Lock to Color(0xFFE0A030)
+                }
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.fillMaxHeight().aspectRatio(1f),
+                )
+            }
+        )
+    } ?: emptyMap()
+
+    androidx.compose.foundation.layout.Column(
+        // Held +AGE echoes are dimmed until the bridge flushes them to the wire (m.pending), so an
+        // optimistic echo reads clearly as "not yet delivered" rather than as a sent message.
+        modifier = Modifier.fillMaxWidth().alpha(if (m.pending) 0.5f else 1f)
+    ) {
         if (m.replyToMsgId != null) {
             val replyDisplayIdx = msgStrToDisplayIdx[m.replyToMsgId] ?: -1
             ReplyQuote(
@@ -5416,8 +5688,9 @@ private fun SingleMessageItem(
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
                 val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme) {
                     buildAnnotatedString {
+                        if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         append(ts); append("* ")
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
@@ -5427,13 +5700,14 @@ private fun SingleMessageItem(
                         appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
-                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle)
+                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = encInline)
             } else {
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
                 val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme) {
                     buildAnnotatedString {
+                        if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         append(ts); append("<")
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
@@ -5443,7 +5717,7 @@ private fun SingleMessageItem(
                         appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
-                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle)
+                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = encInline)
             }
         } // end Box
 
@@ -5464,6 +5738,7 @@ private fun SingleMessageItem(
 private const val ANN_URL = "URL"
 private const val ANN_CHAN = "CHAN"
 private const val ANN_NICK = "NICK"
+private const val ENC_INLINE_ID = "encbadge"
 
 private val urlRegex = Regex("https?://\\S+")
 private val chanRegex = Regex("#\\S+")
@@ -5878,6 +6153,7 @@ private fun AnnotatedClickableText(
     style: androidx.compose.ui.text.TextStyle = LocalTextStyle.current,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
+    inlineContent: Map<String, InlineTextContent> = emptyMap(),
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
     var layout: TextLayoutResult? by remember { mutableStateOf(null) }
@@ -5890,6 +6166,7 @@ private fun AnnotatedClickableText(
         style = style,
         maxLines = maxLines,
         overflow = overflow,
+        inlineContent = inlineContent,
         onTextLayout = {
             layout = it
             onTextLayout?.invoke(it)
@@ -5976,13 +6253,13 @@ private fun looksLikeProse(plain: String): Boolean {
             letters++
         } else {
             if (run >= 2) words++
-            run = 0
+                run = 0
         }
         if (!ch.isWhitespace()) nonSpace++
     }
     if (run >= 2) words++
-    val letterRatio = if (nonSpace > 0) letters.toFloat() / nonSpace else 0f
-    return words >= 3 && letterRatio >= 0.55f
+        val letterRatio = if (nonSpace > 0) letters.toFloat() / nonSpace else 0f
+        return words >= 3 && letterRatio >= 0.55f
 }
 
 /**
@@ -6020,7 +6297,7 @@ private fun looksLikeArt(text: String): Boolean {
             else -> i++
         }
     }
-    if (mircCount >= 4 && !looksLikeProse(plain)) return true
+    if (mircCount >= 4) return true
 
     // Signal 1: ≥2 leading spaces AND the content looks like a structural/art line.
     //

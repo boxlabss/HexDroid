@@ -225,6 +225,8 @@ class SettingsRepository(private val ctx: Context) {
                     ThemeMode.valueOf(o.optString("themeMode", ThemeMode.DARK.name))
                 }.getOrDefault(ThemeMode.DARK),
                 compactMode = o.optBoolean("compactMode", false),
+                networkTabs = o.optBoolean("networkTabs", false),
+                networkTabsAtBottom = o.optBoolean("networkTabsAtBottom", false),
 
                 showTimestamps = o.optBoolean("showTimestamps", true),
                 timestampFormat = o.optString("timestampFormat", "HH:mm:ss"),
@@ -328,6 +330,8 @@ class SettingsRepository(private val ctx: Context) {
         val o = JSONObject()
         o.put("themeMode", s.themeMode.name)
         o.put("compactMode", s.compactMode)
+        o.put("networkTabs", s.networkTabs)
+        o.put("networkTabsAtBottom", s.networkTabsAtBottom)
 
         o.put("showTimestamps", s.showTimestamps)
         o.put("timestampFormat", s.timestampFormat)
@@ -504,6 +508,7 @@ class SettingsRepository(private val ctx: Context) {
                     encoding = o.optString("encoding", "auto"),
                     sortOrder = o.optInt("sortOrder", 0),
                     isFavourite = o.optBoolean("isFavourite", false),
+                    showInSidebar = o.optBoolean("showInSidebar", true),
                     isBouncer = o.optBoolean("isBouncer", false),
                     // Migration: profiles written before BouncerKind existed used
                     // bouncerNetworkName with the soju-style `user/network` syntax.
@@ -624,6 +629,7 @@ class SettingsRepository(private val ctx: Context) {
             o.put("encoding", n.encoding)
             o.put("sortOrder", n.sortOrder)
             o.put("isFavourite", n.isFavourite)
+            o.put("showInSidebar", n.showInSidebar)
             o.put("isBouncer", n.isBouncer)
             // Always emit bouncerKind so the migration on next read doesn't second-guess us.
             o.put("bouncerKind", n.bouncerKind.name)
@@ -684,7 +690,8 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = emptyList()
+            autoJoin = emptyList(),
+            showInSidebar = false
         ),
         NetworkProfile(
             id = "Rizon",
@@ -703,7 +710,8 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = emptyList()
+            autoJoin = emptyList(),
+            showInSidebar = false
         ),
         NetworkProfile(
             id = "Undernet",
@@ -722,7 +730,8 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = emptyList()
+            autoJoin = emptyList(),
+            showInSidebar = false
         ),
         NetworkProfile(
             id = "EFnet",
@@ -741,7 +750,8 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = emptyList()
+            autoJoin = emptyList(),
+            showInSidebar = false
         ),
         NetworkProfile(
             id = "QuakeNet",
@@ -760,7 +770,8 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = emptyList()
+            autoJoin = emptyList(),
+            showInSidebar = false
         ),
         NetworkProfile(
             id = "DALnet",
@@ -779,7 +790,8 @@ class SettingsRepository(private val ctx: Context) {
             saslAuthcid = null,
             saslPassword = null,
             caps = CapPrefs(),
-            autoJoin = emptyList()
+            autoJoin = emptyList(),
+            showInSidebar = false
         )
     )
 
@@ -1061,6 +1073,14 @@ data class NetworkProfile(
 
     /** If true, this network is pinned to the top of the sorted list (above non-favourites). */
     val isFavourite: Boolean = false,
+
+    /**
+     * If true, this network appears in the buffer drawer / channel switcher. Default true so
+     * app updates never silently hide a user's existing or edited networks. The shipped preset
+     * networks are seeded false (except AfterNET) so they don't clog the switcher out of the box;
+     * the network you're actively viewing is always shown regardless of this flag.
+     */
+    val showInSidebar: Boolean = true,
 
     /**
      * If true, this connection goes through a bouncer (ZNC, soju, etc).

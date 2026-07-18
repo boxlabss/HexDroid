@@ -75,7 +75,7 @@ HexDroid can encrypt message **content** end-to-end.
 - `+AGM`: Supported clients have scripts in [aes-client-plugins](https://github.com/boxlabss/HexDroid/tree/main/aes-client-plugins).
 - `+OK`: `fishlim` plugins exist for most IRC clients.
 
-The full `+AGM` wire-format specification are published [here](https://github.com/boxlabss/HexDroid/blob/main/aes-client-plugins/docs/agm-wire-format.md) in this repository so any client author can add `+AGM` support.
+The full `+AGM` wire-format specification are published [here](https://github.com/boxlabss/HexDroid/blob/main/docs/agm-wire-format.md) in this repository so any client author can add `+AGM` support.
 
 ### IRCv3
 

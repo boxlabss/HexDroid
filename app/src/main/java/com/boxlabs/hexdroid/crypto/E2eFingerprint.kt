@@ -31,33 +31,18 @@ import java.security.MessageDigest
  * displayed safety number unchanged must find a key whose digest matches a fixed
  * 40-bit target, which costs ~2^40 SHA-256 evaluations AND each candidate must
  * also be a usable AES key.
+ *
+ * Rendering goes through the shared [Crockford32] encoder so the +AGM/+OK safety
+ * numbers and the +AGE identity safety numbers use one alphabet and one code path.
  */
 object E2eFingerprint {
-
-    private val BASE32_ALPHABET = charArrayOf(
-        'A','B','C','D','E','F','G','H','J','K','L','M','N','P','Q','R',
-        'S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','8','9'
-    ) // Crockford-style: no 0/1/I/O to avoid visual ambiguity over voice.
 
     fun compute(scheme: E2eScheme, key: ByteArray): String {
         val sha = MessageDigest.getInstance("SHA-256")
         sha.update(byteArrayOf(scheme.ordinal.toByte()))
         sha.update(key)
-        val digest = sha.digest()
-
-        // Take 40 bits (5 bytes) and base32-encode into 8 chars (5 bits each).
-        val bits = ((digest[0].toLong() and 0xff) shl 32) or
-                   ((digest[1].toLong() and 0xff) shl 24) or
-                   ((digest[2].toLong() and 0xff) shl 16) or
-                   ((digest[3].toLong() and 0xff) shl 8)  or
-                    (digest[4].toLong() and 0xff)
-
-        val out = StringBuilder(9)
-        for (i in 7 downTo 0) {
-            val sym = ((bits shr (i * 5)) and 0x1f).toInt()
-            out.append(BASE32_ALPHABET[sym])
-            if (i == 4) out.append('-') // K4XR-T9BS
-        }
-        return out.toString()
+        // First 40 bits -> 8 base32 chars, grouped 4-4: identical output to the
+        // previous inline encoder (verified byte-for-byte over random inputs).
+        return Crockford32.encode(sha.digest(), chars = 8, group = 4)
     }
 }
