@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
+##
+
+- Improve art detection with an option to disable it completely.
+- Improve auto reconnection and selecting of text in input box.
+- Fix bug where tapping a highlight would sometimes not scroll to the message.
+
 ## [1.6.8] - 2026-07-14
 - **+AGE encryption** Added "+AGE" (Authenticated Group Exchange), an identity-based, forward-secret E2E scheme alongside +AGM and FiSH. Each device has a pinned identity (Ed25519 sign + X25519 DH using BouncyCastle. PMs get a Signal-style handshake (NEGOTIATING/ESTABLISHED states, forward-secret ratchet, reliability retry loop) and channels get real encrypted "tables" via a shared group key. 
 - **hex scripting** Added a sandboxed .hex scripting system (parser, backend, view renderer) that ships inside the APK. Scripts react to chat events, talk to the network, draw UI, and call HTTP/JSON. Script aliases register as slash-commands (e.g. /tr), script launchers appear in the chat UI, and mounted script views render as overlays (for game scripts in the future). Games can run over +AGE-encrypted channels via a script bridge. Manage from Settings > Scripts. See docs/hex-scripting.md.

@@ -1,56 +1,40 @@
-HexDroid is a clean, fast, open-source IRC client for modern Android. Connect to your favourite networks, chat with friends and communities, and never miss a mention — all from a Material Design interface built for mobile.
+HexDroid is a clean, fast, open-source IRC client for modern Android. Connect to your favourite networks, chat with friends and communities, and never miss a mention—all from a Material Design interface built for mobile.
 
 <b>Connect anywhere</b>
-• Multiple networks at once, each with independent settings
-• Auto-connect and auto-join on startup, with optional post-connect commands
-• Bouncer support: ZNC and soju
-• Always Connected mode keeps your session alive in the background
+- Always Connected for persistent sessions and automatic reconnection
+- Multiple network profiles with independent settings
+- Auto-connect, auto-join and optional post-connect commands
+- ZNC and soju bouncer support
 
 <b>Security</b>
-• TLS on every connection by default
-• SASL: PLAIN, EXTERNAL (client certificates), and SCRAM-SHA-256
-• Trust-On-First-Use pinning for self-signed certificates
-• Credentials encrypted with the Android Keystore, never plain text.
-• Secure Chat end-to-end encryption (AES-256-GCM, with Blowfish/FiSH fallback)
-• Tor and SOCKS proxy support
-
-<b>Modern IRC (IRCv3)</b>
-• Swipe to reply, with inline quote previews
-• Typing indicators, chat-history replay, reactions, read markers, account tags and more
+- TLS by default with Trust On First Use (TOFU) pinning for self-signed certificates
+- SASL authentication: PLAIN, EXTERNAL (client certificates) and SCRAM-SHA-256
+- Credentials encrypted with the Android Keystore
+- Secure Chat with AES-256-GCM end-to-end encryption, Authenticated Group Exchange, FiSH for backwards compatibility.
+- Tor and SOCKS proxy support
 
 <b>Chat experience</b>
-• Instant mention alerts — reply straight from the notification
-• /command and @nick autocomplete
-• Colour-coded nicks, consistent across messages and the sidebar
-• Inline image/video previews, mIRC + ANSI colour, formatting toolbar
-• In-buffer search, jump-to-unread, channel op and IRCop tools
-• Ignore list with nick and hostmask support
-• Mute notifications from users
+- Mention notifications with quick reply, swipe-to-reply and inline quote previews
+- IRCv3 features including typing indicators, chat history, reactions, read markers and account tags
+- /command and @nick autocomplete, colour-coded nicknames, mIRC/ANSI formatting and inline media previews
+- Search, jump to unread, operator tools, ignore lists and notification muting
 
 <b>DCC file transfers</b>
-• Send and receive files, plus DCC Chat
-• Passive/reverse DCC and Secure DCC (SSEND/SCHAT) over TLS with RESUME support
-• Progress tracking on a dedicated Transfers screen
-• Off by default — enable it in settings when you need it
+- Send and receive files, DCC Chat, passive/reverse DCC, Secure DCC (SSEND/SCHAT), RESUME and IPv6 support
 
 <b>Customisation</b>
-• Translations
-• Per-network character encoding (auto-detect, UTF-8, windows-1251, and more)
-• Custom nick colours, drag-and-drop network ordering
-• Settings backup and restore to JSON
-• Optional on-device chat logging to internal storage or a folder you choose
+- Multiple languages and .hex scripting
+- Per-network character encoding
+- Custom nick colours and drag-and-drop network ordering
+- Backup and restore settings as JSON
+- Optional on-device chat logging
 
 <b>Privacy</b>
-No ads, no analytics, no tracking. Your messages and credentials are sent only to the IRC servers you connect to.
+No ads, no analytics and no tracking. Your messages and credentials are sent only to the IRC servers you choose.
 
-<b>Permissions</b>
-• Internet / network state: connect to IRC servers
-• Notifications: alert you to mentions
-• Foreground service and wake lock: optional, only used by Always Connected
+IRCv3 features depend on server support. Background connectivity may vary depending on your device's battery settings.
 
-IRCv3 features depend on server support. Background connectivity may vary with device and battery settings.
-
-Free and open source, licensed under GPLv3.
+Free and open source software, licensed under GPLv3.
 
 Support: irc.afternet.org #HexDroid
-Privacy policy: hexdroid.boxlabs.uk/privacy
+Privacy policy: https://hexdroid.boxlabs.uk/privacy

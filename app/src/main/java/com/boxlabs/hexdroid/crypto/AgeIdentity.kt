@@ -180,6 +180,13 @@ class AgeStore(
 
     fun lookupByFingerprint(fpHex: String): AgePublicIdentity? = pins[fpHex]?.identity
 
+    /** The pinned fingerprint whose signing key is [sigPub], or null if none is pinned. Lets an
+     *  invite adopter turn the payload's hostSigPub back into the host's fingerprint (the invite
+     *  proves the signing key but a fingerprint hashes BOTH keys, so it cannot be derived from
+     *  the payload alone). */
+    fun fingerprintForSigPub(sigPub: ByteArray): String? =
+        pins.entries.firstOrNull { p.constantTimeEquals(it.value.identity.sigPub, sigPub) }?.key
+
     /** Returns null if NO pin or if MULTIPLE keys claim this nick (a conflict — caller must
      *  resolve by fingerprint, never guess which key is real). */
     fun lookupByNick(nick: String): AgePublicIdentity? {

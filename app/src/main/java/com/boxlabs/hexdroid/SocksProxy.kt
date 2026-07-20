@@ -139,9 +139,14 @@ object SocksProxy {
             // to default routing if the network vanished between selection and now.
             pinnedNetwork?.let { net -> runCatching { net.bindSocket(socket) } }
             // Connect to the PROXY (not the destination). The proxy address is a literal
-            // host:port the user configured, so a local resolve here is fine and expected;
-            // it's usually 127.0.0.1 for Tor anyway.
-            socket.connect(InetSocketAddress(cfg.host, cfg.port), connectTimeoutMs)
+            // host:port the user configured; usually 127.0.0.1 for Tor, where resolution is
+            // an instant literal parse. When it IS a hostname, resolve it with the same
+            // wall-clock bound as the direct path: InetSocketAddress(String, port) resolves
+            // eagerly and unbounded in its constructor, BEFORE the connect timeout applies,
+            // so a hung resolver (router mid restart) would wedge the attempt here exactly
+            // like the direct-path bug. Resolved on the pinned network to match the bind.
+            val proxyAddr = com.boxlabs.hexdroid.resolveAllWithTimeout(cfg.host, pinnedNetwork, connectTimeoutMs).first()
+            socket.connect(InetSocketAddress(proxyAddr, cfg.port), connectTimeoutMs)
             // Bound the handshake so a silent/wrong-protocol proxy can't stall us. Restored
             // to soTimeoutMs once the tunnel is established.
             socket.soTimeout = connectTimeoutMs

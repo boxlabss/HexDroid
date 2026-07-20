@@ -993,6 +993,38 @@ internal fun parseZncListNetworksLine(line: String): IrcEvent.BouncerNetwork? {
     )
 }
 
+/**
+ * Resolve [host] to all of its addresses with a hard wall-clock bound.
+ *
+ * InetAddress.getAllByName/Network.getAllByName have NO timeout of their own.
+ *
+ * Resolution runs on a daemon thread; on timeout the thread is abandoned (getaddrinfo is not
+ * interruptible) and exits whenever the native call eventually returns. The
+ * UnknownHostException raised here flows through the normal "Connect failed:" path, so
+ * backoff and auto-reconnect treat a hung resolver exactly like NXDOMAIN and keep retrying
+ * until DNS answers again. IP literals never touch DNS and return immediately.
+ */
+internal fun resolveAllWithTimeout(
+    host: String,
+    network: android.net.Network?,
+    timeoutMs: Int,
+): Array<InetAddress> {
+    val task = java.util.concurrent.FutureTask<Array<InetAddress>> {
+        network?.getAllByName(host) ?: InetAddress.getAllByName(host)
+    }
+    Thread(task, "irc-dns-resolve").apply { isDaemon = true; start() }
+    return try {
+        task.get(timeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+    } catch (te: java.util.concurrent.TimeoutException) {
+        task.cancel(true)
+        throw java.net.UnknownHostException(
+            "DNS resolution timed out after ${timeoutMs / 1000}s (resolver unresponsive) for $host"
+        )
+    } catch (ee: java.util.concurrent.ExecutionException) {
+        throw ee.cause ?: ee
+    }
+}
+
 class IrcClient(val config: IrcConfig) {
     private val parser = IrcParser()
     private val outbound = Channel<String>(capacity = 300)
@@ -4876,7 +4908,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// connection use the same interface (avoids resolving on Wi-Fi but connecting on
 			// mobile under split-horizon DNS/captive portals).
 			val resolved: Array<InetAddress> = try {
-				config.pinnedNetwork?.getAllByName(config.host) ?: InetAddress.getAllByName(config.host)
+				resolveAllWithTimeout(config.host, config.pinnedNetwork, config.connectTimeoutMs)
 			} catch (uhe: java.net.UnknownHostException) {
 				throw java.net.UnknownHostException("Unable to resolve ${config.host}: ${uhe.message ?: "no DNS record"}")
 			}
@@ -5239,6 +5271,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			raw.contains("Connection timed out", ignoreCase = true) ||
 			raw.contains("connect timed out", ignoreCase = true) ->
 				"Connection timed out"
+			raw.contains("resolution timed out", ignoreCase = true) ->
+				"DNS resolution timed out - resolver not responding"
 			raw.contains("UnknownHost", ignoreCase = true) ||
 			raw.contains("No address associated", ignoreCase = true) ->
 				"Could not resolve hostname"

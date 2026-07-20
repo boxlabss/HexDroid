@@ -299,6 +299,11 @@ data class UiSettings(
     val introTourSeenVersion: Int = 0,
     val mircColorsEnabled: Boolean = true,
     val ansiColorsEnabled: Boolean = true,
+    /**
+     * Detect consecutive ASCII/ANSI art lines and render them as a shrunk-to-fit
+     * block. Off means every message renders as normal chat text.
+     */
+    val artDetectionEnabled: Boolean = true,
 
     val welcomeCompleted: Boolean = false,
     val appLanguage: String? = null,
@@ -868,6 +873,11 @@ class IrcViewModel(
             pausedAt + ConnectionConstants.FLAP_WINDOW_MS * 2 > now
         }
         flapPaused.addAll(active.keys)
+        // Arm a resume timer for each surviving pause so it ends on schedule in this
+        // process too, instead of only expiring on the next restart's hydration.
+        for ((netId, pausedAt) in active) {
+            scheduleFlapResume(netId, (pausedAt + ConnectionConstants.FLAP_WINDOW_MS) - now)
+        }
         // Persist the cleaned-up map back so expired entries don't accumulate.
         if (active.size != stored.size) {
             val newMap = stored.filterKeys { it in flapPaused }
@@ -875,8 +885,45 @@ class IrcViewModel(
         }
     }
 
+    /**
+     * Per-network jobs that end a flap pause after a cooldown. Previously a flap pause
+     * lasted until the user tapped Reconnect: within a running process nothing ever
+     * cleared [flapPaused] by time (the 2x-window expiry in [ensureFlapPausedLoaded]
+     * only applies across restarts), so a shaky half hour on mobile could silently
+     * halt auto-reconnect for the rest of the day. The one-off warning line in the
+     * server buffer was easy to miss, and the app then just "failed to reconnect".
+     * Now the pause is a cooldown: after FLAP_WINDOW_MS the network resumes
+     * auto-reconnect on its own (with the backoff counter intact, so resumption
+     * stays polite to the server).
+     */
+    private val flapResumeJobs: MutableMap<String, kotlinx.coroutines.Job> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    private fun scheduleFlapResume(netId: String, delayMs: Long) {
+        flapResumeJobs.remove(netId)?.cancel()
+        flapResumeJobs[netId] = viewModelScope.launch {
+            delay(delayMs.coerceAtLeast(1000L))
+            flapResumeJobs.remove(netId)
+            if (!flapPaused.contains(netId)) return@launch
+            clearFlapPaused(netId)
+            pingTimeoutTimestamps.remove(netId)
+            val conn = _state.value.connections[netId]
+            if (desiredConnected.contains(netId) &&
+                conn?.connected != true && conn?.connecting != true
+            ) {
+                append(
+                    bufKey(netId, "*server*"), from = null,
+                    text = "*** Stability cooldown over. Resuming auto-reconnect…",
+                    doNotify = false
+                )
+                if (_state.value.settings.autoReconnectEnabled) scheduleAutoReconnect(netId)
+            }
+        }
+    }
+
     private fun markFlapPaused(netId: String) {
         flapPaused.add(netId)
+        scheduleFlapResume(netId, ConnectionConstants.FLAP_WINDOW_MS)
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val current = repo.readFlapPaused().toMutableMap()
@@ -887,6 +934,7 @@ class IrcViewModel(
     }
 
     private fun clearFlapPaused(netId: String) {
+        flapResumeJobs.remove(netId)?.cancel()
         flapPaused.remove(netId)
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
@@ -1814,6 +1862,10 @@ class IrcViewModel(
     }
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    /** Last-seen NET_CAPABILITY_VALIDATED per live Network handle, so onCapabilitiesChanged can
+     *  act on the not-validated -> validated EDGE only (the callback also fires for signal
+     *  strength and bandwidth churn). Entries are dropped in onLost. */
+    private val validatedNetworks = java.util.concurrent.ConcurrentHashMap<android.net.Network, Boolean>()
 
     private fun registerNetworkCallback() {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
@@ -1821,28 +1873,11 @@ class IrcViewModel(
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: android.net.Network) {
                 // Network became available - check if any desired connections need reconnecting
-                viewModelScope.launch {
-                    delay(1000) // Brief delay to let the network stabilize
-                    val st = _state.value
-                    // Snapshot before iterating: connectNetwork() inside the loop body adds
-                    // to desiredConnected (and the auth-fail path may also remove from it
-                    // via downstream disconnect handlers), so iterating the live set risks
-                    // ConcurrentModificationException on any background ramp-up.
-                    val snapshot = desiredConnected.toList()
-                    for (netId in snapshot) {
-                        val conn = st.connections[netId]
-                        if (conn?.connected != true && conn?.connecting != true) {
-                            val serverKey = bufKey(netId, "*server*")
-                            if (noNetworkNotice.remove(netId)) {
-                                append(serverKey, from = null, text = "*** Network available. Reconnecting…", doNotify = false)
-                            }
-                            connectNetwork(netId, force = true)
-                        }
-                    }
-                }
+                reconnectDesiredDisconnected()
             }
 
             override fun onLost(network: android.net.Network) {
+                validatedNetworks.remove(network)
                 // Network lost - check if we still have connectivity via another network.
                 viewModelScope.launch {
                     delay(500) // Brief window to let a failover interface take over.
@@ -1891,7 +1926,17 @@ class IrcViewModel(
             }
 
             override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
-                // IrcCore's ping cycle handles stale sockets; nothing to do here.
+                // A router restart with the phone still associated to the AP never fires
+                // onLost/onAvailable: the Network object survives and only its VALIDATED
+                // capability toggles as Android's connectivity probes fail and later pass.
+                // Reconnect promptly on the not-validated -> validated edge, otherwise
+                // recovery after the router is back is left entirely to exponential backoff
+                // (up to RECONNECT_MAX_DELAY_SEC of dead air). Signal-strength and bandwidth
+                // updates land here constantly, so only the edge acts; IrcCore's ping cycle
+                // still handles stale sockets on its own.
+                val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                val was = validatedNetworks.put(network, validated)
+                if (validated && was == false) reconnectDesiredDisconnected()
             }
         }
         networkCallback = cb
@@ -1909,6 +1954,47 @@ class IrcViewModel(
             viewModelScope.launch {
                 for (netId in _state.value.networks.map { it.id }) {
                     append(bufKey(netId, "*server*"), from = null, text = msg, doNotify = false)
+                }
+            }
+        }
+    }
+
+    /**
+     * Shared recovery pass for the two "connectivity is back" signals: onAvailable (a new
+     * network appeared, e.g. Wi-Fi<->cellular handoff) and the onCapabilitiesChanged
+     * not-validated -> validated edge (same network regained internet, e.g. a router restart
+     * the phone rode out while still associated). Skips networks that are connected or
+     * mid-attempt, clears any deep-backoff countdown and the attempt counter (the failure
+     * history belongs to a connectivity state that no longer applies), and force-connects
+     * everything the user wants up.
+     */
+    private fun reconnectDesiredDisconnected() {
+        viewModelScope.launch {
+            delay(1000) // Brief delay to let the network stabilize
+            val st = _state.value
+            // Snapshot before iterating: connectNetwork() inside the loop body adds
+            // to desiredConnected (and the auth-fail path may also remove from it
+            // via downstream disconnect handlers), so iterating the live set risks
+            // ConcurrentModificationException on any background ramp-up.
+            val snapshot = desiredConnected.toList()
+            for (netId in snapshot) {
+                val conn = st.connections[netId]
+                if (conn?.connected != true && conn?.connecting != true) {
+                    val serverKey = bufKey(netId, "*server*")
+                    if (noNetworkNotice.remove(netId)) {
+                        append(serverKey, from = null, text = "*** Network available. Reconnecting…", doNotify = false)
+                    }
+                    // A network change invalidates the failure history: the old
+                    // attempts failed on an interface that no longer applies.
+                    // Cancel any countdown that may be sitting deep in exponential
+                    // backoff (previously it kept running with its inflated delay,
+                    // so if this immediate connect failed, the user was thrown
+                    // straight back to a multi-minute wait) and reset the counter,
+                    // matching what dropConnectionForNetworkLoss already does on
+                    // the way down.
+                    autoReconnectJobs.remove(netId)?.cancel()
+                    reconnectAttempts.remove(netId)
+                    connectNetwork(netId, force = true)
                 }
             }
         }
@@ -4768,6 +4854,17 @@ fun startAddNetwork() {
             // CancellationException is re-thrown so explicit cancel() still works as
             // structured-concurrency expects.
             try {
+                // Tracks which attempt number has already had its backoff countdown run.
+                // The loop body has several `continue` paths (connect still in flight,
+                // manual disconnect in progress) that previously re-entered the countdown
+                // for the SAME attempt, so each pass re-waited the full exponential delay.
+                // With a 40 s delay and a 20 s in-flight connect, the effective wait
+                // between real attempts roughly doubled, and the buffer filled with
+                // duplicate "Reconnecting in Ns" lines. Worse, at attempt 0 those
+                // `continue` paths skipped the countdown entirely and busy-spun with no
+                // delay at all. The latch runs the countdown once per attempt; the
+                // continue paths now use a short 1 s poll instead.
+                var countdownDoneForAttempt = -1
                 while (isActive) {
                 val attempt = reconnectAttempts[netId] ?: 0
                 // Without this guard we'd print "Reconnecting in Ns
@@ -4781,7 +4878,8 @@ fun startAddNetwork() {
                     ConnectionConstants.RECONNECT_BASE_DELAY_MIN_SEC,
                     ConnectionConstants.RECONNECT_BASE_DELAY_MAX_SEC
                 )
-                if (attempt > 0) {
+                if (attempt > 0 && attempt != countdownDoneForAttempt) {
+                    countdownDoneForAttempt = attempt
                     val exp = attempt.coerceAtMost(ConnectionConstants.RECONNECT_MAX_EXPONENT)
                     val planned = (baseDelaySec.toLong() * (1L shl exp)).coerceAtMost(ConnectionConstants.RECONNECT_MAX_DELAY_SEC)
                     val jitter = (planned * ConnectionConstants.RECONNECT_JITTER_FACTOR).toLong()
@@ -4840,7 +4938,9 @@ fun startAddNetwork() {
                 // Stop if the user no longer wants this network connected.
                 if (!desiredConnected.contains(netId)) break
                 // If the user explicitly disconnected/reconnected, don't fight them.
-                if (manualDisconnecting.contains(netId)) continue
+                // Short poll: the countdown latch above means continuing here no longer
+                // re-runs the backoff delay, so without this delay the loop would spin.
+                if (manualDisconnecting.contains(netId)) { delay(1000L); continue }
 
                 val st = _state.value
                 // If the profile no longer exists, stop retrying.
@@ -4855,8 +4955,11 @@ fun startAddNetwork() {
                     reconnectAttempts.remove(netId)
                     break
                 }
-                if (cur?.connecting == true) continue
-
+                // A connect attempt is in flight: wait for it to resolve rather than
+                // starting another. Short poll for the same reason as above; previously
+                // this was a bare `continue`, which busy-spun at attempt 0 and re-ran
+                // the full countdown at attempt > 0.
+                if (cur?.connecting == true) { delay(1000L); continue }
 
                 // If there's no connectivity at all (Wi‑Fi + Mobile disabled), pause auto-reconnect until it returns.
                 if (!hasInternetConnection()) {
@@ -6560,10 +6663,10 @@ fun startAddNetwork() {
                         append(serverKey, from = null, text =
                             "*** ⚠ Connection is unstable - ${q.size} ping timeouts in the last " +
                             "${ConnectionConstants.FLAP_WINDOW_MS / 60000} minutes. " +
-                            "Auto-reconnect paused to avoid flooding the server. " +
-                            "Tap 'Reconnect' to try again when your network is stable.",
+                            "Auto-reconnect paused for ${ConnectionConstants.FLAP_WINDOW_MS / 60000} minutes " +
+                            "to avoid flooding the server. Tap 'Reconnect' to retry sooner.",
                             doNotify = false)
-                        setNetConn(netId) { it.copy(status = "Unstable - reconnect manually") }
+                        setNetConn(netId) { it.copy(status = "Unstable - paused ${ConnectionConstants.FLAP_WINDOW_MS / 60000} min") }
                     }
                 }
 
@@ -6572,7 +6675,7 @@ fun startAddNetwork() {
 
                 // Don't auto-reconnect if flap detection has paused this network.
                 if (flapPaused.contains(netId)) {
-                    setNetConn(netId) { it.copy(status = "Unstable - reconnect manually") }
+                    setNetConn(netId) { it.copy(status = "Unstable - reconnect paused") }
                     return
                 }
 
@@ -10966,6 +11069,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         networkCallback?.let { cb -> runCatching { cm?.unregisterNetworkCallback(cb) } }
         networkCallback = null
+        validatedNetworks.clear()
         // Flush and close all open log file handles so the last few lines written via the
         // BufferedWriter cache are not lost when the ViewModel is destroyed.
         logs.closeAll()

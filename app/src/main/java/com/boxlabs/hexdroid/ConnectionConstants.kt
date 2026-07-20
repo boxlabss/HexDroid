@@ -57,8 +57,13 @@ object ConnectionConstants {
     /** Maximum base delay for auto-reconnect (seconds). */
     const val RECONNECT_BASE_DELAY_MAX_SEC = 600
 
-    /** Maximum delay after exponential backoff (seconds). */
-    const val RECONNECT_MAX_DELAY_SEC = 600L
+    /**
+     * Maximum delay after exponential backoff (seconds). Was 600 (10 minutes), which
+     * users experienced as "the app stopped reconnecting". 180 s keeps retries polite
+     * to the server while ensuring a recovered server is rejoined within 3 minutes
+     * worst case.
+     */
+    const val RECONNECT_MAX_DELAY_SEC = 180L
 
     /** Maximum exponent for backoff (2^6 = 64x multiplier). */
     const val RECONNECT_MAX_EXPONENT = 6

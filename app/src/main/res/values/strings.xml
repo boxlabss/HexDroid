@@ -62,6 +62,7 @@
     <string name="setting_own_nick_colour_reset">Reset</string>
     <string name="setting_mirc_colours">Enable mIRC colours</string>
     <string name="setting_ansi_colours">Enable ANSI colours</string>
+    <string name="setting_art_detection">Shrink ASCII/ANSI art</string>
     <string name="setting_show_topic_bar">Show topic bar</string>
     <string name="setting_show_timestamps">Show timestamps</string>
     <string name="setting_timestamp_format">Timestamp format (Java)</string>

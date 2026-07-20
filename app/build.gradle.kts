@@ -8,9 +8,9 @@ android {
     defaultConfig {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 24
-        versionName = "1.6.8"
+        targetSdk = 37
+        versionCode = 25
+        versionName = "1.6.9"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

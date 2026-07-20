@@ -648,6 +648,9 @@ fun SettingsScreen(
             item {
                 SettingToggle(stringResource(R.string.setting_ansi_colours), s.ansiColorsEnabled) { onUpdate { copy(ansiColorsEnabled = !ansiColorsEnabled) } }
             }
+            item {
+                SettingToggle(stringResource(R.string.setting_art_detection), s.artDetectionEnabled) { onUpdate { copy(artDetectionEnabled = !artDetectionEnabled) } }
+            }
             item { SettingToggle(stringResource(R.string.setting_color_channel_events), s.colorChannelEvents) { onUpdate { copy(colorChannelEvents = !colorChannelEvents) } } }
             item { SettingToggle(stringResource(R.string.setting_show_topic_bar), s.showTopicBar) { onUpdate { copy(showTopicBar = !showTopicBar) } } }
             item { SettingToggle(stringResource(R.string.setting_show_timestamps), s.showTimestamps) { onUpdate { copy(showTimestamps = !showTimestamps) } } }

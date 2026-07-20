@@ -123,8 +123,10 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
         }
 
         is ScriptView.Ring -> {
-            // Children are laid out on an ellipse: rx from `size`, ry = rx * (ratio/100).
-            // Default 1.0 = a true circle. This used to be hardcoded to 0.62, which is why the
+            // Children are laid out on an ellipse: rx from `size`, ry = rx * ratio. `ratio` is a
+            // unitless multiplier (like `weight`), NOT a percentage: 1.0 (the default) is a true
+            // circle, 0.62 reproduces the old flattened ellipse. This used to be hardcoded to
+            // 0.62, which is why the
             // poker seats collided: at 5+ players the left and right pods sat ~ry apart
             // vertically while each pod was taller than that, so they stacked on each other.
             val ratio = (v.props.ratio ?: 1f).coerceIn(0.1f, 4f).toDouble()

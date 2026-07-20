@@ -2260,19 +2260,23 @@ fun ChatScreen(
     /** IRCv3 msgid String → (from, text) for O(1) reply-quote label rendering. */
     var msgIdToTextHoisted by remember { mutableStateOf(emptyMap<String, Pair<String?, String>>()) }
 
-    // Resolve an anchor string to the displayItems index (or -1).
+    // Resolve an anchor string to (displayItems index, exact) where exact=true means the
+    // index came from the hoisted display map and is safe to flicker/consume against.
     // When msgIdToDisplayIdxHoisted is already populated (buffer was already visible),
     // we use it for an exact display-index lookup. When it is still empty (first frame
     // before BoxWithConstraints has fired its sync), we fall back to the reversedMessages
-    // index — without art blocks these are identical, and even with art blocks a near-
+    // index - without art blocks these are identical, and even with art blocks a near-
     // correct scroll is better than returning -1 and triggering the isAtBottom race.
-    fun resolveAnchor(anchor: String): Int {
-        fun msgToDisplayIdx(msg: UiMessage?): Int {
-            if (msg == null) return -1
+    // The fallback is reported as exact=false so the caller keeps the anchor alive and
+    // finishes with an exact scroll once the map lands, instead of consuming a near-miss.
+    fun resolveAnchor(anchor: String): Pair<Int, Boolean> {
+        fun msgToDisplayIdx(msg: UiMessage?): Pair<Int, Boolean> {
+            if (msg == null) return -1 to false
             val mapIdx = msgIdToDisplayIdxHoisted[msg.id]
-            if (mapIdx != null) return mapIdx
-            // Map not yet populated — fall back to reversedMessages index.
-            return reversedMessages.indexOf(msg)
+            if (mapIdx != null) return mapIdx to true
+            // Map not yet populated (or this message postdates its last sync) -
+            // fall back to the reversedMessages index.
+            return reversedMessages.indexOf(msg) to false
         }
 
         if (anchor.startsWith("msgid:")) {
@@ -2282,22 +2286,25 @@ fun ChatScreen(
         if (anchor.startsWith("ts:")) {
             val rest = anchor.removePrefix("ts:")
             val parts = rest.split("|", limit = 3)
-            val anchorSec = parts.getOrNull(0)?.toLongOrNull() ?: return -1
+            val anchorSec = parts.getOrNull(0)?.toLongOrNull() ?: return -1 to false
             val anchorNick = parts.getOrNull(1)?.lowercase()
             val anchorText = parts.getOrNull(2)?.lowercase().orEmpty()
             val msg = reversedMessages.firstOrNull { m ->
                 val deltaSec = kotlin.math.abs(m.timeMs / 1000 - anchorSec)
+                // The anchor stored stripIrcFormatting(text); UiMessage.text is RAW (codes intact,
+                // stripping happens at render time), so strip here too or any colour/format code in
+                // the first 80 chars makes startsWith fail and the tap silently times out.
                 deltaSec <= 3 &&
                     m.from?.lowercase() == anchorNick &&
-                    m.text.take(80).lowercase().startsWith(anchorText.take(80))
+                    stripIrcFormatting(m.text).take(80).lowercase().startsWith(anchorText.take(80))
             }
             return msgToDisplayIdx(msg)
         }
         if (anchor.startsWith("uiid:")) {
-            val id = anchor.removePrefix("uiid:").toLongOrNull() ?: return -1
+            val id = anchor.removePrefix("uiid:").toLongOrNull() ?: return -1 to false
             return msgToDisplayIdx(reversedMessages.firstOrNull { it.id == id })
         }
-        return -1
+        return -1 to false
     }
 
     // Clear pending anchor only when the user manually navigates to a DIFFERENT buffer
@@ -2322,22 +2329,36 @@ fun ChatScreen(
         }
     }
 
-    // Drive scroll + flicker. Re-runs when anchor changes or message list grows
-    // (so we retry once scrollback finishes loading from disk).
-    // We do NOT key on msgIdToDisplayIdxHoisted: resolveAnchor falls back to the
-    // reversedMessages index when the map is empty, so the effect always resolves
-    // on its first fire rather than returning -1 and leaving the isAtBottom effect
-    // free to race in and consume the anchor.
-    LaunchedEffect(state.pendingHighlightAnchor, reversedMessages.size) {
+    // Drive scroll + flicker. Re-runs when anchor changes, the message list grows
+    // (so we retry once scrollback finishes loading from disk), or the display map
+    // arrives. Two-phase behaviour: while msgIdToDisplayIdxHoisted is empty (cold
+    // notification tap, first frame of the buffer) resolveAnchor can only offer the
+    // reversedMessages index, which drifts from the LazyColumn index whenever art
+    // blocks collapse multiple messages into one item. In that phase we scroll to the
+    // approximate index for responsiveness but keep the anchor ALIVE; keying on the
+    // map makes the effect re-run when BoxWithConstraints syncs it, and only that
+    // exact pass flickers and consumes. Consuming on the approximate pass was the
+    // "tapped a highlight but it landed on the wrong message" bug: the near-miss got
+    // cemented and the exact map had nothing left to correct.
+    LaunchedEffect(state.pendingHighlightAnchor, reversedMessages.size, msgIdToDisplayIdxHoisted) {
         val anchor = state.pendingHighlightAnchor ?: return@LaunchedEffect
-        val displayIdx = resolveAnchor(anchor)
+        val (displayIdx, exact) = resolveAnchor(anchor)
+        val age = System.currentTimeMillis() - state.pendingHighlightSetAtMs
         if (displayIdx < 0) {
-            val age = System.currentTimeMillis() - state.pendingHighlightSetAtMs
             if (age > 8_000L) onHighlightConsumed()
             return@LaunchedEffect
         }
         if (displayIdx == 0 && isAtBottom) {
             onHighlightConsumed()
+            return@LaunchedEffect
+        }
+        if (!exact && age <= 8_000L) {
+            // Approximate phase: get the user near the target now, finish when the
+            // map lands. If the map never arrives (shouldn't happen, but the 8s
+            // guard mirrors the unresolvable-anchor timeout), the next pass falls
+            // through and completes with the approximate index rather than leaving
+            // the anchor to interfere with future taps.
+            listState.animateScrollToItem(displayIdx)
             return@LaunchedEffect
         }
         listState.animateScrollToItem(displayIdx)
@@ -2803,6 +2824,7 @@ fun ChatScreen(
                     reversedMessages = reversedMessages,
                     availableWidthPx = motdAvailableWidthPx,
                     style = motdStyle,
+                    artDetectionEnabled = state.settings.artDetectionEnabled,
                 )
                 // Final guard: drop any item whose key duplicates an earlier one. This
                 // should already be impossible (UiMessage ids are AtomicLong-generated and
@@ -3639,7 +3661,10 @@ fun ChatScreen(
 					keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
 					keyboardActions = KeyboardActions(onSend = { sendNow() }),
 					singleLine = false,
-					maxLines = 2,
+					// Grow with content up to 6 visible lines before scrolling internally.
+					// The old cap of 2 forced any longer draft into a two-line window,
+					// which made cursor placement and line changes needlessly fiddly.
+					maxLines = 6,
 					minLines = 1,
 					interactionSource = interactionSource,
 					decorationBox = { innerTextField ->
@@ -3987,7 +4012,13 @@ fun ChatScreen(
             drawerState = drawerState,
             // The bottom bar lists every network and buffer, so the drawer is redundant then: block the
             // swipe-to-open gesture (the drawer button is hidden to match).
-            gesturesEnabled = !state.settings.networkTabsAtBottom,
+            // Also block the open-swipe while the message input has focus: the drawer's
+            // drag zone covers the whole screen, so a rightward drag inside the input
+            // (moving the cursor, extending a selection) was opening the buffer list
+            // instead. Gestures stay enabled while the drawer is OPEN so it can always
+            // be swiped closed regardless of focus.
+            gesturesEnabled = !state.settings.networkTabsAtBottom &&
+                (drawerState.isOpen || !inputHasFocus),
             drawerContent = {
                 // Match the landscape pane exactly: surface colour at 1 dp tonal elevation.
                 // Without this the portrait drawer uses a different tonal surface token,
@@ -6297,7 +6328,15 @@ private fun looksLikeArt(text: String): Boolean {
             else -> i++
         }
     }
-    if (mircCount >= 4) return true
+
+    // Prose gate: colour-heavy but word-shaped lines (relay bots painting the network
+    // tag and nick, lively coloured chat) must never be classified as art. Only the
+    // unambiguous signals - ANSI SGR above and the Unicode box-drawing first char
+    // below - bypass this; every heuristic that can plausibly match real sentences
+    // is gated on the line NOT reading as prose.
+    val isProse = looksLikeProse(plain)
+
+    if (!isProse && mircCount >= 4) return true
 
     // Signal 1: ≥2 leading spaces AND the content looks like a structural/art line.
     //
@@ -6319,7 +6358,7 @@ private fun looksLikeArt(text: String): Boolean {
                 if (first.code in 0x2500..0x2BFF) return true
                 // ASCII structural: both ends non-alphanumeric → symmetrically framed line
                 val lastCh = trimmed.trimEnd().lastOrNull()
-                if (lastCh != null && !lastCh.isLetterOrDigit()) return true
+                if (!isProse && lastCh != null && !lastCh.isLetterOrDigit()) return true
             }
         }
     }
@@ -6339,14 +6378,16 @@ private fun looksLikeArt(text: String): Boolean {
     }
     val nonSpace = artCount + alphaCount
     val density = if (nonSpace > 0) artCount.toFloat() / nonSpace else 0f
-    if (nonSpace >= 4  && density >= 0.80f) return true   // short dense:  "_____", "|_ _|"
-    if (nonSpace >= 8  && density >= 0.45f) return true   // medium mixed: "H _|\/|_ H"
-    if (nonSpace >= 16 && density >= 0.30f) return true   // long:         original threshold
+    if (!isProse) {
+        if (nonSpace >= 4  && density >= 0.80f) return true   // short dense:  "_____", "|_ _|"
+        if (nonSpace >= 8  && density >= 0.45f) return true   // medium mixed: "H _|\/|_ H"
+        if (nonSpace >= 16 && density >= 0.30f) return true   // long:         original threshold
+    }
 
     // Signal 3: single-space indent + border character patterns.
     // Expanded border set to include common art characters (*#@~^<>{}) beyond the
     // original "|/\_-=+[]".
-    if (plain.length >= 4 && plain[0] == ' ' && plain[1] != ' ') {
+    if (!isProse && plain.length >= 4 && plain[0] == ' ' && plain[1] != ' ') {
         val c1 = plain[1]; val c2 = plain[2]
         val border = "|/\\_-=+[]{}~^<>*#@"
         // 3a: border char followed immediately by space or another border char.
@@ -6425,6 +6466,7 @@ private fun rememberDisplayItems(
     availableWidthPx: Float,
     style: androidx.compose.ui.text.TextStyle,
     minFontSp: Float = 6f,
+    artDetectionEnabled: Boolean = true,
 ): List<DisplayItem> {
     val textMeasurer = rememberTextMeasurer()
     val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
@@ -6448,8 +6490,14 @@ private fun rememberDisplayItems(
     // content changes. Phase 1 is pure string ops (~microseconds at the 5000
     // scrollback cap) and Phase 2's expensive TextMeasurer calls are cached
     // separately below, so the perf cost is negligible.
-    val rawItems: List<RawItem> = remember(reversedMessages) {
+    val rawItems: List<RawItem> = remember(reversedMessages, artDetectionEnabled) {
         if (reversedMessages.isEmpty()) return@remember emptyList()
+        // Detection disabled: every message renders as a normal chat line. Mapping
+        // straight to Singles keeps the DisplayItem pipeline (keys, unread separator
+        // indexing, reply-quote scroll) identical to the enabled path.
+        if (!artDetectionEnabled) {
+            return@remember reversedMessages.map { RawItem.Single(it) }
+        }
         val result  = mutableListOf<RawItem>()
         val artRun  = mutableListOf<UiMessage>()  // accumulated in reversed (newest-first) order
 

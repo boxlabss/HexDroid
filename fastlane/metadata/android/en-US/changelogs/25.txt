@@ -1,0 +1,4 @@
+Add Android 17 support
+Improve art detection and selecting of text in input box.
+Auto reconnection bug fix with backoff
+Fix reply fallback in PMs

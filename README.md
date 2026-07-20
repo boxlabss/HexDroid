@@ -18,7 +18,7 @@
 
 ---
 
-HexDroid is a free and open source IRC client for Android. It provides a clean, modern interface while supporting the features users expect from a desktop client — including IRCv3 capabilities, SASL authentication, TLS encryption, bouncer support, DCC file transfers, end-to-end encrypted chat, TOR, and an array of commands.
+HexDroid is a free and open source IRC client for Android. It provides a clean, modern interface while supporting the features users expect from a desktop client — including IRCv3 capabilities, SASL authentication, TLS encryption, bouncer support, DCC file transfers, end-to-end encrypted chat, TOR, scripting support and an array of commands.
 
 > **Requirements:** Android 8.0 (API 26) or higher &nbsp;·&nbsp; **License:** GPLv3
 
@@ -35,11 +35,12 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 ---
 ## Features
  
-- Multiple networks at once, each with its own nick, SASL, TLS, autojoin, and encoding
+- Multiple network profiles, each with its own nick, SASL, TLS, autojoin, and encoding settings
 - Tor and SOCKS proxy support
-- IRCv3 (40+ caps incl. chathistory, MONITOR, typing, replies)
+- Comprehensive IRCv3 support
 - Bouncer support (ZNC, soju) with profile discovery
-- End-to-end encrypted chat per channel/PM: AES-256-GCM (`+AGM`) and Blowfish/FiSH (`+OK`)
+- End-to-end encrypted chat per channel/PM: automatic `+AGE`, AES-256-GCM (`+AGM`), and Blowfish/FiSH (`+OK`)
+- Scripting engine: sandboxed `.hex` scripts add commands, react to events, draw native UI, and call HTTP APIs
 - TOFU certificate pinning, SASL (PLAIN / SCRAM-SHA-256 / EXTERNAL), client certificates
 - DCC SEND/CHAT, including TLS-encrypted SSEND/SCHAT. RESUME support for file transfers and IPv6 support
 - `irc://` / `ircs://` link handling, image/video previews, mIRC + ANSI colour and ASCII art rendering
@@ -51,31 +52,39 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 ### Secure Chat (End-to-End Encryption)
 
 HexDroid can encrypt message **content** end-to-end.
-**Two schemes**, selectable per target in the encryption dialog:
+**Three schemes**, selectable per target in the encryption dialog:
 
 | Scheme | Wire prefix | Indicator | Use it for |
 |---|---|---|---|
-| **AES-256-GCM** | `+AGM` | 🔒 | The modern default. Authenticated encryption, fresh random nonce per message, channel-bound against cross-channel replay. **Recommended for new conversations.** |
+| **AES-256-GCM** | `+AGM` | 🔒 | The modern default for pre-shared keys. Authenticated encryption, fresh random nonce per message, channel-bound against cross-channel replay. **Recommended for new conversations.** |
+| **Authenticated Group Exchange** | `AGE` | 🛡 | Signal-style PMs and sender keys for channels. Automatic authentication between users. |
 | **Blowfish (FiSH)** | `+OK` | 🐟 | interoperability with other clients that support FiSH. Reads both ECB and CBC FiSH formats, sends CBC. |
 
-**How it works**
+**How `+AGM` and `+OK` work**
 
 - Keys are **pre-shared** you generate a key on one device and share it with your contact out of band (the in-app **Share** sheet, in person, over another secure messenger). There is no automatic key exchange, so you control exactly who can read the conversation.
 - Each key has a short **safety number** (e.g. `K4XR-T9BS`) shown on every device that holds it. Compare it with your contact over a trusted channel to confirm you have the same key and no one tampered with it in transit.
 - Encrypted messages show a padlock indicator; a lock badge appears in the input while you're encrypting. Anyone without the key sees only `+AGM <ciphertext>` (or `+OK ...`).
-- `/me` actions are encrypted too, with the CTCP framing left intact so non-encrypting clients still render them correctly.
 
 **Key storage & portability**
 
-- Keys are stored on-device in `EncryptedSharedPreferences`, wrapped by the Android Keystore — the same protection used for SASL credentials.
-- Keys are **excluded from backups** by design, so they never leave the device in a portable form. After a reinstall or device move you re-share keys with your contacts.
+- Keys are stored on-device in `EncryptedSharedPreferences`, wrapped by the Android Keystore — the same protection used for SASL credentials. The `+AGE` device identity lives in the same store.
+- Keys are **excluded from backups** by design, so they never leave the device in a portable form. After a reinstall or device move you re-share `+AGM`/`+OK` keys with your contacts; `+AGE` mints a fresh identity that peers re-pin automatically.
 
 **Client interoperability**
 
 - `+AGM`: Supported clients have scripts in [aes-client-plugins](https://github.com/boxlabss/HexDroid/tree/main/aes-client-plugins).
+- `+AGE`: Currently only available for HexDroid for now.
 - `+OK`: `fishlim` plugins exist for most IRC clients.
 
 The full `+AGM` wire-format specification are published [here](https://github.com/boxlabss/HexDroid/blob/main/docs/agm-wire-format.md) in this repository so any client author can add `+AGM` support.
+
+**How `AGE` works**
+
+- No key sharing needed. Each device holds an Ed25519 identity; clients announce and pin each other's identities automatically (trust-on-first-use), communicating between HexDroid users without needing a decentralized key exchange: a Signal-style handshake with forward secrecy for PMs, and a group key sealed to each pinned member for channels.
+- Every identity has a fingerprint you can compare out of band to upgrade trust-on-first-use to verified.
+- The same layer powers encrypted multiplayer script games (see Scripting below): moves are signed and encrypted, and hidden information such as a player's poker cards is sealed to a single recipient.
+- The [wire format](https://github.com/boxlabss/HexDroid/blob/main/docs/age-wire-format.md) and [handshake](https://github.com/boxlabss/HexDroid/blob/main/docs/age-handshake-spec.md) specifications are published so any client author can implement `AGE`.
 
 ### IRCv3
 
@@ -160,12 +169,28 @@ Automatic detection starting from UTF-8.
 
 ### DCC
 
-- DCC SEND and DCC CHAT with active, passive, and auto modes
+- DCC SEND and DCC CHAT with active, passive, and auto modes with IPv6 support
 - **Secure DCC** SSEND and SCHAT for TLS-encrypted file transfers and chat sessions
 - **RESUME** support resuming of "paused" file transfers
 - Configurable incoming port range and download folder
 - Rich transfer progress cards with one-tap accept from notification
 - Incoming DCC CHAT offers create a buffer immediately and deep-link from notification
+
+### Scripting (`.hex`)
+
+HexDroid ships a sandboxed scripting engine; **features ship as `.hex` scripts** that the interpreter inside the APK loads. Manage them from the chat overflow menu under **Scripts**.
+
+A script is a flat list of event handlers (`on <EVENT> { ... }`) and aliases that become slash-commands. Scripts can:
+
+- react to messages, joins, notices, signals, and timers
+- send messages and commands, and echo locally
+- draw **native UI** (buttons, cards, tables, layouts) rendered in Compose via a small view DSL
+- call HTTP APIs and parse JSON
+- use the `age.*` capabilities to build **end-to-end encrypted multiplayer games** on top of `+AGE`: signed and encrypted moves, host-authoritative state sync, and hidden information (like hole cards) sealed to a single player
+
+Every dispatch runs under instruction and time budgets, so a runaway script cannot hang the app.
+
+The full language reference: [docs/hex-scripting.md](https://github.com/boxlabss/HexDroid/blob/main/docs/hex-scripting.md).
 
 ---
 

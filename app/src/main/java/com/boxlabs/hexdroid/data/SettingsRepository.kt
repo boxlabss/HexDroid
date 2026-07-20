@@ -303,6 +303,7 @@ class SettingsRepository(private val ctx: Context) {
                 ownNickColorInt = o.opt("ownNickColorInt")?.let { (it as? Int) ?: (it as? Long)?.toInt() },
                 mircColorsEnabled = o.optBoolean("mircColorsEnabled", true),
                 ansiColorsEnabled = o.optBoolean("ansiColorsEnabled", true),
+                artDetectionEnabled = o.optBoolean("artDetectionEnabled", true),
                 introTourSeenVersion = o.optInt("introTourSeenVersion", 0),
                 welcomeCompleted = o.optBoolean("welcomeCompleted", false),
                 appLanguage = o.optString("appLanguage", "").takeIf { it.isNotBlank() },
@@ -395,6 +396,7 @@ class SettingsRepository(private val ctx: Context) {
         if (s.ownNickColorInt != null) o.put("ownNickColorInt", s.ownNickColorInt) else o.remove("ownNickColorInt")
         o.put("mircColorsEnabled", s.mircColorsEnabled)
         o.put("ansiColorsEnabled", s.ansiColorsEnabled)
+        o.put("artDetectionEnabled", s.artDetectionEnabled)
         o.put("introTourSeenVersion", s.introTourSeenVersion)
         o.put("welcomeCompleted", s.welcomeCompleted)
         o.put("appLanguage", s.appLanguage ?: "")

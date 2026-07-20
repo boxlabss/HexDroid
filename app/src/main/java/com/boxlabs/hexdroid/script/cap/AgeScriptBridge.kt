@@ -843,10 +843,17 @@ class AgeScriptBridge(
                         raiseSignal("SIGNAL:AGE_PEER", mapOf("chan" to channel, "fp" to fp), emptyList())
                         // If we already host this GAME channel's key (we are its minter) and the channel
                         // is keyed, re-seal the SAME K_G to the newcomer (no rekey) so a player who joins
-                        // after we opened the table is keyed in. Idempotent via `invited`; the chat path
+                        // after we opened the table is keyed in. A LIVE IDENT also clears the `invited`
+                        // dedup first: the peer's client just (re)announced, which is what a rejoin after
+                        // leaving the table (age.close) or an app restart looks like, and both lose the
+                        // memory-only K_G. Without the reset the dedup permanently locked a returning
+                        // player out of the table (they announced, we skipped the invite, they could
+                        // never decrypt again until the whole table closed). Re-sealing the same K_G to
+                        // someone who already held it discloses nothing new. The chat path
                         // (onChatPeer -> inviteExisting) already covers chatChannels, so this is game-only.
                         if (channel !in chatChannels && ready(channel) &&
                             keyMinter[channel]?.let { p.constantTimeEquals(it, me.sigPub) } == true) {
+                            invited.remove("$channel\u0000$fp")
                             inviteExisting(channel, fp, from)
                         }
                     }
@@ -987,6 +994,13 @@ class AgeScriptBridge(
         // this a re-key silently turns the channel one-way: we can encrypt to them, they can read us, and
         // every message they send back is dropped as "unknown sender".
         roster[pl.gameId]?.keys?.forEach { fp -> if (store.lookupByFingerprint(fp) != null) caps.addMember(pl.gameId, fp) }
+        // Member the HOST too, mapped from the payload's hostSigPub through our pin store. The member
+        // list and roster loops above can both miss the host: `members` structurally never contains
+        // the sender, and a REJOINING player's roster was cleared by their own age.close on leaving,
+        // while the host's fresh IDENT to them is suppressed by the announce-back dedup (same fp, so
+        // `announcedBack` still holds their marker). Pins persist across leave/rejoin and app
+        // restarts, so this recovers the host's signing key exactly when the wire cannot re-supply it.
+        store.fingerprintForSigPub(pl.hostSigPub)?.let { hostFp -> caps.addMember(pl.gameId, hostFp) }
         // table is now keyed for us; nudge the script so any waiting view refreshes.
         raiseSignal("SIGNAL:AGE_READY", mapOf("chan" to pl.gameId), emptyList())
     }
