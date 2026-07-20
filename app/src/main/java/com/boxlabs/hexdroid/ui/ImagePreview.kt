@@ -711,8 +711,8 @@ fun InlinePreview(
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .then(when {
-                                s.isYouTube       -> Modifier.clickable { isPlaying = true }
-                                s.isTwitterVideo  -> Modifier.clickable {
+                                s.isYouTube       -> Modifier.focusHighlight().clickable { isPlaying = true }
+                                s.isTwitterVideo  -> Modifier.focusHighlight().clickable {
                                     // Play inline when we have a trusted video URL; otherwise
                                     // fall back to opening the tweet in the browser.
                                     if (s.twitterVideoUrl != null) isPlaying = true
