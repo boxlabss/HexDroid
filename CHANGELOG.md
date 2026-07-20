@@ -1,11 +1,12 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
-##
-
+## [1.6.9] - 2026-07-20
 - Improve art detection with an option to disable it completely.
 - Improve auto reconnection and selecting of text in input box.
 - Fix bug where tapping a highlight would sometimes not scroll to the message.
+- Fix bug where the reply fallback wouldn't show in private messages.
+- Add Android 17 and Android TV support
 
 ## [1.6.8] - 2026-07-14
 - **+AGE encryption** Added "+AGE" (Authenticated Group Exchange), an identity-based, forward-secret E2E scheme alongside +AGM and FiSH. Each device has a pinned identity (Ed25519 sign + X25519 DH using BouncyCastle. PMs get a Signal-style handshake (NEGOTIATING/ESTABLISHED states, forward-secret ratchet, reliability retry loop) and channels get real encrypted "tables" via a shared group key. 

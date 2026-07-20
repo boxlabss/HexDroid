@@ -295,6 +295,16 @@ fun NetworksScreen(
                                     Box(
                                         modifier = Modifier
                                             .size(32.dp)
+                                            .dpadReorder(
+                                                onMoveUp = {
+                                                    val i = sortedNetworks.indexOfFirst { it.id == n.id }
+                                                    if (i > 0) onReorder(i, i - 1)
+                                                },
+                                                onMoveDown = {
+                                                    val i = sortedNetworks.indexOfFirst { it.id == n.id }
+                                                    if (i >= 0 && i < sortedNetworks.lastIndex) onReorder(i, i + 1)
+                                                },
+                                            )
                                             .pointerInput(n.id) {
                                                 detectDragGesturesAfterLongPress(
                                                     onDragStart = {

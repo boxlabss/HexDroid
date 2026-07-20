@@ -320,6 +320,7 @@ private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
                                     listOf(accent, hueRotate(accent, -18f))
                                 )
                             )
+                            .focusHighlight()
                             .clickable {
                                 runCatching {
                                     ctx.startActivity(
@@ -368,7 +369,7 @@ private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
             fontWeight = FontWeight.Medium,
             color = accent.copy(alpha = 0.85f),
             textAlign = TextAlign.Center,
-            modifier = Modifier.clickable {
+            modifier = Modifier.focusHighlight().clickable {
                 runCatching {
                     ctx.startActivity(
                         Intent(Intent.ACTION_VIEW, sourceUrl.toUri())
@@ -449,7 +450,7 @@ private fun CreditsCard(ctx: Context, accent: Color, repoUrl: String) {
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                         color = accent.copy(alpha = 0.85f),
-                        modifier = Modifier.clickable {
+                        modifier = Modifier.focusHighlight().clickable {
                             runCatching {
                                 ctx.startActivity(
                                     Intent(Intent.ACTION_VIEW, repoUrl.toUri())
@@ -474,7 +475,7 @@ private fun CreditChip(ctx: Context, credit: Credit, accent: Color) {
             .background(accent.copy(alpha = 0.10f))
             .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(50))
             .then(
-                if (hasLink) Modifier.clickable {
+                if (hasLink) Modifier.focusHighlight(RoundedCornerShape(50)).clickable {
                     runCatching {
                         ctx.startActivity(
                             Intent(Intent.ACTION_VIEW, credit.url.toUri())

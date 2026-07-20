@@ -107,7 +107,6 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -790,7 +789,6 @@ private fun SubCommandHints(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .focusHighlight()
                             .clickable { onPick("/$parentCmd ${cmd.name} ") }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -887,7 +885,7 @@ private fun NickHints(
                                 MaterialTheme.colorScheme.primaryContainer
                             else
                                 MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.focusHighlight().clickable {
+                            modifier = Modifier.clickable {
                                 highlighted = nick
                                 // "nick: " if cursor is at start of blank input, "nick " otherwise
                                 val completion = if (inputText.trimStart().startsWith("@$prefix", ignoreCase = true) &&
@@ -916,7 +914,6 @@ private fun NickHints(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .focusHighlight()
                             .clickable {
                                 val baseNickText = base(nick)
                                 val completion = if (inputText.trimStart().startsWith("@$prefix", ignoreCase = true) &&
@@ -971,13 +968,10 @@ private fun SidebarDragHandle(
     onStart: () -> Unit,
     onDrag: (totalOffsetY: Float) -> Unit,
     onEnd: () -> Unit,
-    onMoveUp: () -> Unit = {},
-    onMoveDown: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier
             .size(24.dp)
-            .dpadReorder(onMoveUp = onMoveUp, onMoveDown = onMoveDown)
             .pointerInput(Unit) {
                 var accumulated = 0f
                 detectDragGesturesAfterLongPress(
@@ -1226,7 +1220,6 @@ fun ChatScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .focusHighlight()
                 .clickable {
                     scope.launch { if (!isWide) drawerState.close() }
                     onSelectBuffer(key)
@@ -1789,7 +1782,6 @@ fun ChatScreen(
 							Tab(
 								selected = i == selIdx,
 								onClick = { pickedNet = net.id },
-								modifier = Modifier.focusHighlight(),
 								text = {
 									Row(
 										verticalAlignment = Alignment.CenterVertically,
@@ -1883,7 +1875,6 @@ fun ChatScreen(
 									Row(
 										Modifier
 											.fillMaxWidth()
-											.focusHighlight()
 											.clickable { onToggleNetworkExpanded(item.netId) },
 										verticalAlignment = Alignment.CenterVertically
 									) {
@@ -1969,14 +1960,6 @@ fun ChatScreen(
 													dragAdjustmentY = 0f
 													dragTranslationY = 0f
 													dragNetworkOrder = null
-												},
-												onMoveUp = {
-													val idx = netOrder.indexOf(rootNetId)
-													if (idx > 0) onReorderNetworks(idx, idx - 1)
-												},
-												onMoveDown = {
-													val idx = netOrder.indexOf(rootNetId)
-													if (idx >= 0 && idx < netOrder.size - 1) onReorderNetworks(idx, idx + 1)
 												}
 											)
 										}
@@ -2007,7 +1990,6 @@ fun ChatScreen(
 											contentDescription = if (item.expanded) "Collapse" else "Expand",
 											modifier = Modifier
 												.size(16.dp)
-												.focusHighlight()
 												.clickable { onToggleNetworkExpanded(item.netId) },
 											tint = MaterialTheme.colorScheme.onSurfaceVariant
 										)
@@ -2104,14 +2086,6 @@ fun ChatScreen(
 												dragAdjustmentY = 0f
 												dragTranslationY = 0f
 												dragNetworkOrder = null
-											},
-											onMoveUp = {
-												val idx = netOrder.indexOf(rootNetId)
-												if (idx > 0) onReorderNetworks(idx, idx - 1)
-											},
-											onMoveDown = {
-												val idx = netOrder.indexOf(rootNetId)
-												if (idx >= 0 && idx < netOrder.size - 1) onReorderNetworks(idx, idx + 1)
 											}
 										)
 									}
@@ -2172,7 +2146,6 @@ fun ChatScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .focusHighlight()
                             .combinedClickable(
                                 onClick = { openNickActions(n) },
                                 onLongClick = { openNickActions(n) },
@@ -2539,7 +2512,6 @@ fun ChatScreen(
                             onClick = onToggleBufferList,
                             modifier = Modifier
                                 .size(iconBtnSize)
-                                .focusHighlight()
                                 .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
                     } else if (!state.settings.networkTabsAtBottom) {
@@ -2548,7 +2520,6 @@ fun ChatScreen(
                             onClick = { scope.launch { drawerState.open() } },
                             modifier = Modifier
                                 .size(iconBtnSize)
-                                .focusHighlight()
                                 .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
                     }
@@ -2677,7 +2648,7 @@ fun ChatScreen(
                         Box {
                             IconButton(
                                 onClick = { launcherExpanded = true },
-                                modifier = Modifier.size(iconBtnSize).focusHighlight()
+                                modifier = Modifier.size(iconBtnSize)
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.IntegrationInstructions,
@@ -2707,7 +2678,6 @@ fun ChatScreen(
                             onClick = { overflowExpanded = true },
                             modifier = Modifier
                                 .size(iconBtnSize)
-                                .focusHighlight()
                                 .tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON)
                         ) { Text("⋮") }
                         DropdownMenu(
@@ -2721,7 +2691,6 @@ fun ChatScreen(
                                     Modifier
                                         .fillMaxWidth()
                                         .heightIn(min = 40.dp)
-                                        .focusHighlight()
                                         .clickable(enabled = enabled, onClick = onClick)
                                         .padding(horizontal = 16.dp, vertical = 8.dp),
                                     contentAlignment = Alignment.CenterStart
@@ -2778,7 +2747,7 @@ fun ChatScreen(
             if (state.settings.showTopicBar && isChannel && !topic.isNullOrBlank()) {
                 Surface(
                     tonalElevation = 1.dp,
-                    modifier = if (canTopic) Modifier.focusHighlight().combinedClickable(
+                    modifier = if (canTopic) Modifier.combinedClickable(
                         onClick = { topicExpanded = !topicExpanded },
                         onLongClick = { showTopicQuickEdit = true },
                     ) else Modifier
@@ -2968,7 +2937,6 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clipToBounds()
-                                    .focusHighlight()
                                     .combinedClickable(
                                         onClick = {},
                                         onLongClick = {
@@ -3388,7 +3356,6 @@ fun ChatScreen(
                             Tab(
                                 selected = i == barSelIdx,
                                 onClick = { onSelectBuffer(key) },
-                                modifier = Modifier.focusHighlight(),
                                 text = {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -3783,7 +3750,6 @@ fun ChatScreen(
                                 ),
                                 shape = RoundedCornerShape(4.dp)
                             )
-                            .focusHighlight(RoundedCornerShape(4.dp))
                             .clickable(
                                 interactionSource = sendInteraction,
                                 indication = ripple(bounded = false),
@@ -5212,7 +5178,6 @@ fun ChatScreen(
                                 text = emoji,
                                 style = MaterialTheme.typography.headlineSmall,
                                 modifier = Modifier
-                                    .focusHighlight(RoundedCornerShape(24.dp))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = ripple(bounded = false, radius = 24.dp),
@@ -5242,7 +5207,7 @@ fun ChatScreen(
                         leadingContent = {
                             Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null)
                         },
-                        modifier = Modifier.focusHighlight().clickable {
+                        modifier = Modifier.clickable {
                             pendingReply = ctxMsg
                             longPressedMessage = null
                         }
@@ -5254,7 +5219,7 @@ fun ChatScreen(
                     leadingContent = {
                         Icon(Icons.Default.ContentCopy, contentDescription = null)
                     },
-                    modifier = Modifier.focusHighlight().clickable {
+                    modifier = Modifier.clickable {
                         scope.launch {
                             clipboard.setClipEntry(
                                 android.content.ClipData.newPlainText("", plainCtx).toClipEntry()
@@ -5270,32 +5235,13 @@ fun ChatScreen(
                     leadingContent = {
                         Icon(Icons.Default.ContentCopy, contentDescription = null)
                     },
-                    modifier = Modifier.focusHighlight().clickable {
+                    modifier = Modifier.clickable {
                         val m = longPressedMessage
                         longPressedMessage = null
                         copyRangeMode = true
                         selectedMsgIds = if (m != null) setOf(m.id) else emptySet()
                     }
                 )
-                // Links contained in the message. Inline links open by tap position
-                // only, which D-pad and keyboard navigation can never reach, so this
-                // list is the accessible path (Android TV, ChromeOS, hardware keys).
-                val ctxUrls = remember(ctxMsg.id) {
-                    urlRegex.findAll(ctxMsg.text).map { it.value }.distinct().take(5).toList()
-                }
-                if (ctxUrls.isNotEmpty()) HorizontalDivider()
-                for (url in ctxUrls) {
-                    ListItem(
-                        headlineContent = { Text(url, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        leadingContent = {
-                            Icon(Icons.Default.Link, contentDescription = null)
-                        },
-                        modifier = Modifier.focusHighlight().clickable {
-                            longPressedMessage = null
-                            runCatching { uriHandler.openUri(url) }
-                        }
-                    )
-                }
             }
         }
     }
@@ -5661,7 +5607,6 @@ private fun SingleMessageItem(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .focusHighlight()
                 .then(
                     when {
                         isFlickering  -> Modifier.background(

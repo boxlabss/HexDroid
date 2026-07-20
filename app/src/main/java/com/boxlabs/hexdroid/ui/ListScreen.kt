@@ -236,6 +236,7 @@ fun ListScreen(
                     Column(
                         Modifier
                             .fillMaxWidth()
+                            .focusHighlight()
                             .clickable { onJoin(ch.channel) }
                             .padding(vertical = 10.dp),
                     ) {

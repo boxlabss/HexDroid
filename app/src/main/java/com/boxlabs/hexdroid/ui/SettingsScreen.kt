@@ -627,6 +627,7 @@ fun SettingsScreen(
                                     .clip(CircleShape)
                                     .background(customColor)
                                     .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                    .focusHighlight(CircleShape)
                                     .clickable { showPicker = true }
                             )
                             TextButton(onClick = { onUpdate { copy(ownNickColorInt = null) } }) {
@@ -1308,7 +1309,7 @@ private fun SettingToggle(label: String, checked: Boolean, onClick: () -> Unit) 
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = { onClick() })
+        Switch(checked = checked, onCheckedChange = { onClick() }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
     }
 }
 

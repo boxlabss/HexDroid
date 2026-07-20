@@ -1,4 +1,5 @@
-Add Android 17 support
-Improve art detection and selecting of text in input box.
-Auto reconnection bug fix with backoff
-Fix reply fallback in PMs
+Improve art detection with an option to disable it completely.
+Improve auto reconnection and selecting of text in input box.
+Fix bug where tapping a highlight would sometimes not scroll to the message.
+Fix bug where the reply fallback wouldn't work in private messages.
+Add Android 17 and Android TV support

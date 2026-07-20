@@ -1,0 +1,1590 @@
+; Poker Night for HexDroid
+;
+; A multiplayer discord-like poker game for IRC
+;   data model (lists/maps)  +  view{} table  +  age.* encrypted transport
+
+
+on LOAD {
+  set %sb 5
+  set %bb 10
+  set %rankmap $map(A,14,K,13,Q,12,J,11,T,10,9,9,8,8,7,7,6,6,5,5,4,4,3,3,2,2)
+  ; default avatars: a stable emoji face per player (picked from a hash of their fingerprint) so a
+  ; seat is instantly recognisable instead of a bare initial. An uploaded photo still wins over it.
+  set %emojimap $map(0,🦊,1,🐼,2,🐵,3,🐯,4,🦁,5,🐸,6,🐙,7,🦉,8,🐺,9,🐷,a,🐨,b,🐰,c,🦝,d,🐮,e,🐳,f,🦄)
+  poker_reset
+  sidebar add poker poker_open ♠ Play Poker
+}
+
+; Full reset to a clean lobby. Used on load AND when the table is closed, so closing a game
+; terminates it completely - re-opening (even on a different network) shows a fresh lobby
+; instead of the previous hand.
+alias poker_reset {
+  set %practice 0
+  set %chan #game
+  set %hosted 0
+  set %ishost 0
+  set %hostlocked 0        ; host decided for this table (we minted, or adopted a host's key): freeze it
+  set %bots $map()
+  set %seats $list()
+  set %name $map()
+  set %stack $map()
+  set %bet $map()
+  set %folded $map()
+  set %board $list()
+  set %myhole $map()
+  set %hole $map()
+  set %reveal $map()       ; fp->"c1 c2" of non-folded hands, populated ONLY at showdown then
+  set %started 0
+  set %street lobby
+  set %pot 0
+  set %tocall 0
+  set %turn 0
+  set %betamount 0
+  set %handid 0
+  set %button 0
+  set %hostfp
+  set %hostfrom            ; fp we accept authoritative state + STOP from (the dealer that keyed the table)
+  set %gameover 0
+  set %champion
+  set %startstack 1000
+  set %winners $list()
+  set %winnertext
+  set %allin $map()
+  set %turnid 0            ; bumped every time the turn moves; a stale clock tick is ignored
+  set %actclockms 45000    ; per-turn shot-clock (ms); the host auto-checks/folds an AWOL player
+  set %pending $map()      ; fp->name of players who joined mid-hand; seated at the next deal
+  set %clockleft 0         ; visual per-turn countdown (seconds), ticked locally on every node
+  set %clockturn 0         ; last %turnid a countdown was started for (avoids restart on re-broadcast)
+  set %avatar $map()       ; optional fp->image-URL for player avatars; empty falls back to initials
+  set %evseq 0             ; host: monotonic broadcast sequence (full states AND deltas share it)
+  set %cliseq 0            ; client: highest broadcast sequence applied, for delta gap detection
+  set %resyncing 0         ; client: 1 while waiting for a full-state resync after a detected gap
+  set %advturn 0           ; host: poker_advance set this to 1 iff it only moved the turn (=> delta-able)
+}
+
+; ---- open / join -----------------------------------------------------------
+; The sidebar entry point: just (re)draw the table. Render copes with every state
+; (empty lobby, seated-and-waiting, mid-hand, showdown).
+alias poker_open { set %closed 0 | poker_render }
+
+; /poker_avatar <url>  - set your own table avatar image (empty URL clears it back to your initial).
+; Local to this device; others keep whatever avatar they have set for you.
+alias poker_avatar {
+  setat %avatar $age.me $1-
+  poker_render
+}
+
+; The user tapped Close on the table → halt the bot loop so a pending timer tick can't
+; re-render and pop the table straight back open.
+on SIGNAL:view_closed {
+  ; Closing the table properly. %closed latches FIRST so that nothing below (or any inbound state /
+  ; delta / timer tick that lands afterwards) can re-render and pop the table straight back open.
+  ; poker_endtable is an ALIAS, not a signal handler: a bare verb here only resolves against aliases,
+  ; so naming a signal handler would fall through to the slash pipeline and hit the server as an
+  ; unknown command, leaving the table running with no way to stop it.
+  set %closed 1
+  poker_endtable
+}
+
+; Dealer ends the table: drop our queued flood first (so STOP isn't stuck behind it or dropped by the
+; purge), broadcast an authenticated STOP move, then tear our own key/roster down. "Anyone can re-open"
+; falls out naturally: once everyone has torn down, normal election lets any player open a fresh table.
+; A non-dealer just leaves quietly. Defined as an alias so it is callable as a plain verb (buttons
+; raise SIGNALs, so the button is wired through the thin handler below).
+alias poker_endtable {
+  if (%practice == 1) { poker_reset | return }
+  if (%ishost == 1 && %hosted == 1) {
+    age.purge %chan          ; discard the paced-out state-broadcast backlog while we still hold K_G
+    age.send %chan stop       ; authenticated, members-only STOP into the now-drained queue
+    age.close %chan           ; drop key/roster locally. NOT a purge, so the queued STOP still goes out
+    poker_reset
+    return
+  }
+  poker_teardown              ; not actually the dealer: just leave and clean up
+}
+
+; The header "End Table" button (buttons raise SIGNAL:<name>). Ends the table and redraws the lobby;
+; the redraw is a no-op when this arrived via a closed view, because poker_render honours %closed.
+on SIGNAL:poker_stop {
+  poker_endtable
+  poker_render
+}
+
+; We received the dealer's STOP: drop our own queued flood and tear down.
+alias poker_onstop {
+  toast The dealer ended the table
+  poker_teardown
+  poker_render                ; drop back to the lobby (no-op if we already closed the view)
+}
+
+; Local teardown shared by every close path: purge any of our queued AGE for this table, drop the
+; key/roster/announce state in the bridge (age.close), then reset the game model. age.close is a no-op
+; in practice. Order: purge before close so nothing for this channel is left trickling out.
+alias poker_teardown {
+  if (%practice == 0) { age.purge %chan | age.close %chan }
+  poker_reset
+}
+
+alias poker {
+  ; Practice runs entirely on the local loopback (#practice is never an IRC channel).
+  ; A real game must actually be in the shared IRC channel so peers can exchange +AGE lines.
+  if (%practice == 0) { join %chan }
+  age.join %chan                              ; announce our +AGE identity (real: broadcast; practice: skipped)
+  age.send %chan join $age.me $me 1000        ; register me (local always; to peers once the host has keyed)
+  if (%practice == 0) { toast Joined %chan, waiting for the host to start the hand }
+  else { toast Joined the table - waiting for players }
+}
+
+; lobby buttons
+on SIGNAL:poker_join  { poker }
+on SIGNAL:poker_start {
+  if (%gameover == 1) { return }
+  if (%practice == 1) { poker_deal | return }
+  ; The player who taps Open HOSTS the table. Host is decided by action, never by fingerprint order:
+  ; electing the lowest fingerprint made the tapper stand down whenever it wasn't the lowest, while
+  ; the elected owner's device sat showing an Open button nobody tapped - so nobody minted and both
+  ; sides waited forever. If two players tap at the same moment both mint, and the bridge converges
+  ; on the lower fingerprint's key (invite authorisation); the loser adopts it via age_ready and
+  ; stops being host. Once a host exists (%hostlocked) it never changes for the life of the table.
+  if (%hostlocked == 1 && %ishost == 0) { toast Waiting for the host to start the hand | return }
+  if (%hosted == 0) { poker_host | return }
+  poker_deal
+}
+
+; Mint the shared table key and lock ourselves in as host for the life of this table.
+alias poker_host {
+  age.host %chan
+  set %hosted 1
+  set %hostlocked 1
+  set %ishost 1
+  set %hostfp %me
+  poker_render
+  toast Table keyed. Players are joining; tap Deal when ready
+}
+
+on SIGNAL:age_peer {
+  ; a +AGE peer announced on $chan: refresh the lobby so a new arrival shows up. Host election is not
+  ; re-run here - the host is whoever opened the table, and %hostlocked freezes it.
+  if ($chan != %chan) { return }
+  poker_render
+}
+
+on SIGNAL:age_ready {
+  ; the shared table key just arrived: we are a CLIENT, not the host (a host mints its own key and
+  ; never receives an invite). This also covers losing a simultaneous-open race: we minted, the peer's
+  ; lower-fingerprint key won, and we adopt it and stop hosting. Register at the table over the
+  ; now-encrypted channel so the host sees us seated.
+  set %hostlocked 1
+  set %ishost 0
+  set %hosted 0
+  if (%practice == 0) { age.send %chan join $age.me $me 1000 }
+}
+
+on SIGNAL:age_msg {
+  ; $from = sender fp ; $1 = move type ; $2- = payload
+  ; Host-authoritative: the dealer runs all game logic and broadcasts state; clients render it.
+  set %me $age.me
+  if ($1 == join)      { poker_onjoin $1 $2 $3 $4 }
+  elseif ($1 == act)   { if (%ishost == 1) { poker_onact $1 $2 $3 } }
+  elseif ($1 == state) { if ($from != %me) { set %hostfrom $from | poker_applystate $2- } }
+  ; Pass the delta's tokens through INDIVIDUALLY. `$3-` would arrive as a single joined argument
+  ; (that is what `poker_applystate $2-` wants for its JSON blob), so the alias would see the whole
+  ; rest of the line as $2 and never match "act": the delta was silently dropped and the client sat
+  ; on a stale turn. Tokens: ev seq act fp bet stack fold allin pot tocall turn turnid.
+  elseif ($1 == ev)    { if ($from != %me) { set %hostfrom $from | poker_onev $2 $3 $4 $5 $6 $7 $8 $9 $10 $11 $12 } }
+  elseif ($1 == sync)  { if (%ishost == 1 && $from != %me) { poker_broadcast } }   ; a client missed a delta; resend full state
+  elseif ($1 == stop)  {
+    ; the dealer ended the table. Honour STOP only from the authenticated host we've been following
+    ; (the signature already proves $from; this stops a non-dealer member from nuking the table), and
+    ; never from our own local echo (the sender tears down in poker_stop instead).
+    if ($from != %me && $from == %hostfrom) { poker_onstop }
+  }
+}
+
+; ---- host-authoritative state sync -----------------------------------------
+alias poker_sethost {
+  set %me $age.me
+  if (%practice == 1) { set %ishost 1 | set %hostfp %me | return }
+  ; Host is decided by ACTION (who tapped Open), not by fingerprint order. %hostlocked is set when we
+  ; mint (poker_host) or when we adopt a host's key (age_ready), and from then on the host is fixed
+  ; for the life of the table - a later joiner can never steal authority mid-hand. Before any table
+  ; exists nobody is host yet, and anyone may open one.
+  if (%hostlocked == 1) { return }
+  set %ishost 0
+  set %hostfp
+}
+
+; ---- seat helpers: find the next seat still in the hand / able to act ----------
+; A busted or folded seat is skipped. These use locals (set -l) so they never clobber
+; a caller's %n/%fp/%idx while it is mid-loop.
+alias poker_nextin {
+  ; $1 = start index; returns the next index (wrapping) whose seat isn't folded/busted
+  set -l %n $len(%seats)
+  set -l %k 0
+  while (%k < %n) {
+    set -l %idx $mod($calc($1 + %k), %n)
+    if ($get(%folded, $get(%seats, %idx)) != 1) { return %idx }
+    set -l %k $calc(%k + 1)
+  }
+  return $mod($1, %n)
+}
+alias poker_nextactor {
+  ; $1 = start index; returns the next index (wrapping) that can still act (not folded, not all-in)
+  set -l %n $len(%seats)
+  set -l %k 0
+  while (%k < %n) {
+    set -l %idx $mod($calc($1 + %k), %n)
+    set -l %fp $get(%seats, %idx)
+    if ($get(%folded, %fp) != 1) { if ($get(%allin, %fp) != 1) { return %idx } }
+    set -l %k $calc(%k + 1)
+  }
+  return $mod($1, %n)
+}
+
+alias poker_broadcast {
+  if (%ishost == 0) { return }
+  set %evseq $calc(%evseq + 1)   ; full states and deltas share one monotonic sequence (carried as q)
+  ; Compact wire state (age_msg reassembles tokens with $2-, single spaces; keep names free of
+  ; double spaces). Per-player fields are arrays ALIGNED TO %seats (each fp once, not repeated as
+  ; map keys); top-level keys are single letters; default/empty fields are omitted so a mid-hand
+  ; update usually fits ONE AGE line. Key legend (mirrored in poker_applystate):
+  ;   s=seats n=names k=stacks b=bets f=folded a=allin d=board r=reveal p=pot c=tocall
+  ;   t=turn e=street y=started u=button g=turnid w=winner o=gameover h=champion
+  set %aN $list()
+  set %aS $list()
+  set %aB $list()
+  set %aF $list()
+  set %aA $list()
+  set %aR $list()
+  set %hasrev 0
+  foreach %fp %seats {
+    push %aN $get(%name,%fp)
+    push %aS $get(%stack,%fp)
+    push %aB $get(%bet,%fp)
+    push %aF $get(%folded,%fp)
+    push %aA $get(%allin,%fp)
+    set %rvv $get(%reveal,%fp)
+    push %aR %rvv
+    if ($len(%rvv) > 0) { set %hasrev 1 }
+  }
+  set %st $map()
+  setat %st s %seats
+  setat %st n %aN
+  setat %st k %aS
+  setat %st b %aB
+  setat %st f %aF
+  setat %st a %aA
+  setat %st d %board
+  if (%hasrev == 1) { setat %st r %aR }        ; only at showdown; mid-hand it is all mucked
+  setat %st p %pot
+  setat %st c %tocall
+  setat %st t %turn
+  setat %st e %street
+  setat %st y %started
+  setat %st u %button
+  setat %st q %evseq                                     ; sequence baseline so clients can gap-check deltas
+  setat %st g %turnid
+  if ($len(%winnertext) > 0) { setat %st w %winnertext }   ; only on a result
+  if (%gameover == 1) { setat %st o 1 }                     ; only when the table has ended
+  if ($len(%champion) > 0) { setat %st h %champion }
+  age.send %chan state $tojson(%st)
+}
+
+; Host: broadcast just the fields an in-street action changes, as ONE short line (no FRAG), instead of
+; the whole table. $1 = the acting fp. A dropped delta is caught by the sequence gap check in
+; poker_onev and healed with a full-state resync, so this stays lossless.
+alias poker_evact {
+  if (%ishost == 0) { return }
+  set %evseq $calc(%evseq + 1)
+  set %efd 0
+  if ($get(%folded,$1) == 1) { set %efd 1 }
+  set %eai 0
+  if ($get(%allin,$1) == 1) { set %eai 1 }
+  age.send %chan ev %evseq act $1 $get(%bet,$1) $get(%stack,$1) %efd %eai %pot %tocall %turn %turnid
+}
+
+; Client: apply an inbound delta. Called as poker_onev <seq> <type> <payload...>. Enforces contiguity
+; against %cliseq; a gap means we missed a delta, so ask the host once for a full resync and ignore
+; further deltas until it lands (poker_applystate clears %resyncing).
+alias poker_onev {
+  if (%ishost == 1) { return }                     ; the host is authoritative; it never applies deltas
+  set %eseq $1
+  if (%eseq <= %cliseq) { return }                 ; stale / duplicate
+  if (%eseq > $calc(%cliseq + 1)) {
+    if (%resyncing == 0) { set %resyncing 1 | age.send %chan sync }
+    return
+  }
+  if ($2 == act) { poker_ev_act $3 $4 $5 $6 $7 $8 $9 $10 $11 }
+  set %cliseq %eseq
+  poker_startclock
+  poker_render
+}
+
+; Apply an act delta: $1 fp  $2 bet  $3 stack  $4 fold  $5 allin  $6 pot  $7 tocall  $8 turn  $9 turnid.
+; folded/allin only latch on (never clear within a hand), matching poker_applystate.
+alias poker_ev_act {
+  setat %bet $1 $2
+  setat %stack $1 $3
+  if ($4 == 1) { setat %folded $1 1 }
+  if ($5 == 1) { setat %allin $1 1 }
+  set %pot $6
+  set %tocall $7
+  set %turn $8
+  set %turnid $9
+}
+
+alias poker_applystate {
+  set %j $1-
+  set %seats $list()
+  set %i 0
+  set %go 1
+  while (%go == 1) {
+    set %fp $json(%j, s.%i)
+    if ($len(%fp) == 0) { set %go 0 } else { push %seats %fp | set %i $calc(%i + 1) }
+  }
+  set %board $list()
+  set %i 0
+  set %go 1
+  while (%go == 1) {
+    set %cd $json(%j, d.%i)
+    if ($len(%cd) == 0) { set %go 0 } else { push %board %cd | set %i $calc(%i + 1) }
+  }
+  set %name $map()
+  set %stack $map()
+  set %bet $map()
+  set %folded $map()
+  set %allin $map()
+  set %reveal $map()
+  ; per-player fields arrive as arrays aligned to %seats (see poker_broadcast); zip them by index.
+  set %i 0
+  foreach %fp %seats {
+    setat %name %fp $json(%j, n.%i)
+    setat %stack %fp $json(%j, k.%i)
+    set %bv $json(%j, b.%i)
+    if ($len(%bv) > 0) { setat %bet %fp %bv }
+    set %fd $json(%j, f.%i)
+    if (%fd == 1) { setat %folded %fp 1 }
+    set %ai $json(%j, a.%i)
+    if (%ai == 1) { setat %allin %fp 1 }
+    set %rv $json(%j, r.%i)
+    if ($len(%rv) > 0) { setat %reveal %fp %rv }
+    set %i $calc(%i + 1)
+  }
+  set %pot $json(%j, p)
+  set %tocall $json(%j, c)
+  set %turn $json(%j, t)
+  set %street $json(%j, e)
+  set %started $json(%j, y)
+  set %button $json(%j, u)
+  set %turnid $json(%j, g)
+  ; A full state is an authoritative resync point: adopt its sequence baseline and clear any pending
+  ; gap so subsequent deltas are measured from here.
+  set %qv $json(%j, q)
+  if ($len(%qv) > 0) { set %cliseq %qv }
+  set %resyncing 0
+  ; winner/gameover/champion are omitted from the wire unless set, so a missing field restores to
+  ; empty / 0 ("not over", no banner) - correct for a live hand.
+  set %winnertext $json(%j, w)
+  set %gameover $json(%j, o)
+  if ($len(%gameover) == 0) { set %gameover 0 }
+  set %champion $json(%j, h)
+  poker_sethost
+  poker_startclock
+  poker_render
+}
+
+alias poker_onjoin {
+  ; $2 = fp, $3 = name, $4 = stack
+  ; track roster as a map fp->name and an ordered list (idempotent on rejoin). A brand-new player
+  ; who arrives mid-hand is parked in %pending and seated at the next deal, so a join never
+  ; renumbers %seats or shifts the turn pointer inside a live hand.
+  set %newp 0
+  if ($has(%name,$2) == false) { set %newp 1 }
+  setat %name $2 $3
+  ; the buy-in stack in $4 applies to NEW players only. A join from a player we already know is a
+  ; REJOIN (left and came back, app restart, or a re-invite echo), and overwriting their live stack
+  ; with the buy-in both breaks chip conservation mid-hand and hands anyone a free refill exploit:
+  ; leave the table, rejoin, and your losses are erased. Returning players keep their chips.
+  if (%newp == 1) {
+    setat %stack $2 $4
+    if (%started == 1) { setat %pending $2 1 }
+    else { push %seats $2 }
+  }
+  poker_sethost
+  if (%ishost == 1) { poker_broadcast }
+  poker_render
+}
+
+; ---- practice mode: play a full hand solo against calling-station bots --------
+alias poker_practice {
+  set %practice 1
+  set %bots $map()
+  set %chan #practice
+  poker
+  age.send %chan join bot1 Botcall 1000
+  setat %bots bot1 1
+  age.send %chan join bot2 Robofish 1000
+  setat %bots bot2 1
+  poker_deal
+}
+
+; bot turn-driver - runs on a scheduled tick (NOT synchronously) so the main thread
+; is never blocked by a long cascade of bot actions; each tick acts once, the UI
+; repaints, then the next action is re-scheduled by poker_onact / poker_deal below.
+on SIGNAL:poker_botstep {
+  if (%practice == 1) {
+    if (%started == 1) {
+      set %cur $get(%seats,%turn)
+      if ($has(%bots,%cur) == true) { poker_botbrain %cur }
+    }
+  }
+}
+
+; Arm the per-turn shot clock. Bumps %turnid so a tick scheduled for an earlier turn is ignored
+; once the turn moves on. In real games the host schedules itself to auto-act if the seat to move
+; goes quiet (disconnected or just away), so one absent player can never freeze the whole table.
+; Bots run on their own fast driver (poker_botstep), so this only ever resolves a human who left.
+alias poker_armclock {
+  ; %turnid is bumped by the turn-setters (postblinds/advance/firstact), so it already reflects the
+  ; turn being armed here. This only (re)arms the host timeout and the local countdown; being called
+  ; more than once for the same turn is harmless (same turnid, idempotent countdown).
+  if (%practice == 0) { if (%ishost == 1) { timer %actclockms poker_turntimeout %turnid } }
+  poker_startclock
+}
+
+; Local visual countdown (host and every client). It just ticks a per-turn number down once a
+; second and repaints; the host's poker_turntimeout is what actually acts when it hits zero.
+; Keyed on %turnid so a new turn restarts it and a stale tick from a finished turn is ignored.
+alias poker_startclock {
+  if (%practice == 1) { return }
+  if (%turnid == %clockturn) { return }
+  set %clockturn %turnid
+  set %clockleft $int($calc(%actclockms / 1000))
+  timer 1000 poker_clocktick %turnid
+}
+
+on SIGNAL:poker_clocktick {
+  if ($1 != %turnid) { return }
+  if (%started == 0) { return }
+  set %clockleft $calc(%clockleft - 1)
+  if (%clockleft < 0) { set %clockleft 0 }
+  poker_render
+  if (%clockleft > 0) { timer 1000 poker_clocktick %turnid }
+}
+
+on SIGNAL:poker_turntimeout {
+  if (%ishost == 0) { return }
+  if (%started == 0) { return }
+  if ($1 != %turnid) { return }                  ; the turn already moved on; stale tick
+  set %cur $get(%seats,%turn)
+  if ($has(%bots,%cur) == true) { return }        ; bots resolve themselves
+  ; auto-act for the away seat: check when it costs nothing, otherwise fold. age.local injects the
+  ; move locally as that seat (exactly like a bot move) and the host re-broadcasts the result.
+  if ($calc(%tocall - $get(%bet,%cur)) <= 0) { age.local %cur act check }
+  else { age.local %cur act fold }
+}
+
+; A simple but believable bot: folds trash, calls/raises by hand strength, bluffs occasionally.
+; Pre-flop it scores the two hole cards; post-flop it uses the made-hand category (0..7). Pot odds
+; make cheap calls more tempting, and a random roll keeps it from being predictable. Two named
+; practice bots have distinct styles so solo play isn't monotonous: Botcall (bot1) is a loose-
+; passive calling station (calls very wide, almost never raises or bluffs) and Robofish (bot2) is a
+; loose-aggressive maniac (raises a wide range, bluffs often). Any other bot uses the middle profile.
+; Approximate drawing outs to a flush or straight for $1- (hole + board), 0 if a straight is
+; already made or there is no draw. Flush draw (exactly 4 of a suit) ~ 9 outs; open-ended straight
+; draw (2+ ranks complete a straight) ~ 8; gutshot (exactly 1) ~ 4. Used post-flop so the bot can
+; semi-bluff and call the right price on draws instead of folding every unmade hand.
+alias poker_outs {
+  set -l %h $map()
+  set -l %su $map()
+  foreach %card $1- {
+    set -l %rv $get(%rankmap, $left(%card, 1))
+    setat %h %rv 1
+    set -l %s $right(%card, 1)
+    setat %su %s $calc($get(%su, %s) + 1)
+  }
+  set -l %outs 0
+  foreach %s $keys(%su) { if ($get(%su, %s) == 4) { set -l %outs $calc(%outs + 9) } }
+  if ($poker_straighthi($join($keys(%h))) == 0) {
+    set -l %compl 0
+    set -l %r 2
+    while (%r < 15) {
+      if ($get(%h, %r) != 1) {
+        if ($poker_straighthi($join($keys(%h)) %r) > 0) { set -l %compl $calc(%compl + 1) }
+      }
+      set -l %r $calc(%r + 1)
+    }
+    if (%compl >= 2) { set -l %outs $calc(%outs + 8) }
+    elseif (%compl == 1) { set -l %outs $calc(%outs + 4) }
+  }
+  return %outs
+}
+
+alias poker_botbrain {
+  set %bot $1
+  set %mybet $get(%bet,%bot)
+  set %need $calc(%tocall - %mybet)
+  if (%need < 0) { set %need 0 }
+  set %stk $get(%stack,%bot)
+  set %roll $rand(0, 99)
+
+  ; ---- personality knobs (kept as flat conditions; grouping like (A || B) && C also works now) ----
+  set %callpf 19       ; pre-flop score needed to call a bet
+  set %raisepf 26      ; pre-flop score needed to raise
+  set %bluff 6         ; roll cutoff for a pure bluff (higher = bluffs more)
+  set %aggr 50         ; roll cutoff for value-raising a marginal made hand
+  set %stationcall 0   ; 1 = call down light rather than fold
+  set %rmult 3         ; raise size in big blinds
+  if (%bot == bot1) { set %callpf 12 | set %raisepf 34 | set %bluff 0 | set %aggr 15 | set %stationcall 1 }
+  if (%bot == bot2) { set %callpf 16 | set %raisepf 20 | set %bluff 35 | set %aggr 80 | set %rmult 4 }
+  set %aggr2 $calc(%aggr - 15)
+  if (%aggr2 < 0) { set %aggr2 0 }
+
+  ; raise target = current call level + N big blinds, capped at all-in
+  set %raiseto $calc(%tocall + $calc(%bb * %rmult))
+  set %maxto $calc(%mybet + %stk)
+  if (%raiseto > %maxto) { set %raiseto %maxto }
+
+  ; a call is "cheap" when it costs a quarter of the pot or less
+  set %cheapthresh $calc(%pot / 4)
+  set %cheap 0
+  if (%need <= %cheapthresh) { set %cheap 1 }
+  ; pot odds: the price of a call as a percentage of the pot after we put the chips in. A flush/OESD
+  ; (~8-9 outs) is roughly a 1-in-3 shot with two cards to come, so calling is right up to ~33%.
+  set %price 100
+  set %denom $calc(%pot + %need)
+  if (%denom > 0) { set %price $int($calc(%need * 100 / %denom)) }
+
+  if ($len(%board) == 0) {
+    ; ---- pre-flop: score the two hole cards (high cards + pair/suited bonuses) ----
+    ; split on the default (space) delimiter; $split(x, " ") works too now that quoted args
+    ; are string literals, but the bare form stays the simplest spelling.
+    set %hc $split($get(%hole,%bot))
+    set %c1 $get(%hc, 0)
+    set %c2 $get(%hc, 1)
+    set %r1 $get(%rankmap, $left(%c1, 1))
+    set %r2 $get(%rankmap, $left(%c2, 1))
+    set %pf $calc(%r1 + %r2)
+    if (%r1 == %r2) { set %pf $calc(%pf + 12) }
+    if ($right(%c1, 1) == $right(%c2, 1)) { set %pf $calc(%pf + 4) }
+    if (%need == 0) {
+      if (%pf >= %raisepf) { age.local %bot act raise %raiseto }
+      elseif (%pf >= 18 && %roll < %aggr) { age.local %bot act raise %raiseto }
+      elseif (%roll < %bluff) { age.local %bot act raise %raiseto }
+      else { age.local %bot act check }
+    } else {
+      if (%pf >= %raisepf) { age.local %bot act raise %raiseto }
+      elseif (%pf >= %callpf) { age.local %bot act call }
+      elseif (%cheap == 1 && %roll < 30) { age.local %bot act call }
+      elseif (%stationcall == 1 && %cheap == 1) { age.local %bot act call }
+      else { age.local %bot act fold }
+    }
+  } else {
+    ; ---- post-flop: made-hand category 0=high .. 7=quads ----
+    set %sc $poker_handscore($get(%hole,%bot) $join(%board))
+    set %cat $int($calc(%sc / 759375))
+    ; drawing outs, but only while a card is still to come (turn/river); on the river a draw is dead
+    set %outs 0
+    if ($len(%board) < 5) { set %outs $poker_outs($get(%hole,%bot) $join(%board)) }
+    set %strongdraw 0
+    if (%outs >= 8) { set %strongdraw 1 }
+    if (%need == 0) {
+      if (%cat >= 3) { age.local %bot act raise %raiseto }
+      elseif (%cat == 2 && %roll < %aggr) { age.local %bot act raise %raiseto }
+      elseif (%cat == 1 && %roll < %aggr2) { age.local %bot act raise %raiseto }
+      elseif (%strongdraw == 1 && %roll < %aggr) { age.local %bot act raise %raiseto }
+      elseif (%roll < %bluff) { age.local %bot act raise %raiseto }
+      else { age.local %bot act check }
+    } else {
+      if (%cat >= 4) { age.local %bot act raise %raiseto }
+      elseif (%cat >= 2 && %roll < %aggr) { age.local %bot act raise %raiseto }
+      elseif (%cat >= 2) { age.local %bot act call }
+      elseif (%cat == 1 && %stationcall == 1) { age.local %bot act call }
+      elseif (%cat == 1 && %cheap == 1) { age.local %bot act call }
+      elseif (%cat == 1 && %roll < 55) { age.local %bot act call }
+      elseif (%cat == 1) { age.local %bot act fold }
+      elseif (%strongdraw == 1 && %cheap == 1 && %roll < %aggr2) { age.local %bot act raise %raiseto }
+      elseif (%strongdraw == 1 && %price <= 33) { age.local %bot act call }
+      elseif (%outs >= 4 && %price <= 12) { age.local %bot act call }
+      elseif (%stationcall == 1 && %cheap == 1) { age.local %bot act call }
+      elseif (%cheap == 1 && %roll < 55) { age.local %bot act call }
+      elseif (%roll < %bluff) { age.local %bot act raise %raiseto }
+      elseif (%roll < 10) { age.local %bot act call }
+      else { age.local %bot act fold }
+    }
+  }
+}
+
+; ---- start a hand (dealer button rotates each hand) ------------------------
+alias poker_deal {
+  poker_sethost
+  ; seat anyone who joined during the previous hand (parked in %pending), now that seat order and
+  ; the turn pointer can safely change. Guard against double-seating on a rejoin.
+  foreach %fp $keys(%pending) { if ($has(%seats, %fp) == false) { push %seats %fp } }
+  set %pending $map()
+  set %started 1
+  set %winnertext
+  set %board $list()
+  set %folded $map()
+  set %bet $map()
+  set %hole $map()
+  set %myhole $map()
+  set %reveal $map()      ; last hand's shown cards clear so they don't linger into the new deal
+  set %street preflop
+  set %pot 0
+  set %tocall %bb
+  ; players with no chips are out for the hand: mark them folded so every downstream loop
+  ; (turn advance, showdown, live-count) skips them with no special-casing.
+  foreach %fp %seats { if ($get(%stack,%fp) <= 0) { setat %folded %fp 1 } }
+  ; move the dealer button to the next player who still has chips (first hand keeps seat 0)
+  if (%handid > 0) { set %button $poker_nextin($calc(%button + 1)) }
+  set %handid $calc(%handid + 1)
+  set %dealerfp $get(%seats, %button)
+  ; secret deck (dealer only). seed kept private; revealed at showdown to verify.
+  set %seed $age.rand(32)
+  poker_builddeck
+  ; deal 2 hole cards per seat; only seal to players actually in the hand
+  set %i 0
+  foreach %fp %seats {
+    set %c1 $get(%deck,$calc(%i * 2))
+    set %c2 $get(%deck,$calc(%i * 2 + 1))
+    if ($get(%folded,%fp) != 1) { age.seal %fp %c1 %c2 }
+    if (%ishost == 1) { setat %hole %fp %c1 %c2 }
+    set %i $calc(%i + 1)
+  }
+  ; community sits after all hole cards
+  set %base $calc($len(%seats) * 2)
+  ; post blinds relative to the button and open betting
+  poker_postblinds
+  poker_render
+  poker_broadcast
+  timer 350 poker_botstep
+  poker_armclock
+}
+
+alias poker_builddeck {
+  set %deck $list()
+  set %keyed $list()
+  foreach %r $list(2,3,4,5,6,7,8,9,T,J,Q,K,A) {
+    foreach %s $list(c,d,h,s) {
+      ; keyed shuffle: sort cards by a PRF of (seed, card) - a verifiable permutation
+      push %keyed $age.sha(%seed%r%s)~%r%s
+    }
+  }
+  set %keyed $sort(%keyed)
+  foreach %k %keyed {
+    set %card $get($split(%k,~),1)
+    push %deck %card
+  }
+}
+
+alias poker_postblinds {
+  set %contrib $map()
+  set %acted $map()
+  set %allin $map()
+  ; how many players are actually in this hand (chips at the start)
+  set %inhand 0
+  foreach %fp %seats { if ($get(%folded,%fp) != 1) { set %inhand $calc(%inhand + 1) } }
+  ; blind seats relative to the button, skipping busted players
+  if (%inhand < 3) {
+    ; heads-up: the button posts the small blind and acts first pre-flop
+    set %sbi %button
+    set %bbi $poker_nextin($calc(%button + 1))
+  } else {
+    set %sbi $poker_nextin($calc(%button + 1))
+    set %bbi $poker_nextin($calc(%sbi + 1))
+  }
+  set %sbfp $get(%seats, %sbi)
+  set %bbfp $get(%seats, %bbi)
+  ; post blinds, clamped to stack (a short stack goes all-in on its blind)
+  set %sbamt %sb
+  if (%sbamt > $get(%stack,%sbfp)) { set %sbamt $get(%stack,%sbfp) }
+  set %bbamt %bb
+  if (%bbamt > $get(%stack,%bbfp)) { set %bbamt $get(%stack,%bbfp) }
+  setat %bet %sbfp %sbamt
+  setat %bet %bbfp %bbamt
+  setat %contrib %sbfp %sbamt
+  setat %contrib %bbfp %bbamt
+  setat %stack %sbfp $calc($get(%stack,%sbfp) - %sbamt)
+  setat %stack %bbfp $calc($get(%stack,%bbfp) - %bbamt)
+  if ($get(%stack,%sbfp) <= 0) { setat %allin %sbfp 1 }
+  if ($get(%stack,%bbfp) <= 0) { setat %allin %bbfp 1 }
+  set %pot $calc(%sbamt + %bbamt)
+  set %tocall %bb
+  ; first to act pre-flop = next player who can act after the big blind (heads-up: the SB/button)
+  if (%inhand < 3) { set %turn %sbi }
+  else { set %turn $poker_nextactor($calc(%bbi + 1)) }
+  set %turnid $calc(%turnid + 1)
+}
+
+; our sealed hole cards arrive here
+on SIGNAL:age_deal {
+  ; $data = "<c1> <c2>"
+  setat %myhole me $data
+  poker_render
+}
+
+; ---- betting ---------------------------------------------------------------
+on SIGNAL:poker_fold  { age.send %chan act fold }
+on SIGNAL:poker_call  { age.send %chan act call }
+on SIGNAL:poker_raise { age.send %chan act raise %betamount }
+on SIGNAL:poker_min   { set %betamount %bb | poker_render }
+on SIGNAL:poker_q     { set %betamount $int($calc(%pot / 4)) | poker_render }
+on SIGNAL:poker_h     { set %betamount $int($calc(%pot / 2)) | poker_render }
+on SIGNAL:poker_pot   { set %betamount %pot | poker_render }
+on SIGNAL:poker_t     { set %betamount $int($calc(%pot * 3 / 4)) | poker_render }
+on SIGNAL:poker_allin { age.send %chan act allin }
+
+alias poker_onact {
+  ; Drop stale / double-tapped / out-of-turn actions. The view only shows action buttons on
+  ; your turn, but taps can still race the async re-render; without this guard a second tap
+  ; re-applies a move for a seat that has already acted, corrupting stacks/pot and the turn
+  ; pointer (the "mash the buttons" crash). Only the seat whose turn it is may act.
+  if (%started == 0) { halt }
+  if ($from != $get(%seats,%turn)) { halt }
+  ; $from acted: $2 = fold|check|call|raise ; $3 = raise-to amount
+  set %fp $from
+  if ($2 == fold) {
+    setat %folded %fp 1
+    setat %acted %fp 1
+  }
+  elseif ($2 == raise) {
+    set %need $calc($3 - $get(%bet,%fp))
+    if (%need < 0) { set %need 0 }     ; a raise-to below our current bet isn't a raise; never move chips backwards
+    set %put %need
+    if (%put > $get(%stack,%fp)) { set %put $get(%stack,%fp) }   ; clamp to stack (short all-in)
+    setat %bet %fp $calc($get(%bet,%fp) + %put)
+    setat %stack %fp $calc($get(%stack,%fp) - %put)
+    setat %contrib %fp $calc($get(%contrib,%fp) + %put)
+    set %pot $calc(%pot + %put)
+    set %tocall $get(%bet,%fp)
+    set %acted $map()            ; a genuine raise re-opens the action for everyone
+    setat %acted %fp 1
+    if ($get(%stack,%fp) == 0) { setat %allin %fp 1 }
+  }
+  elseif ($2 == allin) {
+    ; host-authoritative all-in: commit the seat's entire remaining stack, clamped by the host so
+    ; it works even if the client's local %bet/%stack are stale. A raise (new bet above %tocall)
+    ; re-opens the action for everyone; an all-in that only calls/undercalls does not.
+    set %put $get(%stack,%fp)
+    setat %bet %fp $calc($get(%bet,%fp) + %put)
+    setat %stack %fp 0
+    setat %contrib %fp $calc($get(%contrib,%fp) + %put)
+    set %pot $calc(%pot + %put)
+    if ($get(%bet,%fp) > %tocall) { set %tocall $get(%bet,%fp) | set %acted $map() }
+    setat %acted %fp 1
+    setat %allin %fp 1
+  }
+  else {
+    ; call or check (call short-stack = all-in for the rest)
+    set %need $calc(%tocall - $get(%bet,%fp))
+    if (%need < 0) { set %need 0 }
+    set %put %need
+    if (%put > $get(%stack,%fp)) { set %put $get(%stack,%fp) }
+    setat %bet %fp $calc($get(%bet,%fp) + %put)
+    setat %stack %fp $calc($get(%stack,%fp) - %put)
+    setat %contrib %fp $calc($get(%contrib,%fp) + %put)
+    set %pot $calc(%pot + %put)
+    setat %acted %fp 1
+    if ($get(%stack,%fp) == 0) { setat %allin %fp 1 }
+  }
+  poker_advance
+  poker_render
+  ; A plain in-street action only moved the turn: push a one-line delta (no FRAG) instead of the whole
+  ; table. Street changes / hand ends fall through to a full state (poker_nextstreet/endhand paths).
+  if (%advturn == 1) { poker_evact %fp } else { poker_broadcast }
+  timer 350 poker_botstep
+  poker_armclock
+}
+
+alias poker_endhand {
+  ; $1 = sole survivor fp - everyone else folded; wins the whole pot
+  setat %stack $1 $calc($get(%stack,$1) + %pot)
+  set %winners $list()
+  push %winners $get(%name,$1)
+  set %winnertext $get(%name,$1) wins %pot
+  set %pot 0                 ; pot is now in the survivor's stack; clear it for the lobby
+  set %started 0
+  set %street lobby
+  poker_checkover
+  signal poker_win
+  poker_broadcast            ; push the final stacks, pot=0 and winner line to every client
+  poker_render
+}
+
+; End-of-session check: if one player (or none) has chips left, the game is over and the
+; last player standing is the champion. Call after a hand's chips have been paid out.
+;
+; Robust champion selection: the winner is the seat holding the most chips, which is by
+; definition the sole survivor once everyone else has busted to 0. Deriving it from the max
+; stack (rather than "the last seat we saw with a positive stack") means we never emit an
+; empty champion - the bug behind the reported "<empty> wins the table" banner, which happened
+; whenever the survivor-tracking loop finished with no positive-stack seat recorded (e.g. an
+; all-in showdown edge where the pot had not yet landed in a stack when this ran). We only
+; declare the game over when there IS a named survivor; a seatless/blank table is left alone.
+alias poker_checkover {
+  set %alive 0
+  set %topfp
+  set %topstk -1
+  foreach %fp %seats {
+    set %stk $get(%stack,%fp)
+    if (%stk > 0) { set %alive $calc(%alive + 1) }
+    if (%stk > %topstk) { set %topstk %stk | set %topfp %fp }
+  }
+  if (%alive < 2) {
+    if ($len(%topfp) > 0) {
+      set %champname $get(%name,%topfp)
+      if ($len(%champname) > 0) {
+        set %gameover 1
+        set %champion %champname
+      }
+    }
+  }
+}
+
+alias poker_advance {
+  set %advturn 0
+  ; last player standing wins immediately
+  set %live 0
+  set %onlyfp
+  foreach %fp %seats { if ($get(%folded,%fp) != 1) { set %live $calc(%live + 1) | set %onlyfp %fp } }
+  if (%live < 2) {
+    poker_endhand %onlyfp
+  } else {
+    ; round closes when every non-folded, non-all-in player has acted AND matched %tocall
+    set %open 0
+    foreach %fp %seats {
+      if ($get(%folded,%fp) != 1) { if ($get(%allin,%fp) != 1) {
+        if ($get(%acted,%fp) != 1) { set %open 1 }
+        if ($get(%bet,%fp) != %tocall) { set %open 1 }
+      } }
+    }
+    if (%open == 0) {
+      poker_nextstreet
+    } else {
+      ; advance to the next seat that can act (non-folded, non-all-in)
+      set %n $len(%seats)
+      set %steps 0
+      set %done 0
+      while (%steps < %n) {
+        if (%done == 0) {
+          set %turn $mod($calc(%turn + 1), %n)
+          set %cur $get(%seats,%turn)
+          if ($get(%folded,%cur) != 1) { if ($get(%allin,%cur) != 1) { set %done 1 } }
+        }
+        set %steps $calc(%steps + 1)
+      }
+      set %turnid $calc(%turnid + 1)
+      set %advturn 1
+    }
+  }
+}
+
+alias poker_firstact {
+  ; first to act after the flop = first player who can act to the left of the button
+  set %turn $poker_nextactor($calc(%button + 1))
+  set %turnid $calc(%turnid + 1)
+}
+
+alias poker_nextstreet {
+  if (%street == river) {
+    poker_showdown
+  } else {
+    ; dealer reveals the next board card(s) from its deck
+    if (%street == preflop) { set %street flop | poker_reveal 3 }
+    elseif (%street == flop) { set %street turn | poker_reveal 1 }
+    elseif (%street == turn) { set %street river | poker_reveal 1 }
+    set %tocall 0
+    set %bet $map()
+    set %acted $map()
+    poker_firstact
+    ; if fewer than two players can still act (rest all-in/folded), run the board out
+    set %actors 0
+    foreach %fp %seats { if ($get(%folded,%fp) != 1) { if ($get(%allin,%fp) != 1) { set %actors $calc(%actors + 1) } } }
+    if (%actors < 2) { poker_nextstreet }
+    else { timer 350 poker_botstep | poker_armclock }   ; re-arm the bot loop: a new street can open on a bot's turn
+  }
+}
+
+alias poker_reveal {
+  ; $1 = count. dealer pulls from %deck at %base and broadcasts.
+  set %n 0
+  while (%n < $1) {
+    set %card $get(%deck,%base)
+    push %board %card
+    set %base $calc(%base + 1)
+    set %n $calc(%n + 1)
+  }
+}
+
+
+; ---- hand evaluation (value function - returns a sortable score) ----
+; $1- = up to 7 cards "Rs". Category + high-rank tiebreak (friendly-game grade;
+; tiebreak is coarse, not full kicker-perfect). Straight detection included.
+; ---------------------------------------------------------------------------
+; Hand evaluation. Scores the BEST 5-card poker hand from the 5-7 cards in $1-.
+; Category is the leading base-15 digit, high to low: 8 straight flush (incl.
+; royal = ace-high), 7 four of a kind, 6 full house, 5 flush, 4 straight,
+; 3 trips, 2 two pair, 1 pair, 0 high card. The five base-15 digits below the
+; category are the CORRECT tiebreak ranks for that category (the flush's own
+; five cards, the straight's high card, a pair's kickers, ...), so equal
+; categories compare exactly as real poker does. Aces play high everywhere and
+; also low for the wheel (A-2-3-4-5); a straight flush beats quads; and 7-card
+; flush/straight scoring uses the actual five cards, never stray kickers.
+alias poker_handscore {
+  set %hist $map()
+  set %suit $map()
+  foreach %card $1- {
+    set %rv $get(%rankmap,$left(%card,1))
+    set %su $right(%card,1)
+    setat %hist %rv $calc($get(%hist,%rv) + 1)
+    setat %suit %su $calc($get(%suit,%su) + 1)
+  }
+  ; flush suit = the (at most one) suit holding 5+ cards
+  set %fsuit
+  foreach %su $keys(%suit) { if ($get(%suit,%su) > 4) { set %fsuit %su } }
+  ; the flush cards' ranks (distinct within a suit), high to low
+  set %flushranks $list()
+  if ($len(%fsuit) > 0) {
+    foreach %card $1- { if ($right(%card,1) == %fsuit) { push %flushranks $get(%rankmap,$left(%card,1)) } }
+    set %flushranks $reverse($sort(%flushranks))
+  }
+  ; best straight high card (wheel-aware): among all ranks, and within the flush suit
+  set %sthi $poker_straighthi($join($keys(%hist)))
+  set %sfhi 0
+  if ($len(%flushranks) > 0) { set %sfhi $poker_straighthi($join(%flushranks)) }
+  ; count buckets: highest quad rank; trips and pairs-or-better, each high to low
+  set %quad 0
+  set %trips $list()
+  set %pairs $list()
+  foreach %k $keys(%hist) {
+    set %c $get(%hist,%k)
+    if (%c > 3) { if (%k > %quad) { set %quad %k } }
+    if (%c == 3) { push %trips %k }
+    if (%c > 1) { push %pairs %k }          ; a trip also serves as a pair (full house / two pair)
+  }
+  set %trips $reverse($sort(%trips))
+  set %pairs $reverse($sort(%pairs))
+  set %distinct $reverse($sort($keys(%hist)))   ; distinct ranks high to low, for kickers
+  ; full house = a trip plus any OTHER paired rank (a second trip counts as that pair)
+  set %fhtrip 0
+  set %fhpair 0
+  if ($len(%trips) > 0) {
+    set %fhtrip $get(%trips,0)
+    foreach %pk %pairs { if (%fhpair == 0) { if (%pk != %fhtrip) { set %fhpair %pk } } }
+  }
+  set %isfh 0
+  if (%fhtrip > 0) { if (%fhpair > 0) { set %isfh 1 } }
+  ; ---- category + its tiebreak ranks (%tb, most significant first) ----
+  set %cat 0
+  set %tb $list()
+  if (%sfhi > 0) {
+    set %cat 8 | push %tb %sfhi
+  } elseif (%quad > 0) {
+    set %cat 7 | push %tb %quad
+    foreach %d %distinct { if ($len(%tb) < 2) { if (%d != %quad) { push %tb %d } } }
+  } elseif (%isfh == 1) {
+    set %cat 6 | push %tb %fhtrip | push %tb %fhpair
+  } elseif ($len(%fsuit) > 0) {
+    set %cat 5
+    foreach %r %flushranks { if ($len(%tb) < 5) { push %tb %r } }
+  } elseif (%sthi > 0) {
+    set %cat 4 | push %tb %sthi
+  } elseif ($len(%trips) > 0) {
+    set %cat 3 | push %tb $get(%trips,0)
+    foreach %d %distinct { if ($len(%tb) < 3) { if (%d != $get(%trips,0)) { push %tb %d } } }
+  } elseif ($len(%pairs) > 1) {
+    set %cat 2
+    set %p1 $get(%pairs,0)
+    set %p2 $get(%pairs,1)
+    push %tb %p1 | push %tb %p2
+    foreach %d %distinct { if ($len(%tb) < 3) { if (%d != %p1) { if (%d != %p2) { push %tb %d } } } }
+  } elseif ($len(%pairs) == 1) {
+    set %cat 1 | push %tb $get(%pairs,0)
+    foreach %d %distinct { if ($len(%tb) < 4) { if (%d != $get(%pairs,0)) { push %tb %d } } }
+  } else {
+    set %cat 0
+    foreach %d %distinct { if ($len(%tb) < 5) { push %tb %d } }
+  }
+  ; ---- pack: category, then five base-15 tiebreak digits (zero-padded) ----
+  set %s %cat
+  set %i 0
+  foreach %t %tb { if (%i < 5) { set %s $calc(%s * 15 + %t) | set %i $calc(%i + 1) } }
+  while (%i < 5) { set %s $calc(%s * 15) | set %i $calc(%i + 1) }
+  return %s
+}
+
+; Best straight high card from a space-separated list of rank values; 0 if none.
+; Wheel-aware: an ace (14) also fills the low end so A-2-3-4-5 scores as a 5-high straight.
+alias poker_straighthi {
+  set %p $map()
+  foreach %v $1- { setat %p %v 1 }
+  if ($get(%p,14) == 1) { setat %p 1 1 }
+  set %hi 14
+  while (%hi > 4) {
+    if ($get(%p,%hi) == 1) { if ($get(%p,$calc(%hi - 1)) == 1) { if ($get(%p,$calc(%hi - 2)) == 1) { if ($get(%p,$calc(%hi - 3)) == 1) { if ($get(%p,$calc(%hi - 4)) == 1) { return %hi } } } } }
+    set %hi $calc(%hi - 1)
+  }
+  return 0
+}
+
+; hand category NAME for the rank badge (derived from the score: category is the
+; leading base-15 digit floor(score / 15^5); the next digit is the straight-flush
+; high card, so an ace-high straight flush reads as ROYAL FLUSH).
+alias poker_handcat {
+  set %sc $poker_handscore($1-)
+  set %c $int($calc(%sc / 759375))
+  if (%c == 8) {
+    if ($mod($int($calc(%sc / 50625)), 15) == 14) { return ROYAL FLUSH }
+    return STRAIGHT FLUSH
+  }
+  elseif (%c == 7) { return FOUR OF A KIND }
+  elseif (%c == 6) { return FULL HOUSE }
+  elseif (%c == 5) { return FLUSH }
+  elseif (%c == 4) { return STRAIGHT }
+  elseif (%c == 3) { return THREE OF A KIND }
+  elseif (%c == 2) { return TWO PAIR }
+  elseif (%c == 1) { return PAIR }
+  return HIGH CARD
+}
+
+alias poker_showdown {
+  ; score every non-folded hand (best 5 of hole+board)
+  set %score $map()
+  foreach %fp %seats {
+    if ($get(%folded,%fp) != 1) { setat %score %fp $poker_handscore($get(%hole,%fp) $join(%board)) }
+  }
+  ; reveal every non-folded hand so the showdown is visible on EVERY client, not just the host
+  ; (hole cards are otherwise host-only and never broadcast). Folded hands stay mucked.
+  set %reveal $map()
+  foreach %fp %seats { if ($get(%folded,%fp) != 1) { setat %reveal %fp $get(%hole,%fp) } }
+  ; distinct sorted contribution levels define the side-pot layers
+  set %tmp $list()
+  foreach %fp %seats { if ($get(%contrib,%fp) > 0) { push %tmp $get(%contrib,%fp) } }
+  set %tmp $sort(%tmp)
+  set %levels $list()
+  set %prev -1
+  foreach %lv %tmp { if (%lv != %prev) { push %levels %lv | set %prev %lv } }
+
+  set %prevlv 0
+  set %winners $list()
+  set %awarded $map()      ; name -> chips actually won, so the banner can show each amount
+  foreach %lv %levels {
+    ; this layer = (lv - prevlv) chips from every player who put in at least lv
+    set %width $calc(%lv - %prevlv)
+    set %cnt 0
+    foreach %fp %seats { if ($get(%contrib,%fp) >= %lv) { set %cnt $calc(%cnt + 1) } }
+    set %layer $calc(%width * %cnt)
+    ; best eligible (non-folded, contributed into this layer) score
+    set %bsc -1
+    foreach %fp %seats {
+      if ($get(%folded,%fp) != 1) { if ($get(%contrib,%fp) >= %lv) {
+        if ($get(%score,%fp) > %bsc) { set %bsc $get(%score,%fp) }
+      } }
+    }
+    ; split this layer among all eligible players tied at the best score
+    set %nwin 0
+    foreach %fp %seats {
+      if ($get(%folded,%fp) != 1) { if ($get(%contrib,%fp) >= %lv) {
+        if ($get(%score,%fp) == %bsc) { set %nwin $calc(%nwin + 1) }
+      } }
+    }
+    if (%nwin > 0) {
+      ; integer chips only: floor the share and hand the odd chip(s) to the earliest eligible
+      ; seats in seat order. This keeps a split pot whole (no fractional stacks, nothing created
+      ; or destroyed): share*nwin + remainder == layer.
+      set %share $idiv(%layer, %nwin)
+      set %rem $calc(%layer - $calc(%share * %nwin))
+      foreach %fp %seats {
+        if ($get(%folded,%fp) != 1) { if ($get(%contrib,%fp) >= %lv) {
+          if ($get(%score,%fp) == %bsc) {
+            set %award %share
+            if (%rem > 0) { set %award $calc(%share + 1) | set %rem $calc(%rem - 1) }
+            setat %stack %fp $calc($get(%stack,%fp) + %award)
+            setat %awarded $get(%name,%fp) $calc($get(%awarded,$get(%name,%fp)) + %award)
+            if ($has(%winners, $get(%name,%fp)) == false) { push %winners $get(%name,%fp) }
+          }
+        } }
+      }
+    } else {
+      ; no eligible (non-folded) player reached this layer - eg an uncalled over-bet whose bettor
+      ; then folded. Those chips belong to nobody at showdown, so return each contributor's share
+      ; of THIS layer to them rather than letting it vanish. width chips came from each of the
+      ; %cnt contributors, so refund width to each: width*cnt == layer, chips stay conserved.
+      foreach %fp %seats {
+        if ($get(%contrib,%fp) >= %lv) { setat %stack %fp $calc($get(%stack,%fp) + %width) }
+      }
+    }
+    set %prevlv %lv
+  }
+  ; announce from who actually took chips and how much. One winner reads "Alice wins 150"; a
+  ; genuine split or several SEPARATE side pots each show their own amount ("Alice 150, Bob 300"),
+  ; so the banner never claims one wrong combined total. Guard the zero-winner case (every layer
+  ; refunded) by falling back to the top-stack seat, who holds the chips.
+  if ($len(%winners) == 0) {
+    set %fallbackfp
+    set %fbstk -1
+    foreach %fp %seats { if ($get(%stack,%fp) > %fbstk) { set %fbstk $get(%stack,%fp) | set %fallbackfp %fp } }
+    set %winnertext $get(%name,%fallbackfp) wins %pot
+  }
+  elseif ($len(%winners) < 2) {
+    set %w0 $get(%winners,0)
+    set %winnertext %w0 wins $get(%awarded,%w0)
+  } else {
+    set %wnames
+    foreach %wn %winners {
+      set %seg %wn $get(%awarded,%wn)
+      if ($len(%wnames) == 0) { set %wnames %seg } else { set %wnames %wnames, %seg }
+    }
+    set %winnertext pot: %wnames
+  }
+  set %pot 0                 ; chips are now in the winners' stacks; clear the pot for the lobby
+  set %started 0
+  set %street lobby
+  poker_checkover
+  signal poker_win
+  poker_broadcast            ; push the final stacks, pot=0 and winner line to every client
+  poker_render
+}
+
+on SIGNAL:poker_win {
+  ; %winnertext is the formatted result: one winner ("Eck wins 140") or a split
+  ; ("split pot: Eck, Ada (140)"); %winners lists the names. The table banner shows the
+  ; same text. Add a personal note when you're among the winners.
+  set %me $age.me
+  if ($has(%winners, $get(%name,%me)) == true) { echo %chan *** you're in the money - %winnertext }
+  else { echo %chan *** %winnertext }
+  if (%gameover == 1) {
+    echo %chan *** game over - %champion takes the table
+  } else {
+    ; keep a practice session flowing: auto-deal the next hand after a short pause
+    if (%practice == 1) { timer 2500 poker_next }
+  }
+}
+
+; Deal the next hand of an ongoing session (host-driven in a real game; auto in practice).
+on SIGNAL:poker_next {
+  if (%gameover == 1) { return }
+  if (%started == 1) { return }
+  if (%practice == 1) { poker_deal }
+}
+
+; Start a fresh session: reset every seated player's stack and deal hand 1 again.
+on SIGNAL:poker_newgame {
+  poker_sethost
+  if (%ishost == 0) { toast Only the host can start a new game | return }
+  set %gameover 0
+  set %champion
+  set %button 0
+  set %handid 0
+  foreach %fp %seats { setat %stack %fp %startstack }
+  poker_deal
+}
+
+; ============================================================================
+; the table view
+; The view DSL supports if/elseif/else + foreach, so the table is state-aware.
+; Multi-word dynamic text is quoted ("…") so it survives as a single label.
+; ============================================================================
+alias poker_render {
+  ; The table was closed with the X. Inbound state/deltas, clock ticks and bot steps all render, so
+  ; without this latch any of them would pop the table straight back open. Re-opening from the
+  ; sidebar (poker_open) clears it.
+  if (%closed == 1) { return }
+  set %me $age.me
+  set %seated 0
+  if ($has(%name,%me) == true) { set %seated 1 }
+  set %turnfp $get(%seats,%turn)
+  ; dealer button follows the rotating button; blinds were set for real by poker_postblinds,
+  ; so only derive a preview for the lobby (no hand in progress yet).
+  set %dealerfp $get(%seats,%button)
+  if (%started == 0) {
+    set %sbi $poker_nextin($calc(%button + 1))
+    set %sbfp $get(%seats, %sbi)
+    set %bbfp $get(%seats, $poker_nextin($calc(%sbi + 1)))
+  }
+  set %nseat $len(%seats)
+
+  ; ---- action context (decide here; the view only reads flags/labels) ----
+  set %active 0
+  if (%started == 1) { set %active 1 }
+
+  set %ismyturn 0
+  if (%active == 1) { if (%turnfp == %me) { if ($get(%folded,%me) != 1) { set %ismyturn 1 } } }
+
+  set %mybet $get(%bet,%me)
+  set %need $calc(%tocall - %mybet)
+  if (%need < 0) { set %need 0 }
+  set %calllabel Check
+  if (%need > 0) { set %calllabel Call %need }
+  if (%betamount == 0) { set %betamount %bb }
+  set %raiselabel Raise to %betamount
+
+  ; Host action gating. Keying the table (age.host) only needs the host seated - a lone host must be
+  ; able to open the table so peers can join encrypted; dealing a hand needs at least two seats. So
+  ; canstart is true for the host in the lobby when either the table is not yet keyed (open it) or it
+  ; is keyed and enough players are seated (deal). Without the pre-key case a solo host could never
+  ; open the table and real multiplayer would deadlock, showing "Join Table" again after joining.
+  ; Host action gating. Before any table exists nobody is host yet, so ANY seated player may open one
+  ; (whoever taps becomes the host). Gating this on %ishost was the no-host deadlock: with the host
+  ; elected by fingerprint, the tapper wasn't allowed to open and the elected owner never tapped.
+  ; Once a table is keyed, only its host may deal, and only with enough players seated.
+  set %canstart 0
+  if (%active == 0 && %gameover == 0) {
+    if (%hostlocked == 0) { set %canstart 1 }
+    elseif (%ishost == 1 && %hosted == 1 && %nseat > 1) { set %canstart 1 }
+  }
+  set %startlabel Open Table
+  if (%hosted == 1) { set %startlabel Deal Hand }
+  if (%handid > 0) { set %startlabel Next Hand }
+  set %hostlabel Start a table
+  if (%hosted == 1) { set %hostlabel You're the host }
+
+  ; The dealer can end the table whenever it is keyed: mid-hand, at showdown, or while waiting in
+  ; the lobby. Gating this on the lobby-only %canstart made End Table useless exactly when a stuck
+  ; table needs ending, so it lives in the header and is driven by its own flag.
+  set %canend 0
+  if (%practice == 0 && %ishost == 1 && %hosted == 1) { set %canend 1 }
+
+  ; A player seated in the lobby who can't act yet (a non-host waiting on the host, or the host who
+  ; has opened the table and is waiting for players) gets a status line - never the "Join Table"
+  ; button again, which reads as though their join silently failed.
+  set %seatwait Waiting for the host to start the hand
+  if (%ishost == 1) { set %seatwait Table open · waiting for players to join }
+
+  ; game over: one player has all the chips
+  set %isover 0
+  if (%gameover == 1) { set %isover 1 }
+  set %cannewgame 0
+  if (%isover == 1) { if (%ishost == 1) { set %cannewgame 1 } }
+  set %overlabel %champion wins the table
+  if ($len(%champion) == 0) { set %overlabel Game over }
+
+  set %waiting 0
+  if (%active == 1) { if (%ismyturn == 0) { set %waiting 1 } }
+  set %waitlabel Waiting for $get(%name,%turnfp)…
+
+  ; per-turn shot-clock label (blank unless a live hand is counting down)
+  set %clocklabel
+  if (%active == 1) { if (%clockleft > 0) { set %clocklabel ⏱ %clockleft s } }
+  if (%waiting == 1) { if (%clockleft > 0) { set %waitlabel Waiting for $get(%name,%turnfp)… · ⏱ %clockleft s } }
+
+  set %haswinner 0
+  set %winlen $len(%winnertext)
+  if (%winlen > 0) { set %haswinner 1 }
+
+  set %streetlabel WAITING
+  if (%street == preflop) { set %streetlabel PRE-FLOP }
+  elseif (%street == flop) { set %streetlabel FLOP }
+  elseif (%street == turn) { set %streetlabel TURN }
+  elseif (%street == river) { set %streetlabel RIVER }
+  elseif (%street == lobby) { set %streetlabel LOBBY }
+  set %blindslabel Blinds %sb/%bb · Pot %pot
+
+  ; ---- per-seat display (precompute into maps) ----
+  set %seatborder $map()
+  set %seatborderw $map()
+  set %seatbadge $map()
+  set %seatbadgebg $map()
+  set %seatstatus $map()
+  set %seatav $map()
+  foreach %fp %seats {
+    set %bc #3a3350
+    set %bw 1
+    if (%fp == %turnfp) { if (%active == 1) { set %bc #ffd166 | set %bw 4 } }
+    setat %seatborder %fp %bc
+    setat %seatborderw %fp %bw
+
+    set %badge
+    set %badgebg #00000000
+    if (%fp == %dealerfp) { set %badge D | set %badgebg #f0c020 }
+    elseif (%fp == %sbfp) { set %badge SB | set %badgebg #6c7bdc }
+    elseif (%fp == %bbfp) { set %badge BB | set %badgebg #6c7bdc }
+    setat %seatbadge %fp %badge
+    setat %seatbadgebg %fp %badgebg
+
+    set %sline
+    if ($get(%bet,%fp) > 0) { set %sline BET $get(%bet,%fp) }
+    if ($get(%allin,%fp) == 1) { set %sline ALL-IN }
+    if ($get(%folded,%fp) == 1) { set %sline FOLD }
+    ; a player with no chips who isn't all-in this hand is eliminated
+    if ($get(%stack,%fp) <= 0) { if ($get(%allin,%fp) != 1) { set %sline OUT } }
+    setat %seatstatus %fp %sline
+
+    set %av #6c5ce7
+    if ($get(%folded,%fp) == 1) { set %av #3a3350 }
+    setat %seatav %fp %av
+  }
+
+  ; my hole cards (split "c1 c2"); show backs until dealt
+  set %myc $split($get(%myhole,me))
+  set %hashole 0
+  if ($len(%myc) > 1) { set %hashole 1 }
+  set %h1 $get(%myc,0)
+  set %h2 $get(%myc,1)
+
+  ; ---- hand-rank badges: mine always, others only once their hole is revealed ----
+  set %bn $len(%board)
+  set %mycat
+  if (%hashole == 1) { if (%bn > 0) { set %mycat $poker_handcat($get(%myhole,me) $join(%board)) } }
+  set %hasmycat 0
+  if ($len(%mycat) > 0) { set %hasmycat 1 }
+  set %seatrank $map()
+  set %seathasrank $map()
+  set %seatc1 $map()        ; revealed hole cards per seat, populated only at showdown
+  set %seatc2 $map()
+  set %seatreveal $map()
+  set %seatemoji $map()
+  foreach %fp %seats {
+    set %rk
+    ; prefer the broadcast reveal (present on every client at showdown), fall back to the local
+    ; hole map (the host has it live). This is why opponents' ranks/cards now show for everyone.
+    set %hh $get(%reveal,%fp)
+    if ($len(%hh) == 0) { set %hh $get(%hole,%fp) }
+    if ($len(%hh) > 0) { if (%bn > 0) { set %rk $poker_handcat(%hh $join(%board)) } }
+    setat %seatrank %fp %rk
+    set %hr 0
+    if ($len(%rk) > 0) { set %hr 1 }
+    setat %seathasrank %fp %hr
+    ; the actual two cards to show under an opponent's seat at showdown
+    set %shown 0
+    set %rv $get(%reveal,%fp)
+    if ($len(%rv) > 0) {
+      set %rc $split(%rv)
+      setat %seatc1 %fp $get(%rc,0)
+      setat %seatc2 %fp $get(%rc,1)
+      set %shown 1
+    }
+    setat %seatreveal %fp %shown
+    ; stable per-player emoji avatar from the first hex nibble of their fingerprint hash
+    setat %seatemoji %fp $get(%emojimap, $lower($left($age.sha(%fp),1)))
+  }
+
+  ; ---- ring seat order: hero first so the ring drops us at the bottom-centre (child 0),
+  ; opponents fanning out around the oval like Discord's table. Not seated -> natural order. ----
+  ; opponents sit along the top edge; the hero is shown in the hand panel at the bottom.
+  set %topseats $list()
+  foreach %fp %seats { if (%fp != %me) { push %topseats %fp } }
+  ; Ring order: YOU first. ScriptView.Ring anchors child 0 at the bottom of the ellipse and walks the
+  ; rest around it, so hero-first puts you at the near edge with everyone facing you across the felt.
+  set %ringseats $list()
+  if (%seated == 1) { push %ringseats %me }
+  foreach %fp %topseats { push %ringseats %fp }
+  ; TUNE ON DEVICE: the ring the seats sit on, and the felt it encircles.
+  ;
+  ; The ring is now a true circle by default (ScriptView.Ring: ry = size * ratio, a unitless
+  ; multiplier like `weight` that defaults to 1.0). It used to be hardcoded to a 0.62 squash,
+  ; which is what made the seats collide: at 5+ players the left and right pods sat only ~ry apart
+  ; vertically while a pod is taller than that, so they piled onto each other. Circular spaces
+  ; them out to 6 players.
+  ;
+  ; Rule for the felt: a seat pod is CENTRED on the ring, so it covers the felt if the felt reaches
+  ; past (ringr - podsize/2). Pods run about 66 wide and 118 tall, so with ringr 132 keep the felt
+  ; inside roughly 198 wide and 146 tall. Add `ratio <mult>` to the ring below to flatten it again
+  ; if the circle eats too much height (ratio 0.62 is exactly the old look; whole numbers like 62
+  ; are NOT percentages and get clamped to the renderer maximum of 4.0).
+  set %ringr 132
+  set %feltw 170
+  set %felth 140
+  ; TUNE ON DEVICE: compact square felt size in px. Larger = more felt, less room for seats.
+  set %feltsz 188
+
+  view {
+    surface gradient linear:#1e2138:#0a0c18 bg #0a0c18 pad 7 {
+      column gap 8 pad 2 align center fill {
+
+        ; ---- header: blurple crest · title · street pill ----
+        row gap 9 align center fill {
+          surface circle width 32 height 32 gradient linear:#5865f2:#4752c4 elevation 5 {
+            column align center { text "♠" bold color #ffffff textsize 16 }
+          }
+          column gap 0 weight 1 {
+            text "POKER NIGHT" bold color #ffffff textsize 15
+            text "%blindslabel" color #8a91a8 textsize 10
+          }
+          surface gradient linear:#5865f2:#4752c4 radius 20 pad 6 elevation 3 {
+            text "%streetlabel" bold color #ffffff textsize 10
+          }
+          if (%canend == 1) { button "End" poker_stop bg #2b3150 color #ed4245 radius 12 height 34 }
+        }
+
+        ; ---- table: opponents along the top edge, a compact square felt below. The hero sits in
+        ; the hand panel at the bottom (further down), a phone-friendly top-vs-bottom table. ----
+        surface gradient linear:#151934:#0d1022 bg #12152b radius 24 pad 10 elevation 10 border #262b4d 1 fill {
+          column align center gap 9 fill {
+            ; The table proper: an elliptical felt with a seat pod for every player arranged around
+            ; its rim (you at the bottom). Replaces the old opponents-across-the-top strip, which read
+            ; as a list of avatars rather than a table.
+            stack align center {
+              surface ellipse gradient radial:#2c9c6a:#0f4a37 bg #12633f border #0a3327 5 elevation 6 width %feltw height %felth {
+                column align center gap 5 fill {
+                  spacer weight 1
+                  surface bg #0b2418 radius 14 pad 5 border #2f7d54 1 elevation 3 {
+                    row gap 6 align center {
+                      stack {
+                        surface circle width 12 height 12 bg #c0392b border #ffffff 2 offsety 5 { spacer }
+                        surface circle width 12 height 12 bg #2980b9 border #ffffff 2 offsety 3 { spacer }
+                        surface circle width 12 height 12 bg #f0c020 border #ffffff 2 { spacer }
+                      }
+                      column align center gap 0 {
+                        text "POT" bold color #7fd6a2 textsize 8
+                        text %pot bold color #ffffff textsize 15
+                      }
+                    }
+                  }
+                  row gap 3 align center {
+                    foreach %idx $range(0,4) {
+                      if (%idx < %bn) { card $get(%board,%idx) width 22 elevation 4 }
+                      else { card "" back width 22 elevation 2 }
+                    }
+                  }
+                  spacer weight 1
+                }
+              }
+              ring size %ringr {
+                foreach %fp %ringseats {
+                  column align center gap 2 {
+                    stack {
+                      if ($len($get(%avatar,%fp)) > 0) {
+                        surface circle width 34 height 34 elevation 4 border $get(%seatborder,%fp) $get(%seatborderw,%fp) {
+                          image $get(%avatar,%fp) circle width 34 height 34 crop
+                        }
+                      }
+                      else {
+                        surface circle width 34 height 34 elevation 4 bg $get(%seatav,%fp) border $get(%seatborder,%fp) $get(%seatborderw,%fp) {
+                          column align center { text "$get(%seatemoji,%fp)" textsize 19 }
+                        }
+                      }
+                      surface circle width 14 height 14 bg $get(%seatbadgebg,%fp) border #101430 1 align bottom {
+                        text "$get(%seatbadge,%fp)" bold color #101430 textsize 7
+                      }
+                    }
+                    surface bg #1b2040 radius 8 pad 3 border $get(%seatborder,%fp) $get(%seatborderw,%fp) elevation 2 {
+                      column align center gap 0 {
+                        text "$get(%name,%fp)" bold color #ffffff textsize 9
+                        row gap 2 align center {
+                          surface circle width 7 height 7 bg #f2c14e border #d99a2b 1 { spacer }
+                          text $get(%stack,%fp) bold color #ffd76b textsize 9
+                        }
+                      }
+                    }
+                    ; after a move, the pod says what they did: what they put in, or that they are out,
+                    ; or the hand they are showing once the board makes one readable.
+                    if ($get(%bet,%fp) > 0) {
+                      surface bg #2a2140 radius 9 pad 2 border #f0c020 1 {
+                        row gap 2 align center {
+                          surface circle width 7 height 7 bg #f0c020 border #ffffff 1 { spacer }
+                          text $get(%bet,%fp) bold color #ffd166 textsize 8
+                        }
+                      }
+                    }
+                    elseif ($get(%folded,%fp) == 1) { surface bg #241d33 radius 7 pad 2 { text "FOLD" bold color #7a7a8a textsize 7 } }
+                    elseif ($get(%seathasrank,%fp) == 1) { surface bg #0a0a0a radius 6 pad 2 { text "$get(%seatrank,%fp)" bold color #f5f5f5 textsize 7 } }
+                    ; every box holds cards: yours face up, everyone else face down until showdown turns
+                    ; them over. A folded player shows none at all.
+                    if (%fp == %me) {
+                      if (%hashole == 1) { row gap 2 align center { card $get(%myc,0) width 16 elevation 3 | card $get(%myc,1) width 16 elevation 3 } }
+                    }
+                    elseif ($get(%seatreveal,%fp) == 1) {
+                      row gap 2 align center { card $get(%seatc1,%fp) width 16 elevation 3 | card $get(%seatc2,%fp) width 16 elevation 3 }
+                    }
+                    elseif ($get(%folded,%fp) != 1) {
+                      ; != 1, not == 0: an unset map entry expands to empty, so a player who simply
+                      ; hasn't folded reads as "" and would fail an == 0 test.
+                      if (%started == 1) { row gap 2 align center { card "" back width 16 elevation 2 | card "" back width 16 elevation 2 } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        ; ---- your hand: big hole cards + rank (avatar/name/stack already show in the ring seat) ----
+        if (%seated == 1) {
+          surface gradient linear:#1a1e3c:#141733 bg #171232 radius 18 pad 9 elevation 6 border $get(%seatborder,%me) $get(%seatborderw,%me) fill {
+            row gap 12 align center {
+              column gap 3 weight 1 {
+                text "YOUR HAND" bold color #8a91a8 textsize 9
+                row gap 6 align center {
+                  if ($len($get(%avatar,%me)) > 0) {
+                    surface circle width 26 height 26 border $get(%seatborder,%me) $get(%seatborderw,%me) { image $get(%avatar,%me) circle width 26 height 26 crop }
+                  }
+                  else {
+                    surface circle width 26 height 26 bg $get(%seatav,%me) border $get(%seatborder,%me) $get(%seatborderw,%me) { column align center { text "$get(%seatemoji,%me)" textsize 15 } }
+                  }
+                  text "$get(%name,%me)" bold color #ffffff textsize 12
+                }
+                row gap 4 align center {
+                  surface circle width 10 height 10 bg #f2c14e border #d99a2b 1 { spacer }
+                  text $get(%stack,%me) bold color #ffd76b textsize 12
+                }
+                if (%hasmycat == 1) { surface bg #2a2140 radius 8 pad 3 border #f2c14e 1 { text "%mycat" bold color #ffe08a textsize 10 } }
+              }
+              row gap 7 {
+                if (%hashole == 1) { card %h1 width 52 elevation 8 | card %h2 width 52 elevation 8 }
+                else { card "" back width 52 elevation 4 | card "" back width 52 elevation 4 }
+              }
+            }
+          }
+        }
+
+        ; ---- action bar (state-aware) ----
+        surface gradient linear:#1a1e3c:#141733 bg #171232 radius 20 pad 11 elevation 8 fill {
+          if (%isover == 1) {
+            column gap 7 fill align center {
+              surface gradient linear:#f2c14e:#e0a52e radius 14 pad 6 elevation 4 { text "🏆 %overlabel" bold color #3a2e08 textsize 13 }
+              if (%cannewgame == 1) { button "New Game" poker_newgame bg #5865f2 color #ffffff radius 14 bold fill height 52 }
+              else { text "Waiting for the host to start a new game" color #8a91a8 textsize 11 }
+            }
+          }
+          elseif (%ismyturn == 1) {
+            column gap 9 fill {
+              if (%clockleft > 0) { text "Your turn · ⏱ %clockleft s" bold color #ffd76b textsize 11 }
+              row gap 8 fill {
+                button "Fold" poker_fold bg #3a3f52 color #e6e9f2 radius 14 bold weight 1 height 52
+                button "%calllabel" poker_call bg #3ba55d color #ffffff radius 14 bold weight 1 height 52
+                button "%raiselabel" poker_raise bg #f2c14e color #3a2e08 radius 14 bold weight 1.3 height 52
+              }
+              column gap 4 {
+                text "RAISE SIZE" bold color #8a91a8 textsize 9
+                row gap 5 fill {
+                  button "Min" poker_min bg #2b3150 color #cdd6e6 radius 12 weight 1 height 44
+                  button "½ Pot" poker_h bg #2b3150 color #cdd6e6 radius 12 weight 1 height 44
+                  button "Pot" poker_pot bg #2b3150 color #cdd6e6 radius 12 weight 1 height 44
+                  button "All-in" poker_allin bg #ed4245 color #ffffff radius 12 bold weight 1.2 height 44
+                }
+              }
+            }
+          }
+          elseif (%canstart == 1) {
+            column gap 7 fill align center {
+              text "%hostlabel" bold color #b9c0d4 textsize 12
+              button "%startlabel" poker_start bg #5865f2 color #ffffff radius 14 bold fill height 52
+            }
+          }
+          elseif (%waiting == 1) {
+            row gap 6 align center { text "%waitlabel" color #b9c0d4 textsize 12 }
+          }
+          elseif (%seated == 1) {
+            row gap 6 align center { text "%seatwait" color #b9c0d4 textsize 12 }
+          }
+          else {
+            column gap 7 fill align center {
+              text "Tap to take a seat" color #b9c0d4 textsize 12
+              button "Join Table" poker_join bg #5865f2 color #ffffff radius 14 bold fill height 52
+              button "Practice vs Bots" poker_practice bg #2b3150 color #e6e9f2 radius 14 fill height 48
+            }
+          }
+        }
+
+        ; ---- winner banner ----
+        if (%haswinner == 1) {
+          surface gradient linear:#2fbf71:#12833f radius 16 pad 11 elevation 7 fill {
+            row gap 7 align center { text "🎉" textsize 15 | text "%winnertext" bold color #ffffff textsize 14 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1088,9 +1088,17 @@ class IrcViewModel(
             val second = h.split(".").getOrNull(1)?.toIntOrNull() ?: return false
             if (second in 16..31) return true
         }
-        // IPv6 link-local (fe80::) and unique-local (fc00::/7 = fc..–fd..)
-        if (h.startsWith("fe80:")) return true
-        if (h.startsWith("fc") || h.startsWith("fd")) return true
+        // IPv4 link-local (self-assigned, always LAN)
+        if (h.startsWith("169.254.")) return true
+        // IPv6 link-local (fe80::) and unique-local (fc00::/7 = fc..-fd..).
+        // Require a colon so hostnames like "fcafe.chat" or "fdn.example" aren't
+        // misclassified as IPv6 literals.
+        if (h.contains(':')) {
+            if (h.startsWith("fe80:")) return true
+            if (h.startsWith("fc") || h.startsWith("fd")) return true
+        }
+        // mDNS names are local by definition
+        if (h.endsWith(".local")) return true
         // Let DNS sort out anything else
         return false
     }
@@ -2454,9 +2462,11 @@ class IrcViewModel(
      * If the server supports IRCv3 `+reply`/`draft/reply` and [msgId] is known, the reply tag
      * is attached so clients that understand threading show it as a reply.
      *
-     * If the server does NOT support reply tags and [buffer] is a channel (not a PM), the
-     * message is prefixed with `Nick: (quote) - ` so context isn't lost when replying
-     * to an older message from the notification drawer.
+     * If the server does NOT support reply tags, the message is prefixed with a quote of
+     * the original so context isn't lost when replying to an older message. In a channel
+     * the sender's nick is prepended too (`Nick: (quote) - reply`); in a PM only the
+     * quote is used (`(quote) - reply`) since there is a single counterparty and a nick
+     * prefix would read as a highlight of the person you're already talking to.
      */
     fun sendToBuffer(
         networkId: String,
@@ -2503,7 +2513,13 @@ class IrcViewModel(
                 }
                 // Channel, no quote available but sender known
                 isChannel && from.isNotBlank() -> "$from: $text"
-                // PM or no context
+                // PM without reply-tag support: keep the quote so the counterparty can tell
+                // which message this answers, but skip the nick prefix (pointless 1:1).
+                !isChannel && originalText.isNotBlank() -> {
+                    val quote = originalText.take(60).let { if (originalText.length > 60) "$it…" else it }
+                    "($quote) - $text"
+                }
+                // No context available
                 else -> text
             }
 
@@ -3697,7 +3713,7 @@ fun startAddNetwork() {
                 "SIGNAL:VIEW_CLOSED",
                 com.boxlabs.hexdroid.script.EventData(
                     network = _state.value.activeNetworkId ?: "",
-                    buffer = _state.value.selectedBuffer ?: "",
+                    buffer = _state.value.selectedBuffer,
                 ),
             )
         }
@@ -3718,7 +3734,7 @@ fun startAddNetwork() {
             if (!ran) runCatching {
                 scriptEngine.dispatch(
                     "SIGNAL:${name.uppercase()}",
-                    com.boxlabs.hexdroid.script.EventData(network = net ?: "", buffer = buf ?: "", args = args),
+                    com.boxlabs.hexdroid.script.EventData(network = net ?: "", buffer = buf, args = args),
                 )
             }
         }
@@ -3841,7 +3857,7 @@ fun startAddNetwork() {
                 event,
                 com.boxlabs.hexdroid.script.EventData(
                     network = netId ?: _state.value.activeNetworkId ?: "",
-                    buffer = _state.value.selectedBuffer ?: "",
+                    buffer = _state.value.selectedBuffer,
                     fields = fields, args = args,
                 ),
             )
@@ -6175,7 +6191,7 @@ fun startAddNetwork() {
                 if (isChannelTarget(bufferName) && bridge?.chatReady(bufferName) == true) {
                     for (chunk in splitMessageByLength(fullMessage, 120)) {
                         if (chunk.isEmpty()) continue
-                        if (bridge?.sendChat(bufferName, chunk) == true) {
+                        if (bridge.sendChat(bufferName, chunk)) {
                             append(currentKey, from = myNickNow, text = chunk, isLocal = true,
                                    encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
                             recordLocalSend(netId, currentKey, chunk, isAction = false)

@@ -17,6 +17,19 @@
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK"
         tools:ignore="ProtectedPermissions" />
 
+    <!--
+        Android TV support. HexDroid is fully usable with a D-pad/remote via Compose
+        focus navigation, so declare that neither a touchscreen nor the Leanback UI
+        library is required. LEANBACK_LAUNCHER (below) makes the app appear in the TV
+        home screen; touch-only launchers ignore it.
+    -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" tools:targetApi="34" />
 	<uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -25,6 +38,7 @@
         android:name=".HexDroidApp"
         android:label="HexDroid IRC"
         android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/tv_banner"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.HexDroidIRC"
         android:supportsRtl="true"
@@ -66,6 +80,9 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <!-- Android TV home screen. Sharing the MAIN filter with LAUNCHER is fine:
+                     phone launchers ignore LEANBACK_LAUNCHER and TV launchers ignore LAUNCHER. -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <!-- Handle irc:// and ircs:// deep links.
                  Scheme-only matching catches all servers/ports/channels.

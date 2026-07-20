@@ -172,6 +172,7 @@ fun WelcomeScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .focusHighlight()
                                     .clickable { selectedLang = lang.code }
                                     .background(
                                         if (isSelected) MaterialTheme.colorScheme.primaryContainer

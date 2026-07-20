@@ -154,7 +154,7 @@ fun EncryptionDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Active: ", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            activeLabel ?: "",
+                            activeLabel,
                              style = MaterialTheme.typography.bodyMedium,
                              color = MaterialTheme.colorScheme.primary,
                         )

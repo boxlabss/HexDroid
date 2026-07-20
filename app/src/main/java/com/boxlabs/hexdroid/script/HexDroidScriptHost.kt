@@ -117,14 +117,14 @@ class HexDroidScriptHost(
                             // Pick the content-type from the body shape: a JSON object/array stays JSON,
                             // but a `key=val&key=val` body (e.g. translate.hex's LibreTranslate call) must
                             // go out as form-urlencoded or the server rejects it as malformed JSON.
-                            val trimmed = body!!.trimStart()
+                            val trimmed = body.trimStart()
                             val ct = when {
                                 trimmed.startsWith("{") || trimmed.startsWith("[") -> "application/json; charset=utf-8"
                                 trimmed.contains("=") && !trimmed.contains(' ') -> "application/x-www-form-urlencoded; charset=utf-8"
                                 else -> req.contentType
                             }
                             setRequestProperty("Content-Type", ct)
-                            outputStream.use { it.write(body!!.toByteArray(Charsets.UTF_8)) }
+                            outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                         }
                     }
                     val status = conn.responseCode

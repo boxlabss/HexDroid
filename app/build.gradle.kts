@@ -4,7 +4,7 @@ plugins {
 }
 android {
     namespace = "com.boxlabs.hexdroid"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
