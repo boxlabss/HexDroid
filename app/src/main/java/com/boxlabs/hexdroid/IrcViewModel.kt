@@ -1754,6 +1754,20 @@ class IrcViewModel(
         }
     }
 
+    // These two MUST be declared above the init block. Kotlin runs property initializers and
+    // init blocks in source order, and init calls registerNetworkCallback(). When they lived
+    // below init: (a) ConnectivityManager delivers onCapabilitiesChanged for every live network
+    // right after registration, so on a fast device the callback ran while the constructor was
+    // still initializing later fields and hit a null validatedNetworks (the Play pre-launch NPE
+    // on ConcurrentHashMap.put); (b) the "= null" initializer of networkCallback ran AFTER init
+    // had assigned the callback into it, silently clobbering it back to null, so onCleared never
+    // unregistered and the callback leaked across ViewModel recreation.
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    /** Last-seen NET_CAPABILITY_VALIDATED per live Network handle, so onCapabilitiesChanged can
+     *  act on the not-validated -> validated EDGE only (the callback also fires for signal
+     *  strength and bandwidth churn). Entries are dropped in onLost. */
+    private val validatedNetworks = java.util.concurrent.ConcurrentHashMap<android.net.Network, Boolean>()
+
     init {
         // Let KeepAliveService request a clean QUIT if the user swipes the app away while
         // background persistence is off (see onTaskRemovedGracefulQuit). Cleared in onCleared.
@@ -1868,12 +1882,6 @@ class IrcViewModel(
 
         notifier.ensureChannels()
     }
-
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    /** Last-seen NET_CAPABILITY_VALIDATED per live Network handle, so onCapabilitiesChanged can
-     *  act on the not-validated -> validated EDGE only (the callback also fires for signal
-     *  strength and bandwidth churn). Entries are dropped in onLost. */
-    private val validatedNetworks = java.util.concurrent.ConcurrentHashMap<android.net.Network, Boolean>()
 
     private fun registerNetworkCallback() {
         val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
