@@ -169,7 +169,7 @@ private fun NickColourPickerDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            Button(onClick = { onConfirm(picked) }) { Text("OK") }
+            Button(onClick = { onConfirm(picked) }) { Text(stringResource(R.string.ok)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
@@ -192,6 +192,13 @@ private fun NickColourPickerDialog(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                         .clip(CircleShape)
+                        // D-pad path (Android TV / hardware keyboards): select engages
+                        // adjust mode, then left/right = hue, up/down = saturation.
+                        // Touch drag below is unaffected.
+                        .dpadColourWheel(
+                            onHue = { d -> hue = (hue + d + 360f) % 360f },
+                            onSat = { d -> sat = (sat + d).coerceIn(0f, 1f) },
+                        )
                         .pointerInput(Unit) {
                             val piF = Math.PI.toFloat()
                             detectDragGestures(
@@ -543,7 +550,7 @@ fun SettingsScreen(
                             onClick = { onUpdate { copy(fontScale = 1.0f) } },
                             enabled = s.fontScale != 1.0f,
                         ) {
-                            Text("Reset to 100%", style = MaterialTheme.typography.labelSmall)
+                            Text(stringResource(R.string.settings_reset_100), style = MaterialTheme.typography.labelSmall)
                         }
                         Text("150%", style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -673,7 +680,7 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_show_nicklist_default), s.defaultShowNickList) { onUpdate { copy(defaultShowNickList = !defaultShowNickList) } } }
 
             item { HorizontalDivider() }
-            item { SectionTitle("Custom Aliases") }
+            item { SectionTitle(stringResource(R.string.settings_custom_aliases)) }
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     Text(
@@ -687,7 +694,7 @@ fun SettingsScreen(
 
                     val aliases = s.commandAliases.toSortedMap()
                     if (aliases.isEmpty()) {
-                        Text("No aliases yet.", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.settings_no_aliases), style = MaterialTheme.typography.bodySmall)
                     } else {
                         aliases.forEach { (name, expansion) ->
                             Row(
@@ -703,7 +710,7 @@ fun SettingsScreen(
                                     )
                                 }
                                 TextButton(onClick = { onUpdate { copy(commandAliases = commandAliases - name) } }) {
-                                    Text("Remove")
+                                    Text(stringResource(R.string.remove))
                                 }
                             }
                         }
@@ -715,7 +722,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text("Alias name (no “/”)") },
+                        label = { Text(stringResource(R.string.settings_alias_name)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -723,7 +730,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = newExpansion,
                         onValueChange = { newExpansion = it },
-                        label = { Text("Expansion (a command, no “/”)") },
+                        label = { Text(stringResource(R.string.settings_alias_expansion)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -738,7 +745,7 @@ fun SettingsScreen(
                             newExpansion = ""
                         },
                         enabled = valid,
-                    ) { Text("Add alias") }
+                    ) { Text(stringResource(R.string.settings_add_alias)) }
                 }
             }
 
@@ -803,10 +810,10 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Scripts", style = MaterialTheme.typography.titleSmall)
-                            Text("Load and manage .hex scripts (games, tools, custom commands).", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.settings_scripts), style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.settings_scripts_desc), style = MaterialTheme.typography.bodySmall)
                         }
-                        OutlinedButton(onClick = onOpenScripts) { Text("Manage") }
+                        OutlinedButton(onClick = onOpenScripts) { Text(stringResource(R.string.manage)) }
                     }
                 }
             }
@@ -943,10 +950,7 @@ fun SettingsScreen(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
-                                    text = "Permission lost — tap \"Choose folder\" to re-pick. " +
-                                        "SAF grants don't survive uninstall/reinstall, so the saved " +
-                                        "folder from your backup isn't accessible to this install. " +
-                                        "Logging and scrollback are silently skipped until you re-pick.",
+                                    text = stringResource(R.string.setting_log_permission_lost),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )

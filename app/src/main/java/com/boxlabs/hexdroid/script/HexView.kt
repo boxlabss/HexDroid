@@ -77,6 +77,22 @@ data class ViewProps(
      * their own height.
      */
     val ratio: Float? = null,
+    /**
+     * ring: lay children out on the perimeter of a stadium (a rounded rect with semicircular
+     * caps) instead of an ellipse. ratio picks the axis: >= 1 is a VERTICAL capsule (caps top
+     * and bottom, seats flanking the straight sides - the portrait poker table), < 1 is a
+     * HORIZONTAL capsule (caps left and right, seats along the top edge - the landscape/TV
+     * table). Child 0 (the hero) stays anchored at the bottom either way, and the renderer
+     * grows the table as the seat count does so seats can never overlap.
+     */
+    val stadium: Boolean = false,
+    /**
+     * ring child only: this child is the table FELT, not a seat. The renderer sizes it to the
+     * exact path the seats sit on (2rx by 2ry) and centres it, so seats straddle its rail by
+     * construction. The script keeps authoring the felt's shape, colours, and inner content
+     * (pot, board); it just stops guessing the size.
+     */
+    val felt: Boolean = false,
 )
 
 /**
@@ -182,6 +198,8 @@ class HexViewParser(body: String) {
                 "wrap" -> p = p.copy(wrap = true)
                 "circle" -> p = p.copy(circle = true)
                 "ellipse" -> p = p.copy(ellipse = true)
+                "stadium" -> p = p.copy(stadium = true)
+                "felt" -> p = p.copy(felt = true)
                 "crop" -> p = p.copy(scale = "crop")
                 "fit" -> p = p.copy(scale = "fit")
                 "stretch" -> p = p.copy(scale = "stretch")
@@ -269,4 +287,78 @@ class HexViewParser(body: String) {
         }
         return s.substring(start + 1)
     }
+}
+
+/**
+ * Pure geometry for ScriptView.Ring, kept Android-free so it can be unit-tested off-device.
+ * All functions take/return px as Double; [childW]/[childH] are the widest/tallest SEAT child.
+ *
+ * Three modes:
+ *  - ellipse (stadium=false): equal-angle walk starting at the bottom - the historical
+ *    behaviour, unchanged, child 0 at the bottom.
+ *  - vertical stadium (stadium=true, ry >= rx): hero (child 0) on the bottom cap; opponents
+ *    fill slots on the two straight sides (bottom-to-top on the right, then top-to-bottom on
+ *    the left), with an odd opponent taking the top-cap apex. Slots are spaced a full seat
+ *    apart, and [stadiumRequiredRy] grows ry so they always fit.
+ *  - horizontal stadium (stadium=true, ry < rx): hero on the bottom edge; opponents evenly
+ *    spaced along the top edge, facing the hero across the felt.
+ */
+fun ringOffsets(n: Int, rx: Double, ry: Double, stadium: Boolean, childW: Double = 0.0, childH: Double = 0.0): List<Pair<Double, Double>> {
+    if (n <= 0) return emptyList()
+    if (!stadium) {
+        return (0 until n).map { i ->
+            val a = Math.toRadians(90.0 + i * (360.0 / n))
+            Pair(Math.cos(a) * rx, Math.sin(a) * ry)
+        }
+    }
+    val out = ArrayList<Pair<Double, Double>>(n)
+    out.add(Pair(0.0, ry))                              // hero, bottom-centre
+    val m = n - 1
+    if (m == 0) return out
+    if (ry >= rx) {
+        // vertical capsule: k slots per straight side, odd opponent at the top apex.
+        // +y is DOWN (screen coords, hero at +ry): right side walks bottom-to-top
+        // (y descending), then the apex, then the left side top-to-bottom (y ascending).
+        val k = m / 2
+        val step = childH + STADIUM_PAD
+        val ys = (0 until k).map { i -> (i - (k - 1) / 2.0) * step }
+        for (y in ys.sortedDescending()) out.add(Pair(rx, y))
+        if (m % 2 == 1) out.add(Pair(0.0, -ry))
+        for (y in ys.sorted()) out.add(Pair(-rx, y))
+    } else {
+        // horizontal capsule: opponents across the top edge, evenly spaced
+        val edge = 2.0 * (rx - ry)
+        val want = childW + STADIUM_PAD
+        val s = if (m > 1) minOf(want, edge / (m - 1)) else 0.0
+        for (i in 0 until m) out.add(Pair((i - (m - 1) / 2.0) * s, -ry))
+    }
+    return out
+}
+
+/** Slot spacing margin between stadium seats, px. Keep in sync with nothing: renderer-only. */
+const val STADIUM_PAD = 6.0
+
+/**
+ * Minimum vertical radius for a VERTICAL stadium so the per-side slot stacks fit the straight
+ * sides. Closed form: k = floor((n-1)/2) slots per side spaced (childH + pad) apart, centred
+ * on the side, and the outermost slot must stay on the straight segment (|y| <= ry - rx).
+ * Returns the largest of that, [ryWant], and rx.
+ */
+fun stadiumRequiredRy(n: Int, rx: Double, ryWant: Double, childH: Double): Double {
+    val k = (n - 1) / 2
+    if (k <= 0) return maxOf(ryWant, rx)
+    val need = rx + (k - 1) * (childH + STADIUM_PAD) / 2.0
+    return maxOf(ryWant, rx, need)
+}
+
+/**
+ * Minimum horizontal radius for a HORIZONTAL stadium so the top-edge seats sit a full seat
+ * apart. The renderer clamps the result to the screen; below the clamp the seats compress
+ * evenly (they can kiss on a very narrow landscape at 7-8 players, never stack).
+ */
+fun stadiumRequiredRx(n: Int, ry: Double, rxWant: Double, childW: Double): Double {
+    val m = n - 1
+    if (m <= 1) return maxOf(rxWant, ry)
+    val need = ry + (m - 1) * (childW + STADIUM_PAD) / 2.0
+    return maxOf(rxWant, ry, need)
 }

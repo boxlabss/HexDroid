@@ -1,4 +1,7 @@
 <resources>
+    <string name="app_name">HexDroid IRC</string>
+
+    <!-- Welcome / Setup Screen -->
     <string name="welcome_title">Bienvenue sur HexDroid IRC</string>
     <string name="welcome_subtitle">Configurons tout avant de commencer.</string>
     <string name="welcome_language_label">Langue</string>
@@ -10,6 +13,7 @@
     <string name="welcome_nick_error_invalid">Le pseudo contient des caractères invalides</string>
     <string name="welcome_nick_error_long">Le pseudo doit faire 16 caractères ou moins</string>
 
+    <!-- Common / Navigation -->
     <string name="back">Retour</string>
     <string name="cancel">Annuler</string>
     <string name="save">Enregistrer</string>
@@ -25,6 +29,16 @@
     <string name="not_now">Pas maintenant</string>
     <string name="copy_text">Copier</string>
 
+    <!-- Buffer-list sidepanel toolbar -->
+    <string name="buffer_toolbar_collapse_all">Réduire tous les réseaux</string>
+    <string name="buffer_toolbar_mark_all_read">Tout marquer comme lu</string>
+    <string name="buffer_toolbar_search">Rechercher dans le tampon</string>
+    <string name="buffer_toolbar_search_dialog_title">Rechercher dans le tampon</string>
+    <string name="buffer_toolbar_search_placeholder">Texte ou expéditeur…</string>
+    <string name="buffer_toolbar_search_global">Rechercher dans tous les tampons de ce réseau</string>
+    <string name="buffer_toolbar_search_action">Rechercher</string>
+
+    <!-- Settings Screen -->
     <string name="settings_title">Paramètres</string>
     <string name="settings_intro_tour">Visite guidée</string>
     <string name="settings_intro_tour_desc">Un tour rapide des écrans principaux et des raccourcis.</string>
@@ -36,9 +50,9 @@
     <string name="section_irc">IRC</string>
     <string name="section_notifications">Notifications</string>
     <string name="section_logging">Journalisation</string>
+    <string name="section_privacy">Confidentialité</string>
     <string name="section_ircv3_history">Historique IRCv3</string>
     <string name="section_file_transfers">Transferts de fichiers</string>
-
     <string name="setting_font_size">Taille de police</string>
     <string name="setting_colorise_nicks">Coloriser les pseudos</string>
     <string name="setting_own_nick_colour_title">Couleur de ton pseudo</string>
@@ -48,65 +62,90 @@
     <string name="setting_own_nick_colour_reset">Réinitialiser</string>
     <string name="setting_mirc_colours">Activer les couleurs mIRC</string>
     <string name="setting_ansi_colours">Activer les couleurs ANSI</string>
+    <string name="setting_art_detection">Réduire l\'art ASCII/ANSI</string>
     <string name="setting_show_topic_bar">Afficher la barre de sujet</string>
     <string name="setting_show_timestamps">Afficher les horodatages</string>
     <string name="setting_timestamp_format">Format d\'heure (Java)</string>
     <string name="setting_hide_motd">Masquer le MOTD à la connexion</string>
     <string name="setting_hide_joinpartquit">Masquer les messages d\'entrée/sortie</string>
+    <string name="setting_hide_away_notify">Masquer les notifications absent/de retour</string>
+    <string name="setting_color_channel_events">Événements de canal colorés</string>
     <string name="setting_hide_topic_on_entry">Masquer le sujet à l\'entrée</string>
     <string name="setting_show_buffers_default">Afficher réseaux/canaux par défaut</string>
     <string name="setting_show_nicklist_default">Afficher la liste de pseudos par défaut</string>
     <string name="setting_highlight_on_nick">Surligner sur pseudo</string>
     <string name="setting_extra_highlights">Mots supplémentaires (un par ligne)</string>
     <string name="setting_compact_mode">Mode compact</string>
-
+    <string name="setting_network_tabs">Onglets de réseaux</string>
+    <string name="setting_network_tabs_desc">Afficher les réseaux sous forme d\'onglets plutôt qu\'en arborescence.</string>
+    <string name="setting_network_tabs_bottom">Barre de réseaux au-dessus de la saisie</string>
+    <string name="setting_network_tabs_bottom_desc">Afficher le sélecteur de canaux en bas de la discussion.</string>
     <string name="setting_portrait_nicklist_overlay">Panneau latéral de pseudos</string>
     <string name="setting_portrait_nicklist_overlay_desc">Afficher la liste des pseudos comme un panneau latéral redimensionnable (comme en paysage) au lieu d\'une feuille en bas. Lorsqu\'activé, le bouton bascule afficher/masquer de façon persistante.</string>
-
     <string name="setting_ignore_list">Liste d\'ignorés</string>
     <string name="setting_ignore_list_desc">Masquer les messages et offres DCC de pseudos spécifiques (par réseau).</string>
     <string name="setting_quit_message">Message de déconnexion</string>
     <string name="setting_part_message">Message de départ</string>
-
     <string name="setting_auto_reconnect">Reconnexion automatique</string>
     <string name="setting_reconnect_interval">Intervalle de reconnexion (secondes)</string>
     <string name="setting_reconnect_interval_desc">Fréquence des tentatives de reconnexion.</string>
     <string name="setting_seconds">Secondes</string>
     <string name="setting_auto_connect_startup">Connexion automatique au démarrage</string>
-
+    <string name="setting_rejoin_on_kick">Rejoindre après un kick</string>
+    <string name="setting_rejoin_on_kick_desc">Rejoindre automatiquement un canal après avoir été expulsé. Un second kick sur le même canal dans les 60 secondes n\'est pas suivi d\'une nouvelle tentative, pour éviter les boucles contre les modes +i/+k/+b.</string>
     <string name="setting_enable_notifications">Activer les notifications</string>
     <string name="setting_notify_highlights">Notifications de surlignage</string>
     <string name="setting_notify_pm">Notifications de messages privés</string>
     <string name="setting_connection_status">Afficher la notification d\'état de connexion</string>
     <string name="setting_sound_highlight">Son lors du surlignage</string>
     <string name="setting_vibrate_highlight">Vibrer lors du surlignage</string>
-
     <string name="setting_enable_logging">Activer la journalisation</string>
     <string name="setting_log_server">Journaliser le tampon serveur</string>
     <string name="setting_log_folder">Dossier de journaux</string>
     <string name="setting_choose_folder">Choisir un dossier</string>
     <string name="setting_retention_days">Jours de rétention</string>
+    <string name="setting_retention_days_hint">0 = conserver indéfiniment</string>
+    <string name="setting_retention_forever">Journaux conservés indéfiniment (suppression auto désactivée)</string>
     <string name="setting_max_scrollback">Lignes maximum d\'historique</string>
-
     <string name="setting_history_limit">Limite de l\'historique</string>
     <string name="setting_history_limit_desc">Messages à demander par canal à l\'entrée (CHATHISTORY). 0 pour désactiver.</string>
     <string name="setting_messages">Messages</string>
     <string name="setting_count_unread">Compter l\'historique comme non lu</string>
     <string name="setting_trigger_notif">Déclencher les notifications pour l\'historique</string>
-
     <string name="setting_download_folder">Dossier de téléchargement</string>
     <string name="setting_incoming_port_min">Port entrant min</string>
     <string name="setting_incoming_port_max">Port entrant max</string>
-
     <string name="setting_keep_alive">Maintenir la connexion active</string>
+    <string name="setting_enable_dcc">Activer DCC</string>
     <string name="setting_open_app_settings">Ouvrir les paramètres de l\'app</string>
     <string name="setting_battery_optimization">Liste d\'optimisation de batterie</string>
 
+    <!-- Theme picker -->
     <string name="theme_label">Thème</string>
     <string name="theme_dark">Sombre</string>
     <string name="theme_light">Clair</string>
     <string name="theme_system">Système</string>
 
+    <!-- Font picker -->
+    <string name="font_open_sans">Open Sans</string>
+    <string name="font_inter">Inter</string>
+    <string name="font_monospace">Monospace</string>
+    <string name="font_custom">Fichier de police personnalisé…</string>
+
+    <!-- Chat font style -->
+    <string name="chat_font_style">Style de police du chat</string>
+    <string name="style_regular">Normal</string>
+    <string name="style_bold">Gras</string>
+    <string name="style_italic">Italique</string>
+    <string name="style_bold_italic">Gras + Italique</string>
+
+    <!-- Vibration -->
+    <string name="vibration_intensity">Intensité de vibration</string>
+    <string name="vibration_low">Faible</string>
+    <string name="vibration_medium">Moyen</string>
+    <string name="vibration_high">Fort</string>
+
+    <!-- Chat Screen -->
     <string name="chat_nicklist">Liste de pseudos</string>
     <string name="chat_users_format">%1$s • %2$d utilisateurs</string>
     <string name="chat_no_channel">Pas dans un canal</string>
@@ -118,29 +157,52 @@
     <string name="chat_kick_ban">Expulser / Bannir</string>
     <string name="chat_nick">Pseudo</string>
     <string name="chat_reason">Raison</string>
+    <string name="chat_duration_label">Durée</string>
+    <string name="chat_duration_hint">par ex. 1d, 2h ; 0 est généralement permanent</string>
     <string name="chat_kick">Expulser</string>
     <string name="chat_ban">Bannir</string>
     <string name="chat_kick_ban_btn">Expulser+Bannir</string>
 
+    <!-- Network screens -->
     <string name="networks_title">Réseaux</string>
     <string name="networks_connect">Connecter</string>
     <string name="networks_disconnect">Déconnecter</string>
     <string name="networks_edit">Modifier</string>
     <string name="networks_add">Ajouter un réseau</string>
     <string name="networks_auto_connect">Auto-connexion</string>
+    <string name="network_edit_title">Modifier le réseau</string>
+    <string name="network_add_title">Ajouter un réseau</string>
+    <string name="network_name">Nom</string>
+    <string name="network_host">Hôte</string>
+    <string name="network_port">Port</string>
+    <string name="network_use_tls">Utiliser TLS (SSL)</string>
+    <string name="network_allow_invalid_certs">Autoriser les certificats invalides</string>
+    <string name="network_pinned_cert_label">Empreintes de certificats épinglées (TOFU)</string>
+    <string name="network_pinned_cert_dormant">Dormant — l\'épinglage TOFU ne s\'active que lorsque \"Autoriser les certificats invalides\" est activé. Les empreintes ci-dessous sont conservées pour référence ; la connexion actuelle est vérifiée par la chaîne CA du système.</string>
+    <string name="network_reset_pinned_cert">Réinitialiser et ré-épingler (tout effacer)</string>
+    <string name="network_sts_active_label">Politique STS active</string>
+    <string name="network_sts_active_desc">Ce serveur publie une politique Strict Transport Security : les connexions sont forcées en TLS et les erreurs de certificat ne peuvent pas être ignorées tant que la politique n\'a pas expiré ou que le serveur ne l\'a pas retirée.</string>
+    <string name="network_sts_forget">Oublier la politique STS pour cet hôte</string>
+    <string name="list_retry">Réessayer</string>
+    <string name="network_trust_extra_pinned_cert">Faire confiance à ce serveur aussi (DNS round-robin)</string>
+    <string name="network_nick">Pseudonyme</string>
+    <string name="network_alt_nick">Pseudo alternatif</string>
+    <string name="network_username">Nom d\'utilisateur</string>
+    <string name="network_realname">Nom réel</string>
 
+    <!-- Tour steps -->
     <string name="tour_add_network_title">Vos réseaux</string>
     <string name="tour_add_network_body">Appuyez sur + pour ajouter un serveur ou modifier ceux déjà présents. HexDroid est livré avec quelques réseaux par défaut.</string>
     <string name="tour_connect_title">Se connecter</string>
     <string name="tour_connect_body">Appuyez sur Connecter pour ouvrir une connexion. Vous pouvez avoir plusieurs réseaux connectés en même temps.</string>
-    <string name="tour_settings_title">Apparence et paramètres</string>
-    <string name="tour_settings_body">Choisissez un thème, ajustez la taille de police, les sons de notification, les options de confidentialité et bien plus. Les changements s\'appliquent immédiatement.</string>
     <string name="tour_switcher_title">Liste des tampons</string>
     <string name="tour_switcher_body">Ce panneau liste tous les serveurs, canaux et messages privés ouverts. Balayez ou appuyez sur ☰ pour l\'afficher. Touchez un élément pour y basculer</string>
-    <string name="tour_more_title">Plus d\'actions</string>
-    <string name="tour_more_body">Ce menu donne accès à la liste des canaux, aux transferts de fichiers, à la liste d\'ignorés, aux paramètres réseau et plus encore. Il affiche aussi la gestion du mode de canal et du sujet lorsque vous êtes op.</string>
     <string name="tour_send_title">Envoyer des messages</string>
     <string name="tour_send_body">Tapez ici pour discuter. Les commandes slash fonctionnent aussi : /join #canal, /msg nick texte, /part, /whois nick, /me action texte, etc.</string>
+    <string name="tour_more_title">Plus d\'actions</string>
+    <string name="tour_more_body">Ce menu donne accès à la liste des canaux, aux transferts de fichiers, à la liste d\'ignorés, aux paramètres réseau et plus encore. Il affiche aussi la gestion du mode de canal et du sujet lorsque vous êtes op.</string>
+    <string name="tour_settings_title">Apparence et paramètres</string>
+    <string name="tour_settings_body">Choisissez un thème, ajustez la taille de police, les sons de notification, les options de confidentialité et bien plus. Les changements s\'appliquent immédiatement.</string>
     <string name="tour_dcc_title">Transferts de fichiers (DCC)</string>
     <string name="tour_dcc_body">Activez le DCC pour envoyer et recevoir des fichiers directement entre utilisateurs. Derrière un routeur, le DCC passif évite les soucis de redirection de ports. SDCC est aussi pris en charge.</string>
     <string name="tour_send_file_title">Envoyer un fichier</string>
@@ -152,39 +214,39 @@
     <string name="tour_replay_title">Rejouer cette visite</string>
     <string name="tour_replay_body">Vous pouvez relancer la visite guidée à tout moment depuis Paramètres → À propos. Appuyez sur Terminé pour finir.</string>
 
+    <!-- About -->
     <string name="about_title">À propos</string>
+
+    <!-- Transfers -->
     <string name="transfers_title">Transferts</string>
+
+    <!-- Ignore -->
     <string name="ignore_title">Liste d\'ignorés</string>
+
+    <!-- List -->
     <string name="list_title">Liste des canaux</string>
 
-    <!-- New strings: Nick hints, DCC chat, Transfers, Network edit -->
-    <string name="network_edit_title">Modifier le réseau</string>
-    <string name="network_add_title">Ajouter un réseau</string>
-    <string name="network_name">Nom</string>
-    <string name="network_host">Hôte</string>
-    <string name="network_port">Port</string>
-    <string name="network_use_tls">Utiliser TLS (SSL)</string>
-    <string name="network_allow_invalid_certs">Autoriser les certificats invalides</string>
-    <string name="network_pinned_cert_label">Empreintes de certificats épinglées (TOFU)</string>
-    <string name="network_reset_pinned_cert">Réinitialiser et ré-épingler (tout effacer)</string>
-    <string name="network_nick">Pseudonyme</string>
-    <string name="network_alt_nick">Pseudo alternatif</string>
-    <string name="network_username">Nom d\'utilisateur</string>
-    <string name="network_realname">Nom réel</string>
-    <string name="font_open_sans">Open Sans</string>
-    <string name="font_inter">Inter</string>
-    <string name="font_monospace">Monospace</string>
-    <string name="font_custom">Fichier de police personnalisé…</string>
-    <string name="chat_font_style">Style de police du chat</string>
-    <string name="style_regular">Normal</string>
-    <string name="style_bold">Gras</string>
-    <string name="style_italic">Italique</string>
-    <string name="style_bold_italic">Gras + Italique</string>
-    <string name="vibration_intensity">Intensité de vibration</string>
-    <string name="vibration_low">Faible</string>
-    <string name="vibration_medium">Moyen</string>
-    <string name="vibration_high">Fort</string>
-    <string name="setting_enable_dcc">Activer DCC</string>
+    <!-- Language names -->
+    <!-- <string name="lang_en" translatable="false">English</string> -->
+    <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
+    <!-- <string name="lang_es" translatable="false">Español</string> -->
+    <!-- <string name="lang_fr" translatable="false">Français</string> -->
+    <!-- <string name="lang_it" translatable="false">Italiano</string> -->
+    <!-- <string name="lang_nl" translatable="false">Nederlands</string> -->
+    <!-- <string name="lang_pl" translatable="false">Polski</string> -->
+    <!-- <string name="lang_pt" translatable="false">Português</string> -->
+    <!-- <string name="lang_ru" translatable="false">Русский</string> -->
+    <!-- <string name="lang_tr" translatable="false">Türkçe</string> -->
+    <!-- <string name="lang_ar" translatable="false">العربية</string> -->
+    <!-- <string name="lang_ja" translatable="false">日本語</string> -->
+    <!-- <string name="lang_ko" translatable="false">한국어</string> -->
+    <!-- <string name="lang_zh" translatable="false">中文</string> -->
+
+    <string name="network_edit_advanced_caps">Caps IRCv3 avancées</string>
+    <string name="network_edit_caps_hint">Les fonctionnalités IRCv3 de base sont activées par défaut. Activer pour voir les options avancées.</string>
+    <string name="network_edit_bouncer_caps">Caps bouncer (soju/pounce)</string>
+
+    <!-- DCC / Transfers Screen -->
     <string name="transfers_enable_dcc">Activer DCC</string>
     <string name="transfers_dcc_send_mode">Mode d\'envoi DCC</string>
     <string name="transfers_send_file">Envoyer un fichier</string>
@@ -198,58 +260,88 @@
     <string name="transfers_no_offers">Aucune offre.</string>
     <string name="transfers_accept">Accepter</string>
     <string name="transfers_reject">Refuser</string>
+    <string name="transfers_resume">Reprendre</string>
+    <string name="transfers_resuming_from">Reprise à partir de %1$s</string>
+    <string name="transfers_partial_available">%1$s partiellement téléchargé. Reprendre ?</string>
     <string name="transfers_accept_open">Accepter &amp; Ouvrir</string>
     <string name="transfers_active">Transferts actifs</string>
     <string name="transfers_no_transfers">Aucun transfert en cours.</string>
     <string name="transfers_share_file">Partager le fichier</string>
+
+    <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">Appuyer pour mentionner</string>
+
+    <!-- Notification channel names (displayed in Android Settings) -->
     <string name="notif_channel_connection">Connexion IRC</string>
     <string name="notif_channel_highlight_silent">Mentions IRC (silencieux)</string>
     <string name="notif_channel_highlight_sound">Mentions IRC</string>
     <string name="notif_channel_pm">Messages privés IRC</string>
     <string name="notif_channel_dcc">Demandes DCC</string>
+
+    <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">DCC chat entrant de %1$s</string>
     <string name="notif_dcc_incoming_chat_text">Appuyer pour ouvrir — ou utiliser Transferts</string>
     <string name="notif_dcc_incoming_file_title">Fichier entrant de %1$s</string>
     <string name="notif_dcc_file_done_title">DCC terminé</string>
     <string name="notif_dcc_file_done_text">%1$s enregistré dans %2$s</string>
     <string name="notif_open_transfers">Ouvrir Transferts</string>
-    <!-- Network Edit IRCv3 cap section labels -->
-    <string name="network_edit_advanced_caps">Caps IRCv3 avancées</string>
-    <string name="network_edit_caps_hint">Les fonctionnalités IRCv3 de base sont activées par défaut. Activer pour voir les options avancées.</string>
-    <string name="network_edit_bouncer_caps">Caps bouncer (soju/pounce)</string>
-    <string name="section_privacy">Confidentialité</string>
+
+    <!-- draft/typing indicator strings -->
+    <string name="typing_one">%1$s est en train d\'écrire…</string>
+    <string name="typing_two">%1$s et %2$s écrivent…</string>
+    <string name="typing_several">Plusieurs personnes écrivent…</string>
+
+    <!-- Settings: typing privacy -->
     <string name="setting_send_typing">Envoyer des indicateurs de frappe</string>
     <string name="setting_send_typing_desc">Permettre aux autres de voir quand vous rédigez un message (draft/typing). Désactivé par défaut pour la vie privée.</string>
     <string name="setting_receive_typing">Afficher les indicateurs de frappe des autres</string>
     <string name="setting_receive_typing_desc">Afficher un indicateur quand quelqu\'un d\'autre rédige un message dans un canal ou en privé.</string>
+
+    <!-- draft/channel-rename -->
     <string name="channel_renamed">Salon renommé de %1$s en %2$s</string>
-    <string name="chathistory_targets_title">Historique disponible pour</string>
+
+    <!-- draft/message-reactions -->
     <string name="reaction_added">%1$s a réagi avec %2$s</string>
     <string name="reaction_removed">%1$s a retiré la réaction %2$s</string>
-    <string name="typing_one">%1$s est en train d\'écrire…</string>
-    <string name="typing_two">%1$s et %2$s écrivent…</string>
-    <string name="typing_several">Plusieurs personnes écrivent…</string>
+
+    <!-- CHATHISTORY TARGETS section title -->
+    <string name="chathistory_targets_title">Historique disponible pour</string>
+
+    <!-- Network edit screen -->
     <string name="network_name_label">Nom du réseau</string>
     <string name="network_host_label">Hôte</string>
     <string name="network_port_label">Port</string>
     <string name="network_nickname_label">Pseudonyme</string>
     <string name="network_alt_nick_label">Pseudo alternatif</string>
     <string name="network_username_label">Nom d\'utilisateur (ident)</string>
+    <string name="network_bouncer_username_label">Nom d\'utilisateur</string>
+    <string name="network_username_bouncer_hint">Pour les profils de bouncer, c\'est votre <b>nom de connexion au bouncer</b> — le même nom avec lequel vous avez configuré le compte du bouncer. Pas votre pseudo IRC.</string>
     <string name="network_realname_label">Vrai nom</string>
     <string name="network_use_tls_label">Utiliser TLS</string>
     <string name="network_allow_plaintext">Autoriser le texte en clair</string>
     <string name="network_auto_connect_label">Connecter au démarrage</string>
+    <string name="network_show_in_switcher_label">Afficher dans le sélecteur de canaux</string>
     <string name="network_auto_reconnect_label">Reconnexion automatique</string>
     <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_bouncer_kind_label">Type de bouncer</string>
+    <string name="network_bouncer_kind_none">Aucun / non spécifié</string>
+    <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
+    <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
+    <string name="network_bouncer_kind_generic">Générique  (user/network)</string>
+    <string name="network_bouncer_network_label">Nom du réseau (optionnel)</string>
+    <string name="network_bouncer_network_help">Quel réseau upstream sur le bouncer ce profil cible (par ex. \"libera\", \"oftc\"). Combiné avec le champ nom d\'utilisateur du bouncer ci-dessus sur le flux — envoyé dans USER et, selon la méthode d\'authentification choisie, dans SASL ou la ligne PASS — selon la syntaxe du type de bouncer sélectionné.</string>
+    <string name="network_bouncer_clientid_label">ID client (optionnel)</string>
+    <string name="network_bouncer_clientid_help">Un court identifiant pour cet appareil, par ex. \"phone\" ou \"hexdroid\". Active les tampons et l\'historique par client lorsque le bouncer le prend en charge (ZNC clientbuffer, historique par client de soju). Laissez vide pour partager un seul tampon entre tous les clients.</string>
     <string name="network_server_password_label">Mot de passe serveur (PASS)</string>
     <string name="network_enable_sasl">Activer SASL</string>
     <string name="network_sasl_mechanism_label">Mécanisme</string>
     <string name="network_sasl_username_label">Nom d\'utilisateur (authcid)</string>
     <string name="network_sasl_password_label">Mot de passe</string>
+    <string name="network_sasl_recommended_for_bouncers">Recommandé pour les bouncers — laissez le champ nom d\'utilisateur vide pour utiliser le nom d\'utilisateur du bouncer de la section Général ci-dessus.</string>
     <string name="network_cert_format_label">Format du certificat</string>
     <string name="network_cert_format_pem">PEM (.pem)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">Mot de passe de clé (si chiffré)</string>
     <string name="network_encoding_label">Encodage</string>
     <string name="network_command_delay_label">Délai avant commandes (secondes)</string>
@@ -259,6 +351,8 @@
     <string name="network_commands_hint">Une commande par ligne. Ajoutez ;wait N pour attendre N secondes, ex. /msg NickServ identify pass ;wait 3</string>
     <string name="network_no_network_selected">Aucun réseau sélectionné</string>
     <string name="network_undo_remove">Annuler la suppression</string>
+
+    <!-- Networks screen -->
     <string name="networks_selected">Sélectionné</string>
     <string name="networks_add_favourite">Ajouter aux favoris</string>
     <string name="networks_remove_favourite">Retirer des favoris</string>
@@ -273,8 +367,12 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="networks_insecure_body2">Pour vous connecter à %1$s sans TLS, vous devez explicitement autoriser les connexions non chiffrées pour ce réseau.</string>
     <string name="networks_allow_connect">Autoriser et connecter</string>
     <string name="networks_reconnect">Reconnecter</string>
+
+    <!-- Channel / List screen -->
     <string name="list_channels_title">Salons</string>
     <string name="list_search_hint">Rechercher salons / sujet</string>
+
+    <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">Obtenir les modes actuels</string>
     <string name="chat_key_password_label">Clé / mot de passe</string>
     <string name="chat_max_users_label">Nb max utilisateurs</string>
@@ -290,6 +388,8 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="chat_user_list">Liste des utilisateurs</string>
     <string name="chat_drag_reorder">Faire glisser pour réorganiser</string>
     <string name="chat_clear_all">Tout effacer</string>
+
+    <!-- Chat screen — menu items -->
     <string name="menu_channel_list">Liste des salons</string>
     <string name="menu_file_transfers">Transferts de fichiers</string>
     <string name="menu_settings">Paramètres</string>
@@ -300,6 +400,23 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="menu_reconnect">Reconnecter</string>
     <string name="menu_disconnect">Déconnecter</string>
     <string name="menu_exit">Quitter</string>
+
+    <!-- ChatScreen tail -->
+    <string name="chat_cd_launch_scripts">Lancer les scripts</string>
+    <string name="chat_cd_edit_topic">Modifier le sujet</string>
+    <string name="chat_cd_jump_unread">Aller aux non lus</string>
+    <string name="chat_cd_scroll_bottom">Défiler vers le bas</string>
+    <string name="chat_cd_close_label">Fermer %1$s</string>
+    <string name="chat_cd_cancel_reply">Annuler la réponse</string>
+    <string name="chat_cd_encryption_configured">Chiffrement configuré (%1$s, %2$s)</string>
+    <string name="chat_cd_upload_file">Envoyer un fichier au serveur</string>
+    <string name="chat_reply_to">Répondre à %1$s</string>
+    <string name="chat_delete_message">Supprimer le message</string>
+    <string name="chat_delete_message_desc">Le supprime pour tout le monde via le serveur</string>
+    <string name="chat_copy_messages">Copier des messages…</string>
+    <string name="chat_copy_messages_desc">Sélectionner plusieurs messages à copier</string>
+
+    <!-- IRCop tools -->
     <string name="ircop_kline">K-line</string>
     <string name="ircop_gline">G-line</string>
     <string name="ircop_dline">D-line</string>
@@ -315,11 +432,15 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="ircop_motd">MOTD</string>
     <string name="ircop_links">Liens</string>
     <string name="ircop_uptime">Temps de fonctionnement</string>
+
+    <!-- Ignore list screen -->
     <string name="ignore_nick_label">Nick à ignorer</string>
     <string name="ignore_no_nicks">Aucun nick ignoré.</string>
     <string name="ignore_no_networks">Aucun réseau configuré.</string>
     <string name="ignore_add">Ajouter</string>
     <string name="ignore_remove">Supprimer</string>
+
+    <!-- Settings screen — extras -->
     <string name="settings_export_backup">Exporter la sauvegarde</string>
     <string name="settings_restore_backup">Restaurer la sauvegarde</string>
     <string name="settings_restore_confirm_title">Restaurer la sauvegarde ?</string>
@@ -328,13 +449,26 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="settings_system_default">Défaut système</string>
     <string name="settings_matrix_theme">Matrix</string>
     <string name="settings_custom_font">Fichier de police personnalisé…</string>
+
+    <!-- Transfers screen — extras -->
     <string name="transfers_share_open">Partager / Ouvrir le fichier</string>
+
+    <!-- About screen -->
     <string name="about_open_website">Ouvrir le site web</string>
+
+    <!-- DCC mode options -->
     <string name="transfers_dcc_auto">Auto</string>
     <string name="transfers_dcc_active">Actif</string>
     <string name="transfers_dcc_passive">Passif</string>
+
+    <!-- Channel tools -->
     <string name="chat_channel_lists">Listes de salons…</string>
+
+    <!-- Network edit: clear certificate -->
     <string name="network_clear">Effacer</string>
+
+
+    <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Connexion</string>
     <string name="network_section_identity">Identité</string>
     <string name="network_section_autoconnect">Connexion automatique &amp; Mot de passe</string>
@@ -344,6 +478,27 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="network_section_postcmds">Commandes post-connexion</string>
     <string name="network_section_encoding">Encodage des caractères</string>
     <string name="network_section_ircv3">Capacités IRCv3.x</string>
+    <!-- NetworkEditScreen: proxy/Tor -->
+    <string name="network_section_proxy">Proxy (SOCKS/Tor)</string>
+    <string name="network_proxy_type_label">Type de proxy</string>
+    <string name="network_proxy_type_none">Aucun (connexion directe)</string>
+    <string name="network_proxy_type_socks5">SOCKS5</string>
+    <string name="network_proxy_type_socks4a">SOCKS4a</string>
+    <string name="network_proxy_host_label">Hôte du proxy</string>
+    <string name="network_proxy_port_label">Port</string>
+    <string name="network_proxy_username_label">Nom d\'utilisateur (facultatif)</string>
+    <string name="network_proxy_password_label">Mot de passe (facultatif)</string>
+    <string name="network_proxy_preset_orbot">Tor (Orbot)</string>
+    <string name="network_proxy_preset_tor_browser">Navigateur Tor</string>
+    <string name="network_proxy_hint">La destination est résolue au niveau du proxy (DNS distant), donc les adresses .onion fonctionnent et le nom d\'hôte du serveur n\'est pas divulgué à votre réseau local. Pour Tor, lancez Orbot et utilisez 127.0.0.1 avec le port 9050. Les envois de fichiers DCC passent par le proxy et utilisent automatiquement le mode passif ; la réception d\'offres passives et l\'hébergement de discussions DCC sont indisponibles tant qu\'un proxy est actif, car ils nécessitent d\'écouter en dehors du tunnel.</string>
+    <!-- NetworkEditScreen: notifications -->
+    <string name="network_section_notifications">Notifications</string>
+    <string name="network_notify_errors_label">Notifier les erreurs</string>
+    <string name="network_notify_errors_desc">Afficher une notification pour les erreurs de serveur et de connexion. Désactivé par défaut ; les reconnexions passagères ne notifient jamais.</string>
+    <string name="network_highlight_ignore_label">Ignorer les surlignages de</string>
+    <string name="network_highlight_ignore_hint">par ex. GitHub, *-bot, ou /^(travis|circleci)/ [un par ligne]</string>
+    <string name="network_highlight_ignore_desc">Un expéditeur par ligne dont les messages ne doivent jamais surligner ni notifier. Utilisez un pseudo simple, un joker IRC (* et ?) ou une expression régulière entre /barres obliques/. Les messages restent visibles dans leur canal.</string>
+    <!-- NetworkEditScreen: misc -->
     <string name="network_default_name">Réseau</string>
     <string name="network_bouncer_desc">Ignore l\'auto-join, demande la relecture des messages manqués</string>
     <string name="network_sasl_external_desc">Utilise le certificat client TLS pour l\'authentification</string>
@@ -356,7 +511,6 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="network_cert_replace_crt">Remplacer .crt</string>
     <string name="network_cert_choose_key">Choisir .key</string>
     <string name="network_cert_replace_key">Remplacer .key</string>
-    <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_cert_choose_p12">Choisir .p12/.pfx</string>
     <string name="network_cert_replace_p12">Remplacer .p12/.pfx</string>
     <string name="network_cert_p12_hint">Si le fichier est protégé par un mot de passe, saisissez-le ci-dessous.</string>
@@ -369,6 +523,7 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="network_encoding_utf8_desc">Unicode standard. Fonctionne avec la plupart des réseaux IRC modernes.</string>
     <string name="network_encoding_manual_desc">Sélection manuelle de l\'encodage pour les réseaux hérités.</string>
     <string name="network_cert_error">Veuillez sélectionner un certificat et une clé</string>
+    <!-- SettingsScreen -->
     <string name="setting_intro_tour">Visite guidée</string>
     <string name="setting_intro_tour_desc">Un aperçu rapide des écrans principaux et des raccourcis.</string>
     <string name="setting_ui_font">Police de l\'interface</string>
@@ -381,9 +536,7 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="section_backup_restore">Sauvegarde &amp; Restauration</string>
     <string name="setting_backup_export_desc">Exportez vos configurations réseau et paramètres de l\'application dans un fichier JSON. Les mots de passe et certificats TLS ne sont pas inclus.</string>
     <string name="setting_restore_desc">La restauration remplace tous les réseaux et paramètres actuels.</string>
-    <string name="setting_restore_confirm">Cela remplacera tous les réseaux et paramètres actuels par ceux du fichier de sauvegarde. Les mots de passe n\'étaient pas inclus dans la sauvegarde et devront être ressaisis.
-
-Ceci ne peut pas être annulé.</string>
+    <string name="setting_restore_confirm">Cela remplacera tous les réseaux et paramètres actuels par ceux du fichier de sauvegarde. Les mots de passe n\'étaient pas inclus dans la sauvegarde et devront être ressaisis. Ceci ne peut pas être annulé.</string>
     <string name="setting_backup_error">Erreur</string>
     <string name="setting_backup_done">Terminé</string>
     <string name="setting_battery_tip">Pour rester connecté la nuit, désactivez l\'optimisation de la batterie pour cette application et autorisez l\'activité en arrière-plan.</string>
@@ -397,6 +550,7 @@ Ceci ne peut pas être annulé.</string>
     <string name="setting_previews_wifi_only">Wi-Fi uniquement</string>
     <string name="setting_previews_wifi_only_desc">Charger les aperçus uniquement en Wi-Fi pour ne pas consommer de données mobiles.</string>
     <string name="theme_system_default">Par défaut du système</string>
+    <!-- TransfersScreen -->
     <string name="transfers_send_file_section">Envoyer un fichier</string>
     <string name="transfers_dcc_chat_section">DCC CHAT</string>
     <string name="transfers_dcc_disabled">DCC est actuellement désactivé. Activez-le pour envoyer/accepter des fichiers.</string>
@@ -409,6 +563,7 @@ Ceci ne peut pas être annulé.</string>
     <string name="transfers_unknown_size">taille inconnue</string>
     <string name="transfers_passive_port">passif (attente du port)</string>
     <string name="transfers_error">Erreur : %1$s</string>
+    <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">Sujet</string>
     <string name="chat_modes_panel">Modes du salon</string>
     <string name="chat_mode_no_external">Pas de messages externes</string>
@@ -460,6 +615,7 @@ Ceci ne peut pas être annulé.</string>
     <string name="chat_unquiet">Lever le silence</string>
     <string name="chat_remove">Supprimer</string>
     <string name="chat_irc_colour_title">Couleur IRC</string>
+    <!-- ChatScreen: nick action sheet -->
     <string name="nick_open_query">Ouvrir une query</string>
     <string name="nick_open_query_desc">Ouvrir une conversation privée</string>
     <string name="nick_whois">Whois</string>
@@ -476,29 +632,50 @@ Ceci ne peut pas être annulé.</string>
     <string name="nick_unignore">Ne plus ignorer</string>
     <string name="nick_ignore_desc">Masquer tous les messages de cet utilisateur</string>
     <string name="nick_unignore_desc">Afficher à nouveau les messages de cet utilisateur</string>
+    <string name="nick_ignore_notifs">Couper les notifications</string>
+    <string name="nick_unignore_notifs">Réactiver les notifications</string>
+    <string name="nick_ignore_notifs_desc">Coupe les alertes de surlignage et de MP ; les messages restent affichés</string>
+    <string name="nick_unignore_notifs_desc">Autoriser à nouveau les alertes de cet utilisateur</string>
     <string name="nick_moderation">Modération</string>
     <string name="nick_kick_ban">Kick / Bannir…</string>
     <string name="nick_kick_ban_desc">Expulser ou bannir %1$s de ce salon</string>
+    <string name="nick_privileges">Privilèges du canal</string>
+    <string name="nick_op">Donner op (+o)</string>
+    <string name="nick_deop">Retirer op (-o)</string>
+    <string name="nick_voice">Voice (+v)</string>
+    <string name="nick_devoice">Retirer voice (-v)</string>
+    <!-- IgnoreListScreen -->
     <string name="ignore_network_label">Réseau</string>
     <string name="ignore_list_desc">Les pseudos ignorés sont comparés sans tenir compte de la casse et s\'appliquent au chat, aux notices et aux offres DCC entrantes sur ce réseau.</string>
     <string name="ignore_list_tip">Conseil : vous pouvez aussi ignorer quelqu\'un depuis la liste des pseudos ou en appuyant sur son nom dans le chat.</string>
+    <!-- ListScreen -->
     <string name="list_loading">Chargement… (%1$d)</string>
     <string name="list_join_button">Rejoindre</string>
+    <!-- AboutScreen -->
     <string name="about_tagline">Client IRC pour Android</string>
     <string name="about_support_title">Documentation &amp; Support</string>
     <string name="about_support_desc">Visitez le site web pour des guides, des FAQ et pour signaler des problèmes.</string>
+    <string name="about_credits_title">Contributions</string>
+    <string name="about_credits_contribute">Envie de contribuer ?</string>
 
-    <!-- SDCC / list filter / topic edit (added) -->
+    <!-- SDCC settings -->
     <string name="setting_dcc_secure">Utiliser SDCC (chiffrement TLS)</string>
     <string name="setting_dcc_secure_desc">Les transferts de fichiers sortants utilisent DCC SSEND (chiffré TLS). Le client distant doit également prendre en charge SDCC.</string>
+
+    <!-- Channel list user count filter -->
     <string name="list_users_filter_label">Utilisateurs :</string>
     <string name="list_users_min">Min</string>
     <string name="list_users_max">Max</string>
+    <string name="list_users_server_hint">appuyez sur Appliquer pour recharger avec ces limites</string>
+    <string name="list_users_local_hint">Filtre la liste chargée (ce serveur ne peut pas filtrer par taille à distance)</string>
+    <string name="list_users_apply">Appliquer</string>
+
+    <!-- Topic quick-edit dialog -->
     <string name="topic_edit_title">Modifier le sujet</string>
     <string name="topic_edit_label">Sujet</string>
     <string name="topic_set">Définir</string>
 
-    <!-- Bouncer multinetwork (soju + ZNC) -->
+    <!-- Bouncer multinetwork UI -->
     <string name="bouncer_networks_section_title">Réseaux du bouncer</string>
     <string name="bouncer_networks_section_subtitle">Upstreams rapportés par %1$s</string>
     <string name="bouncer_networks_refresh">Actualiser</string>
@@ -511,33 +688,701 @@ Ceci ne peut pas être annulé.</string>
     <string name="bouncer_networks_already_imported">Déjà importé</string>
     <string name="bouncer_networks_unnamed">(upstream sans nom)</string>
     <string name="bouncer_networks_clone_dismiss">Ignorer</string>
-    <string name="network_server_password_bouncer_hint">Pour les bouncers, préférez activer SASL ci-dessous — c\'est la voie d\'authentification moderne. Si vous utilisez ce champ PASS à la place, entrez juste le mot de passe ; le nom d\'utilisateur du bouncer et le réseau des champs ci-dessus sont préfixés automatiquement (envoyé comme <b>username/network:password</b>, ou <b>username@clientid/network:password</b> pour ZNC). Si vous préférez taper <b>username/network:password</b> vous-même, ça marche aussi.</string>
-    <string name="network_bouncer_network_help">Quel réseau upstream sur le bouncer ce profil cible (par ex. \"libera\", \"oftc\"). Combiné avec le champ nom d\'utilisateur du bouncer ci-dessus sur le flux — envoyé dans USER et, selon la méthode d\'authentification choisie, dans SASL ou la ligne PASS — selon la syntaxe du type de bouncer sélectionné.</string>
-    <string name="network_username_bouncer_hint">Pour les profils de bouncer, c\'est votre <b>nom de connexion au bouncer</b> — le même nom avec lequel vous avez configuré le compte du bouncer. Pas votre pseudo IRC.</string>
-    <string name="network_sasl_recommended_for_bouncers">Recommandé pour les bouncers — laissez le champ nom d\'utilisateur vide pour utiliser le nom d\'utilisateur du bouncer de la section Général ci-dessus.</string>
-    <string name="setting_color_channel_events">Événements de canal colorés</string>
-    <string name="network_bouncer_username_label">Nom d\'utilisateur</string>
-    <string name="setting_hide_away_notify">Masquer les notifications absent/de retour</string>
-    <!-- HexDroid 1.6.2 additions: bouncer fields, rejoin-on-kick setting,
-         buffer-list sidepanel toolbar (collapse all / mark all read / search). -->
-    <string name="buffer_toolbar_collapse_all">Réduire tous les réseaux</string>
-    <string name="buffer_toolbar_mark_all_read">Tout marquer comme lu</string>
-    <string name="buffer_toolbar_search">Rechercher dans le tampon</string>
-    <string name="buffer_toolbar_search_dialog_title">Rechercher dans le tampon</string>
-    <string name="buffer_toolbar_search_placeholder">Texte ou expéditeur…</string>
-    <string name="buffer_toolbar_search_global">Rechercher dans tous les tampons de ce réseau</string>
-    <string name="buffer_toolbar_search_action">Rechercher</string>
-    <string name="network_bouncer_clientid_help">Un court identifiant pour cet appareil, par ex. \"phone\" ou \"hexdroid\". Active les tampons et l\'historique par client lorsque le bouncer le prend en charge (ZNC clientbuffer, historique par client de soju). Laissez vide pour partager un seul tampon entre tous les clients.</string>
-    <string name="network_bouncer_clientid_label">ID client (optionnel)</string>
-    <string name="network_bouncer_kind_generic">Générique  (user/network)</string>
-    <string name="network_bouncer_kind_label">Type de bouncer</string>
-    <string name="network_bouncer_kind_none">Aucun / non spécifié</string>
-    <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
-    <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
-    <string name="network_bouncer_network_label">Nom du réseau (optionnel)</string>
-    <string name="setting_rejoin_on_kick">Rejoindre après un kick</string>
-    <string name="setting_rejoin_on_kick_desc">Rejoindre automatiquement un canal après avoir été expulsé. Un second kick sur le même canal dans les 60 secondes n\'est pas suivi d\'une nouvelle tentative, pour éviter les boucles contre les modes +i/+k/+b.</string>
-    <string name="network_trust_extra_pinned_cert">Faire confiance à ce serveur aussi (DNS round-robin)</string>
-    <string name="network_pinned_cert_dormant">Dormant — l\'épinglage TOFU ne s\'active que lorsque \"Autoriser les certificats invalides\" est activé. Les empreintes ci-dessous sont conservées pour référence ; la connexion actuelle est vérifiée par la chaîne CA du système.</string>
 
+    <!-- Bouncer-aware password field hint -->
+    <string name="network_server_password_bouncer_hint">Pour les bouncers, préférez activer SASL ci-dessous — c\'est la voie d\'authentification moderne. Si vous utilisez ce champ PASS à la place, entrez juste le mot de passe ; le nom d\'utilisateur du bouncer et le réseau des champs ci-dessus sont préfixés automatiquement (envoyé comme <b>username/network:password</b>, ou <b>username@clientid/network:password</b> pour ZNC). Si vous préférez taper <b>username/network:password</b> vous-même, ça marche aussi.</string>
+
+    <!-- IRCv3 metadata editor (draft/metadata-2) -->
+    <string name="menu_edit_metadata">Modifier les métadonnées</string>
+    <string name="metadata_editor_title">Vos métadonnées</string>
+    <string name="metadata_editor_subtitle">Détails de profil visibles par les autres clients de ce réseau. Laissez un champ vide pour l\'effacer.</string>
+    <string name="metadata_editor_clear_hint">Vider un champ puis enregistrer supprime cette valeur du serveur.</string>
+    <string name="metadata_display_name">Nom affiché</string>
+    <string name="metadata_status">Statut</string>
+    <string name="metadata_color">Couleur du pseudo (6 chiffres hexadécimaux)</string>
+    <string name="metadata_color_hint">Saisissez exactement 6 chiffres hexadécimaux, par ex. 3f8ac2</string>
+    <string name="metadata_avatar">URL de l\'avatar (https)</string>
+    <string name="metadata_homepage">URL du site web</string>
+    <string name="metadata_pronouns">Pronoms</string>
+    <string name="metadata_bio">Biographie</string>
+
+    <!-- IRCv3 account registration (draft/account-registration) -->
+    <string name="menu_register_account">Créer un compte</string>
+    <string name="register_title">Créer un compte</string>
+    <string name="register_subtitle">Créez un compte directement auprès de ce réseau, sans passer par les services.</string>
+    <string name="register_account_optional">Nom du compte (facultatif)</string>
+    <string name="register_email_required">E-mail (obligatoire)</string>
+    <string name="register_email_optional">E-mail (facultatif)</string>
+    <string name="register_password">Mot de passe</string>
+    <string name="register_password_confirm">Confirmer le mot de passe</string>
+    <string name="register_action">Créer le compte</string>
+    <string name="register_code">Code de vérification</string>
+    <string name="register_verify_action">Vérifier</string>
+    <string name="register_verify_prompt">Saisissez le code de vérification envoyé par le serveur.</string>
+    <string name="register_success">Vous êtes enregistré en tant que %1$s et connecté.</string>
+    <string name="register_your_account">votre compte</string>
+    <string name="register_save_password">Enregistrer ce mot de passe pour la connexion automatique (SASL) la prochaine fois</string>
+    <string name="register_failed">Échec de la création du compte. Vérifiez les informations et réessayez.</string>
+
+    <!-- Nick tap sheet -->
+    <string name="nick_away">Absent</string>
+    <string name="nick_bot">Bot</string>
+
+    <!-- Ban/extban editor -->
+    <string name="chat_add">Ajouter</string>
+    <string name="chat_add_mask">Masque, ou compte pour un extban</string>
+    <string name="chat_ban_account">Bannir le compte</string>
+    <string name="chat_extban_hint">Bans étendus pris en charge (%1$s) : %2$s</string>
+
+    <!-- Encryption dialog -->
+    <string name="copy">Copier</string>
+    <string name="share">Partager</string>
+    <string name="paste">Coller</string>
+    <string name="confirm">Confirmer</string>
+    <string name="action_import">Importer</string>
+    <string name="clear">Effacer</string>
+    <string name="enc_title">Chiffrement</string>
+    <string name="enc_for_target">pour %1$s</string>
+    <string name="enc_kind_channel">canal</string>
+    <string name="enc_kind_query">conversation privée</string>
+    <string name="enc_cleartext_desc">Les messages de ce %1$s sont envoyés et reçus en clair.</string>
+    <string name="enc_active">"Actif : "</string>
+    <string name="enc_age_dormant_key">+AGE est activé et chiffre les messages ici. Votre clé %1$s enregistrée est conservée mais reste inutilisée tant que vous ne désactivez pas +AGE.</string>
+    <string name="enc_safety_number">Numéro de sécurité</string>
+    <string name="enc_verify_match">Vérifiez que ceci correspond à ce que voit votre correspondant.</string>
+    <string name="enc_cipher">Chiffrement</string>
+    <string name="enc_agm_desc">Authenticated Group Messaging de HexDroid. Une clé aléatoire de 256 bits, chiffrement authentifié par message. C\'est vous qui partagez la clé.</string>
+    <string name="enc_age_desc">Authenticated Group Exchange. Les clés sont négociées automatiquement et tournent vers l\'avant. Confidentialité persistante pour les MP.</string>
+    <string name="enc_fish_desc">N\'utilisez FiSH que si l\'autre partie ne sait pas parler +AGM ou +AGE.</string>
+    <string name="enc_regen">Régénérer</string>
+    <string name="enc_regen_confirm">Générer une nouvelle clé ? La clé actuelle cesse de fonctionner immédiatement et votre correspondant devra importer la nouvelle.</string>
+    <string name="enc_clear_confirm">Supprimer le chiffrement pour ce %1$s ? Les messages seront envoyés et reçus en clair.</string>
+    <string name="enc_generate_key">Générer une clé</string>
+    <string name="enc_age_safety_number">Votre numéro de sécurité +AGE</string>
+    <string name="enc_copy_safety_number">Copier le numéro de sécurité</string>
+    <string name="enc_share_safety_desc">Partagez-le pour que vos contacts puissent confirmer qu\'ils parlent bien avec vous.</string>
+    <string name="enc_this_channel">Ce canal</string>
+    <string name="enc_this_contact">Ce contact</string>
+    <string name="enc_no_identity">Aucune identité +AGE vue pour %1$s pour l\'instant. Elle sera épinglée automatiquement la première fois qu\'elle sera annoncée (confiance à la première utilisation) ; vous pourrez ensuite la vérifier ici.</string>
+    <string name="enc_verified">Vérifié.</string>
+    <string name="enc_pinned_unverified">Épinglé mais non vérifié. Comparez ceci avec ce que %1$s vous lit, puis confirmez.</string>
+    <string name="enc_mark_verified">Marquer comme vérifié</string>
+    <string name="enc_turn_off_age">Désactiver +AGE</string>
+    <string name="enc_age_enable_desc">Activer ici le chiffrement basé sur l\'identité (Ed25519) à confidentialité persistante (X25519/X3DH). Les clés sont échangées automatiquement dès que les deux parties annoncent +AGE.</string>
+    <string name="enc_turn_on_age">Activer +AGE</string>
+    <string name="enc_reveal_key">Révéler la clé à partager</string>
+    <string name="enc_key_bytes">Clé (32 octets, base64)</string>
+    <string name="enc_key_leak_warn">Quiconque possède cette chaîne peut déchiffrer les messages destinés à cette cible.</string>
+    <string name="enc_paste_key">Coller une clé venant d\'un autre utilisateur</string>
+    <string name="enc_key_placeholder">Clé de 32 octets encodée en base64</string>
+    <string name="enc_reveal_passphrase">Révéler la phrase secrète</string>
+    <string name="enc_passphrase">Phrase secrète</string>
+    <string name="enc_passphrase_desc">Saisissez la même phrase secrète que celle qu\'utilisera votre contact FiSH.</string>
+    <string name="enc_passphrase_placeholder">Phrase secrète (4 à 56 caractères)…</string>
+    <string name="enc_passphrase_weak">Les phrases secrètes courtes (&lt;8 caractères) sont faciles à casser par force brute. Utilisez-en au moins 12.</string>
+
+    <!-- Image/link preview -->
+    <string name="img_load_preview">Charger l\'aperçu</string>
+    <string name="img_close_player">Fermer le lecteur</string>
+    <string name="img_youtube_thumb">Miniature YouTube</string>
+    <string name="img_twitter_video_thumb">Miniature vidéo Twitter/X</string>
+    <string name="img_preview">Aperçu de l\'image</string>
+    <string name="img_play_video">Lire la vidéo</string>
+    <string name="img_open_tweet_video">Ouvrir la vidéo du tweet</string>
+    <string name="img_dismiss_preview">Masquer l\'aperçu</string>
+    <string name="img_failed_load">Échec du chargement de l\'aperçu</string>
+    <string name="img_too_large">Aperçu trop volumineux (5 Mo maximum)</string>
+    <string name="img_no_media">Aucun média dans ce tweet</string>
+    <string name="img_wifi_only">Wi-Fi uniquement – connectez-vous au Wi-Fi</string>
+
+    <!-- Connection/reconnect status lines -->
+    <string name="status_cooldown_over">Fin de la pause de stabilité. Reprise de la reconnexion automatique…</string>
+    <string name="status_network_lost">Réseau perdu. En attente de connectivité…</string>
+    <string name="status_network_changed">Réseau modifié. Reconnexion…</string>
+    <string name="status_network_available_reconnect">Réseau disponible. Reconnexion…</string>
+    <string name="status_disconnected">Déconnecté</string>
+    <string name="status_reconnect_in">Reconnexion dans %1$s (tentative %2$s)…</string>
+    <string name="status_network_available_retry">Réseau disponible. Nouvelle tentative…</string>
+    <string name="status_battery_saver_paused">L\'économiseur de batterie est actif : reconnexion en pause. Nouvelle tentative une fois l\'économiseur désactivé.</string>
+    <string name="status_battery_saver_off">Économiseur de batterie désactivé. Nouvelle tentative…</string>
+    <string name="status_retry_connect">Nouvelle tentative de connexion (tentative %1$s)…</string>
+    <string name="status_resuming">Reprise de la connexion…</string>
+
+    <!-- CAP/SASL session status (IrcSession) -->
+    <string name="session_cap_ls_complete">CAP LS du serveur terminé</string>
+    <string name="session_cap_new">CAP NEW : %1$s</string>
+    <string name="session_cap_del">CAP DEL : %1$s</string>
+    <string name="session_cap_ack">CAP ACK : %1$s</string>
+    <string name="session_starting_sasl">Démarrage de SASL…</string>
+    <string name="session_cap_nak">CAP NAK : %1$s</string>
+    <string name="session_sasl_success">Authentification SASL réussie</string>
+    <string name="session_sasl_plain_no_tls">SASL PLAIN interrompu : refus d\'envoyer le mot de passe sur une connexion non chiffrée. Activez TLS ou passez à SCRAM-SHA-256.</string>
+    <string name="session_sasl_plain_no_pw">SASL PLAIN interrompu : aucun mot de passe défini pour ce profil. Ouvrez les paramètres du réseau et saisissez à nouveau le mot de passe SASL (les mots de passe ne sont pas inclus dans les sauvegardes pour des raisons de sécurité).</string>
+    <string name="session_sasl_plain_aborted">SASL PLAIN : le serveur a interrompu l\'authentification</string>
+    <string name="session_sasl_plain_unexpected">SASL PLAIN : défi serveur inattendu « %1$s », abandon</string>
+    <string name="session_sasl_external_aborted">SASL EXTERNAL : le serveur a interrompu l\'authentification</string>
+    <string name="session_sasl_external_unexpected">SASL EXTERNAL : défi serveur inattendu « %1$s », abandon</string>
+    <string name="session_sasl_scram_no_pw">SASL SCRAM-SHA-256 interrompu : aucun mot de passe défini pour ce profil. Ouvrez les paramètres du réseau et saisissez à nouveau le mot de passe SASL (les mots de passe ne sont pas inclus dans les sauvegardes pour des raisons de sécurité).</string>
+    <string name="session_sasl_decode_fail">SASL : impossible de décoder la charge utile AUTHENTICATE du serveur</string>
+    <string name="session_scram_state_missing">État SCRAM manquant</string>
+    <string name="session_sasl_scram_aborted">SASL SCRAM-SHA-256 interrompu : %1$s</string>
+    <string name="session_scram_sig_verified">SCRAM : signature du serveur vérifiée</string>
+    <string name="session_scram_sig_failed">Échec de la vérification de la signature du serveur SCRAM</string>
+
+    <!-- IrcCore status/server text -->
+    <string name="core_looking_up_ban">Recherche de %1$s pour un ban basé sur %2$s…</string>
+    <string name="core_ctcp_ratelimited">CTCP %1$s de %2$s ignoré (limitation de débit)</string>
+    <string name="core_ctcp_version_sent">Réponse CTCP VERSION envoyée à %1$s</string>
+    <string name="core_ctcp_ping_reply_sent">Réponse CTCP PING envoyée à %1$s</string>
+    <string name="core_ctcp_time_sent">Réponse CTCP TIME envoyée à %1$s</string>
+    <string name="core_ctcp_reply_sent">Réponse CTCP %1$s envoyée à %2$s</string>
+    <string name="core_ctcp_clientinfo_reply_sent">Réponse CTCP CLIENTINFO envoyée à %1$s</string>
+    <string name="core_ctcp_source_sent">Réponse CTCP SOURCE envoyée à %1$s</string>
+    <string name="core_ctcp_unknown">CTCP %1$s inconnu de la part de %2$s</string>
+    <string name="core_ctcp_generic_from">* %1$s de %2$s : %3$s</string>
+    <string name="core_usage_knock">Utilisation : /knock &lt;canal&gt; [raison]</string>
+    <string name="core_no_knock">Le serveur ne prend pas en charge KNOCK</string>
+    <string name="core_ctcp_sent">CTCP %1$s envoyé à %2$s</string>
+    <string name="core_ctcp_finger_sent">CTCP FINGER envoyé à %1$s</string>
+    <string name="core_ctcp_userinfo_sent">CTCP USERINFO envoyé à %1$s</string>
+    <string name="core_ctcp_clientinfo_sent">CTCP CLIENTINFO envoyé à %1$s</string>
+    <string name="core_usage_setname">Utilisation : /setname &lt;nouveau nom réel&gt;</string>
+    <string name="core_no_setname">Le serveur ne prend pas en charge SETNAME (capacité setname non négociée)</string>
+    <string name="core_ctcp_ping_sent">CTCP PING envoyé à %1$s</string>
+    <string name="core_looking_up">Recherche de %1$s...</string>
+    <string name="core_resolved_to">Résolu en :</string>
+    <string name="core_no_resolution">Aucune résolution trouvée pour %1$s</string>
+    <string name="core_dns_failed">Échec de la résolution DNS : %1$s</string>
+    <string name="core_unknown_error">Erreur inconnue</string>
+    <string name="core_connecting">Connexion…</string>
+    <string name="core_tls">TLS : %1$s</string>
+    <string name="core_using_encoding">Encodage utilisé : %1$s</string>
+    <string name="core_regained_nick">Pseudo principal %1$s récupéré.</string>
+    <string name="core_regaining_nick">Tentative de récupération du pseudo principal %1$s…</string>
+    <string name="core_metadata_unsub">Métadonnées : désabonné de %1$s</string>
+    <string name="core_metadata_subs">Abonnements aux métadonnées : %1$s</string>
+    <string name="core_metadata_subs_none">(aucun)</string>
+    <string name="core_monitor_empty">La liste MONITOR est vide</string>
+    <string name="core_monitor_list">Liste MONITOR (%1$s) : %2$s</string>
+    <string name="core_negotiating_caps">Négociation des capacités…</string>
+    <string name="core_legacy_encoding">Encodage hérité détecté automatiquement : %1$s — vous pouvez le définir explicitement dans les paramètres du réseau</string>
+    <string name="core_nick_in_use_alt">Pseudo déjà utilisé ; essai du pseudo de secours : %1$s</string>
+    <string name="core_nick_in_use_next">Pseudo déjà utilisé ; essai de : %1$s</string>
+    <string name="core_netsplit">%1$s%2$s — %3$s concernés</string>
+
+    <!-- IrcViewModel command/feedback status -->
+    <string name="vm_no_matches">Aucun résultat pour « %1$s »</string>
+    <string name="vm_age_offer">%1$s souhaite discuter avec le chiffrement de bout en bout +AGE. Activez-le depuis le menu du cadenas pour chiffrer cette conversation.</string>
+    <string name="vm_sts_secure">STS : %1$s exige TLS - connexion sécurisée sur le port %2$s</string>
+    <string name="vm_turn_on_data">Activez le Wi-Fi ou les données mobiles pour la reconnexion automatique.</string>
+    <string name="vm_conn_error">Erreur de connexion : %1$s (trace d\'appels dans logcat)</string>
+    <string name="vm_agmkey_usage">/agm-key gen [cible] | set &lt;cible&gt; &lt;b64&gt; | clear &lt;cible&gt; | info [cible]</string>
+    <string name="vm_agmkey_gen_needs_target">/agm-key gen nécessite une cible (ou lancez-le dans un canal ou une conversation privée)</string>
+    <string name="vm_agmkey_generated">Clé AGM générée pour %1$s. Empreinte : %2$s</string>
+    <string name="vm_agmkey_run_other">Sur l\'autre appareil, lancez :   /agm-key set %1$s %2$s</string>
+    <string name="vm_agmkey_verify">(Vérifiez que l\'empreinte correspond des deux côtés avant d\'envoyer quoi que ce soit de sensible.)</string>
+    <string name="vm_agmkey_set_usage">Utilisation : /agm-key set &lt;cible&gt; &lt;base64&gt;</string>
+    <string name="vm_agmkey_bad_base64">/agm-key set : base64 invalide dans l\'argument de clé</string>
+    <string name="vm_agmkey_bad_len">/agm-key set : clé de 32 octets attendue (%1$s octets obtenus après décodage base64)</string>
+    <string name="vm_agmkey_installed">Clé AGM installée pour %1$s. Empreinte : %2$s</string>
+    <string name="vm_agmkey_store_fail">Échec de l\'enregistrement de la clé : %1$s</string>
+    <string name="vm_agmkey_clear_needs_target">/agm-key clear nécessite une cible (ou lancez-le dans un canal ou une conversation privée)</string>
+    <string name="vm_agmkey_cleared">Clé AGM effacée pour %1$s. Les messages seront désormais envoyés en clair.</string>
+    <string name="vm_agmkey_info_needs_target">/agm-key info nécessite une cible (ou lancez-le dans un canal ou une conversation privée)</string>
+    <string name="vm_agmkey_none">Aucune clé de chiffrement configurée pour %1$s</string>
+    <string name="vm_agmkey_info">%1$s : schéma=%2$s  empreinte=%3$s</string>
+    <string name="vm_react_usage">Utilisation : /%1$s &lt;emoji&gt; [n]   - n est le nombre de messages en arrière, 1 par défaut</string>
+    <string name="vm_react_needs_target">/%1$s nécessite un canal ou une conversation privée active</string>
+    <string name="vm_react_no_tags">Ce serveur ne prend pas en charge les réactions (capacité message-tags absente)</string>
+    <string name="vm_react_no_msgid">/%1$s n\'a pas trouvé %2$s avec un msgId serveur - le serveur ne prend peut-être pas en charge message-tags</string>
+    <string name="vm_find_usage">Utilisation : /find &lt;texte&gt;</string>
+    <string name="vm_gsearch_usage">Utilisation : /gsearch &lt;texte&gt;</string>
+    <string name="vm_no_matches_buffers">Aucun résultat pour « %1$s » dans %2$s tampons</string>
+    <string name="vm_found_matches">%1$s résultats trouvés pour « %2$s » - utilisez la superposition /gsearch pour naviguer</string>
+    <string name="vm_ignore_empty">La liste d\'ignorés est vide. Utilisation : /ignore &lt;pseudo&gt;</string>
+    <string name="vm_ignored_list">Ignorés (%1$s) : %2$s</string>
+    <string name="vm_ignore_usage">Utilisation : /ignore &lt;pseudo&gt;</string>
+    <string name="vm_unignore_usage">Utilisation : /unignore &lt;pseudo&gt;</string>
+    <string name="vm_not_connected">Non connecté.</string>
+    <string name="vm_names_usage">Utilisation : /names #canal</string>
+    <string name="vm_slap_usage">Utilisation : /slap &lt;pseudo&gt;</string>
+
+    <!-- IrcViewModel multi-line status -->
+    <string name="vm_reconnect_halted">Reconnexion automatique interrompue : %1$s (reconnexion manuelle nécessaire)</string>
+    <string name="vm_reconnect_halted_auth">Reconnexion automatique interrompue : échec de l\'authentification. Corrigez les identifiants, puis reconnectez-vous manuellement.</string>
+    <string name="vm_status_auth_halted">Échec d\'authentification — reconnexion interrompue</string>
+    <string name="vm_sasl_keystore_invalid">Identifiants SASL indisponibles : la clé du Keystore Android a été invalidée (cela peut arriver après un changement de biométrie ou de verrouillage d\'écran). Connexion sans SASL ; saisissez à nouveau votre mot de passe SASL dans les paramètres du réseau pour rétablir l\'authentification auprès des services.</string>
+    <string name="vm_age_key_warning">AVERTISSEMENT +AGE : %1$s a annoncé une clé (%2$s) différente de celle épinglée pour ce pseudo (%3$s). C\'est normal après une réinstallation ou sur un second appareil, mais c\'est aussi à quoi ressemble une usurpation de pseudo. Leurs messages +AGE sont ignorés jusqu\'à votre décision. Vérifiez l\'empreinte par un autre canal, puis : /age trust %1$s  ou  /age reject %1$s</string>
+
+    <!-- IrcViewModel list/STS/DCC/feedback status -->
+    <string name="vm_banlist_usage">Utilisation : /banlist #canal</string>
+    <string name="vm_quietlist_usage">Utilisation : /quietlist #canal</string>
+    <string name="vm_exceptlist_usage">Utilisation : /exceptlist #canal</string>
+    <string name="vm_invexlist_usage">Utilisation : /invexlist #canal</string>
+    <string name="vm_dcc_chat_usage">Utilisation : /dcc chat &lt;pseudo&gt;</string>
+    <string name="vm_age_send_failed">Échec de l\'envoi +AGE ; message non envoyé.</string>
+    <string name="vm_ignoring">%1$s ignoré</string>
+    <string name="vm_unignored">%1$s n\'est plus ignoré</string>
+    <string name="vm_notif_muted">Notifications coupées pour %1$s</string>
+    <string name="vm_notif_unmuted">Notifications réactivées pour %1$s</string>
+    <string name="vm_halted_rejected">Reconnexion automatique interrompue : le serveur a rejeté la connexion.</string>
+    <string name="vm_tls_persist_fail">TLS : impossible d\'enregistrer l\'empreinte du certificat : %1$s</string>
+    <string name="vm_mode_change">Mode %1$s %2$s</string>
+    <string name="vm_sts_cleared">STS : politique pour %1$s effacée par le serveur</string>
+    <string name="vm_sts_stored">STS : politique TLS uniquement enregistrée pour %1$s (valable %2$ss)</string>
+    <string name="vm_sts_upgrade">STS : le serveur exige TLS - reconnexion sécurisée sur le port %1$s</string>
+    <string name="vm_registered_as">Enregistré en tant que %1$s</string>
+    <string name="vm_reconnected">Reconnecté</string>
+    <string name="vm_waiting_autojoin">Attente de %1$ss avant l\'auto-join et les commandes…</string>
+    <string name="vm_waiting">Attente de %1$ss…</string>
+    <string name="vm_dcc_incoming">Offre de fichier DCC entrante de %1$s : %2$s (écran Transferts pour accepter)</string>
+
+    <!-- IrcViewModel TLS/halt multi-line -->
+    <string name="vm_halted_tls">Reconnexion automatique interrompue : l\'erreur TLS a peu de chances de se résoudre seule. Ajustez les paramètres de confiance des certificats, puis reconnectez-vous manuellement.</string>
+    <string name="vm_halted_unreachable">Reconnexion automatique interrompue : serveur injoignable (le nom d\'hôte ne se résout pas ou le port est fermé). Vérifiez l\'hôte et le port dans les paramètres du réseau, puis reconnectez-vous manuellement.</string>
+    <string name="vm_tls_tofu_pinned">TLS : empreinte du certificat apprise et épinglée (TOFU). Les prochaines connexions vérifieront : %1$s</string>
+    <string name="vm_cert_hostname_mismatch">Nom d\'hôte du certificat non concordant : connecté à %1$s mais les SAN du certificat sont : %2$s. Connexion autorisée.</string>
+
+    <!-- IrcViewModel DCC/bouncer/channel status -->
+    <string name="vm_dcc_resume_nomatch">DCC RESUME de %1$s pour %2$s ignoré — aucun envoi correspondant en cours.</string>
+    <string name="vm_dcc_resume_oor">Le DCC RESUME de %1$s indique une position hors limites %2$s (taille %3$s) ; ignoré.</string>
+    <string name="vm_dcc_resume_honour">DCC RESUME de %1$s honoré à %2$s octets.</string>
+    <string name="vm_dcc_chat_incoming">DCC CHAT entrant de %1$s - appuyez sur le tampon « DCCCHAT:%1$s », ou ouvrez Transferts pour accepter</string>
+    <string name="vm_dcc_chat_offer">Offre DCC CHAT de %1$s (%2$s:%3$s). Utilisez /dcc accept %1$s ou ouvrez Transferts pour accepter.</string>
+    <string name="vm_closed_buffer">Tampon %1$s fermé (absent du canal)</string>
+    <string name="vm_left_channel">%1$s quitté</string>
+    <string name="vm_autorejoin_suppressed">Rejoin automatique supprimé (expulsé à nouveau en moins de %1$ss)</string>
+    <string name="vm_command_error">%1$s : %2$s</string>
+    <string name="vm_try_again">veuillez réessayer dans un instant</string>
+    <string name="vm_invited_here">%1$s vous a invité ici</string>
+    <string name="vm_caps_added">Capacités ajoutées par le serveur : %1$s</string>
+    <string name="vm_caps_removed">Capacités retirées par le serveur : %1$s</string>
+    <string name="vm_bouncer_removed">Réseau bouncer supprimé : %1$s</string>
+    <string name="vm_bouncer_state">Réseau bouncer %1$s : %2$s%3$s [%4$s]</string>
+    <string name="vm_deleted_message">%1$s a supprimé un message</string>
+    <string name="vm_names_none">NAMES pour %1$s : (aucun)</string>
+    <string name="vm_names_header">NAMES pour %1$s (%2$s) :</string>
+    <string name="vm_log_write_failed">Échec de l\'écriture du journal pour %1$s : %2$s</string>
+    <string name="vm_dcc_lan_perm">DCC de %1$s : autorisation réseau local requise (Android 17+). Accordez-la dans Paramètres → Applications → HexDroid → Autorisations.</string>
+    <string name="vm_dcc_accepted_passive">Offre DCC passive acceptée : %1$s (écoute sur %2$s)%3$s</string>
+    <string name="vm_dcc_resume_requested">DCC RESUME demandé pour %1$s à %2$s octets…</string>
+    <string name="vm_dcc_resume_agreed">L\'expéditeur a accepté RESUME à %1$s octets (nous en demandions %2$s)</string>
+    <string name="vm_dcc_resume_none">Aucun DCC ACCEPT de %1$s — le transfert reprend depuis le début.</string>
+    <string name="vm_dcc_rejected">Offre DCC refusée : %1$s</string>
+    <string name="vm_dcc_chat_disconnected">DCC CHAT déconnecté%1$s</string>
+
+    <!-- IrcViewModel DCC CHAT/send status -->
+    <string name="vm_dcc_passive_proxy">Impossible d\'accepter un DCC passif de %1$s tant qu\'un proxy est actif : cela nécessiterait d\'écouter en dehors du tunnel. Demandez-leur d\'envoyer en mode actif, ou désactivez le proxy pour ce transfert.</string>
+    <string name="vm_dcc_refuse_private">DCC de %1$s refusé : il annonce une adresse privée ou locale (%2$s) qui n\'est pas joignable via le proxy. Désactivez le proxy pour ce transfert s\'ils sont sur votre réseau local.</string>
+    <string name="vm_dcc_chat_refuse_private">DCC CHAT de %1$s refusé : il annonce une adresse privée ou locale (%2$s) non joignable via le proxy. Désactivez le proxy pour ce réseau s\'ils sont sur votre réseau local.</string>
+    <string name="vm_dcc_chat_failed">Échec du DCC CHAT : %1$s</string>
+    <string name="vm_dcc_chat_closed">DCC CHAT fermé</string>
+    <string name="vm_dcc_chat_connected">DCC CHAT connecté à %1$s</string>
+    <string name="vm_dcc_chat_not_connected">DCC CHAT non connecté.</string>
+    <string name="vm_dcc_chat_send_failed">Échec de l\'envoi DCC CHAT : %1$s</string>
+    <string name="vm_dcc_chat_lan_perm">DCC CHAT de %1$s : autorisation réseau local requise (Android 17+). Accordez-la dans Paramètres → Applications → HexDroid → Autorisations.</string>
+    <string name="vm_dcc_chat_connecting">Connexion DCC CHAT à %1$s (%2$s:%3$s)…</string>
+    <string name="vm_dcc_chat_connect_failed">Échec de la connexion DCC CHAT : %1$s</string>
+    <string name="vm_dcc_chat_rejected">Offre DCC CHAT de %1$s refusée</string>
+    <string name="vm_dcc_chat_offering">Proposition de DCC%1$s CHAT à %2$s…</string>
+    <string name="vm_dcc_chat_sent">Offre DCC%1$s CHAT envoyée à %2$s (port %3$s)</string>
+    <string name="vm_dcc_chat_offer_failed">Échec de l\'offre DCC CHAT : %1$s</string>
+    <string name="vm_dcc_offering_active">Proposition de %1$s à %2$s via DCC%3$s (actif, port %4$s)…</string>
+    <string name="vm_dcc_offering_passive">Proposition de %1$s à %2$s via DCC%3$s (passif)…</string>
+    <string name="vm_dcc_accepted_resume">%1$s a accepté ; reprise à partir de %2$s octets…</string>
+    <string name="vm_dcc_accepted_connecting">%1$s a accepté ; connexion…</string>
+    <string name="vm_dcc_proxy_passive">Proxy actif : utilisation du DCC passif (un envoi actif ne peut pas écouter à travers un proxy).</string>
+    <string name="vm_dcc_send_complete">Envoi DCC terminé : %1$s → %2$s</string>
+    <string name="vm_dcc_send_failed">Échec de l\'envoi DCC : %1$s</string>
+    <string name="vm_dcc_send_cancelled">Envoi DCC annulé : %1$s</string>
+
+    <!-- IrcViewModel connection status labels -->
+    <string name="vm_status_disconnected">Déconnecté</string>
+    <string name="vm_status_connected">Connecté</string>
+    <string name="vm_status_plaintext_disabled">Texte en clair désactivé</string>
+    <string name="vm_status_lan_perm">Autorisation réseau local requise</string>
+    <string name="vm_status_not_configured">Non configuré</string>
+    <string name="vm_status_waiting_network">En attente du réseau…</string>
+    <string name="vm_status_connecting">Connexion…</string>
+    <string name="vm_status_reconnecting">Reconnexion…</string>
+    <string name="vm_status_reconnecting_in">Reconnexion dans %1$ss…</string>
+    <string name="vm_status_paused_battery">En pause (économiseur de batterie)</string>
+    <string name="vm_status_retrying">Nouvelle tentative de connexion…</string>
+    <string name="vm_status_connected_to">Connecté à %1$s</string>
+    <string name="vm_status_unstable_paused">Instable - en pause %1$s min</string>
+    <string name="vm_status_unstable_reconnect">Instable - reconnexion en pause</string>
+    <string name="vm_status_tls_halted">Erreur TLS : reconnexion interrompue</string>
+    <string name="vm_event_handler_error">Erreur du gestionnaire d\'événements : %1$s</string>
+
+    <!-- IrcViewModel final status -->
+    <string name="vm_status_unreachable_halted">Serveur injoignable : reconnexion interrompue</string>
+    <string name="vm_status_rejected_halted">Connexion rejetée par le serveur : reconnexion interrompue</string>
+    <string name="vm_server_error">Erreur du serveur : %1$s</string>
+    <string name="vm_dcc_disabled">DCC est désactivé dans les paramètres.</string>
+    <string name="vm_dcc_chat_proxy">Impossible de proposer un DCC CHAT tant qu\'un proxy est actif (cela nécessite d\'écouter en dehors du tunnel). Désactivez le proxy pour ce réseau afin d\'utiliser DCC CHAT.</string>
+
+    <!-- IrcViewModel auth hints / reactions -->
+    <string name="vm_auth_pass_rejected">Mot de passe serveur (PASS) rejeté. S\'il s\'agit d\'un profil bouncer, le format du mot de passe est généralement utilisateur:motdepasse ou utilisateur/réseau:motdepasse.</string>
+    <string name="vm_auth_sasl_bouncer">Authentification SASL rejetée. Les bouncers exigent un SASL valide pour router la connexion. Vérifiez le nom d\'utilisateur et le mot de passe SASL (ou le certificat client) de ce profil.</string>
+    <string name="vm_auth_sasl_rejected">Authentification SASL rejetée. Vérifiez le nom d\'utilisateur et le mot de passe SASL (ou le certificat client) de ce profil.</string>
+    <string name="vm_auth_rejected">Authentification rejetée.</string>
+    <string name="vm_auth_halt_suffix">Reconnexion automatique interrompue ; appuyez sur reconnecter après avoir corrigé les identifiants.</string>
+    <string name="vm_reacted_with">a réagi avec</string>
+    <string name="vm_removed_reaction">a retiré sa réaction</string>
+    <string name="vm_ref">(réf. : %1$s)</string>
+
+    <!-- IrcViewModel misc -->
+    <string name="vm_cert_changed">L\'empreinte du certificat du serveur a CHANGÉ ! Attendue : %1$s  •  Obtenue : %2$s  - Connexion refusée. Reconnexion automatique interrompue. Si ce serveur utilise un DNS à répartition tournante (irc.exemple.tld), ouvrez les paramètres du réseau et appuyez sur « Faire confiance aussi à ce serveur » pour ajouter la nouvelle empreinte sans perdre les autres. Si le certificat a été renouvelé, appuyez plutôt sur « Réinitialiser et ré-épingler » : cela supprime toutes les empreintes déjà approuvées et recommence l\'apprentissage de zéro.</string>
+    <string name="vm_no_local_profile">aucun profil local pour « %1$s » - ajoutez-en un pour vous connecter à cet upstream.</string>
+    <string name="vm_scrollback_divider">Historique issu des journaux • Dernier message : %1$s</string>
+
+    <!-- Screen tails: About/NetworkEdit/Settings -->
+    <string name="ok">OK</string>
+    <string name="remove">Supprimer</string>
+    <string name="add">Ajouter</string>
+    <string name="about_logo_desc">Logo HexDroid</string>
+    <string name="about_boxlabs_desc">boxlabs</string>
+    <string name="netedit_port_range">Le port doit être compris entre 1 et 65535</string>
+    <string name="netedit_sasl_external">EXTERNAL (certificat client)</string>
+    <string name="netedit_cert_pem">PEM (.pem)</string>
+    <string name="netedit_cert_crtkey">CRT + KEY (.crt/.key)</string>
+    <string name="settings_reset_100">Réinitialiser à 100 %</string>
+    <string name="settings_custom_aliases">Alias personnalisés</string>
+    <string name="settings_no_aliases">Aucun alias pour l\'instant.</string>
+    <string name="settings_alias_name">Nom de l\'alias (sans « / »)</string>
+    <string name="settings_alias_expansion">Expansion (une commande, sans « / »)</string>
+    <string name="settings_add_alias">Ajouter un alias</string>
+    <string name="settings_scripts">Scripts</string>
+    <string name="settings_scripts_desc">Charger et gérer les scripts .hex (jeux, outils, commandes personnalisées).</string>
+    <string name="net_this_network">ce réseau</string>
+    <!-- Connection / disconnect reasons emitted by IrcCore.
+         These are display text only. The machine-readable cause travels separately as
+         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
+         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <string name="core_disconnected">Déconnecté</string>
+    <string name="core_disconnect_server_error">Erreur du serveur : %1$s</string>
+    <string name="core_disconnect_tls_fingerprint_changed">L\'empreinte du certificat TLS a changé</string>
+    <string name="core_disconnect_connect_failed">Échec de la connexion : %1$s</string>
+    <string name="core_disconnect_connection_error">Erreur de connexion : %1$s</string>
+    <string name="core_disconnect_registration_timeout">Délai d\'enregistrement dépassé</string>
+    <string name="core_disconnect_ping_timeout">Délai de ping dépassé</string>
+    <string name="core_error_registration_timeout">Délai d\'enregistrement dépassé : le serveur n\'a pas envoyé 001 en moins de %1$d s</string>
+
+    <!-- friendlyErrorMessage(): human-readable renderings of socket and TLS failures. -->
+    <string name="core_err_proxy">Erreur de proxy : %1$s</string>
+    <string name="core_err_tls_cert_verify">Échec de la vérification du certificat TLS. Le certificat du serveur est peut-être expiré, auto-signé ou non approuvé.</string>
+    <string name="core_err_tls_protocol">Échec de la négociation TLS. Le serveur ne prend peut-être pas en charge TLS 1.2/1.3.</string>
+    <string name="core_err_tls_rejected">Négociation TLS rejetée par le serveur. Vérifiez le port et les paramètres TLS.</string>
+    <string name="core_err_tls_handshake_other">Échec de la négociation TLS : %1$s</string>
+    <string name="core_err_tls_interrupted">Session TLS interrompue. La connexion va être retentée.</string>
+    <string name="core_err_tls_proto_error">Erreur de protocole TLS. La connexion va être retentée.</string>
+    <string name="core_err_tls_read">Erreur de lecture TLS. Le réseau a peut-être changé.</string>
+    <string name="core_err_tls_write">Erreur d\'écriture TLS. Le réseau a peut-être changé.</string>
+    <string name="core_err_tls_closed">Session TLS fermée</string>
+    <string name="core_err_tls_other">Erreur TLS : %1$s</string>
+    <string name="core_err_connection_refused">Connexion refusée. Vérifiez le nom d\'hôte et le port.</string>
+    <string name="core_err_network_unreachable">Réseau injoignable. Vérifiez votre connexion internet.</string>
+    <string name="core_err_connection_timed_out">Délai de connexion dépassé</string>
+    <string name="core_err_dns_timeout">Délai de résolution DNS dépassé. Le résolveur ne répond pas.</string>
+    <string name="core_err_dns_failed">Impossible de résoudre le nom d\'hôte</string>
+    <string name="core_err_broken_pipe">Connexion perdue (tube rompu)</string>
+    <string name="core_err_connection_reset">Connexion réinitialisée par le serveur</string>
+    <string name="core_err_connection_closed">Connexion fermée</string>
+
+    <!-- Disconnect rendering and flap detection in IrcViewModel. -->
+    <string name="vm_disconnected_reason">Déconnecté : %1$s</string>
+    <string name="vm_flap_paused">⚠ La connexion est instable : %1$d délais de ping dépassés au cours des %2$d dernières minutes. Reconnexion automatique en pause pendant %2$d minutes pour éviter d\'inonder le serveur. Appuyez sur Reconnecter pour réessayer plus tôt.</string>
+    <!-- IrcCore: command usage and unsupported-capability notices.
+         Command SYNTAX (the part the user types) stays in English on purpose; only the
+         surrounding prose is translated. -->
+    <string name="core_usage_generic">Utilisation : /%1$s %2$s</string>
+    <string name="core_usage_syntax">Utilisation : %1$s</string>
+    <string name="core_usage_msg">Utilisation : /msg &lt;pseudo|#canal&gt; &lt;message&gt;</string>
+    <string name="core_usage_query">Utilisation : /query &lt;pseudo&gt; [message]</string>
+    <string name="core_usage_kill">Utilisation : /kill &lt;pseudo&gt; [raison]</string>
+    <string name="core_usage_notice">Utilisation : /notice &lt;pseudo|#canal&gt; &lt;message&gt;</string>
+    <string name="core_usage_mode_target">Utilisation : /%1$s &lt;pseudo&gt; [#canal]</string>
+    <string name="core_usage_redact">Utilisation : /redact [cible] &lt;msgid&gt; [raison]</string>
+    <string name="core_usage_metadata_sub">Utilisation : /metadata %1$s &lt;clé&gt; [clé...]</string>
+    <string name="core_usage_verify">Utilisation : /verify [compte] &lt;code&gt;</string>
+    <string name="core_usage_monitor">Utilisation : /monitor +pseudo[,pseudo] | -pseudo[,pseudo] | C | L | S%1$s</string>
+    <string name="core_needs_channel_first_arg">/%1$s nécessite un canal. Placez-vous dans un canal, ou passez #canal en premier argument.</string>
+    <string name="core_needs_channel_second_arg">/%1$s nécessite un canal. Placez-vous dans un canal, ou passez-le en second argument.</string>
+    <string name="core_invite_needs_channel">/invite nécessite un canal. Placez-vous dans un canal, ou passez-le en second argument.</string>
+    <string name="core_no_text_to_send">Aucun texte à envoyer</string>
+    <string name="core_redact_wrong_buffer">Lancez /redact depuis le canal ou la conversation privée où se trouve le message.</string>
+    <string name="core_no_redact">Ce serveur ne prend pas en charge la suppression de messages (draft/message-redaction).</string>
+    <string name="core_no_metadata">Ce serveur ne prend pas en charge les métadonnées IRCv3 (draft/metadata-2).</string>
+    <string name="core_no_registration">Ce serveur ne prend pas en charge la création de compte IRCv3. Essayez plutôt les services : /ns REGISTER &lt;motdepasse&gt; &lt;email&gt;</string>
+    <string name="core_no_verify">Ce serveur ne prend pas en charge la vérification de compte IRCv3. Essayez plutôt les services : /ns VERIFY ...</string>
+    <string name="core_register_nick_is_account">Ce serveur enregistre votre pseudo actuel comme nom de compte : omettez donc l\'argument de compte. %1$s</string>
+    <!-- Leading spaces are significant: this is appended to the usage line. Keep the
+         surrounding double quotes, which is what preserves them. -->
+    <string name="core_register_email_required">"  - ce serveur exige une adresse e-mail"</string>
+    <string name="core_no_monitor">MONITOR n\'est pas pris en charge par ce serveur.</string>
+    <string name="core_monitor_no_limit">"  (le serveur n\'annonce aucune limite)"</string>
+    <string name="core_monitor_limit">"  (limite du serveur : %1$d entrées)"</string>
+    <string name="core_no_read_markers">Le serveur ne prend pas en charge les marqueurs de lecture</string>
+    <string name="core_dns_proxy_disabled">/dns est désactivé tant qu\'un proxy est actif (une résolution locale contournerait le proxy et divulguerait la requête).</string>
+    <string name="core_dns_ipv6_note">(des enregistrements IPv6 existent peut-être, mais cet appareil n\'a pas de connectivité IPv6)</string>
+
+    <!-- IrcCore: ban helper -->
+    <string name="core_ban_no_account">%1$s n\'est pas authentifié auprès des services</string>
+    <string name="core_ban_no_host">Impossible de résoudre l\'hôte de %1$s</string>
+    <string name="core_ban_fallback">Le bannissement par %1$s a échoué : %2$s. Repli sur le masque de pseudo.</string>
+
+    <!-- IrcCore: status lines for server-driven events -->
+    <string name="core_youre_oper">Vous êtes maintenant opérateur IRC</string>
+    <string name="core_sets_mode">%1$s applique le mode %2$s%3$s</string>
+    <string name="core_invited_to">%1$s a invité %2$s dans %3$s</string>
+    <string name="core_bouncer_error">Erreur du bouncer : %1$s</string>
+    <string name="core_channel_renamed">Canal renommé : %1$s → %2$s</string>
+    <string name="core_channel_renamed_reason">Canal renommé : %1$s → %2$s (%3$s)</string>
+    <string name="core_account_registered">Compte %1$s créé. Vous êtes maintenant connecté.</string>
+    <string name="core_account_verified">Compte %1$s vérifié. Vous êtes maintenant connecté.</string>
+    <string name="core_verification_required">Vérification requise pour %1$s : %2$s. Terminez-la avec /verify &lt;code&gt;</string>
+    <string name="core_check_your_email">consultez votre messagerie</string>
+    <string name="core_reg_hint_account_exists">(déjà enregistré ? essayez /verify &lt;code&gt;, ou choisissez un autre nom)</string>
+    <string name="core_reg_hint_weak_password">(choisissez un autre mot de passe et réessayez)</string>
+    <string name="core_reg_hint_invalid_email">(vérifiez l\'adresse e-mail)</string>
+    <string name="core_reg_hint_invalid_code">(revérifiez le code du message de vérification)</string>
+    <string name="core_reg_hint_not_connected">(attendez d\'être complètement connecté, puis réessayez)</string>
+    <string name="core_reg_hint_temp_unavailable">(réessayez plus tard)</string>
+    <string name="core_age_plaintext_refused">+AGE est activé pour %1$s mais ce message n\'était pas chiffré : il n\'a donc PAS été envoyé (HexDroid refuse de le transmettre en clair). Désactivez +AGE ici pour discuter normalement.</string>
+    <string name="core_nick_still_in_use">%1$s est toujours utilisé ; nouvelle tentative discrète en arrière-plan (une session résiduelle se libère généralement en quelques minutes).</string>
+    <string name="core_nick_gave_up">Abandon de la récupération de %1$s, toujours utilisé. Utilisez /nick %1$s pour réessayer.</string>
+    <string name="core_oversize_line_dropped">Une ligne IRC entrante trop longue (&gt;32 Kio) a été ignorée. La connexion est maintenue ; les rejets suivants seront silencieux.</string>
+    <string name="core_sasl_handler_error">Erreur du gestionnaire SASL : %1$s</string>
+    <string name="core_monitor_list_full_rejected">La liste MONITOR est pleine (limite : %1$s). Impossible d\'ajouter : %2$s</string>
+    <string name="core_monitor_list_full">La liste MONITOR est pleine (limite : %1$s)</string>
+
+    <!-- IrcCore: join errors and other numerics we phrase ourselves when the server
+         sends no trailing text of its own. -->
+    <string name="core_not_on_channel">Vous n\'êtes pas sur ce canal</string>
+    <string name="core_channel_limit_reached">Vous avez atteint la limite de canaux du serveur (%1$d)</string>
+    <string name="core_too_many_channels">Vous avez rejoint trop de canaux</string>
+    <string name="core_cannot_join">Impossible de rejoindre le canal</string>
+    <string name="core_cannot_join_full">Impossible de rejoindre le canal (+l)</string>
+    <string name="core_cannot_join_invite">Impossible de rejoindre le canal (+i)</string>
+    <string name="core_cannot_join_banned">Impossible de rejoindre le canal (+b)</string>
+    <string name="core_cannot_join_key">Impossible de rejoindre le canal (+k)</string>
+    <string name="core_password_incorrect">Mot de passe incorrect</string>
+
+    <!-- IrcCore formatNumeric(): MOTD, LUSERS, channel info -->
+    <string name="core_motd_start">— MOTD —</string>
+    <string name="core_motd_end">— Fin de la commande MOTD —</string>
+    <string name="core_no_motd">Aucun MOTD trouvé</string>
+    <string name="core_hidden_host">Votre hôte masqué est désormais %1$s</string>
+    <string name="core_lusers_251">Il y a %1$s utilisateurs et %2$s invisibles sur %3$s serveurs</string>
+    <string name="core_lusers_operators">opérateur(s) en ligne</string>
+    <string name="core_lusers_channels">canaux formés</string>
+    <string name="core_lusers_unknown_conns">connexion(s) inconnue(s)</string>
+    <string name="core_lusers_255">J\'ai %1$s clients et %2$s serveurs</string>
+    <string name="core_lusers_265">Utilisateurs locaux actuels : %1$s  Max : %2$s</string>
+    <string name="core_lusers_266">Utilisateurs globaux actuels : %1$s  Max : %2$s</string>
+    <string name="core_channel_url">URL du canal : %1$s</string>
+    <string name="core_channel_created">Canal créé le : %1$s</string>
+    <string name="core_unknown">inconnu</string>
+
+    <!-- IrcCore formatNumeric(): WHOIS -->
+    <string name="core_away_default">Absent</string>
+    <string name="core_whois_away">%1$s est absent : %2$s</string>
+    <string name="core_whois_oper">%1$s est opérateur IRC</string>
+    <string name="core_whois_idle">inactif depuis %1$d h %2$d min %3$d s</string>
+    <string name="core_whois_signon">connecté depuis %1$s</string>
+    <string name="core_whois_end">Fin de la liste /WHOIS.</string>
+    <string name="core_whois_channels">%1$s sur les canaux : %2$s</string>
+    <string name="core_whois_special">%1$s a un statut spécial ou enregistré</string>
+    <string name="core_whois_logged_in_verb">est authentifié en tant que</string>
+    <string name="core_whois_logged_in_as">%1$s est authentifié en tant que %2$s</string>
+    <string name="core_whois_bot">%1$s est signalé comme bot ou service</string>
+    <string name="core_whois_actual_host">%1$s : informations d\'hôte réelles</string>
+    <string name="core_whois_metadata_set">%1$s %2$s (métadonnée définie)</string>
+    <string name="core_whois_secure_tail">est connecté via SSL</string>
+
+    <!-- IrcCore formatNumeric(): common errors and RPL_ADMIN -->
+    <string name="core_err_no_such_nick_channel">Pseudo ou canal inexistant</string>
+    <string name="core_err_no_such_server">Serveur inexistant</string>
+    <string name="core_err_no_such_channel">Canal inexistant</string>
+    <string name="core_err_no_such_channel_named">Canal inexistant : %1$s</string>
+    <string name="core_err_cannot_send_to_channel">Impossible d\'envoyer au canal</string>
+    <string name="core_err_no_such_nickname">Ce pseudo n\'existe pas</string>
+    <string name="core_err_unknown_command">Commande inconnue</string>
+    <string name="core_err_unknown_command_named">Commande inconnue : %1$s</string>
+    <string name="core_err_nick_in_use">Ce pseudo est déjà utilisé</string>
+    <string name="core_err_not_enough_params">Paramètres insuffisants</string>
+    <string name="core_err_may_not_reregister">Vous ne pouvez pas vous réenregistrer</string>
+    <string name="core_err_banned_from_server">Vous êtes banni de ce serveur</string>
+    <string name="core_admin_info">Informations administratives sur ce serveur</string>
+    <string name="core_admin_location">Localisation de l\'admin : %1$s</string>
+    <string name="core_admin_info_line">Informations sur l\'admin : %1$s</string>
+    <string name="core_admin_contact">Contact de l\'admin : %1$s</string>
+    <string name="core_admin_extended">Informations admin étendues : %1$s</string>
+    <!-- IrcViewModel: setup, credentials, backup and restore -->
+    <string name="vm_netcallback_failed">Échec de l\'enregistrement du rappel réseau : %1$s. La reconnexion automatique lors d\'un changement de réseau risque de ne pas fonctionner sur cet appareil.</string>
+    <string name="vm_keystore_error">erreur du keystore</string>
+    <string name="vm_creds_save_failed">Échec de l\'enregistrement des identifiants : %1$s. Réessayez, ou redémarrez l\'application si le problème persiste.</string>
+    <string name="vm_cert_import_failed">Échec de l\'importation du certificat</string>
+    <string name="vm_backup_no_output">Impossible d\'ouvrir le flux de sortie du fichier de sauvegarde</string>
+    <string name="vm_backup_saved">Sauvegarde enregistrée. Remarque : les mots de passe et les certificats ne sont pas inclus.</string>
+    <string name="vm_backup_failed">Échec de la sauvegarde : %1$s</string>
+    <string name="vm_restore_no_input">Impossible de lire le fichier de sauvegarde</string>
+    <string name="vm_restore_done">Sauvegarde restaurée. Les mots de passe n\'ont pas été restaurés : saisissez-les à nouveau dans les paramètres de chaque réseau.</string>
+    <string name="vm_restore_failed">Échec de la restauration : %1$s</string>
+
+    <!-- IrcViewModel: bouncer discover-and-clone -->
+    <string name="vm_clone_no_parent">Profil parent introuvable.</string>
+    <string name="vm_clone_unsupported">La découverte et le clonage ne sont disponibles que pour soju et ZNC.</string>
+    <string name="vm_clone_no_name">Ce réseau bouncer n\'a pas encore de nom. Essayez d\'actualiser.</string>
+    <string name="vm_clone_already">Déjà importé sous le nom « %1$s ».</string>
+    <string name="vm_clone_imported_sasl">« %1$s » importé. Activez l\'auto-connexion pour l\'utiliser.</string>
+    <string name="vm_clone_imported_plain">« %1$s » importé avec l\'authentification SASL PLAIN issue du mot de passe serveur. Activez l\'auto-connexion pour l\'utiliser.</string>
+    <string name="vm_clone_imported_preformatted">« %1$s » importé. Le mot de passe parent semble préformaté pour le bouncer : vérifiez donc les paramètres d\'authentification du clone avant d\'activer l\'auto-connexion.</string>
+    <string name="vm_clone_imported_plain_none">« %1$s » importé. Renseignez les identifiants et l\'auto-connexion sur le nouveau profil pour l\'utiliser.</string>
+    <string name="vm_bouncer_verb_discovered">découvert</string>
+    <string name="vm_bouncer_verb_state_changed">état modifié</string>
+
+    <!-- IrcViewModel: +AGE encryption status and the /age command -->
+    <string name="vm_age_negotiating">Établissement du chiffrement +AGE avec %1$s…</string>
+    <string name="vm_age_established">Chiffrement +AGE établi avec %1$s. Les messages sont chiffrés de bout en bout.</string>
+    <string name="vm_age_failed">Le chiffrement +AGE avec %1$s a échoué : %2$s. Les messages ne sont PAS chiffrés.</string>
+    <string name="vm_age_unavailable">+AGE n\'est pas disponible sur ce réseau.</string>
+    <string name="vm_age_none_pending">+AGE : aucune identité en attente de décision.</string>
+    <string name="vm_age_pending_list">+AGE en attente d\'une décision :</string>
+    <string name="vm_age_usage">Utilisation : /age trust &lt;pseudo&gt; | /age reject &lt;pseudo&gt; | /age pending</string>
+    <string name="vm_age_trusted">+AGE : nouvelle clé de %1$s épinglée. Leurs messages seront de nouveau vérifiés.</string>
+    <string name="vm_age_rejected">+AGE : nouvelle clé de %1$s rejetée ; la clé précédemment épinglée fait toujours foi.</string>
+    <string name="vm_age_nothing_pending">+AGE : rien en attente pour %1$s.</string>
+    <string name="vm_age_still_keying">+AGE pour %1$s est encore en train d\'échanger les clés avec les autres membres +AGE. Votre message n\'a PAS été envoyé. Réessayez dans un instant.</string>
+
+    <!-- IrcViewModel: encryption key and passphrase import -->
+    <string name="vm_key_empty">La clé est vide</string>
+    <string name="vm_key_not_base64">Chaîne base64 invalide</string>
+    <string name="vm_key_wrong_length">32 octets attendus après décodage base64, %1$d obtenus</string>
+    <string name="vm_key_store_failed">Échec de l\'enregistrement de la clé : %1$s</string>
+    <string name="vm_pass_empty">La phrase secrète est vide</string>
+    <string name="vm_pass_too_short">La phrase secrète doit faire au moins 4 octets</string>
+    <string name="vm_pass_too_long">La phrase secrète doit faire au plus 56 octets (%1$d obtenus)</string>
+
+    <!-- IrcViewModel: /alias and /react -->
+    <string name="vm_alias_none">Aucun alias. Ajoutez-en un avec : /alias add &lt;nom&gt; &lt;expansion&gt;</string>
+    <string name="vm_alias_usage_add">Utilisation : /alias add &lt;nom&gt; &lt;expansion&gt;   par ex. /alias add bl msg *backlog $channel $1</string>
+    <string name="vm_alias_usage_remove">Utilisation : /alias remove &lt;nom&gt;</string>
+    <string name="vm_alias_usage">Utilisation : /alias [list] | add &lt;nom&gt; &lt;expansion&gt; | remove &lt;nom&gt;</string>
+    <string name="vm_alias_bad_name">Un nom d\'alias ne peut pas contenir d\'espace ni de « / ».</string>
+    <string name="vm_alias_saved">Alias enregistré :  /%1$s  &gt;  %2$s</string>
+    <string name="vm_alias_no_such">Alias inexistant : /%1$s</string>
+    <string name="vm_alias_removed">Alias supprimé : /%1$s</string>
+    <string name="vm_react_latest">le dernier message</string>
+    <string name="vm_react_nback">le message n° %1$d en arrière</string>
+
+    <!-- IrcViewModel: in-buffer event lines.  -->
+    <string name="vm_ev_you_now_known_as">Vous êtes maintenant connu sous le nom de %1$s</string>
+    <string name="vm_ev_now_known_as">%1$s est maintenant connu sous le nom de %2$s</string>
+    <string name="vm_ev_now_talking">Vous parlez maintenant sur %1$s</string>
+    <string name="vm_ev_has_joined">%1$s (%2$s) a rejoint %3$s</string>
+    <string name="vm_ev_logged_in_as">authentifié en tant que %1$s</string>
+    <string name="vm_ev_you_left">Vous avez quitté le canal %1$s</string>
+    <string name="vm_ev_has_left">%1$s (%2$s) a quitté %3$s</string>
+    <string name="vm_ev_you_kicked">Vous avez été expulsé de %1$s par %2$s</string>
+    <string name="vm_ev_kicked">%1$s a été expulsé par %2$s</string>
+    <string name="vm_ev_has_quit">%1$s (%2$s) s\'est déconnecté</string>
+    <string name="vm_ev_topic_is">Sujet de %1$s : %2$s</string>
+    <string name="vm_ev_topic_set_by">Sujet de %1$s défini par %2$s le %3$s</string>
+    <string name="vm_ev_topic_changed_by">%1$s a changé le sujet en : %2$s</string>
+    <string name="vm_ev_topic_changed">Sujet changé en : %1$s</string>
+    <string name="vm_ev_unknown_time">date inconnue</string>
+    <string name="vm_ev_your_host_now">Votre hôte est maintenant %1$s@%2$s</string>
+    <string name="vm_ev_host_now">%1$s est maintenant %2$s@%3$s</string>
+    <string name="vm_ev_you_logged_out">Vous n\'êtes plus authentifié</string>
+    <string name="vm_ev_logged_out">%1$s s\'est déconnecté de son compte</string>
+    <string name="vm_ev_you_logged_in_as">Vous êtes maintenant authentifié en tant que %1$s</string>
+    <string name="vm_ev_nick_logged_in_as">%1$s est maintenant authentifié en tant que %2$s</string>
+    <string name="vm_ev_your_realname_now">Votre nom réel est maintenant « %1$s »</string>
+    <string name="vm_ev_realname_changed">%1$s a changé son nom réel en « %2$s »</string>
+    <string name="vm_ev_invited_you">%1$s vous a invité dans %2$s</string>
+    <string name="vm_ev_now_away">%1$s est maintenant absent</string>
+    <string name="vm_ev_now_away_msg">%1$s est maintenant absent (%2$s)</string>
+    <string name="vm_ev_back">%1$s est de retour</string>
+    <string name="vm_ev_monitor_online">%1$s est en ligne</string>
+    <string name="vm_ev_monitor_offline">%1$s est hors ligne</string>
+    <string name="vm_ev_ctcp_ping_ms">Réponse CTCP PING de %1$s : %2$d ms</string>
+    <string name="vm_ev_ctcp_ping_raw">Réponse CTCP PING de %1$s : %2$s</string>
+    <string name="vm_ev_ctcp_reply">Réponse CTCP %1$s de %2$s : %3$s</string>
+    <string name="vm_ev_list_ratelimited">Le serveur limite le débit de LIST (réessayez dans un instant).</string>
+    <string name="vm_ev_message_deleted">(message supprimé par %1$s)</string>
+    <string name="vm_ev_message_deleted_reason">(message supprimé par %1$s : %2$s)</string>
+    <string name="vm_history_divider">── Historique de discussion • Dernier message : %1$s ──</string>
+
+    <!-- IrcViewModel: notifications -->
+    <string name="vm_notif_networks">%1$d réseaux : %2$s</string>
+    <string name="vm_notif_connected_connecting">Connecté (%1$d), connexion (%2$d)</string>
+
+    <!-- IrcViewModel: DCC, uploads and file handling -->
+    <string name="vm_dcc_invalid_reply">Réponse DCC passive invalide</string>
+    <string name="vm_dcc_timeout">Aucune réponse de %1$s, délai DCC dépassé</string>
+    <string name="vm_file_open_failed">Impossible d\'ouvrir le fichier sélectionné</string>
+    <string name="vm_file_cannot_open">Impossible d\'ouvrir ce fichier</string>
+    <string name="vm_upload_unsupported">Ce serveur ne propose pas d\'envoi de fichiers</string>
+    <string name="vm_upload_disabled">Les envois de fichiers sont désactivés pour ce réseau</string>
+    <string name="vm_upload_no_proxy">L\'envoi de fichiers via un proxy SOCKS n\'est pas encore pris en charge</string>
+    <string name="vm_upload_failed">Échec de l\'envoi : %1$s</string>
+    <string name="vm_open_with">Ouvrir avec</string>
+
+    <!-- Generic actions added during string extraction -->
+    <string name="edit">Modifier</string>
+    <string name="replace">Remplacer</string>
+    <string name="expand">Développer</string>
+    <string name="collapse">Réduire</string>
+    <string name="sort_ascending">Croissant</string>
+    <string name="sort_descending">Décroissant</string>
+
+    <!-- ScriptsScreen -->
+    <string name="scripts_title">Scripts</string>
+    <string name="scripts_reload">Recharger</string>
+    <string name="scripts_import_file">Importer un fichier…</string>
+    <string name="scripts_import">Importer…</string>
+    <string name="scripts_paste">Coller…</string>
+    <string name="scripts_enabled_count">%1$d/%2$d actifs</string>
+    <string name="scripts_none">Aucun script installé pour le moment.</string>
+    <string name="scripts_none_hint">Importez un fichier ou collez du code source ci-dessous pour en ajouter un.</string>
+    <string name="scripts_revert">Rétablir</string>
+    <string name="scripts_revert_title">Rétablir %1$s ?</string>
+    <string name="scripts_revert_body">Remplace vos modifications par la version fournie par défaut. Cette action est irréversible.</string>
+    <string name="scripts_paste_title">Coller un script</string>
+    <string name="scripts_name_hint">Nom (.%1$s)</string>
+    <string name="scripts_source">Code source</string>
+
+    <!-- ChatScreen: unread divider and formatting toolbar.
+         The toolbar labels are the initials of Bold/Italic/Underline/Reverse and the
+         colour swatch, so they are translated, not fixed glyphs. -->
+    <string name="chat_unread_divider">"  non lus  "</string>
+    <string name="chat_fmt_bold">G</string>
+    <string name="chat_fmt_italic">I</string>
+    <string name="chat_fmt_underline">S</string>
+    <string name="chat_fmt_reverse">Inv</string>
+    <string name="chat_fmt_colour">A</string>
+
+    <!-- ListScreen sort chips -->
+    <string name="list_sort_size">Taille</string>
+    <string name="list_sort_name">Nom</string>
+
+    <!-- NetworksScreen: fallback label when the active network has no name yet -->
+    <string name="networks_active_fallback">Actif</string>
+
+    <!-- SettingsScreen: SAF folder grant lost after reinstall -->
+    <string name="setting_log_permission_lost">Autorisation perdue : appuyez sur \"Choisir un dossier\" pour le sélectionner à nouveau. Les autorisations SAF ne survivent pas à une désinstallation puis réinstallation, le dossier enregistré dans votre sauvegarde n\'est donc pas accessible à cette installation. La journalisation et l\'historique sont ignorés silencieusement jusqu\'à ce que vous le sélectionniez à nouveau.</string>
+
+    <!-- IrcCore: /invite usage -->
+    <string name="core_usage_invite">Utilisation : /invite &lt;nick&gt; [#channel]</string>
+
+    <!-- ScriptsScreen: header, status and errors -->
+    <string name="scripts_backend_hint">Les fonctionnalités se trouvent dans les scripts .%1$s (activez-les ou désactivez-les)</string>
+    <string name="scripts_header_desc">Ajoutez ou supprimez des fonctionnalités sous forme de scripts .%1$s. Les scripts désactivés restent installés mais ne sont pas chargés.</string>
+    <string name="scripts_enabled_of">%1$d sur %2$d activés</string>
+    <string name="scripts_with_errors">" · %1$d avec erreurs"</string>
+    <string name="scripts_load_error">erreur de chargement</string>
+    <string name="scripts_status_disabled">Désactivé</string>
+    <string name="scripts_status_loaded">Chargé</string>
+    <string name="scripts_status_error">Erreur</string>
 </resources>

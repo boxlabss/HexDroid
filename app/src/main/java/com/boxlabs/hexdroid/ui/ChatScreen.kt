@@ -20,6 +20,8 @@ package com.boxlabs.hexdroid.ui
 
 import android.content.res.Configuration
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
@@ -103,11 +105,13 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -176,6 +180,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
@@ -264,6 +269,7 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("cycle",      "/cycle [channel]",               "Rejoin a channel (part then join)"),
     IrcCommand("topic",      "/topic [new topic]",             "Show or set the channel topic"),
     IrcCommand("invite",     "/invite <nick> [channel]",       "Invite a user to a channel"),
+    IrcCommand("knock",      "/knock <channel> [reason]",      "Ask for an invite to an invite-only channel"),
     IrcCommand("list",       "/list",                          "List all channels on the server"),
     IrcCommand("names",      "/names [channel]",               "List users in a channel"),
 
@@ -369,6 +375,10 @@ private val IRC_COMMANDS = listOf(
     IrcCommand("setname",    "/setname <realname>",            "Change your realname without reconnecting (SETNAME cap)"),
     IrcCommand("markread",   "/markread [target] [timestamp]", "Mark a buffer as read (IRCv3 read-marker)"),
     IrcCommand("monitor",    "/monitor +nick | -nick | C | L | S", "Watch for nicks coming online (IRCv3 MONITOR)"),
+    IrcCommand("register",   "/register [account] [email] <password>", "Create a services account (IRCv3 account-registration)"),
+    IrcCommand("verify",     "/verify [account] <code>",       "Complete account verification (email/CAPTCHA code)"),
+    IrcCommand("metadata",   "/metadata [target] <sub> | <key> [value]", "View or set IRCv3 metadata (display-name, avatar)"),
+    IrcCommand("redact",     "/redact [target] <msgid> [reason]", "Delete a message for everyone (IRCv3 message-redaction)"),
 )
 
 /**
@@ -938,7 +948,7 @@ private fun NickHints(
                         )
                         Spacer(Modifier.weight(1f))
                         Text(
-                            text = "Tap to mention",
+                            text = stringResource(R.string.nick_hint_tap_to_mention),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1065,7 +1075,7 @@ private fun UnreadSeparator() {
             thickness = 1.dp
         )
         Text(
-            text = "  unread  ",
+            text = stringResource(R.string.chat_unread_divider),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
             fontWeight = FontWeight.SemiBold,
@@ -1219,6 +1229,7 @@ fun ChatScreen(
         onClose: () -> Unit,
         lagLabel: String? = null,
         lagProgress: Float? = null,
+        networkIconUrl: String? = null,
     ) {
         val unread = meta?.unread ?: 0
         val hi = meta?.highlights ?: 0
@@ -1238,6 +1249,21 @@ fun ChatScreen(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (networkIconUrl != null) {
+                    var iconBmp by remember(networkIconUrl) { mutableStateOf(RemoteImage.cached(networkIconUrl)) }
+                    LaunchedEffect(networkIconUrl) { if (iconBmp == null) iconBmp = RemoteImage.fetch(networkIconUrl) }
+                    iconBmp?.let {
+                        Image(
+                            bitmap = it,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .size(18.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                    }
+                }
                 Text(
                     text = label,
                     fontWeight = if (key == selected) FontWeight.Bold else FontWeight.Normal,
@@ -1385,6 +1411,46 @@ fun ChatScreen(
     val canMode  = isChannel && myPrefix in listOf('~', '&', '@')
     val isIrcOper = state.connections[selNetId]?.isIrcOper == true
     val hasReactionSupport = state.connections[selNetId]?.hasReactionSupport == true
+    // draft/metadata-2 display names for this network, keyed by lowercased nick.
+    val metadataDisplayNames = state.connections[selNetId]?.displayNames ?: emptyMap()
+    // draft/metadata-2 avatars, same keying. Rendered in the nick list only, and only
+    // when the user has opted into image previews AND this profile is unproxied - an
+    // avatar URL is chosen by the remote user, so fetching it from a Tor/SOCKS profile
+    // would bypass the proxy and leak the user's IP (same rule as filehost uploads).
+    val metadataAvatars: Map<String, String> =
+        if (state.settings.imagePreviewsEnabled &&
+            state.networks.firstOrNull { it.id == selNetId }?.proxyType ==
+                com.boxlabs.hexdroid.connection.ProxyType.NONE
+        ) state.connections[selNetId]?.avatarUrls ?: emptyMap()
+        else emptyMap()
+    // draft/metadata-2 nick colours (6 hex digits, no #), keyed by lowercased nick.
+    // Applied below a manual own-nick override, above the hash colour.
+    val metadataColors = state.connections[selNetId]?.nickColors ?: emptyMap()
+    // draft/metadata-2 status text, keyed by lowercased nick. Shown as secondary
+    // text in the nick list.
+    val metadataStatuses = state.connections[selNetId]?.statuses ?: emptyMap()
+    // Casefolded nicks currently marked away (from away-notify / WHOX), used to dim
+    // their rows in the member list.
+    val awayNicks = state.connections[selNetId]?.awayNicks ?: emptySet()
+    // Lowercased nicks known to be bots (BOT mode letter in WHO/WHOX, or a bot tag),
+    // badged in the member list and nick sheet.
+    val botNicks = state.connections[selNetId]?.botNicks ?: emptySet()
+
+    // ICON / draft/ICON ISUPPORT token: the per-network icon URL, gated the same way
+    // as avatars - only over https, only with image previews enabled, and only on an
+    // unproxied profile (an icon URL fetch would otherwise bypass a SOCKS/Tor proxy and
+    // leak the user's IP). Returns null when any gate fails, hiding the icon.
+    fun networkIconOf(netId: String): String? {
+        val raw = state.connections[netId]?.networkIconUrl ?: return null
+        // Some servers advertise a {size} template; substitute a concrete pixel size
+        // so the URL is fetchable (a literal {size} would 404).
+        val url = raw.replace("{size}", "64")
+        if (!url.startsWith("https://")) return null
+        if (!state.settings.imagePreviewsEnabled) return null
+        val unproxied = state.networks.firstOrNull { it.id == netId }?.proxyType ==
+            com.boxlabs.hexdroid.connection.ProxyType.NONE
+        return if (unproxied) url else null
+    }
     val currentModeString = if (isChannel) state.buffers[selected]?.modeString else null
 
     val bgLum = MaterialTheme.colorScheme.background.luminance()
@@ -1408,11 +1474,29 @@ fun ChatScreen(
             .sorted()
     }
 
+    // draft/metadata-2 `color`: 6 hex digits, already validated at ingest. Parsed to
+    // an opaque Color, or null if somehow unparseable (belt-and-braces). A colour too
+    // close to the theme background (e.g. #000000 on a dark theme) is rejected so the
+    // nick doesn't vanish; the caller then falls back to the readable hash colour.
+    fun metadataNickColor(base: String): Color? {
+        val hex = metadataColors[base] ?: return null
+        val c = runCatching { Color("ff$hex".toLong(16)) }.getOrNull() ?: return null
+        val lum = c.luminance()
+        val lighter = maxOf(lum, bgLum)
+        val darker = minOf(lum, bgLum)
+        // WCAG-style contrast ratio; below ~2.5 the nick is hard to read on this theme.
+        val contrast = (lighter + 0.05f) / (darker + 0.05f)
+        return if (contrast < 2.5f) null else c
+    }
+
     fun nickColor(nick: String): Color {
         if (!state.settings.colorizeNicks) return Color.Unspecified
         val base = baseNick(nick).lowercase()
         val custom = state.settings.ownNickColorInt
         if (custom != null && base in allMyNicks) return Color(custom)
+        // A user's self-chosen colour (via metadata) wins over the hash, but never
+        // over your own manual override for your own nick, handled above.
+        metadataNickColor(base)?.let { return it }
         // Stable hash-based colour for messages — never changes regardless of who
         // else is in the channel. The nicklist panel uses nicklistColorMap
         // (pre-computed with adjacency nudge) instead.
@@ -1445,6 +1529,10 @@ fun ChatScreen(
      * switches buffer (the `remember(selected)` resets it to false).
      */
     var showEncryptionDialog by remember(selected) { mutableStateOf(false) }
+    // Metadata editor and guided account-registration dialogs. Keyed to the selected
+    // network so switching networks dismisses a stale dialog.
+    var showMetadataEditor by remember(selNetId) { mutableStateOf(false) }
+    var showRegistration by remember(selNetId) { mutableStateOf(false) }
     var topicExpanded by remember(selected, topic) { mutableStateOf(false) }
     var topicHasOverflow by remember(selected, topic) { mutableStateOf(false) }
 
@@ -1796,6 +1884,18 @@ fun ChatScreen(
 										horizontalArrangement = Arrangement.spacedBy(6.dp)
 									) {
 										Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
+										networkIconOf(net.id)?.let { iconUrl ->
+											var tbmp by remember(iconUrl) { mutableStateOf(RemoteImage.cached(iconUrl)) }
+											LaunchedEffect(iconUrl) { if (tbmp == null) tbmp = RemoteImage.fetch(iconUrl) }
+											tbmp?.let {
+												Image(
+													bitmap = it,
+													contentDescription = null,
+													contentScale = ContentScale.Crop,
+													modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
+												)
+											}
+										}
 										Text(net.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
 										if (unread > 0) {
 											Badge(
@@ -1890,7 +1990,7 @@ fun ChatScreen(
 										Icon(
 											imageVector = if (item.expanded) Icons.Default.KeyboardArrowDown
 														  else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-											contentDescription = if (item.expanded) "Collapse" else "Expand",
+											contentDescription = if (item.expanded) stringResource(R.string.collapse) else stringResource(R.string.expand),
 											modifier = Modifier.size(16.dp),
 											tint = MaterialTheme.colorScheme.onSurfaceVariant
 										)
@@ -2004,7 +2104,7 @@ fun ChatScreen(
 										Icon(
 											imageVector = if (item.expanded) Icons.Default.KeyboardArrowDown
 														  else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-											contentDescription = if (item.expanded) "Collapse" else "Expand",
+											contentDescription = if (item.expanded) stringResource(R.string.collapse) else stringResource(R.string.expand),
 											modifier = Modifier
 												.size(16.dp)
 												.focusHighlight()
@@ -2037,6 +2137,8 @@ fun ChatScreen(
 											onClose = { onSend("/closekey ${item.key}") },
 											lagLabel = lag?.first,
 											lagProgress = lag?.second,
+											networkIconUrl = if (item.isNetworkHeader && item.netId != null)
+												networkIconOf(item.netId) else null,
 										)
 									}
 									if (isRoot) {
@@ -2161,24 +2263,81 @@ fun ChatScreen(
             LazyColumn(Modifier.fillMaxSize()) {
                 items(nicklist) { n ->
                     val cleaned = baseNick(n)
-                    Text(
-                        n,
-                        color = if (state.settings.colorizeNicks)
-                            nicklistColorMap[cleaned.lowercase()]
-                                ?: NickColors.colorForNick(cleaned.lowercase(), bgLum)
-                        else Color.Unspecified,
-                        fontSize = nickFontSp.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    val nickDisplayName = metadataDisplayNames[cleaned.lowercase()]
+                        ?.takeIf { !it.equals(cleaned, ignoreCase = true) }
+                    val isAway = awayNicks.contains(cleaned.lowercase())
+                    val isBot = botNicks.contains(cleaned.lowercase())
+                    val nickAvatar = metadataAvatars[cleaned.lowercase()]
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusHighlight()
+                            // Away users get a dimmed background tint so they read as
+                            // "present but not at the keyboard" without hiding them.
+                            .background(
+                                if (isAway) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                else Color.Transparent
+                            )
                             .combinedClickable(
                                 onClick = { openNickActions(n) },
                                 onLongClick = { openNickActions(n) },
                             )
                             .padding(vertical = 2.dp)
-                    )
+                    ) {
+                        // draft/metadata-2 avatar: a small circle before the nick that scales
+                        // with the nick font, so it grows when the member pane is widened.
+                        // Gated by the metadataAvatars map (previews on, https, unproxied).
+                        if (nickAvatar != null) {
+                            var avatarBmp by remember(nickAvatar) { mutableStateOf(RemoteImage.cached(nickAvatar)) }
+                            LaunchedEffect(nickAvatar) { if (avatarBmp == null) avatarBmp = RemoteImage.fetch(nickAvatar) }
+                            avatarBmp?.let { bmp ->
+                                Image(
+                                    bitmap = bmp,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .padding(end = 5.dp)
+                                        .size((nickFontSp + 4f).dp)
+                                        .clip(CircleShape)
+                                        .alpha(if (isAway) 0.6f else 1f),
+                                )
+                            }
+                        }
+                        Text(
+                            n,
+                            color = if (state.settings.colorizeNicks)
+                                metadataNickColor(cleaned.lowercase())
+                                    ?: nicklistColorMap[cleaned.lowercase()]
+                                    ?: NickColors.colorForNick(cleaned.lowercase(), bgLum)
+                            else Color.Unspecified,
+                            fontSize = nickFontSp.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // Fade an away nick a touch further, on top of the row tint.
+                            modifier = Modifier.alpha(if (isAway) 0.6f else 1f),
+                        )
+                        // Display name never replaces the nick here, for the same
+                        // impersonation reason as the message rows.
+                        if (nickDisplayName != null) {
+                            Text(
+                                " ($nickDisplayName)",
+                                color = Color.Gray,
+                                fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        // Bot Mode: a small chip marks bot users.
+                        if (isBot) {
+                            Text(
+                                " [bot]",
+                                color = Color(0xFF7E9CD8),
+                                fontSize = (nickFontSp - 3f).coerceAtLeast(8f).sp,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2539,6 +2698,7 @@ fun ChatScreen(
                             onClick = onToggleBufferList,
                             modifier = Modifier
                                 .size(iconBtnSize)
+                                .tvInitialFocus()
                                 .focusHighlight()
                                 .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
@@ -2548,6 +2708,7 @@ fun ChatScreen(
                             onClick = { scope.launch { drawerState.open() } },
                             modifier = Modifier
                                 .size(iconBtnSize)
+                                .tvInitialFocus()
                                 .focusHighlight()
                                 .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
                         ) { Text("☰") }
@@ -2681,7 +2842,7 @@ fun ChatScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.IntegrationInstructions,
-                                     contentDescription = "Launch scripts",
+                                     contentDescription = stringResource(R.string.chat_cd_launch_scripts),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant
                                      .copy(alpha = 0.6f),
 
@@ -2748,6 +2909,21 @@ fun ChatScreen(
                             ) {
                                 MenuRow("Secure Chat") { overflowExpanded = false; showEncryptionDialog = true }
                             }
+                            // draft/metadata-2 editor and draft/account-registration dialog,
+                            // shown only when the connected server negotiated the cap.
+                            if (viewModel != null && selNetId.isNotBlank() &&
+                                viewModel.serverSupportsMetadata(selNetId)) {
+                                MenuRow(stringResource(R.string.menu_edit_metadata)) {
+                                    overflowExpanded = false; showMetadataEditor = true
+                                }
+                            }
+                            if (viewModel != null && selNetId.isNotBlank() &&
+                                viewModel.serverSupportsAccountReg(selNetId) &&
+                                state.connections[selNetId]?.myAccount == null) {
+                                MenuRow(stringResource(R.string.menu_register_account)) {
+                                    overflowExpanded = false; showRegistration = true
+                                }
+                            }
                             MenuRow(stringResource(R.string.menu_settings)) { overflowExpanded = false; onOpenSettings() }
                             MenuRow("Scripts") { overflowExpanded = false; onOpenScripts() }
                             MenuRow(stringResource(R.string.menu_networks)) { overflowExpanded = false; onOpenNetworks() }
@@ -2813,7 +2989,7 @@ fun ChatScreen(
                         if (canTopic) {
                             Icon(
                                 Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Edit topic",
+                                contentDescription = stringResource(R.string.chat_cd_edit_topic),
                                 modifier = Modifier
                                     .size(16.dp)
                                     .alpha(0.5f),
@@ -3070,6 +3246,11 @@ fun ChatScreen(
                             },
                             onLongPress = { longPressedMessage = m },
                             onSwipeReply = { pendingReply = m },
+                            // draft/metadata-2: shown after the nick, never instead of it.
+                            // Suppressed when it merely repeats the nick.
+                            displayName = m.from
+                                ?.let { metadataDisplayNames[baseNick(it).lowercase()] }
+                                ?.takeIf { !it.equals(baseNick(m.from), ignoreCase = true) },
                         )
                         } // end DisplayItem.Single
 
@@ -3127,7 +3308,7 @@ fun ChatScreen(
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                 disabledContentColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.38f),
                             ),
-                        ) { Text("Copy") }
+                        ) { Text(stringResource(R.string.copy)) }
                         TextButton(
                             onClick = {
                                 copyRangeMode = false
@@ -3136,7 +3317,7 @@ fun ChatScreen(
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                             ),
-                        ) { Text("Cancel") }
+                        ) { Text(stringResource(R.string.cancel)) }
                     }
                 }
             }
@@ -3182,7 +3363,7 @@ fun ChatScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Jump to unread",
+                            contentDescription = stringResource(R.string.chat_cd_jump_unread),
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.size(16.dp),
                         )
@@ -3219,7 +3400,7 @@ fun ChatScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Scroll to bottom",
+                            contentDescription = stringResource(R.string.chat_cd_scroll_bottom),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(24.dp)
                         )
@@ -3398,6 +3579,18 @@ fun ChatScreen(
                                         // conversation tabs under it are named alone.
                                         if (isServerTab) {
                                             Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
+                                            networkIconOf(keyNet)?.let { iconUrl ->
+                                                var sbmp by remember(iconUrl) { mutableStateOf(RemoteImage.cached(iconUrl)) }
+                                                LaunchedEffect(iconUrl) { if (sbmp == null) sbmp = RemoteImage.fetch(iconUrl) }
+                                                sbmp?.let {
+                                                    Image(
+                                                        bitmap = it,
+                                                        contentDescription = null,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
+                                                    )
+                                                }
+                                            }
                                         }
                                         Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (unread > 0) {
@@ -3410,7 +3603,7 @@ fun ChatScreen(
                                         if (!isServerTab) {
                                             Icon(
                                                 imageVector = Icons.Default.Close,
-                                                contentDescription = "Close $label",
+                                                contentDescription = stringResource(R.string.chat_cd_close_label, label),
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                     .copy(alpha = 0.6f),
                                                 modifier = Modifier
@@ -3563,7 +3756,7 @@ fun ChatScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Cancel reply",
+                            contentDescription = stringResource(R.string.chat_cd_cancel_reply),
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
@@ -3598,9 +3791,56 @@ fun ChatScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Lock,
-                                contentDescription = "Encryption configured (${keyInfo.scheme.displayName}, ${keyInfo.fingerprint})",
+                                contentDescription = stringResource(R.string.chat_cd_encryption_configured, keyInfo.scheme.displayName, keyInfo.fingerprint),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+                // Filehost attach button: shown when the server advertises a
+                // soju.im/FILEHOST upload endpoint (soju, Ergo, standalone filehost
+                // servers). Picks a document, uploads it, and appends the resulting
+                // URL to the input so the user can add text before sending.
+                val filehostUrl = state.connections[selNetId]?.filehostUrl
+                if (viewModel != null && filehostUrl != null) {
+                    var uploading by remember { mutableStateOf(false) }
+                    val ctxUpload = LocalContext.current
+                    val filePicker = rememberLauncherForActivityResult(
+                        ActivityResultContracts.OpenDocument()
+                    ) { uri ->
+                        if (uri != null && !uploading) {
+                            uploading = true
+                            viewModel.uploadFileToFilehost(selNetId, uri) { url, err ->
+                                uploading = false
+                                if (url != null) {
+                                    val sep = if (input.text.isEmpty() || input.text.endsWith(" ")) "" else " "
+                                    val newText = input.text + sep + url
+                                    input = input.copy(
+                                        text = newText,
+                                        selection = TextRange(newText.length)
+                                    )
+                                } else {
+                                    Toast.makeText(ctxUpload, err ?: "Upload failed", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
+                    if (uploading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        IconButton(
+                            onClick = { filePicker.launch(arrayOf("*/*")) },
+                            modifier = Modifier.size(28.dp).focusHighlight(),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AttachFile,
+                                contentDescription = stringResource(R.string.chat_cd_upload_file),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
@@ -3710,7 +3950,7 @@ fun ChatScreen(
 							interactionSource = interactionSource,
 							placeholder = {
 								Text(
-									text = "Message",
+									text = stringResource(R.string.chat_message_label),
 									color = MaterialTheme.colorScheme.onSurfaceVariant,
 									style = inputTextStyle
 								)
@@ -4614,22 +4854,22 @@ fun ChatScreen(
                     FilterChip(
                         selected = boldActive,
                         onClick = { boldActive = !boldActive },
-                        label = { Text("B", fontWeight = FontWeight.Bold) }
+                        label = { Text(stringResource(R.string.chat_fmt_bold), fontWeight = FontWeight.Bold) }
                     )
                     FilterChip(
                         selected = italicActive,
                         onClick = { italicActive = !italicActive },
-                        label = { Text("I", fontStyle = FontStyle.Italic) }
+                        label = { Text(stringResource(R.string.chat_fmt_italic), fontStyle = FontStyle.Italic) }
                     )
                     FilterChip(
                         selected = underlineActive,
                         onClick = { underlineActive = !underlineActive },
-                        label = { Text("U", textDecoration = TextDecoration.Underline) }
+                        label = { Text(stringResource(R.string.chat_fmt_underline), textDecoration = TextDecoration.Underline) }
                     )
                     FilterChip(
                         selected = reverseActive,
                         onClick = { reverseActive = !reverseActive },
-                        label = { Text("Rev") }
+                        label = { Text(stringResource(R.string.chat_fmt_reverse)) }
                     )
                     Spacer(Modifier.weight(1f))
                     // Active colour chips showing current selection
@@ -4644,7 +4884,7 @@ fun ChatScreen(
                                 .clickable { selectedFgColor = null }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text("A", style = MaterialTheme.typography.labelSmall,
+                                Text(stringResource(R.string.chat_fmt_colour), style = MaterialTheme.typography.labelSmall,
                                     color = if (fgCol.luminance() > 0.4f) Color.Black else Color.White)
                             }
                         }
@@ -4895,6 +5135,10 @@ fun ChatScreen(
         val supportsQuiet = listModes.contains('q')
         val supportsExcept = listModes.contains('e')
         val supportsInvex = listModes.contains('I')
+        val extbanPrefix = state.connections[selNetId]?.extbanPrefix
+        val extbanTypes = state.connections[selNetId]?.extbanTypes
+        val accountExtban = state.connections[selNetId]?.accountExtban
+        var banInput by remember(selected, chanListTab) { mutableStateOf("") }
 
         LaunchedEffect(showChanListSheet, listModes) {
             if (!showChanListSheet) return@LaunchedEffect
@@ -5123,6 +5367,64 @@ fun ChatScreen(
                     }
                 }
 
+                if (canBan) {
+                    HorizontalDivider()
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = banInput,
+                                onValueChange = { banInput = it },
+                                label = { Text(stringResource(R.string.chat_add_mask)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedButton(
+                                enabled = banInput.isNotBlank(),
+                                onClick = {
+                                    val mask = banInput.trim()
+                                    scope.launch {
+                                        onSend("/mode $selBufName +${ui.removeMode} $mask")
+                                        delay(250)
+                                        onSend(ui.refreshCmd)
+                                    }
+                                    banInput = ""
+                                }
+                            ) { Text(stringResource(R.string.chat_add)) }
+                        }
+                        // Extended-ban helpers (EXTBAN / draft/account-extban). Only shown on
+                        // the ban and quiet tabs, where extbans apply.
+                        if (extbanTypes != null && chanListTab <= 1) {
+                            if (accountExtban != null) {
+                                OutlinedButton(
+                                    enabled = banInput.isNotBlank(),
+                                    onClick = {
+                                        // Treat the field as an account name and wrap it as the
+                                        // account extban, e.g. ~a:someone.
+                                        val mask = "${extbanPrefix ?: ""}$accountExtban:${banInput.trim()}"
+                                        scope.launch {
+                                            onSend("/mode $selBufName +${ui.removeMode} $mask")
+                                            delay(250)
+                                            onSend(ui.refreshCmd)
+                                        }
+                                        banInput = ""
+                                    }
+                                ) { Text(stringResource(R.string.chat_ban_account)) }
+                            }
+                            Text(
+                                stringResource(R.string.chat_extban_hint, extbanPrefix ?: "", extbanTypes),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -5142,6 +5444,22 @@ fun ChatScreen(
             target = selBufName,
             viewModel = viewModel,
             onDismiss = { showEncryptionDialog = false },
+        )
+    }
+
+    if (showMetadataEditor && viewModel != null && selNetId.isNotBlank()) {
+        MetadataEditorDialog(
+            networkId = selNetId,
+            viewModel = viewModel,
+            onDismiss = { showMetadataEditor = false },
+        )
+    }
+
+    if (showRegistration && viewModel != null && selNetId.isNotBlank()) {
+        RegistrationDialog(
+            networkId = selNetId,
+            viewModel = viewModel,
+            onDismiss = { showRegistration = false },
         )
     }
 
@@ -5238,7 +5556,7 @@ fun ChatScreen(
                 // Reply; only for channel/PM messages that have a real sender
                 if (ctxMsg.from != null && !ctxMsg.isMotd) {
                     ListItem(
-                        headlineContent = { Text("Reply to ${ctxMsg.from}") },
+                        headlineContent = { Text(stringResource(R.string.chat_reply_to, ctxMsg.from)) },
                         leadingContent = {
                             Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null)
                         },
@@ -5248,9 +5566,28 @@ fun ChatScreen(
                         }
                     )
                 }
+                // Delete (IRCv3 message-redaction); own messages with a server msgId only.
+                // The buffer updates when the server relays the REDACT back, so a FAIL
+                // leaves the message intact rather than vanishing locally but not remotely.
+                if (viewModel != null && ctxMsg.msgId != null && ctxMsg.from != null &&
+                    ctxMsg.from.equals(myNick, ignoreCase = true) &&
+                    state.connections[selNetId]?.hasRedactionSupport == true
+                ) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.chat_delete_message)) },
+                        supportingContent = { Text(stringResource(R.string.chat_delete_message_desc)) },
+                        leadingContent = {
+                            Icon(Icons.Default.Delete, contentDescription = null)
+                        },
+                        modifier = Modifier.focusHighlight().clickable {
+                            viewModel.redactMessage(selNetId, selBufName, ctxMsg.msgId)
+                            longPressedMessage = null
+                        }
+                    )
+                }
                 // Copy
                 ListItem(
-                    headlineContent = { Text("Copy") },
+                    headlineContent = { Text(stringResource(R.string.copy)) },
                     leadingContent = {
                         Icon(Icons.Default.ContentCopy, contentDescription = null)
                     },
@@ -5265,8 +5602,8 @@ fun ChatScreen(
                 )
                 // Copy messages range picker
                 ListItem(
-                    headlineContent = { Text("Copy messages…") },
-                    supportingContent = { Text("Select multiple messages to copy") },
+                    headlineContent = { Text(stringResource(R.string.chat_copy_messages)) },
+                    supportingContent = { Text(stringResource(R.string.chat_copy_messages_desc)) },
                     leadingContent = {
                         Icon(Icons.Default.ContentCopy, contentDescription = null)
                     },
@@ -5320,7 +5657,92 @@ fun ChatScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(selectedNick, style = MaterialTheme.typography.titleLarge)
+                    val sheetBase = selectedNick.lowercase()
+                    val sheetAvatar = metadataAvatars[sheetBase]
+                    val sheetDisplayName = metadataDisplayNames[sheetBase]
+                        ?.takeIf { !it.equals(selectedNick, ignoreCase = true) }
+                    val sheetStatus = metadataStatuses[sheetBase]
+                    val sheetAway = awayNicks.contains(sheetBase)
+                    val sheetBot = botNicks.contains(sheetBase)
+                    val sheetExtra = state.connections[selNetId]?.extraMetadata?.get(sheetBase) ?: emptyMap()
+                    val sheetUri = androidx.compose.ui.platform.LocalUriHandler.current
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        // Avatar (draft/metadata-2), gated identically to the message rows:
+                        // only when image previews are on and this profile is unproxied.
+                        if (sheetAvatar != null) {
+                            var bmp by remember(sheetAvatar) { mutableStateOf(RemoteImage.cached(sheetAvatar)) }
+                            LaunchedEffect(sheetAvatar) { if (bmp == null) bmp = RemoteImage.fetch(sheetAvatar) }
+                            bmp?.let {
+                                Image(
+                                    bitmap = it,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(44.dp).clip(CircleShape),
+                                )
+                            }
+                        }
+                        Column {
+                            Text(selectedNick, style = MaterialTheme.typography.titleLarge)
+                            if (sheetBot) {
+                                Text(
+                                    stringResource(R.string.nick_bot),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color(0xFF7E9CD8),
+                                )
+                            }
+                            if (sheetDisplayName != null) {
+                                Text(
+                                    sheetDisplayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            sheetExtra["pronouns"]?.let { pr ->
+                                Text(
+                                    pr,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (sheetAway) {
+                                Text(
+                                    stringResource(R.string.nick_away),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else if (sheetStatus != null) {
+                                Text(
+                                    sheetStatus,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            sheetExtra["bio"]?.let { bio ->
+                                Text(
+                                    bio,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            sheetExtra["homepage"]?.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let { hp ->
+                                Text(
+                                    hp,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .clickable { runCatching { sheetUri.openUri(hp) } },
+                                )
+                            }
+                        }
+                    }
                     // Show mode badge if nick has a prefix (e.g. @, +)
                     val dispNick = nickDisplayByBase[selectedNick.lowercase()]
                     val prefix = dispNick?.let { nickPrefix(it) }
@@ -5589,6 +6011,13 @@ private fun SingleMessageItem(
     onToggleSelected: () -> Unit,
     onLongPress: () -> Unit,
     onSwipeReply: () -> Unit,
+    /**
+     * draft/metadata-2 display-name for this message's sender, already sanitised,
+     * or null when unset / identical to the nick. Rendered AFTER the real nick
+     * rather than replacing it: a display name is attacker-chosen free text, so
+     * substituting it for the nick would let anyone impersonate another user.
+     */
+    displayName: String? = null,
 ) {
     val fromNick = m.from
     // Local copy of ChatScreen's baseNick — strips IRC mode prefixes from a display nick.
@@ -5774,15 +6203,23 @@ private fun SingleMessageItem(
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
                 val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         append(ts); append("* ")
+                        // draft/oper-tag: amber star marks messages from IRC operators.
+                        if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
+                        // Bot Mode: a muted [bot] tag marks messages from bots.
+                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append("[bot] ") }
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
                             append(fromDisplay)
                         }
-                        pop(); append(" ")
+                        pop()
+                        if (displayName != null) {
+                            withStyle(SpanStyle(color = Color.Gray)) { append(" ($displayName)") }
+                        }
+                        append(" ")
                         appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
@@ -5791,15 +6228,23 @@ private fun SingleMessageItem(
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
                 val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         append(ts); append("<")
+                        // draft/oper-tag: amber star marks messages from IRC operators.
+                        if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
+                        // Bot Mode: a muted [bot] tag marks messages from bots.
+                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append("[bot] ") }
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
                             append(fromDisplay)
                         }
-                        pop(); append("> ")
+                        pop()
+                        if (displayName != null) {
+                            withStyle(SpanStyle(color = Color.Gray)) { append(" ($displayName)") }
+                        }
+                        append("> ")
                         appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }

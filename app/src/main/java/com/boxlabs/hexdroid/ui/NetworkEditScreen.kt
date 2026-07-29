@@ -25,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
@@ -52,7 +53,9 @@ import com.boxlabs.hexdroid.R
 fun NetworkEditScreen(
     state: UiState,
     onCancel: () -> Unit,
-    onSave: (NetworkProfile, ClientCertDraft?, Boolean) -> Unit
+    onSave: (NetworkProfile, ClientCertDraft?, Boolean) -> Unit,
+    stsPolicyActive: Boolean = false,
+    onClearStsPolicy: (() -> Unit)? = null,
 ) {
     val n0 = state.editingNetwork ?: run {
         Text(stringResource(R.string.network_no_network_selected))
@@ -206,6 +209,11 @@ fun NetworkEditScreen(
     var capMessageReactions by remember(n0.id) { mutableStateOf(n0.caps.messageReactions) }
     var capNoImplicitNames by remember(n0.id) { mutableStateOf(n0.caps.noImplicitNames) }
     var capMultiline by remember(n0.id) { mutableStateOf(n0.caps.multiline) }
+    var capMessageRedaction by remember(n0.id) { mutableStateOf(n0.caps.messageRedaction) }
+    var capAccountRegistration by remember(n0.id) { mutableStateOf(n0.caps.accountRegistration) }
+    var capExtendedIsupport by remember(n0.id) { mutableStateOf(n0.caps.extendedIsupport) }
+    var capMetadata2 by remember(n0.id) { mutableStateOf(n0.caps.metadata2) }
+    var capFilehostUploads by remember(n0.id) { mutableStateOf(n0.caps.filehostUploads) }
     // Bouncer-specific caps
     var capSojuRead by remember(n0.id) { mutableStateOf(n0.caps.sojuRead) }
     var capSojuNoImplicitNames by remember(n0.id) { mutableStateOf(n0.caps.sojuNoImplicitNames) }
@@ -221,7 +229,7 @@ fun NetworkEditScreen(
 
     val mechLabels = mapOf(
         SaslMechanism.PLAIN to "PLAIN",
-        SaslMechanism.EXTERNAL to "EXTERNAL (client cert)",
+        SaslMechanism.EXTERNAL to stringResource(R.string.netedit_sasl_external),
         SaslMechanism.SCRAM_SHA_256 to "SCRAM-SHA-256"
     )
 
@@ -230,12 +238,12 @@ fun NetworkEditScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.network_edit_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onCancel) {
+                    IconButton(onClick = onCancel, modifier = Modifier.focusHighlight()) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cancel))
                     }
                 },
                 actions = {
-                    Button(onClick = {
+                    Button(modifier = Modifier.focusHighlight(RoundedCornerShape(50)), onClick = {
                         val p = port.filter { it.isDigit() }.toIntOrNull() ?: 0
                         // validate port is in the legal TCP range before saving.
                         if (p !in 1..65535) {
@@ -299,6 +307,11 @@ fun NetworkEditScreen(
                             messageReactions = capMessageReactions,
                             noImplicitNames = capNoImplicitNames,
                             multiline = capMultiline,
+                            messageRedaction = capMessageRedaction,
+                            accountRegistration = capAccountRegistration,
+                            extendedIsupport = capExtendedIsupport,
+                            metadata2 = capMetadata2,
+                            filehostUploads = capFilehostUploads,
                         )
 
                         clientCertUiError = null
@@ -478,7 +491,7 @@ fun NetworkEditScreen(
                     label = { Text(stringResource(R.string.network_port_label)) },
                     isError = portError,
                     supportingText = if (portError) {
-                        { Text("Port must be between 1 and 65535") }
+                        { Text(stringResource(R.string.netedit_port_range)) }
                     } else null,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -491,7 +504,7 @@ fun NetworkEditScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(stringResource(R.string.network_use_tls_label))
-                    Switch(checked = tls, onCheckedChange = { tls = it })
+                    Switch(checked = tls, onCheckedChange = { tls = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
 
                 AnimatedVisibility(visible = !tls) {
@@ -501,7 +514,7 @@ fun NetworkEditScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(stringResource(R.string.network_allow_plaintext))
-                        Switch(checked = allowInsecurePlaintext, onCheckedChange = { allowInsecurePlaintext = it })
+                        Switch(checked = allowInsecurePlaintext, onCheckedChange = { allowInsecurePlaintext = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                     }
                 }
 
@@ -512,10 +525,41 @@ fun NetworkEditScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(stringResource(R.string.network_allow_invalid_certs))
-                        Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it })
+                        Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                     }
 
                     // Show every pinned TOFU fingerprint when at least one is stored. The
+                    // IRCv3 STS: when the server has published a TLS-only policy for this
+                    // host, connections are forced onto TLS with strict certificate checks
+                    // regardless of the toggles above. Surface that here, with an explicit
+                    // escape hatch for a policy gone stale (e.g. the server moved or broke
+                    // its TLS listener) before it expires. stsCleared hides the row locally
+                    // once tapped; the policy simply re-learns on the next TLS connect if
+                    // the server still advertises it.
+                    var stsCleared by remember(n0.id) { mutableStateOf(false) }
+                    if (stsPolicyActive && !stsCleared) {
+                        HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stringResource(R.string.network_sts_active_label),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                stringResource(R.string.network_sts_active_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    stsCleared = true
+                                    onClearStsPolicy?.invoke()
+                                },
+                                modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))
+                            ) {
+                                Text(stringResource(R.string.network_sts_forget))
+                            }
+                        }
+                    }
                     // "Reset & re-pin" button is destructive (it discards every trust anchor
                     // the user has established, including any round-robin-DNS extras), so it
                     // only surfaces when the connection is in a known mismatch state. The
@@ -585,7 +629,7 @@ fun NetworkEditScreen(
                                                 false
                                             )
                                         },
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))
                                     ) {
                                         Text(stringResource(R.string.network_trust_extra_pinned_cert))
                                     }
@@ -604,7 +648,7 @@ fun NetworkEditScreen(
                                             false
                                         )
                                     },
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))
                                 ) {
                                     Text(stringResource(R.string.network_reset_pinned_cert))
                                 }
@@ -657,7 +701,7 @@ fun NetworkEditScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(stringResource(R.string.network_auto_connect_label))
-                    Switch(checked = autoConnect, onCheckedChange = { autoConnect = it })
+                    Switch(checked = autoConnect, onCheckedChange = { autoConnect = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
                 Row(
                     Modifier.fillMaxWidth(),
@@ -665,7 +709,7 @@ fun NetworkEditScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(stringResource(R.string.network_show_in_switcher_label))
-                    Switch(checked = showInSidebar, onCheckedChange = { showInSidebar = it })
+                    Switch(checked = showInSidebar, onCheckedChange = { showInSidebar = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
                 Row(
                     Modifier.fillMaxWidth(),
@@ -673,7 +717,7 @@ fun NetworkEditScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(stringResource(R.string.network_auto_reconnect_label))
-                    Switch(checked = autoReconnect, onCheckedChange = { autoReconnect = it })
+                    Switch(checked = autoReconnect, onCheckedChange = { autoReconnect = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
                 Row(
                     Modifier.fillMaxWidth(),
@@ -688,7 +732,7 @@ fun NetworkEditScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(checked = isBouncer, onCheckedChange = { isBouncer = it })
+                    Switch(checked = isBouncer, onCheckedChange = { isBouncer = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
 
                 // Bouncer kind selector. Determines how IrcConfig.effectiveAuthIdentity
@@ -712,7 +756,8 @@ fun NetworkEditScreen(
                                 readOnly = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                                    .dpadActivate { bouncerKindExpanded = !bouncerKindExpanded },
                                 label = { Text(stringResource(R.string.network_bouncer_kind_label)) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bouncerKindExpanded) }
                             )
@@ -798,7 +843,7 @@ fun NetworkEditScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(stringResource(R.string.network_enable_sasl))
-                    Switch(checked = saslEnabled, onCheckedChange = { saslEnabled = it })
+                    Switch(checked = saslEnabled, onCheckedChange = { saslEnabled = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
                 // Nudge bouncer users towards SASL, it's the structured auth path that
                 // works regardless of which bouncer the user has, whereas PASS requires
@@ -823,7 +868,7 @@ fun NetworkEditScreen(
                                 readOnly = true,
                                 label = { Text(stringResource(R.string.network_sasl_mechanism_label)) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = mechExpanded) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth().dpadActivate { mechExpanded = !mechExpanded }
                             )
                             ExposedDropdownMenu(mechExpanded, { mechExpanded = false }) {
                                 SaslMechanism.entries.forEach { mech ->
@@ -886,8 +931,8 @@ fun NetworkEditScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         val label = when (certFormat) {
-                            ClientCertFormat.PEM_BUNDLE -> "PEM (.pem)"
-                            ClientCertFormat.CERT_AND_KEY -> "CRT + KEY (.crt/.key)"
+                            ClientCertFormat.PEM_BUNDLE -> stringResource(R.string.netedit_cert_pem)
+                            ClientCertFormat.CERT_AND_KEY -> stringResource(R.string.netedit_cert_crtkey)
                             ClientCertFormat.PKCS12 -> "PKCS#12 (.p12/.pfx)"
                         }
                         OutlinedTextField(
@@ -896,7 +941,7 @@ fun NetworkEditScreen(
                             readOnly = true,
                             label = { Text(stringResource(R.string.network_cert_format_label)) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = certFormatExpanded) },
-                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth().dpadActivate { certFormatExpanded = !certFormatExpanded }
                         )
                         ExposedDropdownMenu(
                             expanded = certFormatExpanded,
@@ -932,10 +977,11 @@ fun NetworkEditScreen(
                     when (certFormat) {
                         ClientCertFormat.PEM_BUNDLE -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { pickPem.launch(arrayOf("*/*")) }) {
+                                Button(onClick = { pickPem.launch(arrayOf("*/*")) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                     Text(if (pendingPemUri == null) stringResource(R.string.network_cert_choose_pem) else stringResource(R.string.network_cert_replace_pem))
                                 }
                                 OutlinedButton(
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                                     enabled = pendingPemUri != null,
                                     onClick = {
                                         pendingPemUri = null
@@ -949,10 +995,10 @@ fun NetworkEditScreen(
                         }
                         ClientCertFormat.CERT_AND_KEY -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { pickCrt.launch(arrayOf("*/*")) }) {
+                                Button(onClick = { pickCrt.launch(arrayOf("*/*")) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                     Text(if (pendingCertUri == null) stringResource(R.string.network_cert_choose_crt) else stringResource(R.string.network_cert_replace_crt))
                                 }
-                                Button(onClick = { pickKey.launch(arrayOf("*/*")) }) {
+                                Button(onClick = { pickKey.launch(arrayOf("*/*")) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                     Text(if (pendingKeyUri == null) stringResource(R.string.network_cert_choose_key) else stringResource(R.string.network_cert_replace_key))
                                 }
                             }
@@ -963,10 +1009,11 @@ fun NetworkEditScreen(
                         }
                         ClientCertFormat.PKCS12 -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { pickPem.launch(arrayOf("*/*")) }) {
+                                Button(onClick = { pickPem.launch(arrayOf("*/*")) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                     Text(if (pendingPemUri == null) stringResource(R.string.network_cert_choose_p12) else stringResource(R.string.network_cert_replace_p12))
                                 }
                                 OutlinedButton(
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                                     enabled = pendingPemUri != null,
                                     onClick = {
                                         pendingPemUri = null
@@ -994,6 +1041,7 @@ fun NetworkEditScreen(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                             enabled = (tlsClientCertId != null) || (activeLabel != null),
                             onClick = {
                                 clearPendingCertSelection()
@@ -1002,6 +1050,7 @@ fun NetworkEditScreen(
                             }
                         ) { Text(stringResource(R.string.ignore_remove)) }
                         OutlinedButton(
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                             enabled = removeClientCert,
                             onClick = {
                                 removeClientCert = false
@@ -1082,7 +1131,8 @@ fun NetworkEditScreen(
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                            .dpadActivate { proxyTypeExpanded = !proxyTypeExpanded },
                         label = { Text(stringResource(R.string.network_proxy_type_label)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = proxyTypeExpanded) }
                     )
@@ -1122,6 +1172,7 @@ fun NetworkEditScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             AssistChip(
+                                modifier = Modifier.focusHighlight(),
                                 onClick = {
                                     proxyType = ProxyType.SOCKS5
                                     proxyHost = "127.0.0.1"
@@ -1131,6 +1182,7 @@ fun NetworkEditScreen(
                                 label = { Text(stringResource(R.string.network_proxy_preset_orbot)) }
                             )
                             AssistChip(
+                                modifier = Modifier.focusHighlight(),
                                 onClick = {
                                     proxyType = ProxyType.SOCKS5
                                     proxyHost = "127.0.0.1"
@@ -1162,7 +1214,7 @@ fun NetworkEditScreen(
                                 singleLine = true,
                                 isError = proxyPortError,
                                 supportingText = if (proxyPortError) {
-                                    { Text("Port must be between 1 and 65535") }
+                                    { Text(stringResource(R.string.netedit_port_range)) }
                                 } else null,
                                 modifier = Modifier.width(120.dp)
                             )
@@ -1207,7 +1259,8 @@ fun NetworkEditScreen(
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                            .dpadActivate { encodingExpanded = !encodingExpanded },
                         label = { Text(stringResource(R.string.network_encoding_label)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = encodingExpanded) }
                     )
@@ -1252,7 +1305,7 @@ fun NetworkEditScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(checked = notifyOnErrors, onCheckedChange = { notifyOnErrors = it })
+                    Switch(checked = notifyOnErrors, onCheckedChange = { notifyOnErrors = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                 }
 
                 Text(
@@ -1282,7 +1335,8 @@ fun NetworkEditScreen(
                     Text(stringResource(R.string.network_edit_advanced_caps))
                     Switch(
                         checked = showAdvancedCaps,
-                        onCheckedChange = { showAdvancedCaps = it }
+                        onCheckedChange = { showAdvancedCaps = it },
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp))
                     )
                 }
 
@@ -1316,7 +1370,12 @@ fun NetworkEditScreen(
                         CapSwitch("draft/channel-rename", capChannelRename) { capChannelRename = it }
                         CapSwitch("draft/extended-monitor", capExtendedMonitor) { capExtendedMonitor = it }
                         CapSwitch("draft/message-reactions", capMessageReactions) { capMessageReactions = it }
+                        CapSwitch("draft/message-redaction", capMessageRedaction) { capMessageRedaction = it }
+                        CapSwitch("draft/account-registration", capAccountRegistration) { capAccountRegistration = it }
+                        CapSwitch("draft/extended-isupport", capExtendedIsupport) { capExtendedIsupport = it }
+                        CapSwitch("draft/metadata-2", capMetadata2) { capMetadata2 = it }
                         CapSwitch("draft/no-implicit-names", capNoImplicitNames) { capNoImplicitNames = it }
+                        CapSwitch("soju.im/FILEHOST uploads", capFilehostUploads) { capFilehostUploads = it }
 
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
@@ -1367,7 +1426,7 @@ private fun CapSwitch(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
     }
 }
 

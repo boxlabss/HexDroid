@@ -28,6 +28,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -114,9 +116,9 @@ fun ScriptsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Scripts") },
-                navigationIcon = { TextButton(onBack) { Text("Back") } },
-                actions = { TextButton(onReloadAll) { Text("Reload") } },
+                title = { Text(stringResource(R.string.scripts_title)) },
+                navigationIcon = { TextButton(onBack) { Text(stringResource(R.string.back)) } },
+                actions = { TextButton(onReloadAll) { Text(stringResource(R.string.scripts_reload)) } },
             )
         },
     ) { pad ->
@@ -137,8 +139,8 @@ fun ScriptsScreen(
 
             HorizontalDivider()
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ onImportFile() }, Modifier.weight(1f)) { Text("Import file…") }
-                OutlinedButton({ pasting = true }, Modifier.weight(1f)) { Text("Paste…") }
+                OutlinedButton({ onImportFile() }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_import_file)) }
+                OutlinedButton({ pasting = true }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_paste)) }
             }
         }
     }
@@ -166,21 +168,21 @@ fun ScriptsDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Scripts", Modifier.weight(1f))
+                Text(stringResource(R.string.scripts_title), Modifier.weight(1f))
                 val on = state.scripts.count { it.enabled }
-                Text("$on/${state.scripts.size} on", style = MaterialTheme.typography.labelMedium,
+                Text(stringResource(R.string.scripts_enabled_count, on, state.scripts.size), style = MaterialTheme.typography.labelMedium,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Features live in .${state.backendName} scripts (toggle them on or off)",
+                    stringResource(R.string.scripts_backend_hint, state.backendName),
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (state.scripts.isEmpty()) {
-                    Text("No scripts installed yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.scripts_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     LazyColumn(
                         Modifier.fillMaxWidth().heightIn(max = 320.dp),
@@ -190,13 +192,13 @@ fun ScriptsDialog(
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton({ onImportFile() }, Modifier.weight(1f)) { Text("Import…") }
-                    OutlinedButton({ pasting = true }, Modifier.weight(1f)) { Text("Paste…") }
+                    OutlinedButton({ onImportFile() }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_import)) }
+                    OutlinedButton({ pasting = true }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_paste)) }
                 }
             }
         },
-        confirmButton = { TextButton(onReloadAll) { Text("Reload") } },
-        dismissButton = { TextButton(onDismiss) { Text("Close") } },
+        confirmButton = { TextButton(onReloadAll) { Text(stringResource(R.string.scripts_reload)) } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.close)) } },
     )
 
     if (pasting) PasteDialog(state.backendName, onDismiss = { pasting = false }) { name, src ->
@@ -211,20 +213,21 @@ private fun ScriptsHeader(state: ScriptsUiState) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Scripts", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.scripts_title), fontWeight = FontWeight.SemiBold)
             Text(
-                "Add or remove features as .${state.backendName} scripts. " +
-                    "Disabled scripts stay installed but are unloaded.",
+                stringResource(R.string.scripts_header_desc, state.backendName),
                  style = MaterialTheme.typography.bodySmall,
                  color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (state.scripts.isNotEmpty()) {
                 val on = state.scripts.count { it.enabled }
                 val bad = state.scripts.count { it.enabled && !it.ok }
+                val enabledOf = stringResource(R.string.scripts_enabled_of, on, state.scripts.size)
+                val withErrors = if (bad > 0) stringResource(R.string.scripts_with_errors, bad) else ""
                 Text(
                     buildString {
-                        append("$on of ${state.scripts.size} enabled")
-                        if (bad > 0) append(" · $bad with errors")
+                        append(enabledOf)
+                        if (bad > 0) append(withErrors)
                     },
                      style = MaterialTheme.typography.labelMedium,
                      color = if (bad > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
@@ -238,8 +241,8 @@ private fun ScriptsHeader(state: ScriptsUiState) {
 private fun ScriptsEmpty() {
     Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("No scripts installed yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Import a file or paste source below to add one.",
+            Text(stringResource(R.string.scripts_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.scripts_none_hint),
                  style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -274,7 +277,7 @@ private fun ScriptRow(
                         modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        s.error ?: "load error",
+                        s.error ?: stringResource(R.string.scripts_load_error),
                          style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                          color = MaterialTheme.colorScheme.onErrorContainer,
                          modifier = Modifier.padding(8.dp),
@@ -283,8 +286,8 @@ private fun ScriptRow(
             }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton({ onEdit(s.name) }) { Text("Edit") }
-                TextButton({ onRemove(s.name) }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                TextButton({ onEdit(s.name) }) { Text(stringResource(R.string.edit)) }
+                TextButton({ onRemove(s.name) }) { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -314,10 +317,10 @@ private fun ScriptEditorScreen(
         topBar = {
             TopAppBar(
                 title = { Text(name, fontFamily = FontFamily.Monospace, maxLines = 1) },
-                navigationIcon = { TextButton(onBack) { Text("Cancel") } },
+                navigationIcon = { TextButton(onBack) { Text(stringResource(R.string.cancel)) } },
                 actions = {
-                    if (canRevert) TextButton({ confirmRevert = true }) { Text("Revert") }
-                    TextButton({ onSave(text) }) { Text("Save") }
+                    if (canRevert) TextButton({ confirmRevert = true }) { Text(stringResource(R.string.scripts_revert)) }
+                    TextButton({ onSave(text) }) { Text(stringResource(R.string.save)) }
                 },
             )
         },
@@ -353,12 +356,12 @@ private fun ScriptEditorScreen(
     if (confirmRevert) {
         AlertDialog(
             onDismissRequest = { confirmRevert = false },
-            title = { Text("Revert $name?") },
-            text = { Text("Replace your edits with the bundled default. This can't be undone.") },
+            title = { Text(stringResource(R.string.scripts_revert_title, name)) },
+            text = { Text(stringResource(R.string.scripts_revert_body)) },
             confirmButton = {
-                TextButton({ onRevert()?.let { text = it }; confirmRevert = false }) { Text("Revert") }
+                TextButton({ onRevert()?.let { text = it }; confirmRevert = false }) { Text(stringResource(R.string.scripts_revert)) }
             },
-            dismissButton = { TextButton({ confirmRevert = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ confirmRevert = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
@@ -379,9 +382,9 @@ private fun ExtBadge(ext: String) {
 @Composable
 private fun StatusPill(s: ScriptInfo) {
     val (label, color) = when {
-        !s.enabled -> "Disabled" to MaterialTheme.colorScheme.onSurfaceVariant
-        s.ok       -> "Loaded" to MaterialTheme.colorScheme.primary
-        else       -> "Error" to MaterialTheme.colorScheme.error
+        !s.enabled -> stringResource(R.string.scripts_status_disabled) to MaterialTheme.colorScheme.onSurfaceVariant
+        s.ok       -> stringResource(R.string.scripts_status_loaded) to MaterialTheme.colorScheme.primary
+        else       -> stringResource(R.string.scripts_status_error) to MaterialTheme.colorScheme.error
     }
     Text(label, fontSize = 12.sp, color = color)
 }
@@ -392,12 +395,12 @@ private fun PasteDialog(ext: String, onDismiss: () -> Unit, onConfirm: (String, 
     var body by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Paste a script") },
+        title = { Text(stringResource(R.string.scripts_paste_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Name (.$ext)") }, singleLine = true)
+                OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.scripts_name_hint, ext)) }, singleLine = true)
                 OutlinedTextField(
-                    body, { body = it }, label = { Text("Source") },
+                    body, { body = it }, label = { Text(stringResource(R.string.scripts_source)) },
                     modifier = Modifier.fillMaxWidth().height(220.dp),
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 )
@@ -406,8 +409,8 @@ private fun PasteDialog(ext: String, onDismiss: () -> Unit, onConfirm: (String, 
         confirmButton = {
             TextButton(
                 onClick = { if (name.isNotBlank() && body.isNotBlank()) onConfirm(name.trim(), body) },
-            ) { Text("Add") }
+            ) { Text(stringResource(R.string.add)) }
         },
-        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }

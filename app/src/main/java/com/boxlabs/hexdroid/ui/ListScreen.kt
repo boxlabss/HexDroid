@@ -21,6 +21,7 @@
 package com.boxlabs.hexdroid.ui
 
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -180,14 +181,14 @@ fun ListScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 SortChip(
-                    label = "Size",
+                    label = stringResource(R.string.list_sort_size),
                     activeAsc  = sort == "size_asc",
                     activeDesc = sort == "size_desc",
                     onClickDesc = { onSortChange("size_desc") },
                     onClickAsc  = { onSortChange("size_asc")  },
                 )
                 SortChip(
-                    label = "Name",
+                    label = stringResource(R.string.list_sort_name),
                     activeAsc  = sort == "name_asc",
                     activeDesc = sort == "name_desc",
                     onClickDesc = { onSortChange("name_desc") },
@@ -212,6 +213,29 @@ fun ListScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            // RPL_TRYAGAIN (263): the server rate-limited LIST, commonly SECURELIST
+            // refusing LIST for the first N seconds after connect. Show the reason and a
+            // retry so the user isn't left staring at a short or empty directory.
+            state.listTryAgainMessage?.let { msg ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { onRefresh(minUsers, maxUsers) }, modifier = Modifier.focusHighlight()) {
+                        Text(stringResource(R.string.list_retry))
+                    }
                 }
             }
 
@@ -310,7 +334,7 @@ private fun SortChip(
                 Icon(
                     imageVector = if (activeDesc) Icons.Default.ArrowDownward
                                   else            Icons.Default.ArrowUpward,
-                    contentDescription = if (activeDesc) "Descending" else "Ascending",
+                    contentDescription = if (activeDesc) stringResource(R.string.sort_descending) else stringResource(R.string.sort_ascending),
                     modifier = Modifier.size(14.dp),
                 )
             }

@@ -127,6 +127,10 @@ data class UiMessage(
      * never mistaken for a delivered message, the exact "looks sent but wasn't" trap this guards against.
      */
     val pending: Boolean = false,
+    /** draft/oper-tag: the sender was marked as an IRC operator; rendered as a star before the nick. */
+    val fromOper: Boolean = false,
+    /** Bot Mode `bot` tag: the sender is a bot; rendered as a badge before the nick. */
+    val fromBot: Boolean = false,
 )
 data class UiBuffer(
     val name: String,
@@ -334,11 +338,20 @@ data class NetConnState(
      * Common: b,e,I,q. Defaults to a permissive set until ISUPPORT arrives.
      */
     val listModes: String = "bqeI",
+    /** EXTBAN prefix (e.g. "~", or "" for no prefix); null when unsupported. */
+    val extbanPrefix: String? = null,
+    /** EXTBAN type letters; null when unsupported. */
+    val extbanTypes: String? = null,
+    /** draft/account-extban letter; null when unsupported. */
+    val accountExtban: String? = null,
     /** True after 381 RPL_YOUREOPER is received for this connection */
     val isIrcOper: Boolean = false,
     /** True when the message-tags or draft/message-reactions cap is negotiated.
      *  Used by ChatScreen to decide whether to offer emoji reactions. */
     val hasReactionSupport: Boolean = false,
+    /** True when draft/message-redaction (or the graduated name) is negotiated.
+     *  Gates the "Delete message" context-sheet action for own messages. */
+    val hasRedactionSupport: Boolean = false,
     /**
      * True from the moment a [IrcEvent.TlsFingerprintChanged] fires until the next successful
      * connection (or until the pin is cleared by the user). Drives the "Reset & re-pin" button
@@ -351,6 +364,63 @@ data class NetConnState(
      * next successful connect alongside [tlsPinMismatch]. Null when no mismatch is active.
      */
     val tlsPinMismatchActualFp: String? = null,
+    /**
+     * soju.im/FILEHOST upload endpoint from ISUPPORT, when the server offers one.
+     * Non-null enables the attach button in the chat input row.
+     */
+    val filehostUrl: String? = null,
+    /** ICON / draft/ICON ISUPPORT token: server-supplied icon URL. */
+    val networkIconUrl: String? = null,
+    /**
+     * draft/metadata-2 display-name values, keyed by lowercased nick or channel.
+     * Values are sanitised at ingest (see IrcViewModel.sanitizeMetadataValue).
+     */
+    val displayNames: Map<String, String> = emptyMap(),
+    /** draft/metadata-2 avatar URLs, keyed by lowercased nick or channel. */
+    val avatarUrls: Map<String, String> = emptyMap(),
+    /**
+     * draft/metadata-2 `color` values (6 hex digits, no leading #), keyed by
+     * lowercased nick. Applied as the nick colour, below a manual own-nick override.
+     */
+    val nickColors: Map<String, String> = emptyMap(),
+    /** draft/metadata-2 `status` text, keyed by lowercased nick. */
+    val statuses: Map<String, String> = emptyMap(),
+    /**
+     * Every metadata key set on our OWN current nick, verbatim (post-sanitise),
+     * keyed by lowercased key. Populated from a METADATA * LIST refresh and from
+     * live updates for our nick; backs the metadata editor's pre-fill. Bounded to
+     * a single target (us), so it cannot grow without limit like a per-nick store.
+     */
+    val ownMetadata: Map<String, String> = emptyMap(),
+    /**
+     * Extra text metadata (pronouns / homepage / bio) shown in the nick tap sheet,
+     * keyed by lowercased nick then key. A bounded whitelist, so it stays small.
+     */
+    val extraMetadata: Map<String, Map<String, String>> = emptyMap(),
+    /** Our own services account name when identified (RPL_LOGGEDIN / account-notify), else null. */
+    val myAccount: String? = null,
+    /** draft/account-registration progress for the guided registration dialog. */
+    val regState: RegState = RegState(),
+    /**
+     * Lowercased nicks currently marked away (from away-notify / WHOX), mirrored from
+     * the internal nickAwayState map so the member list can dim them reactively.
+     */
+    val awayNicks: Set<String> = emptySet(),
+    /**
+     * Lowercased nicks known to be bots, from the BOT mode letter in WHO/WHOX flags or
+     * a `bot` message tag. Used to badge them in the member list and nick sheet.
+     */
+    val botNicks: Set<String> = emptySet(),
+)
+
+/** Phase of a draft/account-registration flow, for the registration dialog. */
+enum class RegPhase { IDLE, VERIFY_REQUIRED, SUCCESS, FAILED }
+
+/** Structured snapshot of a draft/account-registration exchange. */
+data class RegState(
+    val phase: RegPhase = RegPhase.IDLE,
+    val account: String? = null,
+    val message: String? = null,
 )
 
 data class BanEntry(
@@ -446,6 +516,8 @@ data class UiState(
 
     // /LIST UI (active network only)
     val listInProgress: Boolean = false,
+    /** RPL_TRYAGAIN notice for the channel list (e.g. SECURELIST cooldown), else null. */
+    val listTryAgainMessage: String? = null,
     val channelDirectory: List<ChannelListEntry> = emptyList(),
     val listFilter: String = "",
     /** Sort order for the channel list: "size_desc", "size_asc", "name_asc", "name_desc". */
@@ -816,6 +888,31 @@ class IrcViewModel(
     private var flapPausedLoaded = false
 
     /**
+     * IRCv3 STS policies keyed by lowercased hostname, hydrated lazily from DataStore
+     * (see ensureStsPoliciesLoaded). While a host's entry is unexpired, every connection
+     * to it is forced onto TLS with allowInvalidCerts overridden to false, per spec.
+     */
+    /**
+     * The user's own metadata values, persisted per network id then key, and re-applied
+     * on connect so they survive reconnects even on servers that don't store them.
+     */
+    private val ownMetadataStore: MutableMap<String, MutableMap<String, String>> =
+        java.util.concurrent.ConcurrentHashMap()
+    private var ownMetadataLoaded = false
+
+    private val stsPolicies: MutableMap<String, StsPolicyEntry> =
+        java.util.concurrent.ConcurrentHashMap()
+    private var stsPoliciesLoaded = false
+
+    /**
+     * One-shot TLS ports learned mid-connection from an insecure CAP LS `sts port=<n>`.
+     * Consumed by the immediate secure retry in connectNetworkInternal. Deliberately NOT
+     * persisted: the durable policy is only written once the secure connection confirms
+     * it by advertising a duration, per the spec's trust-on-verify flow.
+     */
+    private val stsUpgradePorts: MutableMap<String, Int> = java.util.concurrent.ConcurrentHashMap()
+
+    /**
      * Per-network dedup tracker for transient connection-status lines (disconnect reasons,
      * connect-failure errors, recurring SASL/keystore warnings). Within
      * [CONN_STATUS_DEDUP_WINDOW_MS] of the first occurrence, a repeated identical line is
@@ -885,6 +982,42 @@ class IrcViewModel(
         }
     }
 
+    /** Hydrate STS policies from DataStore (lazy, once), dropping expired entries. */
+    private suspend fun ensureOwnMetadataLoaded() {
+        if (ownMetadataLoaded) return
+        ownMetadataLoaded = true
+        val stored = runCatching { repo.readOwnMetadata() }.getOrDefault(emptyMap())
+        stored.forEach { (netId, keys) -> ownMetadataStore[netId] = keys.toMutableMap() }
+    }
+
+    /** Re-send our stored own metadata to the server so it survives a reconnect. */
+    private fun reapplyOwnMetadata(netId: String) {
+        val rt = runtimes[netId] ?: return
+        if (!rt.client.hasCap("draft/metadata-2")) return
+        viewModelScope.launch {
+            ensureOwnMetadataLoaded()
+            val keys = ownMetadataStore[netId]?.toMap() ?: return@launch
+            keys.forEach { (k, v) -> runCatching { rt.client.setOwnMetadata(k, v) } }
+        }
+    }
+
+    private suspend fun ensureStsPoliciesLoaded() {
+        if (stsPoliciesLoaded) return
+        stsPoliciesLoaded = true
+        val now = System.currentTimeMillis()
+        val stored = runCatching { repo.readStsPolicies() }.getOrDefault(emptyMap())
+        val active = stored.filterValues { it.isActive(now) }
+        stsPolicies.putAll(active)
+        // Write back the pruned map so expired policies don't accumulate forever.
+        if (active.size != stored.size) {
+            viewModelScope.launch(Dispatchers.IO) { runCatching { repo.writeStsPolicies(stsPolicies.toMap()) } }
+        }
+    }
+
+    private fun persistStsPolicies() {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { repo.writeStsPolicies(stsPolicies.toMap()) } }
+    }
+
     /**
      * Per-network jobs that end a flap pause after a cooldown. Previously a flap pause
      * lasted until the user tapped Reconnect: within a running process nothing ever
@@ -913,7 +1046,7 @@ class IrcViewModel(
             ) {
                 append(
                     bufKey(netId, "*server*"), from = null,
-                    text = "*** Stability cooldown over. Resuming auto-reconnect…",
+                    text = "*** " + appContext.getString(R.string.status_cooldown_over),
                     doNotify = false
                 )
                 if (_state.value.settings.autoReconnectEnabled) scheduleAutoReconnect(netId)
@@ -979,7 +1112,7 @@ class IrcViewModel(
             }
         }
         if (matches.isEmpty()) {
-            append(currentKey, from = null, text = "*** No matches for \"$q\"", isLocal = true, doNotify = false)
+            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_no_matches, q), isLocal = true, doNotify = false)
             return
         }
         _state.value = st.copy(
@@ -1256,6 +1389,35 @@ class IrcViewModel(
 
     private val nickAwayState: MutableMap<String, MutableMap<String, String>> =
         java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Mirror a single nick's away transition into NetConnState.awayNicks (keyed by
+     * lowercased original nick, matching how the member list looks them up). Kept in
+     * step with nickAwayState, which stays casefolded and also holds the away message.
+     */
+    private fun markAwayInState(netId: String, nick: String, away: Boolean) {
+        val key = nick.lowercase()
+        setNetConn(netId) { st ->
+            if (away) {
+                if (key in st.awayNicks) st else st.copy(awayNicks = st.awayNicks + key)
+            } else {
+                if (key !in st.awayNicks) st else st.copy(awayNicks = st.awayNicks - key)
+            }
+        }
+    }
+
+    /** Drop all away flags for a network (used when the away map is bulk-cleared). */
+    private fun clearAwayNicksInState(netId: String) {
+        setNetConn(netId) { st -> if (st.awayNicks.isEmpty()) st else st.copy(awayNicks = emptySet()) }
+    }
+
+    /** Record a nick as a bot (from WHO/WHOX flags or a `bot` message tag). */
+    private fun markBotInState(netId: String, nick: String) {
+        val key = nick.lowercase()
+        setNetConn(netId) { st ->
+            if (key in st.botNicks) st else st.copy(botNicks = st.botNicks + key)
+        }
+    }
 
     // Auto-rejoin throttle. Key = "$netId::${chan.lowercase()}", value = epoch-ms of the last
     // auto-rejoin attempt. Used to suppress repeat rejoins within AUTO_REJOIN_SUPPRESS_MS so a
@@ -1778,6 +1940,9 @@ class IrcViewModel(
         // instantly (single DataStore read) and sets flapPausedLoaded=true so the lazy guard
         // in ensureFlapPausedLoaded() is a no-op on any subsequent call.
         viewModelScope.launch { runCatching { ensureFlapPausedLoaded() } }
+        // Hydrate STS policies early too, so a startup auto-connect to a policy-covered
+        // host is TLS-enforced from the very first attempt.
+        viewModelScope.launch { runCatching { ensureStsPoliciesLoaded() } }
         // Surface "log folder is unreadable" to the UI. LogWriter populates its
         // unreadableTreeUrisFlow whenever a SAF query against a tree URI throws
         // SecurityException (most often: backup-restore brought the URI string into
@@ -1912,7 +2077,7 @@ class IrcViewModel(
                             val conn = st.connections[netId]
                             if (conn?.connected == true || conn?.connecting == true) {
                                 val serverKey = bufKey(netId, "*server*")
-                                append(serverKey, from = null, text = "*** Network lost. Waiting for connectivity…", doNotify = false)
+                                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_lost), doNotify = false)
                                 noNetworkNotice.add(netId)
                                 dropConnectionForNetworkLoss(netId)
                             }
@@ -1933,7 +2098,7 @@ class IrcViewModel(
                             val ridingLostNet = runtimes[netId]?.boundNetwork == network
                             if (ridingLostNet && (conn?.connected == true || conn?.connecting == true)) {
                                 val serverKey = bufKey(netId, "*server*")
-                                append(serverKey, from = null, text = "*** Network changed. Reconnecting…", doNotify = false)
+                                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_changed), doNotify = false)
                                 dropConnectionForNetworkLoss(netId, statusText = "Reconnecting…")
                             }
                         }
@@ -1965,8 +2130,7 @@ class IrcViewModel(
             // Registration can fail on some OEM ROMs (e.g. missing permission, broken
             // ConnectivityManager implementation). Log it to every server buffer so the
             // user knows auto-reconnect on network change won't work.
-            val msg = "*** Network callback registration failed: ${e.message ?: e.javaClass.simpleName} - " +
-                "auto-reconnect on network change may not work on this device"
+            val msg = "*** " + appContext.getString(R.string.vm_netcallback_failed, e.message ?: e.javaClass.simpleName)
             viewModelScope.launch {
                 for (netId in _state.value.networks.map { it.id }) {
                     append(bufKey(netId, "*server*"), from = null, text = msg, doNotify = false)
@@ -1998,7 +2162,7 @@ class IrcViewModel(
                 if (conn?.connected != true && conn?.connecting != true) {
                     val serverKey = bufKey(netId, "*server*")
                     if (noNetworkNotice.remove(netId)) {
-                        append(serverKey, from = null, text = "*** Network available. Reconnecting…", doNotify = false)
+                        append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_available_reconnect), doNotify = false)
                     }
                     // A network change invalidates the failure history: the old
                     // attempts failed on an interface that no longer applies.
@@ -2314,9 +2478,9 @@ class IrcViewModel(
         val actualConnected = runtimes[netId]?.client?.isConnectedNow() == true
         val conn0 = _state.value.connections[netId]
         if (conn0?.connected == true && !actualConnected) {
-            setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Disconnected") }
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_disconnected)) }
         } else if (conn0?.connected != true && actualConnected) {
-            setNetConn(netId) { it.copy(connected = true, connecting = false, status = "Connected") }
+            setNetConn(netId) { it.copy(connected = true, connecting = false, status = appContext.getString(R.string.vm_status_connected)) }
         }
         if (_state.value.activeNetworkId != netId) setActiveNetwork(netId)
 
@@ -2370,7 +2534,9 @@ class IrcViewModel(
 
         // Send MARKREAD once, after the state update has settled.
         val mrNet = markReadNet; val mrName = markReadName; val mrTs = markReadTs
-        if (mrNet != null && mrName != null && mrTs != null) {
+        // MARKREAD targets must be a real channel or query; the server buffer ("*server*")
+        // is not a valid target and draws FAIL MARKREAD INVALID_PARAMS.
+        if (mrNet != null && mrName != null && mrName != "*server*" && mrTs != null) {
             val rt = runtimes[mrNet]
             if (rt != null) {
                 viewModelScope.launch { runCatching { rt.client.sendRaw("MARKREAD $mrName timestamp=$mrTs") } }
@@ -2393,7 +2559,7 @@ class IrcViewModel(
         _state.value = st.copy(buffers = st.buffers + (key to buf.copy(lastReadTimestamp = ts)))
         val (netId, bufferName) = splitKey(key)
         val rt = runtimes[netId] ?: return
-        if (rt.client.hasCap("draft/read-marker")) {
+        if (rt.client.hasCap("draft/read-marker") && bufferName != "*server*") {
             viewModelScope.launch { rt.client.sendRaw("MARKREAD $bufferName timestamp=$ts") }
         }
     }
@@ -2584,7 +2750,7 @@ class IrcViewModel(
     }
 
     private fun syncActiveNetworkSummary(st: UiState): UiState {
-        val id = st.activeNetworkId ?: return st.copy(connected = false, connecting = false, status = "Disconnected", myNick = "me")
+        val id = st.activeNetworkId ?: return st.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_disconnected), myNick = "me")
         val conn = st.connections[id] ?: NetConnState()
         return st.copy(connected = conn.connected, connecting = conn.connecting, status = conn.status, myNick = conn.myNick)
     }
@@ -2790,7 +2956,7 @@ fun startAddNetwork() {
                 _state.value = _state.value.copy(
                     screen = AppScreen.NETWORK_EDIT,
                     editingNetwork = profile,
-                    networkEditError = "Failed to save credentials: ${t?.message ?: t?.javaClass?.simpleName ?: "keystore error"}. Try again, or restart the app if the problem persists."
+                    networkEditError = appContext.getString(R.string.vm_creds_save_failed, t?.message ?: t?.javaClass?.simpleName ?: appContext.getString(R.string.vm_keystore_error))
                 )
                 return@launch
             }
@@ -2815,7 +2981,7 @@ fun startAddNetwork() {
                     _state.value = _state.value.copy(
                         screen = AppScreen.NETWORK_EDIT,
                         editingNetwork = profile,
-                        networkEditError = t.message ?: "Failed to import certificate"
+                        networkEditError = t.message ?: appContext.getString(R.string.vm_cert_import_failed)
                     )
                     return@launch
                 }
@@ -3140,10 +3306,10 @@ fun startAddNetwork() {
                 val json = repo.exportBackupJson(st.networks, st.settings)
                 appContext.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(json.toByteArray(Charsets.UTF_8))
-                } ?: throw java.io.IOException("Unable to open output stream for backup file")
-                "Backup saved successfully.\nNote: passwords and certificates are not included."
+                } ?: throw java.io.IOException(appContext.getString(R.string.vm_backup_no_output))
+                appContext.getString(R.string.vm_backup_saved)
             }
-            val msg = result.getOrElse { e -> "Backup failed: ${e.message}" }
+            val msg = result.getOrElse { e -> appContext.getString(R.string.vm_backup_failed, e.message) }
             _state.update { it.copy(backupMessage = msg) }
         }
     }
@@ -3160,7 +3326,7 @@ fun startAddNetwork() {
             val result = runCatching {
                 val json = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?.toString(Charsets.UTF_8)
-                    ?: throw java.io.IOException("Unable to read backup file")
+                    ?: throw java.io.IOException(appContext.getString(R.string.vm_restore_no_input))
                 val orphanedIds = repo.importBackup(json)
                 // Clear encrypted secrets for profiles that existed locally before the restore
                 // but are absent from the imported backup. Without this, SASL passwords / server
@@ -3217,9 +3383,9 @@ fun startAddNetwork() {
                         }
                     }
                 }
-                "Backup restored successfully.\nPasswords were not restored - please re-enter them in each network's settings."
+                appContext.getString(R.string.vm_restore_done)
             }
-            val msg = result.getOrElse { e -> "Restore failed: ${e.message}" }
+            val msg = result.getOrElse { e -> appContext.getString(R.string.vm_restore_failed, e.message) }
             _state.update { it.copy(backupMessage = msg) }
         }
     }
@@ -3355,19 +3521,19 @@ fun startAddNetwork() {
         viewModelScope.launch {
             val st = _state.value
             val parent = st.networks.firstOrNull { it.id == parentNetId } ?: run {
-                _state.update { it.copy(bouncerCloneMessage = "Parent profile not found.") }
+                _state.update { it.copy(bouncerCloneMessage = appContext.getString(R.string.vm_clone_no_parent)) }
                 return@launch
             }
             if (parent.bouncerKind != BouncerKind.SOJU && parent.bouncerKind != BouncerKind.ZNC) {
                 // Defensive: the UI only shows the section for SOJU/ZNC, but the action could
                 // be invoked through other paths (deep links, future automation). Reject so
                 // the resulting clone can't end up with a misconfigured authcid syntax.
-                _state.update { it.copy(bouncerCloneMessage = "Discover-and-clone is only available for soju and ZNC.") }
+                _state.update { it.copy(bouncerCloneMessage = appContext.getString(R.string.vm_clone_unsupported)) }
                 return@launch
             }
             val targetName = bouncerNetworkName.trim()
             if (targetName.isEmpty()) {
-                _state.update { it.copy(bouncerCloneMessage = "Bouncer network has no name yet. try refresh.") }
+                _state.update { it.copy(bouncerCloneMessage = appContext.getString(R.string.vm_clone_no_name)) }
                 return@launch
             }
 
@@ -3382,7 +3548,7 @@ fun startAddNetwork() {
                     it.port == parent.port
             }
             if (existing != null) {
-                _state.update { it.copy(bouncerCloneMessage = "Already imported as \"${existing.name}\".") }
+                _state.update { it.copy(bouncerCloneMessage = appContext.getString(R.string.vm_clone_already, existing.name)) }
                 return@launch
             }
 
@@ -3497,10 +3663,10 @@ fun startAddNetwork() {
                 runCatching { repo.secretStore.setServerPassword(newId, parentServerPass) }
             }
             val resultHint = when {
-                parentHasSasl -> "Imported \"$targetName\" (enable auto-connect to use it.)"
-                parentHasUsablePassForSasl -> "Imported \"$targetName\" with SASL PLAIN auth from server password. Enable auto-connect to use it."
-                parentPassLooksHandFormatted -> "Imported \"$targetName\". Parent password looks pre-formatted for the bouncer; review the clone's auth settings before enabling auto-connect."
-                else -> "Imported \"$targetName\". Set credentials and auto-connect on the new profile to use it."
+                parentHasSasl -> appContext.getString(R.string.vm_clone_imported_sasl, targetName)
+                parentHasUsablePassForSasl -> appContext.getString(R.string.vm_clone_imported_plain, targetName)
+                parentPassLooksHandFormatted -> appContext.getString(R.string.vm_clone_imported_preformatted, targetName)
+                else -> appContext.getString(R.string.vm_clone_imported_plain_none, targetName)
             }
             _state.update { it.copy(bouncerCloneMessage = resultHint) }
         }
@@ -3754,6 +3920,35 @@ fun startAddNetwork() {
     /** A tap inside a mounted script view -> run the alias or fire the signal named by the button. */
     fun scriptViewAction(actionId: String, args: List<String>) = runScriptAction(actionId, args)
 
+    /** Read-only display metrics for the script `$screen.*` capability (see HexDroidScriptHost). */
+    fun scriptScreenInfo(key: String): String {
+        val cfg = appContext.resources.configuration
+        return when (key) {
+            "landscape" -> if (cfg.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) "1" else "0"
+            "width" -> cfg.screenWidthDp.toString()
+            "height" -> cfg.screenHeightDp.toString()
+            "tv" -> if ((cfg.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK) ==
+                android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) "1" else "0"
+            else -> ""
+        }
+    }
+
+    /**
+     * Fired by the script view screen when the device rotates while a script view is mounted,
+     * so a layout-aware script (poker) can re-render for the new orientation. Scripts opt in
+     * with `on SIGNAL:screenchange { ... }`; scripts without a handler are unaffected.
+     */
+    fun scriptScreenChanged() {
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            runCatching {
+                scriptEngine.dispatch(
+                    "SIGNAL:screenchange",
+                    com.boxlabs.hexdroid.script.EventData(network = "", buffer = ""),
+                )
+            }
+        }
+    }
+
     // ---- script `age.*` transport (loopback) -------------------------------------------------
     // Makes scripted games actually play: a script's own `age.send`/`age.seal` are
     // delivered back into the script as `age_msg` / `age_deal` events, so the local client's moves
@@ -3935,9 +4130,9 @@ fun startAddNetwork() {
                     debug = { msg -> android.util.Log.d("AGEDBG", "pm[$net] $msg") },
                     onPmState = { peer, state, detail ->
                         val line = when (state) {
-                            "NEGOTIATING" -> "*** Establishing +AGE encryption with $peer\u2026"
-                            "ESTABLISHED" -> "*** +AGE encryption established with $peer. Messages are end-to-end encrypted."
-                            "FAILED"      -> "*** +AGE encryption with $peer failed: $detail. Messages are NOT encrypted."
+                            "NEGOTIATING" -> "*** " + appContext.getString(R.string.vm_age_negotiating, peer)
+                            "ESTABLISHED" -> "*** " + appContext.getString(R.string.vm_age_established, peer)
+                            "FAILED"      -> "*** " + appContext.getString(R.string.vm_age_failed, peer, detail)
                             else          -> "*** +AGE with $peer: $state"
                         }
                         append(bufKey(net, peer), from = null, text = line, isLocal = true, doNotify = false)
@@ -3945,7 +4140,7 @@ fun startAddNetwork() {
                     onPmInterest = { peer ->
                         append(
                             bufKey(net, peer), from = null,
-                            text = "*** $peer wants to talk with +AGE end-to-end encryption. Turn it on from the lock menu to encrypt this conversation.",
+                            text = "*** " + appContext.getString(R.string.vm_age_offer, peer),
                             isLocal = true, doNotify = false,
                         )
                     },
@@ -3955,11 +4150,7 @@ fun startAddNetwork() {
                         // is exactly what makes a nick takeover invisible.
                         append(
                             bufKey(net, target), from = null,
-                            text = "*** +AGE WARNING: $nick announced a different key (${newFp.take(16)}) " +
-                                "to the one pinned for that nick (${pinnedFp.take(16)}). " +
-                                "Normal after a reinstall or on a second device, and also what a nick takeover looks like. " +
-                                "Their +AGE messages are ignored until you decide. " +
-                                "Verify the fingerprint out of band, then: /age trust $nick  or  /age reject $nick",
+                            text = "*** " + appContext.getString(R.string.vm_age_key_warning, nick, newFp.take(16), pinnedFp.take(16)),
                             isLocal = true, doNotify = true,
                         )
                     },
@@ -4214,14 +4405,14 @@ fun startAddNetwork() {
 
     fun importE2eKey(networkId: String, target: String, b64: String): E2eImportResult {
         val cleaned = b64.trim().replace(Regex("\\s+"), "")
-        if (cleaned.isEmpty()) return E2eImportResult.Failure("Key is empty")
+        if (cleaned.isEmpty()) return E2eImportResult.Failure(appContext.getString(R.string.vm_key_empty))
         val keyBytes = try {
             android.util.Base64.decode(cleaned, android.util.Base64.DEFAULT)
         } catch (_: IllegalArgumentException) {
-            return E2eImportResult.Failure("Not a valid base64 string")
+            return E2eImportResult.Failure(appContext.getString(R.string.vm_key_not_base64))
         }
         if (keyBytes.size != 32) {
-            return E2eImportResult.Failure("Expected 32 bytes after base64 decode, got ${keyBytes.size}")
+            return E2eImportResult.Failure(appContext.getString(R.string.vm_key_wrong_length, keyBytes.size))
         }
         return try {
             e2eKeyStore.set(networkId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
@@ -4233,7 +4424,7 @@ fun startAddNetwork() {
                 android.util.Base64.encodeToString(keyBytes, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING),
             ))
         } catch (t: Throwable) {
-            E2eImportResult.Failure("Failed to store key: ${t.message ?: t::class.java.simpleName}")
+            E2eImportResult.Failure(appContext.getString(R.string.vm_key_store_failed, t.message ?: t::class.java.simpleName))
         }
     }
 
@@ -4261,9 +4452,9 @@ fun startAddNetwork() {
      */
     fun setE2eBlowfishPassphrase(networkId: String, target: String, passphrase: String): E2eImportResult {
         val raw = passphrase.toByteArray(Charsets.UTF_8)
-        if (raw.isEmpty()) return E2eImportResult.Failure("Passphrase is empty")
-        if (raw.size < 4) return E2eImportResult.Failure("Passphrase must be at least 4 bytes")
-        if (raw.size > 56) return E2eImportResult.Failure("Passphrase must be at most 56 bytes (got ${raw.size})")
+        if (raw.isEmpty()) return E2eImportResult.Failure(appContext.getString(R.string.vm_pass_empty))
+        if (raw.size < 4) return E2eImportResult.Failure(appContext.getString(R.string.vm_pass_too_short))
+        if (raw.size > 56) return E2eImportResult.Failure(appContext.getString(R.string.vm_pass_too_long, raw.size))
         return try {
             e2eKeyStore.set(networkId, target, com.boxlabs.hexdroid.crypto.E2eKeyStore.Entry(
                 com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH, raw))
@@ -4278,7 +4469,7 @@ fun startAddNetwork() {
                 android.util.Base64.encodeToString(raw, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING),
             ))
         } catch (t: Throwable) {
-            E2eImportResult.Failure("Failed to store key: ${t.message ?: t::class.java.simpleName}")
+            E2eImportResult.Failure(appContext.getString(R.string.vm_key_store_failed, t.message ?: t::class.java.simpleName))
         }
     }
 
@@ -4316,6 +4507,7 @@ fun startAddNetwork() {
             // In the normal case this is a no-op (init already loaded it); this guards
             // the race where a connect is requested before the init coroutine completes.
             ensureFlapPausedLoaded()
+            ensureStsPoliciesLoaded()
             withNetLock(netId) {
                 // Same gate as scheduleAutoReconnect's entry: if the network is auth-
                 // blocked and the caller didn't explicitly clear the block (i.e. this
@@ -4336,12 +4528,16 @@ fun startAddNetwork() {
         if (!force && (conn?.connected == true || conn?.connecting == true)) return
 
         val profilePre = st.networks.firstOrNull { it.id == netId }
-        if (profilePre != null && !profilePre.useTls && !profilePre.allowInsecurePlaintext) {
+        // An active STS policy forces this connection onto TLS below, so the plaintext
+        // warning dialog would be wrong - the connection will not be plaintext.
+        val stsForcesTls = profilePre != null &&
+            stsPolicies[profilePre.host.trim().lowercase()]?.isActive(System.currentTimeMillis()) == true
+        if (profilePre != null && !profilePre.useTls && !profilePre.allowInsecurePlaintext && !stsForcesTls) {
             val removedDesired = desiredConnected.remove(netId)
             if (removedDesired) persistDesiredNetworkIds()
             manualDisconnecting.remove(netId)
             autoReconnectJobs.remove(netId)?.cancel()
-            setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Plaintext disabled") }
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_plaintext_disabled)) }
             if (_state.value.activeNetworkId == netId) clearConnectionNotification()
             _state.value = _state.value.copy(plaintextWarningNetworkId = netId)
             return
@@ -4353,7 +4549,7 @@ fun startAddNetwork() {
             if (removedDesired2) persistDesiredNetworkIds()
             manualDisconnecting.remove(netId)
             autoReconnectJobs.remove(netId)?.cancel()
-            setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Local network permission required") }
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_lan_perm)) }
             if (_state.value.activeNetworkId == netId) clearConnectionNotification()
             _state.value = _state.value.copy(localNetworkWarningNetworkId = netId)
             return
@@ -4381,7 +4577,7 @@ fun startAddNetwork() {
             if (removedDesired) persistDesiredNetworkIds()
             manualDisconnecting.remove(netId)
             autoReconnectJobs.remove(netId)?.cancel()
-            setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Not configured") }
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_not_configured)) }
             if (_state.value.activeNetworkId == netId) clearConnectionNotification()
             return
         }
@@ -4394,10 +4590,7 @@ fun startAddNetwork() {
                 ensureServerBuffer(netId)
                 appendConnStatus(
                     netId = netId,
-                    text = "*** ⚠ SASL credentials unavailable. the Android Keystore key was " +
-                        "invalidated (this can happen after a biometric or screen-lock change). " +
-                        "Connecting without SASL; please re-enter your SASL password in Network " +
-                        "Settings to restore services authentication.",
+                    text = "*** ⚠ " + appContext.getString(R.string.vm_sasl_keystore_invalid),
                     from = null,
                     isHighlight = false,
                     doNotify = false,
@@ -4409,7 +4602,7 @@ fun startAddNetwork() {
         val serverPassword = repo.secretStore.getServerPassword(profile.id)
         val proxyPassword = repo.secretStore.getProxyPassword(profile.id)
         val tlsCert = repo.secretStore.loadTlsClientCert(profile.id, profile.tlsClientCertId)
-        val cfg = profile.toIrcConfig(
+        val cfgBase = profile.toIrcConfig(
                         saslPasswordOverride = saslPassword,
                         serverPasswordOverride = serverPassword,
                         proxyPasswordOverride = proxyPassword,
@@ -4418,18 +4611,43 @@ fun startAddNetwork() {
                         historyLimit = st.settings.ircHistoryLimit
                     )
 
+        // IRCv3 STS enforcement. A one-shot upgrade port (from an insecure CAP LS
+        // `sts port=` moments ago) or an unexpired stored policy for this host forces
+        // TLS regardless of the profile, and disables the allow-invalid-certs escape
+        // hatch - the spec forbids certificate click-through while a policy is active
+        // (TOFU pinning still applies on top). Plaintext-configured profiles connect
+        // to the learned policy port, falling back to the standard 6697.
+        val stsUpgradePort = stsUpgradePorts.remove(netId)
+        val stsPolicy = stsPolicies[profile.host.trim().lowercase()]
+            ?.takeIf { it.isActive(System.currentTimeMillis()) }
+        val cfg = when {
+            stsUpgradePort != null ->
+                cfgBase.copy(useTls = true, port = stsUpgradePort, allowInvalidCerts = false)
+            stsPolicy != null && !cfgBase.useTls ->
+                cfgBase.copy(useTls = true, port = stsPolicy.port ?: 6697, allowInvalidCerts = false)
+            stsPolicy != null ->
+                cfgBase.copy(allowInvalidCerts = false)
+            else -> cfgBase
+        }
+
         ensureServerBuffer(netId)
 
         val serverKey = bufKey(netId, "*server*")
+
+        if (cfg.useTls && !cfgBase.useTls) {
+            append(serverKey, from = null,
+                text = "*** " + appContext.getString(R.string.vm_sts_secure, profile.host, cfg.port),
+                doNotify = false)
+        }
 
         // If there's no active network with Internet capability, don't attempt to connect (it will just fail and spam).
         if (!hasInternetConnection()) {
             if (!noNetworkNotice.contains(netId)) {
                 noNetworkNotice.add(netId)
-                append(serverKey, from = null, text = "*** Please turn on WiFi or Mobile data to auto-reconnect.", doNotify = false)
+                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_turn_on_data), doNotify = false)
             }
-            setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Waiting for network…", myNick = cfg.nick) }
-            if (_state.value.activeNetworkId == netId) updateConnectionNotification("Waiting for network…")
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_waiting_network), myNick = cfg.nick) }
+            if (_state.value.activeNetworkId == netId) updateConnectionNotification(appContext.getString(R.string.vm_status_waiting_network))
             if (_state.value.settings.autoReconnectEnabled) scheduleAutoReconnect(netId)
             return
         } else {
@@ -4440,7 +4658,7 @@ fun startAddNetwork() {
         val newConns = st.connections + (netId to NetConnState(
             connected = false,
             connecting = true,
-            status = "Connecting…",
+            status = appContext.getString(R.string.vm_status_connecting),
             myNick = cfg.nick,
             listModes = preservedListModes
         ))
@@ -4490,6 +4708,8 @@ fun startAddNetwork() {
         }.getOrNull()
 
         val client = IrcClient(cfg.copy(pinnedNetwork = chosenNetwork))
+        // Wire localized status text into the protocol engine (and its session).
+        client.strings = { id, args -> appContext.getString(id, *args) }
         // Attach the E2E codec for this network. The codec wraps the per-process
         // shared keystore (which lazily hydrates from SecretStore) and is held by
         // the IrcClient for its lifetime - reconnecting the same network reuses
@@ -4586,7 +4806,7 @@ fun startAddNetwork() {
                             runCatching { handleEvent(netId, ev) }
                                 .onFailure { t ->
                                     val msg = (t.message ?: t::class.java.simpleName)
-                                    append(bufKey(netId, "*server*"), from = "CLIENT", text = "Event handler error: $msg", isHighlight = true)
+                                    append(bufKey(netId, "*server*"), from = "CLIENT", text = appContext.getString(R.string.vm_event_handler_error, msg), isHighlight = true)
                                 }
                         }
                     }
@@ -4599,7 +4819,7 @@ fun startAddNetwork() {
                         append(
                             bufKey(netId, "*server*"),
                             from = "CLIENT",
-                            text = "*** Connection error: $msg (stack trace in logcat)",
+                            text = "*** " + appContext.getString(R.string.vm_conn_error, msg),
                             isHighlight = true,
                         )
                     }
@@ -4638,8 +4858,8 @@ fun startAddNetwork() {
 
                 // True fallback path: do the cleanup the Disconnected handler would have
                 // done, then schedule reconnect.
-                append(bufKey(netId, "*server*"), from = null, text = "*** Disconnected", doNotify = false)
-                setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Disconnected") }
+                append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.status_disconnected), doNotify = false)
+                setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_disconnected)) }
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
 
                 if (!_state.value.settings.autoReconnectEnabled) return@launch
@@ -4698,7 +4918,7 @@ fun startAddNetwork() {
             runCatching { oldRt?.job?.cancel() }
 
             // Mark as disconnected before re-connecting. (connectNetwork() will flip to "Connecting...".)
-            setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Reconnecting…") }
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_reconnecting)) }
 
             // Bypass the "already connecting" guard by calling the internal variant.
             connectNetworkInternal(netId, force = true)
@@ -4738,7 +4958,7 @@ fun startAddNetwork() {
 
             val st = _state.value
             val prev = st.connections[netId] ?: NetConnState()
-            val newConns = st.connections + (netId to prev.copy(connected = false, connecting = false, status = "Disconnected"))
+            val newConns = st.connections + (netId to prev.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_disconnected)))
             _state.value = syncActiveNetworkSummary(st.copy(connections = newConns))
             if (st.activeNetworkId == netId) clearConnectionNotification()
         }
@@ -4818,7 +5038,10 @@ fun startAddNetwork() {
      * UI updates instantly and the read coroutine doesn't sit blocked for up to
      * SOCKET_READ_TIMEOUT_MS. Recovery is driven explicitly via [scheduleAutoReconnect]
      */
-    private fun dropConnectionForNetworkLoss(netId: String, statusText: String = "Waiting for network…") {
+    private fun dropConnectionForNetworkLoss(
+        netId: String,
+        statusText: String = appContext.getString(R.string.vm_status_waiting_network),
+    ) {
         viewModelScope.launch {
             withNetLock(netId) {
                 val oldRt = runtimes.remove(netId)
@@ -4854,10 +5077,9 @@ fun startAddNetwork() {
         if (netId in authBlockedReconnect) {
             val serverKey = bufKey(netId, "*server*")
             append(serverKey, from = null,
-                text = "*** Auto-reconnect halted: authentication failed. " +
-                       "Fix credentials, then reconnect manually.",
+                text = "*** " + appContext.getString(R.string.vm_reconnect_halted_auth),
                 doNotify = false)
-            setNetConn(netId) { it.copy(status = "Auth failed — reconnect halted") }
+            setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_auth_halted)) }
             return
         }
         // One job per network.
@@ -4908,7 +5130,7 @@ fun startAddNetwork() {
                     val planned = (baseDelaySec.toLong() * (1L shl exp)).coerceAtMost(ConnectionConstants.RECONNECT_MAX_DELAY_SEC)
                     val jitter = (planned * ConnectionConstants.RECONNECT_JITTER_FACTOR).toLong()
                     val actual = if (jitter > 0) planned - jitter + Random.nextLong(jitter * 2 + 1) else planned
-                    setNetConn(netId) { it.copy(status = "Reconnecting in ${actual}s…") }
+                    setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_reconnecting_in, actual)) }
                     // Route through appendConnStatus for consistency with the rest of the
                     // connection-status pipeline. Each attempt has a different N and Xs so
                     // dedup never collapses these in practice, but a malicious server that
@@ -4916,7 +5138,7 @@ fun startAddNetwork() {
                     // print two identical lines.
                     appendConnStatus(
                         netId = netId,
-                        text = "*** Reconnecting in ${actual}s (attempt ${attempt + 1})…",
+                        text = "*** " + appContext.getString(R.string.status_reconnect_in, "${actual}s", attempt + 1),
                         from = null,
                         doNotify = false,
                         isHighlight = false,
@@ -4951,7 +5173,7 @@ fun startAddNetwork() {
                                     remaining = 0
                                 } else {
                                     if (_state.value.connections[netId]?.connected == true) break
-                                    setNetConn(netId) { it.copy(status = "Reconnecting in ${remaining}s…") }
+                                    setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_reconnecting_in, remaining)) }
                                 }
                             }
                         }
@@ -4989,15 +5211,15 @@ fun startAddNetwork() {
                 if (!hasInternetConnection()) {
                     if (!noNetworkNotice.contains(netId)) {
                         noNetworkNotice.add(netId)
-                        append(serverKey, from = null, text = "*** Please turn on WiFi or Mobile data to auto-reconnect.", doNotify = false)
-                        setNetConn(netId) { it.copy(connected = false, connecting = false, status = "Waiting for network…") }
-                        if (_state.value.activeNetworkId == netId) updateConnectionNotification("Waiting for network…")
+                        append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_turn_on_data), doNotify = false)
+                        setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_waiting_network)) }
+                        if (_state.value.activeNetworkId == netId) updateConnectionNotification(appContext.getString(R.string.vm_status_waiting_network))
                     }
                     delay(5000L)
                     continue
                 } else if (noNetworkNotice.remove(netId)) {
                     // Connectivity is back; let the user know once and try again.
-                    append(serverKey, from = null, text = "*** Network available. Retrying…", doNotify = false)
+                    append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_available_retry), doNotify = false)
                 }
 
                 // Pause reconnect when battery saver is active to avoid draining battery.
@@ -5007,14 +5229,14 @@ fun startAddNetwork() {
                     val pm = appContext.getSystemService(android.content.Context.POWER_SERVICE)
                         as? android.os.PowerManager
                     if (pm?.isPowerSaveMode == true) {
-                        append(serverKey, from = null, text = "*** Battery saver is active - reconnect paused. Will retry when battery saver is off.", doNotify = false)
-                        setNetConn(netId) { it.copy(status = "Paused (battery saver)") }
+                        append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_battery_saver_paused), doNotify = false)
+                        setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_paused_battery)) }
                         // Poll every 30s until battery saver is disabled or app comes to foreground.
                         while (!AppVisibility.isForeground && pm.isPowerSaveMode && isActive) {
                             delay(30_000L)
                         }
                         if (isActive && !pm.isPowerSaveMode) {
-                            append(serverKey, from = null, text = "*** Battery saver off. Retrying…", doNotify = false)
+                            append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_battery_saver_off), doNotify = false)
                         }
                         continue
                     }
@@ -5023,14 +5245,14 @@ fun startAddNetwork() {
                 if (attempt > 0) {
                     appendConnStatus(
                         netId = netId,
-                        text = "*** Retrying to connect (attempt ${attempt + 1})…",
+                        text = "*** " + appContext.getString(R.string.status_retry_connect, attempt + 1),
                         from = null,
                         doNotify = false,
                         isHighlight = false,
                     )
                 }
-                setNetConn(netId) { it.copy(status = "Retrying to connect…") }
-                if (st.activeNetworkId == netId) updateConnectionNotification("Retrying to connect…")
+                setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_retrying)) }
+                if (st.activeNetworkId == netId) updateConnectionNotification(appContext.getString(R.string.vm_status_retrying))
 
                 // Force a clean reconnect (drops stale runtimes if present).
                 withNetLock(netId) { KeepAliveService.withWakeLock(appContext) { connectNetworkInternal(netId, force = true) } }
@@ -5047,7 +5269,7 @@ fun startAddNetwork() {
                     append(
                         serverKey,
                         from = "CLIENT",
-                        text = "*** Auto-reconnect halted: ${t.message ?: t::class.java.simpleName} (manual reconnect needed)",
+                        text = "*** " + appContext.getString(R.string.vm_reconnect_halted, t.message ?: t::class.java.simpleName),
                         isHighlight = true,
                     )
                 }
@@ -5094,13 +5316,13 @@ fun startAddNetwork() {
 
             // Socket is alive but UI thinks we're disconnected - correct the UI.
             if (actual && !cur.connected) {
-                newMap[net.id] = cur.copy(connected = true, connecting = false, status = "Connected")
+                newMap[net.id] = cur.copy(connected = true, connecting = false, status = appContext.getString(R.string.vm_status_connected))
                 changed = true
             }
 
             // Socket is gone but UI thinks we're connected - correct the UI and maybe reconnect.
             if (!actual && cur.connected) {
-                newMap[net.id] = cur.copy(connected = false, connecting = false, status = "Disconnected")
+                newMap[net.id] = cur.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_disconnected))
                 changed = true
                 if (desiredConnected.contains(net.id)) networksToReconnect.add(net.id)
             }
@@ -5123,7 +5345,7 @@ fun startAddNetwork() {
                     if (autoReconnectJobs.containsKey(netId)) continue
                     val cur = _state.value.connections[netId]
                     if (cur?.connecting == true || cur?.connected == true) continue
-                    append(bufKey(netId, "*server*"), from = null, text = "*** Resuming connection…", doNotify = false)
+                    append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.status_resuming), doNotify = false)
                     connectNetwork(netId, force = true)
                 }
             }
@@ -5149,7 +5371,7 @@ fun startAddNetwork() {
             if (buf != null) {
                 _state.value = st.copy(buffers = st.buffers + (bufferKey to buf.copy(lastReadTimestamp = timestamp)))
             }
-            if (rt.client.hasCap("draft/read-marker")) {
+            if (rt.client.hasCap("draft/read-marker") && bufferName != "*server*") {
                 viewModelScope.launch { rt.client.sendRaw("MARKREAD $bufferName timestamp=$timestamp") }
             }
         } else {
@@ -5433,22 +5655,23 @@ fun startAddNetwork() {
                         val br = ageBridgeFor(netId)
                         val say = { t: String -> append(currentKey, from = null, text = t, isLocal = true, doNotify = false) }
                         when {
-                            br == null -> say("*** +AGE is not available on this network.")
+                            br == null -> say("*** " + appContext.getString(R.string.vm_age_unavailable))
                             sub == "pending" -> {
                                 val ps = br.pendingIdentNicks()
-                                say(if (ps.isEmpty()) "*** +AGE: no identities awaiting a decision."
-                                    else "*** +AGE awaiting a decision: " + ps.joinToString(", ") { n -> "$n (${br.pendingIdentFp(n)?.take(16)})" })
+                                say(if (ps.isEmpty()) "*** " + appContext.getString(R.string.vm_age_none_pending)
+                                    else "*** " + appContext.getString(R.string.vm_age_pending_list) + " " +
+                                        ps.joinToString(", ") { n -> "$n (${br.pendingIdentFp(n)?.take(16)})" })
                             }
-                            who.isEmpty() -> say("*** Usage: /age trust <nick> | /age reject <nick> | /age pending")
+                            who.isEmpty() -> say("*** " + appContext.getString(R.string.vm_age_usage))
                             sub == "trust" -> say(
-                                if (br.trustPendingIdent(who)) "*** +AGE: pinned $who's new key. Their messages will verify again."
-                                else "*** +AGE: nothing pending for $who."
+                                if (br.trustPendingIdent(who)) "*** " + appContext.getString(R.string.vm_age_trusted, who)
+                                else "*** " + appContext.getString(R.string.vm_age_nothing_pending, who)
                             )
                             sub == "reject" -> say(
-                                if (br.rejectPendingIdent(who)) "*** +AGE: discarded $who's new key; the previously pinned key stays authoritative."
-                                else "*** +AGE: nothing pending for $who."
+                                if (br.rejectPendingIdent(who)) "*** " + appContext.getString(R.string.vm_age_rejected, who)
+                                else "*** " + appContext.getString(R.string.vm_age_nothing_pending, who)
                             )
-                            else -> say("*** Usage: /age trust <nick> | /age reject <nick> | /age pending")
+                            else -> say("*** " + appContext.getString(R.string.vm_age_usage))
                         }
                     }
                     "quit", "disconnect" -> {
@@ -5497,7 +5720,7 @@ fun startAddNetwork() {
                         val sub = parts.getOrNull(1)?.lowercase() ?: ""
                         fun usage() {
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** /agm-key gen [target] | set <target> <b64> | clear <target> | info [target]")
+                                text = "*** " + appContext.getString(R.string.vm_agmkey_usage))
                         }
                         val defaultTarget = if (bufferName == "*server*") null else bufferName
                         when (sub) {
@@ -5505,7 +5728,7 @@ fun startAddNetwork() {
                                 val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: defaultTarget
                                 if (target == null) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** /agm-key gen needs a target (or run it inside a channel/query)")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_gen_needs_target))
                                     return@launch
                                 }
                                 val key = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
@@ -5514,11 +5737,11 @@ fun startAddNetwork() {
                                 val b64 = android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
                                 val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.AGM, key)
                                 append(currentKey, from = null, isLocal = true, doNotify = false,
-                                    text = "*** AGM key generated for $target. Fingerprint: $fp")
+                                    text = "*** " + appContext.getString(R.string.vm_agmkey_generated, target, fp))
                                 append(currentKey, from = null, isLocal = true, doNotify = false,
-                                    text = "*** On the other device, run:   /agm-key set $target $b64")
+                                    text = "*** " + appContext.getString(R.string.vm_agmkey_run_other, target, b64))
                                 append(currentKey, from = null, isLocal = true, doNotify = false,
-                                    text = "*** (Verify the fingerprint matches on both sides before sending anything sensitive.)")
+                                    text = "*** " + appContext.getString(R.string.vm_agmkey_verify))
                                 return@launch
                             }
                             "set" -> {
@@ -5526,19 +5749,19 @@ fun startAddNetwork() {
                                 val b64 = parts.getOrNull(3)?.trim()
                                 if (target == null || b64.isNullOrBlank()) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** Usage: /agm-key set <target> <base64>")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_set_usage))
                                     return@launch
                                 }
                                 val keyBytes = try {
                                     android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
                                 } catch (_: IllegalArgumentException) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** /agm-key set: invalid base64 in key argument")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_bad_base64))
                                     return@launch
                                 }
                                 if (keyBytes.size != 32) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** /agm-key set: expected 32-byte key (got ${keyBytes.size} bytes after base64 decode)")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_bad_len, keyBytes.size))
                                     return@launch
                                 }
                                 try {
@@ -5546,10 +5769,10 @@ fun startAddNetwork() {
                                         com.boxlabs.hexdroid.crypto.E2eScheme.AGM, keyBytes))
                                     val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(com.boxlabs.hexdroid.crypto.E2eScheme.AGM, keyBytes)
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** AGM key installed for $target. Fingerprint: $fp")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_installed, target, fp))
                                 } catch (t: Throwable) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** Failed to store key: ${t.message ?: t.javaClass.simpleName}")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_store_fail, t.message ?: t.javaClass.simpleName))
                                 }
                                 return@launch
                             }
@@ -5557,29 +5780,29 @@ fun startAddNetwork() {
                                 val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: defaultTarget
                                 if (target == null) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** /agm-key clear needs a target (or run it inside a channel/query)")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_clear_needs_target))
                                     return@launch
                                 }
                                 e2eKeyStore.clear(netId, target)
                                 append(currentKey, from = null, isLocal = true, doNotify = false,
-                                    text = "*** AGM key cleared for $target. Messages will now be sent in cleartext.")
+                                    text = "*** " + appContext.getString(R.string.vm_agmkey_cleared, target))
                                 return@launch
                             }
                             "info" -> {
                                 val target = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: defaultTarget
                                 if (target == null) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** /agm-key info needs a target (or run it inside a channel/query)")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_info_needs_target))
                                     return@launch
                                 }
                                 val entry = e2eKeyStore.get(netId, target)
                                 if (entry == null) {
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** No encryption key configured for $target")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_none, target))
                                 } else {
                                     val fp = com.boxlabs.hexdroid.crypto.E2eFingerprint.compute(entry.scheme, entry.key)
                                     append(currentKey, from = null, isLocal = true, doNotify = false,
-                                        text = "*** $target: scheme=${entry.scheme.displayName}  fingerprint=$fp")
+                                        text = "*** " + appContext.getString(R.string.vm_agmkey_info, target, entry.scheme.displayName, fp))
                                 }
                                 return@launch
                             }
@@ -5611,7 +5834,7 @@ fun startAddNetwork() {
                             "", "list" -> {
                                 val aliases = st.settings.commandAliases
                                 if (aliases.isEmpty()) {
-                                    info("*** No aliases. Add one with: /alias add <name> <expansion>")
+                                    info("*** " + appContext.getString(R.string.vm_alias_none))
                                 } else {
                                     info("*** Aliases (${aliases.size}):")
                                     aliases.toSortedMap().forEach { (k, v) -> info("***   /$k  >  $v") }
@@ -5622,27 +5845,27 @@ fun startAddNetwork() {
                                 val expansion = subArg.substringAfter(' ', "").trim()
                                 when {
                                     name.isBlank() || expansion.isBlank() ->
-                                        info("*** Usage: /alias add <name> <expansion>   e.g. /alias add bl msg *backlog \$channel \$1")
+                                        info("*** " + appContext.getString(R.string.vm_alias_usage_add))
                                     name.any { it.isWhitespace() || it == '/' } ->
-                                        info("*** Alias name can't contain spaces or '/'.")
+                                        info("*** " + appContext.getString(R.string.vm_alias_bad_name))
                                     else -> {
                                         updateSettings { copy(commandAliases = commandAliases + (name to expansion)) }
-                                        info("*** Alias saved:  /$name  >  $expansion")
+                                        info("*** " + appContext.getString(R.string.vm_alias_saved, name, expansion))
                                     }
                                 }
                             }
                             "remove", "rm", "del", "delete" -> {
                                 val name = subArg.substringBefore(' ').trim().removePrefix("/").lowercase()
                                 when {
-                                    name.isBlank() -> info("*** Usage: /alias remove <name>")
-                                    !st.settings.commandAliases.containsKey(name) -> info("*** No such alias: /$name")
+                                    name.isBlank() -> info("*** " + appContext.getString(R.string.vm_alias_usage_remove))
+                                    !st.settings.commandAliases.containsKey(name) -> info("*** " + appContext.getString(R.string.vm_alias_no_such, name))
                                     else -> {
                                         updateSettings { copy(commandAliases = commandAliases - name) }
-                                        info("*** Alias removed: /$name")
+                                        info("*** " + appContext.getString(R.string.vm_alias_removed, name))
                                     }
                                 }
                             }
-                            else -> info("*** Usage: /alias [list] | add <name> <expansion> | remove <name>")
+                            else -> info("*** " + appContext.getString(R.string.vm_alias_usage))
                         }
                         return@launch
                     }
@@ -5676,12 +5899,12 @@ fun startAddNetwork() {
                         val emoji = args.getOrNull(0)?.takeIf { it.isNotBlank() }
                         if (emoji == null) {
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** Usage: /${cmd} <emoji> [n]   - n is how many messages back, default 1")
+                                text = "*** " + appContext.getString(R.string.vm_react_usage, cmd))
                             return@launch
                         }
                         if (bufferName == "*server*" || c == null) {
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** /${cmd} requires an active channel or query")
+                                text = "*** " + appContext.getString(R.string.vm_react_needs_target, cmd))
                             return@launch
                         }
                         // Match the long-press UI's friendly fail mode: surface a clear message
@@ -5689,7 +5912,7 @@ fun startAddNetwork() {
                         // hasReactionSupport is set on CAP-negotiated -> ack of message-tags.
                         if (st.connections[netId]?.hasReactionSupport != true) {
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** This server doesn't support reactions (no message-tags cap)")
+                                text = "*** " + appContext.getString(R.string.vm_react_no_tags))
                             return@launch
                         }
                         val nBack = args.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 100) ?: 1
@@ -5701,9 +5924,9 @@ fun startAddNetwork() {
                             .toList()
                         val target = withMsgId.getOrNull(nBack - 1)
                         if (target?.msgId == null) {
-                            val noun = if (nBack == 1) "the latest message" else "message #$nBack back"
+                            val noun = if (nBack == 1) appContext.getString(R.string.vm_react_latest) else appContext.getString(R.string.vm_react_nback, nBack)
                             append(currentKey, from = null, isLocal = true, doNotify = false,
-                                text = "*** /${cmd} couldn't find $noun with a server msgId - the server may not support message-tags")
+                                text = "*** " + appContext.getString(R.string.vm_react_no_msgid, cmd, noun))
                             return@launch
                         }
                         c.sendReaction(bufferName, target.msgId, emoji, remove = remove)
@@ -5713,7 +5936,7 @@ fun startAddNetwork() {
                     "find", "grep", "search" -> {
                         val query = cmdLine.substringAfter(' ', "").trim()
                         if (query.isBlank()) {
-                            append(currentKey, from = null, text = "*** Usage: /find <text>", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_find_usage), isLocal = true, doNotify = false)
                             return@launch
                         }
                         val msgs = _state.value.buffers[currentKey]?.messages.orEmpty()
@@ -5722,7 +5945,7 @@ fun startAddNetwork() {
                                 it.from?.contains(query, ignoreCase = true) == true
                         }
                         if (matches.isEmpty()) {
-                            append(currentKey, from = null, text = "*** No matches for \"$query\"", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_no_matches, query), isLocal = true, doNotify = false)
                             return@launch
                         }
                         _state.value = _state.value.copy(
@@ -5740,7 +5963,7 @@ fun startAddNetwork() {
                         // Global search across all loaded buffers on the current network.
                         val query = cmdLine.substringAfter(' ', "").trim()
                         if (query.isBlank()) {
-                            append(currentKey, from = null, text = "*** Usage: /gsearch <text>", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_gsearch_usage), isLocal = true, doNotify = false)
                             return@launch
                         }
                         val allMatches = _state.value.buffers
@@ -5753,7 +5976,7 @@ fun startAddNetwork() {
                             }
                             .sortedBy { it.timeMs }
                         if (allMatches.isEmpty()) {
-                            append(currentKey, from = null, text = "*** No matches for \"$query\" across ${_state.value.buffers.count { splitKey(it.key).first == netId }} buffers", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_no_matches_buffers, query, _state.value.buffers.count { splitKey(it.key).first == netId }), isLocal = true, doNotify = false)
                             return@launch
                         }
                         _state.value = _state.value.copy(
@@ -5764,7 +5987,7 @@ fun startAddNetwork() {
                                 bufferKey = "GLOBAL:$netId",
                             )
                         )
-                        append(currentKey, from = null, text = "*** Found ${allMatches.size} matches for \"$query\" - use /gsearch overlay to navigate", isLocal = true, doNotify = false)
+                        append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_found_matches, allMatches.size, query), isLocal = true, doNotify = false)
                         return@launch
                     }
 
@@ -5788,16 +6011,16 @@ fun startAddNetwork() {
                             val net = _state.value.networks.firstOrNull { it.id == netId }
                             val items = net?.ignoredNicks.orEmpty()
                             if (items.isEmpty()) {
-                                append(currentKey, from = null, text = "*** Ignore list is empty. Usage: /ignore <nick>", isLocal = true, doNotify = false)
+                                append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_ignore_empty), isLocal = true, doNotify = false)
                             } else {
-                                append(currentKey, from = null, text = "*** Ignored (${items.size}): ${items.joinToString(", ")}", isLocal = true, doNotify = false)
+                                append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_ignored_list, items.size, items.joinToString(", ")), isLocal = true, doNotify = false)
                             }
                             return@launch
                         }
                         val nick = arg.substringBefore(' ').trim()
                         val canon = canonicalIgnoreNick(nick)
                         if (canon == null) {
-                            append(currentKey, from = null, text = "*** Usage: /ignore <nick>", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_ignore_usage), isLocal = true, doNotify = false)
                             return@launch
                         }
                         ignoreNick(netId, canon)
@@ -5807,13 +6030,13 @@ fun startAddNetwork() {
                     "unignore" -> {
                         val arg = cmdLine.substringAfter(' ', "").trim()
                         if (arg.isBlank()) {
-                            append(currentKey, from = null, text = "*** Usage: /unignore <nick>", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_unignore_usage), isLocal = true, doNotify = false)
                             return@launch
                         }
                         val nick = arg.substringBefore(' ').trim()
                         val canon = canonicalIgnoreNick(nick)
                         if (canon == null) {
-                            append(currentKey, from = null, text = "*** Usage: /unignore <nick>", isLocal = true, doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_unignore_usage), isLocal = true, doNotify = false)
                             return@launch
                         }
                         unignoreNick(netId, canon)
@@ -5822,7 +6045,7 @@ fun startAddNetwork() {
 
                     "motd" -> {
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         // If user explicitly requests MOTD, show it even if we hide on connect
@@ -5834,7 +6057,7 @@ fun startAddNetwork() {
                     }
                     "names" -> {
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
 
@@ -5846,7 +6069,7 @@ fun startAddNetwork() {
                         }
 
                         if (target.isBlank()) {
-                            append(currentKey, from = null, text = "*** Usage: /names #channel", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_names_usage), doNotify = false)
                             return@launch
                         }
 
@@ -5858,7 +6081,7 @@ fun startAddNetwork() {
 
                     "me" -> {
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         val msg = cmdLine.drop(2).trim()
@@ -5887,12 +6110,12 @@ fun startAddNetwork() {
 
                     "slap" -> {
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         val victim = cmdLine.substringAfter(' ', "").trim().substringBefore(' ').trim()
                         if (victim.isBlank()) {
-                            append(currentKey, from = null, text = "*** Usage: /slap <nick>", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_slap_usage), doNotify = false)
                             return@launch
                         }
                         val msg = "slaps $victim around a bit with ${SLAP_FISH.random()}"
@@ -5916,7 +6139,7 @@ fun startAddNetwork() {
 
                     "banlist" -> {
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         val arg = cmdLine.substringAfter(' ', "").trim()
@@ -5926,7 +6149,7 @@ fun startAddNetwork() {
                             else -> ""
                         }
                         if (chan.isBlank() || !isChannelOnNet(netId, chan)) {
-                            append(currentKey, from = null, text = "*** Usage: /banlist #channel", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_banlist_usage), doNotify = false)
                             return@launch
                         }
                         startBanList(netId, chan)
@@ -5942,11 +6165,11 @@ fun startAddNetwork() {
                             else -> ""
                         }
                         if (chan.isBlank() || !isChannelOnNet(netId, chan)) {
-                            append(currentKey, from = null, text = "*** Usage: /quietlist #channel", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_quietlist_usage), doNotify = false)
                             return@launch
                         }
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         startQuietList(netId, chan)
@@ -5962,11 +6185,11 @@ fun startAddNetwork() {
                             else -> ""
                         }
                         if (chan.isBlank() || !isChannelOnNet(netId, chan)) {
-                            append(currentKey, from = null, text = "*** Usage: /exceptlist #channel", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_exceptlist_usage), doNotify = false)
                             return@launch
                         }
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         startExceptList(netId, chan)
@@ -5982,11 +6205,11 @@ fun startAddNetwork() {
                             else -> ""
                         }
                         if (chan.isBlank() || !isChannelOnNet(netId, chan)) {
-                            append(currentKey, from = null, text = "*** Usage: /invexlist #channel", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_invexlist_usage), doNotify = false)
                             return@launch
                         }
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         startInvexList(netId, chan)
@@ -6052,19 +6275,19 @@ fun startAddNetwork() {
                         when (sub) {
                             "chat" -> {
                                 if (arg.isBlank()) {
-                                    append(currentKey, from = null, text = "*** Usage: /dcc chat <nick>", doNotify = false)
+                                    append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_usage), doNotify = false)
                                 } else {
                                     startDccChat(arg.substringBefore(' '))
                                 }
                             }
-                            else -> append(currentKey, from = null, text = "*** Usage: /dcc chat <nick>", doNotify = false)
+                            else -> append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_usage), doNotify = false)
                         }
                         return@launch
                     }
 
                     "mode" -> {
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
 
@@ -6145,7 +6368,7 @@ fun startAddNetwork() {
                             return@launch
                         }
                         if (c == null) {
-                            append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                             return@launch
                         }
                         // Let the IRC client handle it
@@ -6178,7 +6401,7 @@ fun startAddNetwork() {
             val liveConnected = c?.isConnectedNow() == true
             val stateConnected = _state.value.connections[netId]?.connected == true
             if (c == null || (!liveConnected && !stateConnected)) {
-                append(currentKey, from = null, text = "*** Not connected.", doNotify = false)
+                append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
                 return@launch
             }
             if (bufferName == "*server*") {
@@ -6204,7 +6427,7 @@ fun startAddNetwork() {
                                    encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
                             recordLocalSend(netId, currentKey, chunk, isAction = false)
                         } else append(currentKey, from = null, doNotify = false,
-                                   text = "*** +AGE send failed; message not sent.")
+                                   text = "*** " + appContext.getString(R.string.vm_age_send_failed))
                     }
                 } else if (!isChannelTarget(bufferName)) {
                     // PM. sendOrHoldPm chooses: send now over the ratchet if it's up; self-key + AGE CHAT
@@ -6232,7 +6455,7 @@ fun startAddNetwork() {
                                 recordLocalSend(netId, currentKey, chunk, isAction = false)
                             }
                             else -> append(currentKey, from = null, doNotify = false,
-                                       text = "*** +AGE send failed; message not sent.")
+                                       text = "*** " + appContext.getString(R.string.vm_age_send_failed))
                         }
                     }
                     if (anyHeldOrSent) scheduleAgePmGrace(netId, bufferName, bridge)
@@ -6241,8 +6464,7 @@ fun startAddNetwork() {
                     // non-owner during the brief window before the owner's invite arrives; it resolves on
                     // its own, so keep the message short and transient rather than a hard failure.
                     append(currentKey, from = null, doNotify = false, text =
-                        "*** +AGE for $bufferName is still keying with the other +AGE members. Your " +
-                        "message was NOT sent. Try again in a moment.")
+                        "*** " + appContext.getString(R.string.vm_age_still_keying, bufferName))
                 }
                 return@launch
             }
@@ -6495,7 +6717,7 @@ fun startAddNetwork() {
         val sel = _state.value.selectedBuffer
         val (selNet, _) = splitKey(sel)
         val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
-        append(dest, from = null, text = "*** Ignoring $base", isLocal = true, doNotify = false)
+        append(dest, from = null, text = "*** " + appContext.getString(R.string.vm_ignoring, base), isLocal = true, doNotify = false)
     }
 
     fun unignoreNick(netId: String, nick: String) {
@@ -6509,7 +6731,7 @@ fun startAddNetwork() {
         val sel = _state.value.selectedBuffer
         val (selNet, _) = splitKey(sel)
         val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
-        append(dest, from = null, text = "*** Unignored $base", isLocal = true, doNotify = false)
+        append(dest, from = null, text = "*** " + appContext.getString(R.string.vm_unignored, base), isLocal = true, doNotify = false)
     }
 
     /**
@@ -6532,7 +6754,7 @@ fun startAddNetwork() {
         val sel = _state.value.selectedBuffer
         val (selNet, _) = splitKey(sel)
         val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
-        append(dest, from = null, text = "*** Notifications muted for $base", isLocal = true, doNotify = false)
+        append(dest, from = null, text = "*** " + appContext.getString(R.string.vm_notif_muted, base), isLocal = true, doNotify = false)
     }
 
     /**
@@ -6550,7 +6772,7 @@ fun startAddNetwork() {
         val sel = _state.value.selectedBuffer
         val (selNet, _) = splitKey(sel)
         val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
-        append(dest, from = null, text = "*** Notifications unmuted for $base", isLocal = true, doNotify = false)
+        append(dest, from = null, text = "*** " + appContext.getString(R.string.vm_notif_unmuted, base), isLocal = true, doNotify = false)
     }
 
     fun openIgnoreList() { goTo(AppScreen.IGNORE) }
@@ -6580,7 +6802,7 @@ fun startAddNetwork() {
                     // and "Trust this server too" buttons hide on the next render. Stashed
                     // actual-fp is dropped because it's now either in the trust set or has
                     // been superseded by a full reset.
-                    it.copy(connecting = false, connected = true, status = "Connected to ${ev.server}", lagMs = null, tlsPinMismatch = false, tlsPinMismatchActualFp = null)
+                    it.copy(connecting = false, connected = true, status = appContext.getString(R.string.vm_status_connected_to, ev.server), lagMs = null, tlsPinMismatch = false, tlsPinMismatchActualFp = null)
                 }
                 // Arm chathistory marker windows for known PM-style buffers on this network.
                 // Bouncer playback delivers PRIVMSGs to query buffers without a corresponding
@@ -6626,23 +6848,30 @@ fun startAddNetwork() {
                 // (dropped before STABLE_CONNECTION_MS) never clears the backoff counter.
                 stableConnectionJobs.remove(netId)?.cancel()
                 val r = ev.reason?.trim()
-                // Connect failures and mid-stream connection errors arrive prefixed
-                // ("Connect failed: ...", "Connection error: ...") - emit those as ERROR
-                // styled lines, Tray notifications stay suppressed (isHighlight = false, doNotify = false)
-                // because a routine connect-failure-and-retry shouldn't ping the user;
-                // the in-buffer error line is enough.
-                val isConnectFailureLine = r != null && (
-                    r.startsWith("Connect failed:", ignoreCase = true) ||
-                    r.startsWith("Connection error:", ignoreCase = true) ||
-                    r.startsWith("Connection failed:", ignoreCase = true)
-                )
+                val code = ev.code
+                // Connect failures and mid-stream connection errors are rendered as ERROR
+                // styled lines. Tray notifications stay suppressed (isHighlight = false,
+                // doNotify = false) because a routine connect-failure-and-retry shouldn't
+                // ping the user; the in-buffer error line is enough.
+                //
+                // This used to test the reason text for a "Connect failed:" prefix, which
+                // only worked while the text was English. It now switches on the code the
+                // core attaches, and ev.reason is display material only.
+                val isConnectFailureLine = code.stylesAsError
+                val disconnectedLabel = appContext.getString(R.string.vm_status_disconnected)
                 val pretty = when {
-                    r.isNullOrBlank() -> "Disconnected"
-                    r.equals("Client disconnect", ignoreCase = true) -> "Disconnected"
-                    r.equals("EOF", ignoreCase = true) -> "Disconnected"
-                    r.equals("socket closed", ignoreCase = true) -> "Disconnected"
+                    code == DisconnectCode.USER_QUIT || code == DisconnectCode.EOF -> disconnectedLabel
+                    r.isNullOrBlank() -> disconnectedLabel
                     isConnectFailureLine -> r
-                    else -> "Disconnected: $r"
+                    // UNKNOWN means the emitter didn't state a cause, which today only
+                    // happens for events built outside IrcClient. Keep the old text tests
+                    // as a fallback so those keep rendering the way they used to.
+                    code == DisconnectCode.UNKNOWN && (
+                        r.equals("Client disconnect", ignoreCase = true) ||
+                        r.equals("EOF", ignoreCase = true) ||
+                        r.equals("socket closed", ignoreCase = true)
+                    ) -> disconnectedLabel
+                    else -> appContext.getString(R.string.vm_disconnected_reason, r)
                 }
                 if (isConnectFailureLine) {
                     appendConnStatus(netId, pretty, from = "ERROR", doNotify = false, isHighlight = false, broadcast = true)
@@ -6653,26 +6882,23 @@ fun startAddNetwork() {
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
                 cleanupNetworkMaps(netId)
 
-                // Flap detection: count ping-timeout / dead-socket disconnects within the window.
-                //   - "Connection timed out"  : the 150 s SOCKET_READ_TIMEOUT_MS path (the most
-                //                               common dead-socket case on mobile, and it fires
-                //                               BEFORE the 180 s client-ping timeout).
-                //   - "read timed out"        : raw SocketTimeoutException message (rare; usually
-                //                               overridden to "Connection timed out" above).
-                //   - "connection reset"      : friendlyErrorMessage("Connection reset by server").
-                //   - "ping timeout"          : server-sent "Closing Link: ... (Ping timeout)".
-                val isConnectAttemptFailure = r != null && (
-                    r.startsWith("Connect failed:", ignoreCase = true) ||
-                    r.startsWith("Connection failed:", ignoreCase = true)
-                )
-                val isPingTimeout = r != null && !isConnectAttemptFailure && (
-                    r.contains("ping timeout", ignoreCase = true) ||
-                    r.contains("ping time out", ignoreCase = true) ||
-                    r.contains("connection reset", ignoreCase = true) ||
-                    r.contains("connection timed out", ignoreCase = true) ||
-                    r.contains("SocketTimeout", ignoreCase = true) ||
-                    r.contains("read timed out", ignoreCase = true)
-                )
+                // Flap detection: count dead-socket disconnects within the window.
+                // DisconnectCode.isDeadSocket covers the three causes that used to be
+                // matched by text here:
+                //   READ_TIMEOUT      the 150 s SOCKET_READ_TIMEOUT_MS path, the most common
+                //                     dead-socket case on mobile; fires BEFORE the 180 s
+                //                     client-ping timeout.
+                //   PING_TIMEOUT      no inbound traffic for PING_TIMEOUT_MS.
+                //   CONNECTION_RESET  peer reset, or a broken pipe mid-stream.
+                // It already excludes connect-attempt failures, so a server that is simply
+                // down no longer counts towards the flap threshold.
+                //
+                // Note the one behaviour change: a server-sent "Closing Link: ... (Ping
+                // timeout: 240 seconds)" arrives as SERVER_ERROR, not PING_TIMEOUT, so it
+                // no longer feeds flap detection. That text is the server's, in the
+                // server's wording, and matching it was always the fragile half of this
+                // test. The socket-level timeouts that follow such a drop still count.
+                val isPingTimeout = code.isDeadSocket
                 if (isPingTimeout) {
                     val now = System.currentTimeMillis()
                     val q = pingTimeoutTimestamps.getOrPut(netId) { ArrayDeque() }
@@ -6684,13 +6910,12 @@ fun startAddNetwork() {
                     if (q.size >= ConnectionConstants.FLAP_THRESHOLD && !flapPaused.contains(netId)) {
                         markFlapPaused(netId)
                         val serverKey = bufKey(netId, "*server*")
-                        append(serverKey, from = null, text =
-                            "*** ⚠ Connection is unstable - ${q.size} ping timeouts in the last " +
-                            "${ConnectionConstants.FLAP_WINDOW_MS / 60000} minutes. " +
-                            "Auto-reconnect paused for ${ConnectionConstants.FLAP_WINDOW_MS / 60000} minutes " +
-                            "to avoid flooding the server. Tap 'Reconnect' to retry sooner.",
-                            doNotify = false)
-                        setNetConn(netId) { it.copy(status = "Unstable - paused ${ConnectionConstants.FLAP_WINDOW_MS / 60000} min") }
+                        append(serverKey, from = null, text = "*** " + appContext.getString(
+                            R.string.vm_flap_paused,
+                            q.size,
+                            ConnectionConstants.FLAP_WINDOW_MS / 60000,
+                        ), doNotify = false)
+                        setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_unstable_paused, ConnectionConstants.FLAP_WINDOW_MS / 60000)) }
                     }
                 }
 
@@ -6699,7 +6924,7 @@ fun startAddNetwork() {
 
                 // Don't auto-reconnect if flap detection has paused this network.
                 if (flapPaused.contains(netId)) {
-                    setNetConn(netId) { it.copy(status = "Unstable - reconnect paused") }
+                    setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_unstable_reconnect)) }
                     return
                 }
 
@@ -6708,24 +6933,14 @@ fun startAddNetwork() {
                 // failure mode. In both cases we halt auto-reconnect via authBlockedReconnect
                 // without this, a misconfigured network cycles through the exponential backoff forever,
                 // hitting the same failure each time and burning battery.
-                if (r != null && netId !in authBlockedReconnect) {
-                    val tlsUnrecoverable =
-                        r.contains("TLS certificate verification failed", ignoreCase = true) ||
-                        r.contains("TLS handshake rejected by server", ignoreCase = true) ||
-                        r.contains("TLS pin enforcement failed", ignoreCase = true) ||
-                        r.contains("server may not support TLS", ignoreCase = true)
+                if (netId !in authBlockedReconnect) {
+                    // Both of these used to be substring tests against the reason text.
+                    // IrcClient.errorCode() now derives them once, from the raw exception
+                    // chain, which stays English regardless of the user's locale.
+                    val tlsUnrecoverable = code == DisconnectCode.TLS_UNRECOVERABLE
                     // "Server doesn't exist" class: the hostname doesn't resolve, or it
-                    // resolves but nothing is listening on the configured port. Patterns
-                    // cover Android's libcore DNS resolver, the bare JVM exception name
-                    // (in case it leaks through wrapping), the libc-level messages from
-                    // glibc/BSD, and the TCP-level "connection refused"
-                    val hostUnreachable =
-                        r.contains("Unable to resolve host", ignoreCase = true) ||
-                        r.contains("UnknownHostException", ignoreCase = true) ||
-                        r.contains("No address associated with hostname", ignoreCase = true) ||
-                        r.contains("nodename nor servname provided", ignoreCase = true) ||
-                        r.contains("Name or service not known", ignoreCase = true) ||
-                        r.contains("Connection refused", ignoreCase = true)
+                    // resolves but nothing is listening on the configured port.
+                    val hostUnreachable = code == DisconnectCode.HOST_UNREACHABLE
                     // "Server rejected the connection" class: the TCP+TLS handshake succeeded
                     // and the server then told us, in plain words, that it won't have us. The
                     // wire form is typically a raw `ERROR :Closing Link: <addr> (<reason>)`
@@ -6745,7 +6960,10 @@ fun startAddNetwork() {
                     //   connection-limit class   server is at capacity OR we've hit a
                     //                            per-IP / per-account connection cap
                     //   access-denied / banned   catch-all for "you're not welcome here"
-                    val lowerR = r.lowercase()
+                    // Server-supplied wording, so this half stays a text match: the
+                    // reasons below are the SERVER's English, not ours, and no code we
+                    // attach can stand in for them.
+                    val lowerR = (r ?: "").lowercase()
                     val recentServerErrorText = lastServerErrorByNet[netId]?.let { (msg, ts) ->
                         if (System.currentTimeMillis() - ts < SERVER_ERROR_DISCONNECT_CORRELATION_MS)
                             msg.lowercase()
@@ -6786,14 +7004,13 @@ fun startAddNetwork() {
                         authBlockedReconnect.add(netId)
                         appendConnStatus(
                             netId = netId,
-                            text = "*** Auto-reconnect halted: TLS error is unlikely to fix itself. " +
-                                   "Adjust certificate trust settings, then reconnect manually.",
+                            text = "*** " + appContext.getString(R.string.vm_halted_tls),
                             from = null,
                             doNotify = false,
                             isHighlight = false,
                             broadcast = true,
                         )
-                        setNetConn(netId) { it.copy(status = "TLS error: reconnect halted") }
+                        setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_tls_halted)) }
                         return
                     }
                     // Only treat host-unreachable as a permanent halt if we never managed
@@ -6804,28 +7021,26 @@ fun startAddNetwork() {
                         authBlockedReconnect.add(netId)
                         appendConnStatus(
                             netId = netId,
-                            text = "*** Auto-reconnect halted: server unreachable (hostname doesn't resolve " +
-                                   "or port is closed). Check the host and port in Network Settings, " +
-                                   "then reconnect manually.",
+                            text = "*** " + appContext.getString(R.string.vm_halted_unreachable),
                             from = null,
                             doNotify = false,
                             isHighlight = false,
                             broadcast = true,
                         )
-                        setNetConn(netId) { it.copy(status = "Server unreachable: reconnect halted") }
+                        setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_unreachable_halted)) }
                         return
                     }
                     if (serverRejection) {
                         authBlockedReconnect.add(netId)
                         appendConnStatus(
                             netId = netId,
-                            text = "*** Auto-reconnect halted: server rejected the connection.",
+                            text = "*** " + appContext.getString(R.string.vm_halted_rejected),
                             from = null,
                             doNotify = false,
                             isHighlight = false,
                             broadcast = true,
                         )
-                        setNetConn(netId) { it.copy(status = "Server rejected connection: reconnect halted") }
+                        setNetConn(netId) { it.copy(status = appContext.getString(R.string.vm_status_rejected_halted)) }
                         return
                     }
 
@@ -6841,9 +7056,11 @@ fun startAddNetwork() {
                 // disconnects, etc. Anything not matched here is treated as a genuine error
                 // We dedup either way so a flapping connection can't fill the buffer with identical
                 // "Read timed out" lines.
+                // The emitter states this where it knows (ev.transient). Where it doesn't,
+                // fall back to the text heuristic: it still works for server-sent wording
+                // such as "Closing Link", which is not translated.
                 val lower = msg.lowercase()
-                val isTransient = msg.startsWith("Connect failed", ignoreCase = true) ||
-                    msg.startsWith("Connection failed", ignoreCase = true) ||
+                val isTransient = ev.transient ?: (
                     lower.contains("read timed out") ||
                     lower.contains("ping timeout") ||
                     lower.contains("connection reset") ||
@@ -6852,6 +7069,7 @@ fun startAddNetwork() {
                     lower.contains("socket closed") ||
                     lower.contains("network is unreachable") ||
                     lower.contains("software caused connection abort")
+                )
                 appendConnStatus(
                     netId = netId,
                     text = msg,
@@ -6894,19 +7112,13 @@ fun startAddNetwork() {
                     authBlockedReconnect.add(netId)
                 }
                 val hint = when {
-                    isPassFailure -> "Server password (PASS) rejected. " +
-                        "If this is a bouncer profile, the password format is usually " +
-                        "user:password or user/network:password."
-                    isSaslFailure && isBouncerProfile -> "SASL authentication rejected. " +
-                        "Bouncers require valid SASL to route the connection. Check the " +
-                        "SASL username/password (or client certificate) on this profile."
-                    isSaslFailure -> "SASL authentication rejected. " +
-                        "Check the SASL username/password " +
-                        "(or client certificate) on this profile."
-                    else -> "Authentication rejected."
+                    isPassFailure -> appContext.getString(R.string.vm_auth_pass_rejected)
+                    isSaslFailure && isBouncerProfile -> appContext.getString(R.string.vm_auth_sasl_bouncer)
+                    isSaslFailure -> appContext.getString(R.string.vm_auth_sasl_rejected)
+                    else -> appContext.getString(R.string.vm_auth_rejected)
                 }
                 val haltSuffix = if (shouldHalt)
-                    " Auto-reconnect halted; tap reconnect after fixing credentials."
+                    " " + appContext.getString(R.string.vm_auth_halt_suffix)
                 else ""
                 appendConnStatus(
                     netId = netId,
@@ -6927,13 +7139,12 @@ fun startAddNetwork() {
                         repo.updateNetworkProfile(netId) { it.copy(tlsTofuFingerprint = fp) }
                         append(
                             bufKey(netId, "*server*"), from = null,
-                            text = "*** TLS: Certificate fingerprint learned and pinned (TOFU). " +
-                                   "Future connections will verify: $fp",
+                            text = "*** " + appContext.getString(R.string.vm_tls_tofu_pinned, fp),
                             doNotify = false
                         )
                     } catch (t: Throwable) {
                         append(bufKey(netId, "*server*"), from = null,
-                            text = "*** TLS: Could not persist certificate fingerprint: ${t.message}", doNotify = false)
+                            text = "*** " + appContext.getString(R.string.vm_tls_persist_fail, t.message), doNotify = false)
                     }
                 }
             }
@@ -6947,8 +7158,7 @@ fun startAddNetwork() {
                 val sansStr = if (ev.sans.isEmpty()) "(none)" else ev.sans.joinToString(", ")
                 append(
                     bufKey(netId, "*server*"), from = "TLS",
-                    text = "*** Certificate hostname mismatch: connected to ${ev.expected} but cert SANs are: $sansStr. " +
-                           "Connection allowed.",
+                    text = "*** " + appContext.getString(R.string.vm_cert_hostname_mismatch, ev.expected, sansStr),
                     doNotify = false
                 )
             }
@@ -6975,14 +7185,7 @@ fun startAddNetwork() {
                 }
                 append(
                     bufKey(netId, "*server*"), from = "TLS WARNING", isHighlight = true,
-                    text = "⚠️  Server certificate fingerprint has CHANGED! " +
-                           "Expected: ${ev.stored}  •  Got: ${ev.actual}  - " +
-                           "Connection refused. Auto-reconnect halted. " +
-                           "If this server uses round-robin DNS (irc.example.tld), " +
-                           "open Network Settings and tap 'Trust this server too' to add the new " +
-                           "fingerprint without losing the others. " +
-                           "If the cert was rotated/renewed, tap 'Reset & re-pin' instead - " +
-                           "that discards every previously-trusted fingerprint and re-learns from scratch."
+                    text = "⚠️  " + appContext.getString(R.string.vm_cert_changed, ev.stored, ev.actual)
                 )
             }
             is IrcEvent.ServerLine -> {
@@ -7064,7 +7267,7 @@ if (code == "442") {
                 val st = _state.value
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 val dest = if (st.buffers.containsKey(chanKey)) chanKey else bufKey(netId, "*server*")
-                append(dest, from = null, text = "* Mode ${ev.channel} ${ev.modes}", doNotify = false)
+                append(dest, from = null, text = "* " + appContext.getString(R.string.vm_mode_change, ev.channel, ev.modes), doNotify = false)
                 // Store mode string so Channel Tools can show/toggle modes
                 val buf = st.buffers[chanKey]
                 if (buf != null) {
@@ -7202,6 +7405,81 @@ if (code == "442") {
                 if (listModes != null) {
                     setNetConn(netId) { it.copy(listModes = listModes) }
                 }
+
+                // EXTBAN / ACCOUNTEXTBAN: surface extended-ban syntax to the ban editor.
+                setNetConn(netId) {
+                    it.copy(
+                        extbanPrefix = ev.extbanPrefix,
+                        extbanTypes = ev.extbanTypes,
+                        accountExtban = ev.accountExtban,
+                    )
+                }
+
+                // Surface the filehost upload endpoint (soju.im/FILEHOST) to the UI so
+                // ChatScreen can offer the attach button. Assigned unconditionally: a
+                // later 005 without the token must not leave a stale URL behind. The
+                // per-network toggle hides it entirely when uploads are disabled.
+                val filehostAllowed = runtimes[netId]?.client?.config?.capPrefs?.filehostUploads != false
+                setNetConn(netId) { it.copy(
+                    filehostUrl = if (filehostAllowed) ev.filehostUrl else null,
+                    // ICON / draft/ICON ISUPPORT token: raw ICON URL; display gating (previews opt-in,
+                    // https-only, unproxied profile) lives in NetworksScreen.
+                    networkIconUrl = ev.networkIconUrl,
+                ) }
+            }
+
+            is IrcEvent.StsReceived -> viewModelScope.launch {
+                ensureStsPoliciesLoaded()
+                val hostKey = ev.host.trim().lowercase()
+                if (ev.secure) {
+                    // Persist/refresh (or delete) the policy - durations are only
+                    // trustworthy over TLS. A port key on a secure connection is
+                    // ignored per spec. The stored TLS port is the one this secure
+                    // connection is actually using, so a plaintext-configured profile
+                    // knows where to go next time.
+                    val dur = ev.durationSec
+                    if (dur != null) {
+                        if (dur == 0L) {
+                            if (stsPolicies.remove(hostKey) != null) {
+                                persistStsPolicies()
+                                append(bufKey(netId, "*server*"), from = null,
+                                    text = "*** " + appContext.getString(R.string.vm_sts_cleared, hostKey),
+                                    doNotify = false)
+                            }
+                        } else {
+                            val prev = stsPolicies[hostKey]
+                            val securePort = runtimes[netId]?.client?.config
+                                ?.takeIf { it.useTls }?.port
+                            stsPolicies[hostKey] = StsPolicyEntry(
+                                port = prev?.port ?: securePort,
+                                expiresAtMs = System.currentTimeMillis() + dur * 1000L
+                            )
+                            persistStsPolicies()
+                            if (prev == null) {
+                                append(bufKey(netId, "*server*"), from = null,
+                                    text = "*** " + appContext.getString(R.string.vm_sts_stored, hostKey, dur),
+                                    doNotify = false)
+                            }
+                        }
+                    }
+                } else if (ev.port != null) {
+                    // Insecure connection advertising an upgrade port: abandon this
+                    // plaintext attempt immediately and retry over TLS on that port.
+                    // The policy itself is persisted only once the secure connection
+                    // confirms it with a duration.
+                    val upgradePort: Int = ev.port
+                    append(bufKey(netId, "*server*"), from = null,
+                        text = "*** " + appContext.getString(R.string.vm_sts_upgrade, upgradePort),
+                        doNotify = false)
+                    stsUpgradePorts[netId] = upgradePort
+                    withNetLock(netId) {
+                        val oldRt = runtimes.remove(netId)
+                        runCatching { oldRt?.client?.forceClose() }
+                        runCatching { oldRt?.job?.cancel() }
+                    }
+                    connectNetwork(netId, force = true)
+                }
+                Unit
             }
 
             is IrcEvent.Registered -> {
@@ -7210,8 +7488,13 @@ if (code == "442") {
                 val rt0 = runtimes[netId]
                 val hasReact = rt0 != null &&
                     (rt0.client.hasCap("message-tags") || rt0.client.hasCap("draft/message-reactions"))
-                setNetConn(netId) { it.copy(myNick = ev.nick, hasReactionSupport = hasReact) }
-                append(bufKey(netId, "*server*"), from = null, text = "*** Registered as ${ev.nick}", doNotify = false)
+                val hasRedact = rt0 != null &&
+                    (rt0.client.hasCap("draft/message-redaction") || rt0.client.hasCap("message-redaction"))
+                setNetConn(netId) { it.copy(myNick = ev.nick, hasReactionSupport = hasReact, hasRedactionSupport = hasRedact) }
+                // Re-send our own metadata so display name / avatar / colour etc. survive a
+                // reconnect even on servers that don't persist metadata across sessions.
+                reapplyOwnMetadata(netId)
+                append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_registered_as, ev.nick), doNotify = false)
                 // If this was a reconnect (we had been retrying), announce success in every
                 // channel/query buffer so the user reading a channel sees their connection
                 // come back without having to switch to the *server* buffer. Heuristic:
@@ -7228,7 +7511,7 @@ if (code == "442") {
                 if (wasReconnect) {
                     appendConnStatus(
                         netId = netId,
-                        text = "*** Reconnected",
+                        text = "*** " + appContext.getString(R.string.vm_reconnected),
                         from = null,
                         doNotify = false,
                         isHighlight = false,
@@ -7297,7 +7580,7 @@ if (code == "442") {
                     val delaySec = profile?.autoCommandDelaySeconds ?: 0
                     if (delaySec > 0) {
                         append(bufKey(netId, "*server*"), from = null,
-                            text = "*** Waiting ${delaySec}s before auto-join & commands…", doNotify = false)
+                            text = "*** " + appContext.getString(R.string.vm_waiting_autojoin, delaySec), doNotify = false)
                         delay(delaySec * 1000L)
                     }
 
@@ -7347,7 +7630,7 @@ if (code == "442") {
 
                             if (waitMs > 0) {
                                 append(bufKey(netId, "*server*"), from = null,
-                                    text = "*** Waiting ${waitMs / 1000}s…", doNotify = false)
+                                    text = "*** " + appContext.getString(R.string.vm_waiting, waitMs / 1000), doNotify = false)
                                 delay(waitMs)
                             }
                         }
@@ -7364,8 +7647,8 @@ if (code == "442") {
                 // Show nick changes in-channel:
                 //   * old is now known as new
                 //   * You are now known as new
-                val line = if (isMe) "* You are now known as ${ev.newNick}"
-                else "* ${ev.oldNick} is now known as ${ev.newNick}"
+                val line = if (isMe) "* " + appContext.getString(R.string.vm_ev_you_now_known_as, ev.newNick)
+                else "* " + appContext.getString(R.string.vm_ev_now_known_as, ev.oldNick, ev.newNick)
 
                 // Determine which channel buffers to print to.
                 // Prefer channels where we currently see the old nick in the nicklist; otherwise
@@ -7506,7 +7789,7 @@ if (code == "442") {
 
                 val st = _state.value
                 _state.value = st.copy(dccOffers = st.dccOffers + offer0)
-                append(bufKey(netId, "*server*"), from = null, text = "*** Incoming DCC file offer from ${offer0.from}: ${offer0.filename} (Transfers screen to accept)")
+                append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_dcc_incoming, offer0.from, offer0.filename))
                 if (st.settings.notificationsEnabled) {
                     notifier.notifyDccIncomingFile(netId, offer0.from, baseName)
                 }
@@ -7534,13 +7817,13 @@ if (code == "442") {
                 }
                 if (match == null) {
                     append(bufKey(netId, "*server*"), from = null,
-                        text = "*** Ignored DCC RESUME from $from for $baseName — no matching send in progress.",
+                        text = "*** " + appContext.getString(R.string.vm_dcc_resume_nomatch, from, baseName),
                         doNotify = false)
                     return
                 }
                 if (r.position < 0L || r.position >= match.size) {
                     append(bufKey(netId, "*server*"), from = null,
-                        text = "*** DCC RESUME from $from has out-of-range position ${r.position} (size ${match.size}); ignoring.",
+                        text = "*** " + appContext.getString(R.string.vm_dcc_resume_oor, from, r.position, match.size),
                         doNotify = false)
                     return
                 }
@@ -7557,7 +7840,7 @@ if (code == "442") {
                 val payload = "DCC ACCEPT $name ${r.port} ${r.position}$tokenField"
                 viewModelScope.launch { runCatching { c.ctcp(from, payload) } }
                 append(bufKey(netId, "*server*"), from = null,
-                    text = "*** Honouring DCC RESUME from $from at ${r.position} bytes.",
+                    text = "*** " + appContext.getString(R.string.vm_dcc_resume_honour, from, r.position),
                     doNotify = false)
                 // Don't blow up if multiple RESUMEs arrive (unusual but not illegal).
                 if (!match.resumeRequest.isCompleted) match.resumeRequest.complete(r.position)
@@ -7599,14 +7882,14 @@ if (code == "442") {
                     append(
                         bufKey(netId, "*server*"),
                         from = null,
-                        text = "*** Incoming DCC CHAT from ${offer0.from} - tap 'DCCCHAT:${offer0.from}' buffer, or open Transfers to accept",
+                        text = "*** " + appContext.getString(R.string.vm_dcc_chat_incoming, offer0.from),
                         doNotify = false
                     )
                     // Show the offer inline inside the dedicated buffer with a clear prompt.
                     append(
                         chatKey,
                         from = null,
-                        text = "*** DCC CHAT offer from ${offer0.from} (${offer0.ip}:${offer0.port}). Use /dcc accept ${offer0.from} or open Transfers to accept.",
+                        text = "*** " + appContext.getString(R.string.vm_dcc_chat_offer, offer0.from, offer0.ip, offer0.port),
                         doNotify = false
                     )
                     if (st.settings.notificationsEnabled) {
@@ -7625,10 +7908,13 @@ if (code == "442") {
                 if (pendingKey != null) {
                     // We tried to part/close a channel we're not in; drop the buffer anyway.
                     removeBuffer(pendingKey)
-                    append(bufKey(netId, "*server*"), from = null, text = "*** Closed buffer $chan (not on channel)", doNotify = false)
+                    append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_closed_buffer, chan), doNotify = false)
                 }
             }
             is IrcEvent.ChatMessage -> {
+                // Bot Mode: a `bot`-tagged message is proof the sender is a bot; remember it
+                // so the member list and nick sheet can badge them even before a WHO.
+                if (ev.fromBot) markBotInState(netId, ev.from)
                 // +AGE transport tap: AGE MSG/DEAL/IDENT/INVITE/REKEY lines are protocol, not chat.
                 // Hand them to the bridge (which raises age_msg/age_deal into scripts) and, if it
                 // consumed the line, suppress it from the buffer. Cheap prefix guard first.
@@ -7739,7 +8025,10 @@ if (code == "442") {
                 append(
                     targetKey,
                     from = ev.from,
-                    text = shownText,
+                    // +draft/channel-context: a PM sent from a channel's context carries the
+                    // channel name; annotate the line so the recipient sees what it relates
+                    // to (hexdroid keeps PMs in their own buffer rather than rerouting them).
+                    text = if (ev.isPrivate && ev.channelContext != null) "[${ev.channelContext}] $shownText" else shownText,
                     isAction = ev.isAction,
                     isHighlight = highlight,
                     isPrivate = ev.isPrivate,
@@ -7750,6 +8039,8 @@ if (code == "442") {
                     replyToMsgId = ev.replyToMsgId,
                     isHistory = ev.isHistory,
                     encryption = ev.encryption,
+                    fromOper = ev.fromOper,
+                    fromBot = ev.fromBot,
                 )
             }
             is IrcEvent.Notice -> {
@@ -7939,13 +8230,13 @@ if (code == "442") {
                         if (sent != null && sent > 1000000000000L && sent < now + 60000) {
                             // Looks like a valid recent timestamp
                             val rtt = now - sent
-                            "*** CTCP PING reply from ${ev.from}: ${rtt}ms"
+                            "*** " + appContext.getString(R.string.vm_ev_ctcp_ping_ms, ev.from, rtt)
                         } else {
                             // Not our timestamp format, just show raw
-                            "*** CTCP PING reply from ${ev.from}: ${ev.args}"
+                            "*** " + appContext.getString(R.string.vm_ev_ctcp_ping_raw, ev.from, ev.args)
                         }
                     }
-                    else -> "*** CTCP ${ev.command} reply from ${ev.from}: ${ev.args}"
+                    else -> "*** " + appContext.getString(R.string.vm_ev_ctcp_reply, ev.command, ev.from, ev.args)
                 }
                 append(destKey, from = null, text = text, isLocal = true, timeMs = ev.timeMs, doNotify = false)
             }
@@ -8016,12 +8307,12 @@ if (code == "442") {
                 if (!st0.settings.hideJoinPartQuit) {
                     val myNick = st0.connections[netId]?.myNick ?: st0.myNick
                     val msg = if (ev.nick.equals(myNick, ignoreCase = true)) {
-                        "* Now talking on ${ev.channel}"
+                        "* " + appContext.getString(R.string.vm_ev_now_talking, ev.channel)
                     } else {
                         val host = ev.userHost ?: "*!*@*"
                         // extended-join: include account name if logged in
-                        val accountSuffix = ev.account?.let { " [logged in as $it]" } ?: ""
-                        "* ${ev.nick} ($host) has joined ${ev.channel}$accountSuffix"
+                        val accountSuffix = ev.account?.let { " [" + appContext.getString(R.string.vm_ev_logged_in_as, it) + "]" } ?: ""
+                        "* " + appContext.getString(R.string.vm_ev_has_joined, ev.nick, host, ev.channel) + accountSuffix
                     }
                     append(
                         chanKey,
@@ -8166,7 +8457,7 @@ if (code == "442") {
                         append(
                             bufKey(netId, "*server*"),
                             from = null,
-                            text = "*** Left ${ev.channel}",
+                            text = "*** " + appContext.getString(R.string.vm_left_channel, ev.channel),
                             isLocal = suppressUnread,
                             timeMs = ev.timeMs,
                             doNotify = false
@@ -8179,10 +8470,10 @@ if (code == "442") {
 
                 if (!st0.settings.hideJoinPartQuit) {
                     val msg = if (isMe) {
-                        "* You have left channel ${ev.channel}"
+                        "* " + appContext.getString(R.string.vm_ev_you_left, ev.channel)
                     } else {
                         val host = ev.userHost ?: "*!*@*"
-                        "* ${ev.nick} ($host) has left ${ev.channel}" +
+                        "* " + appContext.getString(R.string.vm_ev_has_left, ev.nick, host, ev.channel) +
                             (ev.reason?.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: "")
                     }
                     append(
@@ -8231,9 +8522,9 @@ if (code == "442") {
                     val by = ev.byNick ?: "?"
                     val reason = ev.reason?.takeIf { it.isNotBlank() }
                     val msg = if (ev.victim.equals(myNick, ignoreCase = true)) {
-                        "* You were kicked from ${ev.channel} by $by" + (reason?.let { " [$it]" } ?: "")
+                        "* " + appContext.getString(R.string.vm_ev_you_kicked, ev.channel, by) + (reason?.let { " [$it]" } ?: "")
                     } else {
-                        "* ${ev.victim} was kicked by $by" + (reason?.let { " [$it]" } ?: "")
+                        "* " + appContext.getString(R.string.vm_ev_kicked, ev.victim, by) + (reason?.let { " [$it]" } ?: "")
                     }
 
                     append(
@@ -8285,7 +8576,7 @@ if (code == "442") {
                             }
                         } else {
                             append(chanKey, from = null,
-                                text = "*** Auto-rejoin suppressed (kicked again within ${AUTO_REJOIN_SUPPRESS_MS / 1000}s)",
+                                text = "*** " + appContext.getString(R.string.vm_autorejoin_suppressed, AUTO_REJOIN_SUPPRESS_MS / 1000),
                                 doNotify = false)
                         }
                     }
@@ -8324,7 +8615,7 @@ if (code == "442") {
                 val targets = affected
                 if (!st0.settings.hideJoinPartQuit) {
                     val host = ev.userHost ?: "*!*@*"
-                    val msg = "* ${ev.nick} ($host) has quit" + (reason?.let { " [$it]" } ?: "")
+                    val msg = "* " + appContext.getString(R.string.vm_ev_has_quit, ev.nick, host) + (reason?.let { " [$it]" } ?: "")
                     val coloured = colorEvent(msg, 5)  // brown — distinguishes server-side QUIT from client-side PART
                     for (k in targets) {
                         append(
@@ -8371,6 +8662,7 @@ if (code == "442") {
                     // shouldn't reset somebody's current away status.
                     if (affectLive) {
                         nickAwayState[netId]?.remove(casefoldText(netId, ev.nick))
+                        markAwayInState(netId, ev.nick, false)
                     }
                     // Clear any pending typing indicator for the quitting nick across all buffers on this network.
                     val newBufs = st1.buffers.mapValues { (k, buf) ->
@@ -8396,7 +8688,7 @@ if (code == "442") {
                 if (!st0.settings.hideTopicOnEntry) {
                     // mIRC-style join/topic info line
                     val topicText = ev.topic ?: ""
-                    val msg = "* Topic for ${ev.channel} is: $topicText"
+                    val msg = "* " + appContext.getString(R.string.vm_ev_topic_is, ev.channel, topicText)
                     append(
                         chanKey,
                         from = null,
@@ -8421,9 +8713,9 @@ if (code == "442") {
                         } catch (_: Throwable) {
                             java.util.Date(it).toString()
                         }
-                    } ?: "unknown time"
+                    } ?: appContext.getString(R.string.vm_ev_unknown_time)
 
-                    val msg = "* Topic for ${ev.channel} set by ${ev.setter} at $whenStr"
+                    val msg = "* " + appContext.getString(R.string.vm_ev_topic_set_by, ev.channel, ev.setter, whenStr)
                     append(
                         chanKey,
                         from = null,
@@ -8446,9 +8738,9 @@ if (code == "442") {
                     // Append a status line so the change is visible in the buffer.
                     val topicText = ev.topic?.takeIf { it.isNotBlank() } ?: "(topic cleared)"
                     val line = if (ev.setter != null)
-                        "* ${ev.setter} changed the topic to: $topicText"
+                        "* " + appContext.getString(R.string.vm_ev_topic_changed_by, ev.setter, topicText)
                     else
-                        "* Topic changed to: $topicText"
+                        "* " + appContext.getString(R.string.vm_ev_topic_changed, topicText)
                     append(chanKey, from = null, text = line, doNotify = false, timeMs = ev.timeMs)
                 }
             }
@@ -8461,7 +8753,7 @@ if (code == "442") {
             is IrcEvent.ChannelListStart -> {
                 _channelListBuffer.clear()
                 _channelListLastFlushMs = 0L
-                _state.value = _state.value.copy(listInProgress = true, channelDirectory = emptyList())
+                _state.value = _state.value.copy(listInProgress = true, channelDirectory = emptyList(), listTryAgainMessage = null)
             }
             is IrcEvent.ChannelListItem -> {
                 _channelListBuffer.add(ChannelListEntry(ev.channel, ev.users, ev.topic))
@@ -8481,6 +8773,17 @@ if (code == "442") {
                 _channelListBuffer.clear()
                 _state.update { it.copy(channelDirectory = snapshot, listInProgress = false) }
             }
+            is IrcEvent.TryAgain -> {
+                // Only the LIST command drives the channel directory UI; other TRYAGAIN
+                // targets (rare) just get a server-buffer line via the generic path.
+                if (ev.command == "LIST") {
+                    val msg = ev.message ?: appContext.getString(R.string.vm_ev_list_ratelimited)
+                    _state.update { it.copy(listInProgress = false, listTryAgainMessage = msg) }
+                }
+                append(bufKey(netId, "*server*"), from = null,
+                    text = "*** " + appContext.getString(R.string.vm_command_error, ev.command, ev.message ?: appContext.getString(R.string.vm_try_again)),
+                    doNotify = false, isLocal = true)
+            }
 
             // IRCv3 CHGHOST: update user@host for nick in all shared channel nicklists.
             // The nicklist stores raw "prefix+nick" strings, not full masks, so we don't need
@@ -8497,8 +8800,8 @@ if (code == "442") {
                             casefoldText(netId, b) == casefoldText(netId, ev.nick) } }
                     }
                     .map { it.key }
-                val line = if (isMe) "* Your host is now ${ev.newUser}@${ev.newHost}"
-                           else "* ${ev.nick} is now ${ev.newUser}@${ev.newHost}"
+                val line = if (isMe) "* " + appContext.getString(R.string.vm_ev_your_host_now, ev.newUser, ev.newHost)
+                           else "* " + appContext.getString(R.string.vm_ev_host_now, ev.nick, ev.newUser, ev.newHost)
                 for (k in affectedChannels) {
                     append(k, from = null, text = line, timeMs = ev.timeMs, doNotify = false, isLocal = true)
                 }
@@ -8512,10 +8815,15 @@ if (code == "442") {
                 if (ev.isHistory) return
                 val myNick = _state.value.connections[netId]?.myNick ?: return
                 val isMe = casefoldText(netId, ev.nick) == casefoldText(netId, myNick)
+                if (isMe) {
+                    val acct = ev.account.takeIf { it != "*" && it.isNotBlank() }
+                    setNetConn(netId) { it.copy(myAccount = acct) }
+                }
                 val line = when {
-                    ev.account == "*" -> if (isMe) "* You are no longer logged in" else "* ${ev.nick} logged out"
-                    isMe -> "* You are now logged in as ${ev.account}"
-                    else -> "* ${ev.nick} is now logged in as ${ev.account}"
+                    ev.account == "*" -> if (isMe) "* " + appContext.getString(R.string.vm_ev_you_logged_out)
+                                         else "* " + appContext.getString(R.string.vm_ev_logged_out, ev.nick)
+                    isMe -> "* " + appContext.getString(R.string.vm_ev_you_logged_in_as, ev.account)
+                    else -> "* " + appContext.getString(R.string.vm_ev_nick_logged_in_as, ev.nick, ev.account)
                 }
                 // Surface in channels where this nick is visible, or server buffer
                 val affected = _state.value.nicklists
@@ -8536,8 +8844,8 @@ if (code == "442") {
                 if (ev.isHistory) return
                 val myNick = _state.value.connections[netId]?.myNick ?: return
                 val isMe = casefoldText(netId, ev.nick) == casefoldText(netId, myNick)
-                val line = if (isMe) "* Your realname is now \"${ev.newRealname}\""
-                           else "* ${ev.nick} changed realname to \"${ev.newRealname}\""
+                val line = if (isMe) "* " + appContext.getString(R.string.vm_ev_your_realname_now, ev.newRealname)
+                           else "* " + appContext.getString(R.string.vm_ev_realname_changed, ev.nick, ev.newRealname)
                 val affected = _state.value.nicklists
                     .filterKeys { it.startsWith("$netId::") }
                     .filter { (_, list) ->
@@ -8554,12 +8862,12 @@ if (code == "442") {
             // Incoming channel invite.
             is IrcEvent.InviteReceived -> {
                 val serverKey = bufKey(netId, "*server*")
-                val line = "* ${ev.from} has invited you to ${ev.channel}"
+                val line = "* " + appContext.getString(R.string.vm_ev_invited_you, ev.from, ev.channel)
                 append(serverKey, from = null, text = line, timeMs = ev.timeMs, doNotify = false, isLocal = false, isHighlight = true)
                 // Also surface in the channel buffer if it already exists (e.g. we were kicked)
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 if (_state.value.buffers.containsKey(chanKey)) {
-                    append(chanKey, from = null, text = "* ${ev.from} invited you here", timeMs = ev.timeMs, doNotify = false, isLocal = false)
+                    append(chanKey, from = null, text = "* " + appContext.getString(R.string.vm_invited_here, ev.from), timeMs = ev.timeMs, doNotify = false, isLocal = false)
                 }
             }
 
@@ -8570,7 +8878,7 @@ if (code == "442") {
                 // text (SASL required, K-Lined, etc.) only came in via this ERROR frame.
                 lastServerErrorByNet[netId] = ev.message to System.currentTimeMillis()
                 val serverKey = bufKey(netId, "*server*")
-                append(serverKey, from = null, text = "*** Server error: ${ev.message}", doNotify = false, isLocal = false)
+                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_server_error, ev.message), doNotify = false, isLocal = false)
             }
 
             // AWAY status change for another user (away-notify CAP).
@@ -8586,17 +8894,18 @@ if (code == "442") {
                 val awayMap = nickAwayState.getOrPut(netId) { mutableMapOf() }
                 // On large servers with away-notify, every away transition adds an entry.
                 // Nicks are evicted on QUIT but not on PART - cap to prevent unbounded growth.
-                if (awayMap.size >= 2000) awayMap.clear()
+                if (awayMap.size >= 2000) { awayMap.clear(); clearAwayNicksInState(netId) }
                 val fold = casefoldText(netId, ev.nick)
                 val wasAway = awayMap.containsKey(fold)
                 val suppressAnnouncement = _state.value.settings.hideAwayNotify
                 if (ev.awayMessage != null) {
                     // Nick set or changed away message.
                     awayMap[fold] = ev.awayMessage
+                    markAwayInState(netId, ev.nick, true)
                     if (!wasAway && !suppressAnnouncement) {
                         // Only print "went away" on transition (not on away-message updates).
-                        val msg = if (ev.awayMessage.isBlank()) "* ${ev.nick} is now away"
-                                  else "* ${ev.nick} is now away (${ev.awayMessage})"
+                        val msg = if (ev.awayMessage.isBlank()) "* " + appContext.getString(R.string.vm_ev_now_away, ev.nick)
+                                  else "* " + appContext.getString(R.string.vm_ev_now_away_msg, ev.nick, ev.awayMessage)
                         val affected = _state.value.nicklists
                             .filterKeys { it.startsWith("$netId::") }
                             .filter { (_, list) ->
@@ -8611,8 +8920,9 @@ if (code == "442") {
                     // Nick returned from away.
                     if (wasAway) {
                         awayMap.remove(fold)
+                        markAwayInState(netId, ev.nick, false)
                         if (!suppressAnnouncement) {
-                            val msg = "* ${ev.nick} is back"
+                            val msg = "* " + appContext.getString(R.string.vm_ev_back, ev.nick)
                             val affected = _state.value.nicklists
                                 .filterKeys { it.startsWith("$netId::") }
                                 .filter { (_, list) ->
@@ -8630,11 +8940,11 @@ if (code == "442") {
             // CAP NEW / CAP DEL - already logged by IrcSession via EmitStatus; just re-surface as server text.
             is IrcEvent.CapNew -> {
                 val serverKey = bufKey(netId, "*server*")
-                append(serverKey, from = null, text = "*** Server added capabilities: ${ev.caps.joinToString(" ")}", doNotify = false, isLocal = true)
+                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_caps_added, ev.caps.joinToString(" ")), doNotify = false, isLocal = true)
             }
             is IrcEvent.CapDel -> {
                 val serverKey = bufKey(netId, "*server*")
-                append(serverKey, from = null, text = "*** Server removed capabilities: ${ev.caps.joinToString(" ")}", doNotify = false, isLocal = true)
+                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_caps_removed, ev.caps.joinToString(" ")), doNotify = false, isLocal = true)
             }
 
             // soju BOUNCER NETWORK: track upstream network info.
@@ -8651,7 +8961,7 @@ if (code == "442") {
                     }
                     if (stillPresent != null) {
                         val nameStr = stillPresent.name ?: ev.networkId
-                        append(serverKey, from = null, text = "*** Bouncer network removed: $nameStr",
+                        append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_bouncer_removed, nameStr),
                             doNotify = false, isLocal = true)
                     }
                     return
@@ -8690,9 +9000,9 @@ if (code == "442") {
                     val stateStr = merged.state ?: "unknown"
                     val nameStr = merged.name ?: ev.networkId
                     val hostStr = if (merged.host != null) " (${merged.host})" else ""
-                    val verb = if (isNew) "discovered" else "state changed"
+                    val verb = if (isNew) appContext.getString(R.string.vm_bouncer_verb_discovered) else appContext.getString(R.string.vm_bouncer_verb_state_changed)
                     append(serverKey, from = null,
-                        text = "*** Bouncer network $verb: $nameStr$hostStr [$stateStr]",
+                        text = "*** " + appContext.getString(R.string.vm_bouncer_state, verb, nameStr, hostStr, stateStr),
                         doNotify = false, isLocal = true)
 
                     // Hint for first-seen upstreams that don't correspond to any local profile.
@@ -8705,7 +9015,7 @@ if (code == "442") {
                         if (merged.host.lowercase() !in profileHosts) {
                             val displayName = merged.name ?: merged.host
                             append(serverKey, from = null,
-                                text = "    → no local profile for \"$displayName\" - add one to connect to this upstream.",
+                                text = "    → " + appContext.getString(R.string.vm_no_local_profile, displayName),
                                 doNotify = false, isLocal = true)
                         }
                     }
@@ -8715,7 +9025,7 @@ if (code == "442") {
             is IrcEvent.MonitorStatus -> {
                 // MONITOR: a watched nick came online or went offline.
                 // Show a brief status line in the server buffer (and PM buffer if open).
-                val statusLine = if (ev.online) "*** ${ev.nick} is online" else "*** ${ev.nick} is offline"
+                val statusLine = if (ev.online) "*** " + appContext.getString(R.string.vm_ev_monitor_online, ev.nick) else "*** " + appContext.getString(R.string.vm_ev_monitor_offline, ev.nick)
                 val serverKey = bufKey(netId, "*server*")
                 append(serverKey, from = null, text = statusLine, doNotify = false, isLocal = true, timeMs = ev.timeMs)
                 // Also show in the PM buffer for that nick, if it exists.
@@ -8783,12 +9093,15 @@ if (code == "442") {
                     val awayMap = nickAwayState.getOrPut(netId) { mutableMapOf() }
                     if (ev.isAway) {
                         awayMap.putIfAbsent(fold, "")  // Set away without overwriting a known message.
+                        markAwayInState(netId, ev.nick, true)
                     } else {
                         awayMap.remove(fold)
+                        markAwayInState(netId, ev.nick, false)
                     }
                 }
                 // WhoxReply account field currently informational; full account enrichment can
                 // be added to the nicklist display in a future UI pass.
+                if (ev.isBot) markBotInState(netId, ev.nick)
             }
 
             // draft/channel-rename: server renamed a channel we're in.
@@ -8819,11 +9132,116 @@ if (code == "442") {
             // Surface as a brief status line in the target buffer.
             is IrcEvent.MessageReaction -> {
                 val bufKey = resolveBufferKey(netId, ev.target)
-                val verb = if (ev.adding) "reacted with" else "removed reaction"
-                val refStr = ev.msgId?.let { " (ref: $it)" } ?: ""
+                val verb = if (ev.adding) appContext.getString(R.string.vm_reacted_with) else appContext.getString(R.string.vm_removed_reaction)
+                val refStr = ev.msgId?.let { " " + appContext.getString(R.string.vm_ref, it) } ?: ""
                 append(bufKey, from = null,
                     text = "* ${ev.fromNick} $verb ${ev.reaction}$refStr",
                     timeMs = ev.timeMs, doNotify = false, isLocal = true)
+            }
+
+            is IrcEvent.MetadataChanged -> {
+                // draft/metadata-2. Only the keys this client actually renders are
+                // stored: an unbounded key-value store per nick would grow without
+                // limit on a busy network, and nothing else reads it.
+                val mdKey = ev.target.trim().lowercase()
+                if (mdKey.isNotEmpty()) {
+                    when (ev.key) {
+                        "display-name" -> setNetConn(netId) { st ->
+                            val clean = sanitizeMetadataValue(ev.value, maxLen = 40)
+                            st.copy(displayNames =
+                                if (clean == null) st.displayNames - mdKey
+                                else st.displayNames + (mdKey to clean))
+                        }
+                        "avatar" -> setNetConn(netId) { st ->
+                            // Only https URLs are retained; the renderer additionally
+                            // gates on the image-previews opt-in and an unproxied profile.
+                            val url = sanitizeMetadataValue(ev.value, maxLen = 512)
+                                ?.takeIf { it.startsWith("https://") }
+                            st.copy(avatarUrls =
+                                if (url == null) st.avatarUrls - mdKey
+                                else st.avatarUrls + (mdKey to url))
+                        }
+                        "color" -> setNetConn(netId) { st ->
+                            // Registry format is exactly 6 hex digits (no leading #).
+                            // Anything else is ignored so a malformed value can't crash
+                            // Colour parsing at render time.
+                            val hex = ev.value?.trim()?.removePrefix("#")
+                                ?.takeIf { s -> s.length == 6 && s.all { c -> c in '0'..'9' || c in 'a'..'f' || c in 'A'..'F' } }
+                                ?.lowercase()
+                            st.copy(nickColors =
+                                if (hex == null) st.nickColors - mdKey
+                                else st.nickColors + (mdKey to hex))
+                        }
+                        "status" -> setNetConn(netId) { st ->
+                            val clean = sanitizeMetadataValue(ev.value, maxLen = 60)
+                            st.copy(statuses =
+                                if (clean == null) st.statuses - mdKey
+                                else st.statuses + (mdKey to clean))
+                        }
+                        "pronouns", "homepage", "bio" -> setNetConn(netId) { st ->
+                            // Bounded whitelist of extra keys shown only in the tap sheet.
+                            val clean = sanitizeMetadataValue(ev.value, maxLen = if (ev.key == "bio") 300 else 100)
+                            val forNick = (st.extraMetadata[mdKey] ?: emptyMap())
+                            val updated = if (clean == null) forNick - ev.key else forNick + (ev.key to clean)
+                            st.copy(extraMetadata =
+                                if (updated.isEmpty()) st.extraMetadata - mdKey
+                                else st.extraMetadata + (mdKey to updated))
+                        }
+                        else -> { /* not a key we render for other users */ }
+                    }
+                    // Independently, mirror ANY key set on our own current nick into
+                    // ownMetadata so the editor can pre-fill every field, not just the
+                    // rendered ones. Single-target, so it stays bounded.
+                    setNetConn(netId) { st ->
+                        if (!mdKey.equals(st.myNick, ignoreCase = true)) st
+                        else {
+                            val clean = sanitizeMetadataValue(ev.value, maxLen = 512)
+                            st.copy(ownMetadata =
+                                if (clean == null) st.ownMetadata - ev.key
+                                else st.ownMetadata + (ev.key to clean))
+                        }
+                    }
+                }
+            }
+
+            is IrcEvent.AccountRegUpdate -> {
+                val phase = when {
+                    ev.stage.startsWith("FAIL:") -> RegPhase.FAILED
+                    ev.stage == "SUCCESS" -> RegPhase.SUCCESS
+                    ev.stage == "VERIFICATION_REQUIRED" -> RegPhase.VERIFY_REQUIRED
+                    else -> RegPhase.IDLE
+                }
+                if (phase != RegPhase.IDLE) {
+                    setNetConn(netId) { st ->
+                        st.copy(regState = RegState(
+                            phase = phase,
+                            // Keep a previously-known account when the server omits it
+                            // (failures carry no account name).
+                            account = ev.account ?: st.regState.account,
+                            message = ev.message,
+                        ))
+                    }
+                }
+            }
+
+            is IrcEvent.MessageRedacted -> {
+                // Replace the deleted message's text
+                val chanKey = resolveBufferKey(netId, ev.target)
+                val buf = _state.value.buffers[chanKey]
+                val idx = buf?.messages?.indexOfLast { it.msgId != null && it.msgId == ev.msgId } ?: -1
+                if (buf != null && idx >= 0) {
+                    val victim = buf.messages[idx]
+                    val tombstone = if (ev.reason.isNullOrBlank())
+                        appContext.getString(R.string.vm_ev_message_deleted, ev.fromNick)
+                    else
+                        appContext.getString(R.string.vm_ev_message_deleted_reason, ev.fromNick, ev.reason)
+                    val newMsgs = buf.messages.set(idx, victim.copy(text = tombstone))
+                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(messages = newMsgs))) }
+                } else {
+                    append(chanKey, from = null,
+                        text = "* " + appContext.getString(R.string.vm_deleted_message, ev.fromNick),
+                        timeMs = ev.timeMs, doNotify = false, isLocal = true)
+                }
             }
 
             // ChannelModeChanged: live simple-mode delta on a channel. We merge it into the
@@ -9040,7 +9458,7 @@ if (code == "442") {
                         id = nextUiMsgId.getAndIncrement(),
                         timeMs = markerTimeMs,
                         from = null,
-                        text = "── Scrollback from logs • Last message: $newestStr ──",
+                        text = "── " + appContext.getString(R.string.vm_scrollback_divider, newestStr) + " ──",
                         isAction = false
                     )
                     olderLoaded + preExisting + marker + liveDuringLoad
@@ -9246,11 +9664,11 @@ if (code == "442") {
 
     private fun appendNamesList(bufferKey: String, channel: String, names: List<String>) {
         if (names.isEmpty()) {
-            append(bufferKey, from = null, text = "*** NAMES for $channel: (none)", doNotify = false)
+            append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_names_none, channel), doNotify = false)
             return
         }
 
-        append(bufferKey, from = null, text = "*** NAMES for $channel (${names.size}):", doNotify = false)
+        append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_names_header, channel, names.size), doNotify = false)
 
         val maxLen = 380
         var sb = StringBuilder()
@@ -9305,6 +9723,10 @@ if (code == "442") {
         encryption: com.boxlabs.hexdroid.crypto.E2eScheme? = null,
         /** True for a locally-echoed +AGE message still being held pending key agreement (see UiMessage.pending). */
         pending: Boolean = false,
+        /** draft/oper-tag: sender is an IRC operator (see UiMessage.fromOper). */
+        fromOper: Boolean = false,
+        /** Bot Mode: sender is a bot (see UiMessage.fromBot). */
+        fromBot: Boolean = false,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         // A sender on this network's highlight-ignore list never highlights or alerts; the
@@ -9323,6 +9745,8 @@ if (code == "442") {
             replyToMsgId = replyToMsgId,
             encryption = encryption,
             pending = pending,
+            fromOper = fromOper,
+            fromBot = fromBot,
         )
 
         // Content-fingerprint dedup. `time=` is server-stamped on replayed messages so two
@@ -9407,7 +9831,7 @@ if (code == "442") {
                 id = nextUiMsgId.getAndIncrement(),
                 timeMs = (pending + 1L).coerceAtMost(ts - 1L),
                 from = null,
-                text = "── Chat history • Last message: $newestStr ──",
+                text = appContext.getString(R.string.vm_history_divider, newestStr),
             )
         }
 
@@ -9586,7 +10010,7 @@ if (code == "442") {
                         // log write either succeeded the same way or already failed
                         // and is silenced by logServerBuffer = false in the common case.
                         withContext(Dispatchers.Main.immediate) {
-                            append(bufKey(netId, "*server*"), from = null, text = "*** Log write failed for $bufferName: $err", isLocal = true, doNotify = false)
+                            append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_log_write_failed, bufferName, err), isLocal = true, doNotify = false)
                         }
                     }
                 }
@@ -9970,7 +10394,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     if (net != null) "${net.name} • ${net.host}:${net.port}" else "HexDroid IRC"
                 }
                 val netIdForIntent = st.activeNetworkId?.takeIf { wanted.contains(it) } ?: wanted.first()
-                val statusTxt = if (!hasInternetConnection()) "Waiting for network…" else "Reconnecting…"
+                val statusTxt = if (!hasInternetConnection()) appContext.getString(R.string.vm_status_waiting_network)
+                        else appContext.getString(R.string.vm_status_reconnecting)
                 val i = Intent(appContext, KeepAliveService::class.java).apply {
                     action = KeepAliveService.ACTION_UPDATE
                     putExtra(KeepAliveService.EXTRA_NETWORK_ID, netIdForIntent)
@@ -10005,7 +10430,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val names = displayIds.mapNotNull { id -> st.networks.firstOrNull { it.id == id }?.name }.ifEmpty { displayIds }
 
         val label = if (displayIds.size > 1) {
-            "${displayIds.size} networks: ${names.joinToString(", ")}" // NotificationHelper prefixes with "Connected to"
+            // NotificationHelper prefixes this with "Connected to".
+            appContext.getString(R.string.vm_notif_networks, displayIds.size, names.joinToString(", "))
         } else {
             val net = st.networks.firstOrNull { it.id == displayIds.first() }
             if (net != null) "${net.name} • ${net.host}:${net.port}" else "HexDroid IRC"
@@ -10013,9 +10439,9 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
 
         val status = statusOverride ?: when {
             connectedIds.isNotEmpty() && connectingIds.isNotEmpty() ->
-                "Connected (${connectedIds.size}), connecting (${connectingIds.size})"
-            connectedIds.isNotEmpty() -> "Connected"
-            else -> "Connecting…"
+                appContext.getString(R.string.vm_notif_connected_connecting, connectedIds.size, connectingIds.size)
+            connectedIds.isNotEmpty() -> appContext.getString(R.string.vm_status_connected)
+            else -> appContext.getString(R.string.vm_status_connecting)
         }
 
         if (st.settings.keepAliveInBackground) {
@@ -10099,7 +10525,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         if (!offer.isPassive && isLocalHost(offer.ip) && !hasLocalNetworkPermission()) {
             append(bufKey(offer.netId.ifBlank { st.activeNetworkId ?: "" }, "*server*"),
                 from = null,
-                text = "*** DCC from ${offer.from}: local network permission required (Android 17+). Grant it in Settings → Apps → HexDroid → Permissions.",
+                text = "*** " + appContext.getString(R.string.vm_dcc_lan_perm, offer.from),
                 isHighlight = true)
             return
         }
@@ -10130,8 +10556,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 it is DccTransferState.Incoming && it.offer == offer
             })
             append(bufKey(netId, "*server*"), from = null,
-                text = "*** Can't accept passive DCC from ${offer.from} while a proxy is active: " +
-                    "it would require listening outside the tunnel. Ask them to send actively, or disable the proxy for this transfer.",
+                text = "*** " + appContext.getString(R.string.vm_dcc_passive_proxy, offer.from),
                 isHighlight = true)
             return
         }
@@ -10144,8 +10569,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 it is DccTransferState.Incoming && it.offer == offer
             })
             append(bufKey(netId, "*server*"), from = null,
-                text = "*** Refusing DCC from ${offer.from}: it advertises a private/LAN address (${offer.ip}) " +
-                    "that isn't reachable through the proxy. Disable the proxy for this transfer if they're on your LAN.",
+                text = "*** " + appContext.getString(R.string.vm_dcc_refuse_private, offer.from, offer.ip),
                 isHighlight = true)
             return
         }
@@ -10193,7 +10617,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                             val payload = "DCC SEND $name $addrField $port $size $tokenStr"
                             c.ctcp(offer.from, payload)
                             val resumeNote = if (effectiveOffset > 0L) " (resuming from ${effectiveOffset} bytes)" else ""
-                            append(bufKey(netId, "*server*"), from = null, text = "*** Accepted passive DCC offer: ${offer.filename} (listening on $port)$resumeNote", doNotify = false)
+                            append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_dcc_accepted_passive, offer.filename, port, resumeNote), doNotify = false)
                         }
                     ) { got, _ ->
                         updateIncoming(offer) { it.copy(received = got) }
@@ -10283,7 +10707,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val resumePayload = "DCC RESUME $name $portField ${partial.receivedBytes}$tokenField"
         c.ctcp(offer.from, resumePayload)
         append(bufKey(netId, "*server*"), from = null,
-            text = "*** Requested DCC RESUME for ${offer.filename} at ${partial.receivedBytes} bytes…",
+            text = "*** " + appContext.getString(R.string.vm_dcc_resume_requested, offer.filename, partial.receivedBytes),
             doNotify = false)
 
         return try {
@@ -10294,13 +10718,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
             val agreed = accept.position.coerceIn(0L, partial.receivedBytes)
             if (agreed != partial.receivedBytes) {
                 append(bufKey(netId, "*server*"), from = null,
-                    text = "*** Sender accepted RESUME at $agreed bytes (we asked for ${partial.receivedBytes})",
+                    text = "*** " + appContext.getString(R.string.vm_dcc_resume_agreed, agreed, partial.receivedBytes),
                     doNotify = false)
             }
             agreed
         } catch (_: TimeoutCancellationException) {
             append(bufKey(netId, "*server*"), from = null,
-                text = "*** No DCC ACCEPT from ${offer.from} — restarting transfer from the beginning.",
+                text = "*** " + appContext.getString(R.string.vm_dcc_resume_none, offer.from),
                 doNotify = false)
             0L
         } finally {
@@ -10345,7 +10769,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         // unlinks the partial file and drops the registry entry.
         val baseName = offer.filename.substringAfterLast('/').substringAfterLast('\\')
         dccPartials.removeAndDeleteFile(offer.from, baseName, offer.size)
-        append(bufKey(netId, "*server*"), from = null, text = "*** Rejected DCC offer: ${offer.filename}", doNotify = false)
+        append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_dcc_rejected, offer.filename), doNotify = false)
     }
 
     private fun isDccChatBufferName(name: String): Boolean = name.startsWith("DCCCHAT:")
@@ -10357,7 +10781,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         runCatching { ses.readJob.cancel() }
         runCatching { ses.socket.close() }
         val r = reason?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
-        append(bufferKey, from = null, text = "*** DCC CHAT disconnected$r", doNotify = false)
+        append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_disconnected, r), doNotify = false)
     }
 
     private fun startDccChatSession(netId: String, peer: String, bufferKey: String, socket: Socket) {
@@ -10386,25 +10810,25 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 }
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
-                    append(bufferKey, from = null, text = "*** DCC CHAT failed: ${(t.message ?: t::class.java.simpleName)}", isHighlight = true)
+                    append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_failed, t.message ?: t::class.java.simpleName), isHighlight = true)
                 }
             } finally {
                 withContext(Dispatchers.Main) {
                     dccChatSessions.remove(bufferKey)
                     runCatching { socket.close() }
-                    append(bufferKey, from = null, text = "*** DCC CHAT closed", doNotify = false)
+                    append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_closed), doNotify = false)
                 }
             }
         }
 
         dccChatSessions[bufferKey] = DccChatSession(netId, peer, bufferKey, socket, writer, job)
-        append(bufferKey, from = null, text = "*** DCC CHAT connected to $peer", doNotify = false)
+        append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_connected, peer), doNotify = false)
     }
 
     private fun sendDccChatLine(bufferKey: String, line: String, isAction: Boolean) {
         val ses = dccChatSessions[bufferKey]
         if (ses == null) {
-            append(bufferKey, from = null, text = "*** DCC CHAT not connected.", isHighlight = true)
+            append(bufferKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_not_connected), isHighlight = true)
             return
         }
 
@@ -10424,7 +10848,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     append(
                         bufferKey,
                         from = null,
-                        text = "*** DCC CHAT send failed: ${(t.message ?: t::class.java.simpleName)}",
+                        text = "*** " + appContext.getString(R.string.vm_dcc_chat_send_failed, t.message ?: t::class.java.simpleName),
                         isHighlight = true
                     )
                     closeDccChatSession(bufferKey, reason = t.message)
@@ -10453,8 +10877,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         // and dialling it would make the proxy probe its own local network. Refuse.
         if (isProxiedNetwork(netId) && isLocalHost(offer.ip)) {
             append(key, from = null,
-                text = "*** Refusing DCC CHAT from $peer: it advertises a private/LAN address (${offer.ip}) " +
-                    "not reachable through the proxy. Disable the proxy for this network if they're on your LAN.",
+                text = "*** " + appContext.getString(R.string.vm_dcc_chat_refuse_private, peer, offer.ip),
                 isHighlight = true)
             return
         }
@@ -10462,19 +10885,19 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         // Android 17+: connecting to a LAN peer requires ACCESS_LOCAL_NETWORK.
         if (isLocalHost(offer.ip) && !hasLocalNetworkPermission()) {
             append(key, from = null,
-                text = "*** DCC CHAT from $peer: local network permission required (Android 17+). Grant it in Settings → Apps → HexDroid → Permissions.",
+                text = "*** " + appContext.getString(R.string.vm_dcc_chat_lan_perm, peer),
                 isHighlight = true)
             return
         }
 
         viewModelScope.launch {
             try {
-                append(key, from = null, text = "*** Connecting DCC CHAT to ${offer.from} (${offer.ip}:${offer.port})…", doNotify = false)
+                append(key, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_connecting, offer.from, offer.ip, offer.port), doNotify = false)
                 val chatProxy = withContext(Dispatchers.IO) { proxyForNetwork(netId) }
                 val socket = dcc.connectChat(offer, proxy = chatProxy)
                 startDccChatSession(netId, peer, key, socket)
             } catch (t: Throwable) {
-                append(key, from = null, text = "*** DCC CHAT connect failed: ${(t.message ?: t::class.java.simpleName)}", isHighlight = true)
+                append(key, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_connect_failed, t.message ?: t::class.java.simpleName), isHighlight = true)
             }
         }
     }
@@ -10482,7 +10905,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     fun rejectDccChat(offer: DccChatOffer) {
         _state.value = _state.value.copy(dccChatOffers = _state.value.dccChatOffers.filterNot { it == offer })
         val netId = offer.netId.takeIf { it.isNotBlank() } ?: _state.value.activeNetworkId ?: return
-        append(bufKey(netId, "*server*"), from = null, text = "*** Rejected DCC CHAT offer from ${offer.from}", doNotify = false)
+        append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_rejected, offer.from), doNotify = false)
     }
 
     fun startDccChat(targetNick: String) = startDccChatFlow(targetNick)
@@ -10496,7 +10919,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         if (peer.isBlank()) return
 
         if (!st.settings.dccEnabled) {
-            append(bufKey(netId, "*server*"), from = "DCC", text = "DCC is disabled in settings.", isHighlight = true)
+            append(bufKey(netId, "*server*"), from = "DCC", text = appContext.getString(R.string.vm_dcc_disabled), isHighlight = true)
             return
         }
 
@@ -10506,7 +10929,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         // refuse outright while a proxy is active.
         if (isProxiedNetwork(netId)) {
             append(bufKey(netId, "*server*"), from = "DCC",
-                text = "Can't offer DCC CHAT while a proxy is active (it requires listening outside the tunnel). Disable the proxy for this network to use DCC CHAT.",
+                text = appContext.getString(R.string.vm_dcc_chat_proxy),
                 isHighlight = true)
             return
         }
@@ -10523,19 +10946,19 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 val secure = st.settings.dccSecure
                 val chatVerb = if (secure) "SCHAT" else "CHAT"
                 val secureLabel = if (secure) " (SDCC/TLS)" else ""
-                append(key, from = null, text = "*** Offering DCC${secureLabel} CHAT to $peer…", doNotify = false)
+                append(key, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_offering, secureLabel, peer), doNotify = false)
                 val socket = dcc.startChat(
                     portMin = minP,
                     portMax = maxP,
                     onClient = { addrField, port ->
                         val payload = "DCC $chatVerb chat $addrField $port"
                         c.ctcp(peer, payload)
-                        append(bufKey(netId, "*server*"), from = null, text = "*** Sent DCC$secureLabel CHAT offer to $peer (port $port)", doNotify = false)
+                        append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_sent, secureLabel, peer, port), doNotify = false)
                     }
                 )
                 startDccChatSession(netId, peer, key, socket)
             } catch (t: Throwable) {
-                append(key, from = null, text = "*** DCC CHAT offer failed: ${(t.message ?: t::class.java.simpleName)}", isHighlight = true)
+                append(key, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_chat_offer_failed, t.message ?: t::class.java.simpleName), isHighlight = true)
             }
         }
     }
@@ -10561,7 +10984,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val target = targetNick.trimStart('~', '&', '@', '%', '+')
 
         if (!_state.value.settings.dccEnabled) {
-            append(bufKey(netId, "*server*"), from = "DCC", text = "DCC is disabled in settings.", isHighlight = true)
+            append(bufKey(netId, "*server*"), from = "DCC", text = appContext.getString(R.string.vm_dcc_disabled), isHighlight = true)
             return
         }
 
@@ -10639,7 +11062,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                             )
                             c.ctcp(target, payload)
                             val secureLabel = if (secure) " (SDCC/TLS)" else ""
-                            append(statusKey, from = null, text = "*** Offering $offerName to $target via DCC$secureLabel (active, port $port)…", doNotify = false)
+                            append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_offering_active, offerName, target, secureLabel, port), doNotify = false)
                         },
                         awaitStartOffset = {
                             // Short window for a late RESUME; if the peer didn't ask for resume,
@@ -10691,10 +11114,10 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         val payload = "DCC $verb $offerNamePayload $ipField 0 $fileSize $token"
                         c.ctcp(target, payload)
                         val secureLabel = if (secure) " (SDCC/TLS)" else ""
-                        append(statusKey, from = null, text = "*** Offering $offerName to $target via DCC$secureLabel (passive)…", doNotify = false)
+                        append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_offering_passive, offerName, target, secureLabel), doNotify = false)
 
                         val reply = withTimeout(timeoutMs) { def.await() }
-                        if (reply.port <= 0) throw IOException("Invalid passive DCC reply")
+                        if (reply.port <= 0) throw IOException(appContext.getString(R.string.vm_dcc_invalid_reply))
                         // Resume race: per the DCC RESUME protocol the receiver sends RESUME
                         // *before* its DCC SEND reply opens the port, so by the time we get
                         // `reply` here the resume offset (if any) is already settled and the
@@ -10709,9 +11132,9 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                                     it.copy(resumeOffset = startOffset, bytesSent = startOffset)
                                 else it
                             })
-                            append(statusKey, from = null, text = "*** $target accepted; resuming from $startOffset bytes…", doNotify = false)
+                            append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_accepted_resume, target, startOffset), doNotify = false)
                         } else {
-                            append(statusKey, from = null, text = "*** $target accepted; connecting…", doNotify = false)
+                            append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_accepted_connecting, target), doNotify = false)
                         }
 
                         dcc.sendFileConnect(
@@ -10737,7 +11160,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 val effectiveMode = if (sendProxy.enabled && mode != DccSendMode.PASSIVE) {
                     if (mode == DccSendMode.ACTIVE) {
                         append(statusKey, from = null,
-                            text = "*** Proxy active: using passive DCC (active send can't listen through a proxy).",
+                            text = "*** " + appContext.getString(R.string.vm_dcc_proxy_passive),
                             doNotify = false)
                     }
                     DccSendMode.PASSIVE
@@ -10756,7 +11179,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         } catch (t: TimeoutCancellationException) {
                             // Re-throw as a plain IOException so the outer catch marks the
                             // transfer as an error rather than falling through to the success path.
-                            throw IOException("No response from $target - DCC timed out")
+                            throw IOException(appContext.getString(R.string.vm_dcc_timeout, target))
                         }
                     }
                 }
@@ -10766,7 +11189,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName) it.copy(done = true, endTimeMs = System.currentTimeMillis()) else it
                 })
                 outgoingSendJobs.remove(jobKey)
-                append(statusKey, from = null, text = "*** DCC send complete: $offerName → $target", doNotify = false)
+                append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_send_complete, offerName, target), doNotify = false)
 
             } catch (t: Throwable) {
                 // See incoming catch above for why !isActive is the reliable cancel signal:
@@ -10784,11 +11207,11 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                             it.copy(done = true, error = msg, endTimeMs = System.currentTimeMillis())
                         else it
                     })
-                    if (!cancelled) append(statusKey, from = "DCC", text = "*** DCC send failed: $msg", isHighlight = true)
-                    else append(statusKey, from = null, text = "*** DCC send cancelled: $fn", doNotify = false)
+                    if (!cancelled) append(statusKey, from = "DCC", text = "*** " + appContext.getString(R.string.vm_dcc_send_failed, msg), isHighlight = true)
+                    else append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_send_cancelled, fn), doNotify = false)
                 } ?: run {
                     _state.value = stErr.copy(dccTransfers = stErr.dccTransfers + DccTransferState.Outgoing(target = target, filename = "(unknown)", done = true, error = msg, endTimeMs = System.currentTimeMillis()))
-                    if (!cancelled) append(statusKey, from = "DCC", text = "*** DCC send failed: $msg", isHighlight = true)
+                    if (!cancelled) append(statusKey, from = "DCC", text = "*** " + appContext.getString(R.string.vm_dcc_send_failed, msg), isHighlight = true)
                 }
                 if (t is kotlinx.coroutines.CancellationException) throw t   // re-throw so coroutine completes correctly
             }
@@ -10875,12 +11298,210 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
             }
         }
 
-        val inp = appContext.contentResolver.openInputStream(uri) ?: throw IOException("Unable to open selected file")
+        val inp = appContext.contentResolver.openInputStream(uri) ?: throw IOException(appContext.getString(R.string.vm_file_open_failed))
         inp.use { input ->
             out.outputStream().use { fos -> input.copyTo(fos) }
         }
 
         PreparedDccSend(file = out, offerName = out.name)
+    }
+
+    /**
+     * Upload a picked document to the network's soju.im/FILEHOST endpoint and hand the
+     * resulting public URL back on the main thread. [onDone] receives (url, error);
+     * exactly one is non-null.
+     *
+     * Credentials mirror the IRC connection: the SASL PLAIN identity (including any
+     * bouncer suffixes via effectiveAuthIdentity) with the SASL password, falling back
+     * to the server password for PASS-authenticated bouncers.
+     *
+     * Fail-closed on proxied profiles: HttpURLConnection does not route through
+     * SocksProxy.kt, so an upload from a Tor/proxied network would leave the proxy and
+     * leak the user's IP to the filehost. Refused until proxied uploads exist.
+     */
+    fun uploadFileToFilehost(netId: String, uri: android.net.Uri, onDone: (url: String?, error: String?) -> Unit) {
+        val cfg = runtimes[netId]?.client?.config
+        val uploadUrl = _state.value.connections[netId]?.filehostUrl
+        if (cfg == null || uploadUrl.isNullOrBlank()) {
+            onDone(null, appContext.getString(R.string.vm_upload_unsupported))
+            return
+        }
+        if (!cfg.capPrefs.filehostUploads) {
+            onDone(null, appContext.getString(R.string.vm_upload_disabled))
+            return
+        }
+        if (cfg.proxy.enabled) {
+            onDone(null, appContext.getString(R.string.vm_upload_no_proxy))
+            return
+        }
+        val saslCfg = cfg.sasl as? SaslConfig.Enabled
+        val baseUser = saslCfg?.authcid?.takeIf { it.isNotBlank() } ?: cfg.nick
+        val username = cfg.effectiveAuthIdentity(baseUser)
+        val password = saslCfg?.password ?: cfg.serverPassword
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = try {
+                val name = queryDisplayName(uri)
+                    ?: runCatching { java.net.URLDecoder.decode(uri.lastPathSegment ?: "", "UTF-8") }.getOrNull()
+                val size = try {
+                    appContext.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) {
+                            val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                            if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else -1L
+                        } else -1L
+                    } ?: -1L
+                } catch (_: Throwable) { -1L }
+                val mime = runCatching { appContext.contentResolver.getType(uri) }.getOrNull()
+                val stream = appContext.contentResolver.openInputStream(uri)
+                if (stream == null) {
+                    FilehostUpload.Result(null, appContext.getString(R.string.vm_file_open_failed))
+                } else stream.use { inp ->
+                    FilehostUpload.upload(
+                        uploadUrl = uploadUrl,
+                        username = username,
+                        password = password,
+                        fileName = name,
+                        mimeType = mime,
+                        contentLength = size,
+                        input = inp,
+                        connectionUsesTls = cfg.useTls,
+                    )
+                }
+            } catch (t: Throwable) {
+                FilehostUpload.Result(null, appContext.getString(R.string.vm_upload_failed, t.message ?: t.javaClass.simpleName))
+            }
+            withContext(Dispatchers.Main) { onDone(result.url, result.error) }
+        }
+    }
+
+    /**
+     * Ask the server to delete one of our own messages (draft/message-redaction).
+     * The buffer is updated when the server relays the REDACT back to us.
+     */
+    fun redactMessage(netId: String, target: String, msgId: String) {
+        viewModelScope.launch {
+            runCatching { runtimes[netId]?.client?.sendRedact(target, msgId) }
+        }
+    }
+
+    /**
+     * Sanitise a draft/metadata-2 value before it reaches the UI. Metadata is
+     * attacker-controlled free text from any user on the network, so control
+     * characters (including IRC formatting codes, which could otherwise recolour
+     * or blank out surrounding text) and line breaks are stripped, and the result
+     * is length-capped. Returns null for a value that is absent or empty after
+     * cleaning, which the callers treat as "key not set".
+     */
+    private fun sanitizeMetadataValue(raw: String?, maxLen: Int): String? {
+        if (raw.isNullOrEmpty()) return null
+        val cleaned = buildString {
+            for (ch in raw) {
+                if (ch.code >= 0x20 && ch.code != 0x7f) append(ch)
+            }
+        }.trim()
+        if (cleaned.isEmpty()) return null
+        return if (cleaned.length > maxLen) cleaned.take(maxLen) else cleaned
+    }
+
+    /** Set one of our own draft/metadata-2 keys (null or blank removes it). */
+    fun setOwnMetadata(netId: String, key: String, value: String?) {
+        viewModelScope.launch {
+            runCatching { runtimes[netId]?.client?.setOwnMetadata(key, value) }
+            // Persist so the value can be re-applied on reconnect.
+            runCatching {
+                ensureOwnMetadataLoaded()
+                val map = ownMetadataStore.getOrPut(netId) { java.util.concurrent.ConcurrentHashMap() }
+                val v = value?.trim()
+                if (v.isNullOrEmpty()) map.remove(key) else map[key] = v
+                repo.writeOwnMetadata(ownMetadataStore.mapValues { it.value.toMap() })
+            }
+        }
+    }
+
+    /**
+     * Ask the server to list our own metadata (METADATA * LIST). Replies arrive as
+     * 761 RPL_KEYVALUE and flow into NetConnState.ownMetadata, pre-filling the editor.
+     */
+    fun requestOwnMetadata(netId: String) {
+        viewModelScope.launch {
+            runCatching { runtimes[netId]?.client?.sendMetadata("*", "LIST") }
+        }
+    }
+
+    /** True when the connected server negotiated draft/metadata-2. */
+    fun serverSupportsMetadata(netId: String): Boolean =
+        runtimes[netId]?.client?.hasCap("draft/metadata-2") == true
+
+    /** True when the connected server negotiated draft/account-registration. */
+    fun serverSupportsAccountReg(netId: String): Boolean =
+        runtimes[netId]?.client?.hasCap("draft/account-registration") == true
+
+    /**
+     * The comma-separated cap-value flags of draft/account-registration, lowercased
+     * (e.g. "email-required", "custom-account-name", "before-connect"). Empty when the
+     * cap has no value or is absent.
+     */
+    fun accountRegFlags(netId: String): List<String> =
+        (runtimes[netId]?.client?.capValue("draft/account-registration") ?: "")
+            .split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+
+    /** Reset the registration dialog's state (on open, and after it closes). */
+    fun clearRegState(netId: String) {
+        setNetConn(netId) { it.copy(regState = RegState()) }
+    }
+
+    /** draft/account-registration: send a REGISTER for the guided dialog. */
+    fun registerAccount(netId: String, account: String, email: String, password: String) {
+        viewModelScope.launch {
+            runCatching { runtimes[netId]?.client?.sendRegister(account, email, password) }
+        }
+    }
+
+    /** draft/account-registration: send a VERIFY for the guided dialog. */
+    fun verifyAccount(netId: String, account: String, code: String) {
+        viewModelScope.launch {
+            runCatching { runtimes[netId]?.client?.sendVerify(account, code) }
+        }
+    }
+
+    /**
+     * After a successful REGISTER, optionally persist the password so SASL logs the
+     * user in automatically next connect. Writes the encrypted SecretStore entry and
+     * flips the profile to SASL PLAIN with [account] as the authcid. Opt-in only,
+     * driven by an explicit checkbox in the dialog.
+     */
+    fun saveSaslCredentialsAfterRegister(netId: String, account: String, password: String) {
+        viewModelScope.launch {
+            runCatching {
+                repo.secretStore.setSaslPassword(netId, password)
+                repo.updateNetworkProfile(netId) { p ->
+                    p.copy(
+                        saslEnabled = true,
+                        saslMechanism = SaslMechanism.PLAIN,
+                        saslAuthcid = account.takeIf { it.isNotBlank() } ?: p.saslAuthcid,
+                    )
+                }
+            }
+        }
+    }
+
+    /** True when an unexpired IRCv3 STS policy is stored for [host]. */
+    fun hasActiveStsPolicy(host: String): Boolean {
+        val key = host.trim().lowercase()
+        if (key.isBlank()) return false
+        return stsPolicies[key]?.isActive(System.currentTimeMillis()) == true
+    }
+
+    /**
+     * User-requested escape hatch: forget the stored STS policy for [host], e.g.
+     * when a server published a policy and then moved or broke its TLS listener
+     * before the policy expired. The next connection follows the profile settings
+     * again (and will simply re-learn the policy if the server still advertises it).
+     */
+    fun clearStsPolicy(host: String) {
+        val key = host.trim().lowercase()
+        if (stsPolicies.remove(key) != null) {
+            persistStsPolicies()
+        }
     }
 
     // Sharing
@@ -10927,7 +11548,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }
-            val toLaunch = (if (asChooser) Intent.createChooser(base, "Open with") else base)
+            val toLaunch = (if (asChooser) Intent.createChooser(base, appContext.getString(R.string.vm_open_with)) else base)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             return try {
                 appContext.startActivity(toLaunch)
@@ -10954,7 +11575,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             runCatching {
                 android.widget.Toast.makeText(
-                    appContext, "Couldn't open this file", android.widget.Toast.LENGTH_SHORT
+                    appContext, appContext.getString(R.string.vm_file_cannot_open), android.widget.Toast.LENGTH_SHORT
                 ).show()
             }
         }

@@ -57,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
@@ -73,7 +74,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.boxlabs.hexdroid.script.ScriptView
 import com.boxlabs.hexdroid.script.ViewProps
-import kotlin.math.cos
+import com.boxlabs.hexdroid.script.ringOffsets
+import com.boxlabs.hexdroid.script.stadiumRequiredRx
+import com.boxlabs.hexdroid.script.stadiumRequiredRy
+import com.boxlabs.hexdroid.ui.focusHighlight
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -123,44 +127,69 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
         }
 
         is ScriptView.Ring -> {
-            // Children are laid out on an ellipse: rx from `size`, ry = rx * ratio. `ratio` is a
-            // unitless multiplier (like `weight`), NOT a percentage: 1.0 (the default) is a true
-            // circle, 0.62 reproduces the old flattened ellipse. This used to be hardcoded to
-            // 0.62, which is why the
-            // poker seats collided: at 5+ players the left and right pods sat ~ry apart
-            // vertically while each pod was taller than that, so they stacked on each other.
+            // Children sit on the perimeter of an ellipse or, with the `stadium` flag, a
+            // capsule: ratio >= 1 is a vertical capsule (portrait poker table, seats flanking
+            // the sides), ratio < 1 a horizontal one (landscape/TV, seats across the top).
+            // Geometry lives in ringOffsets / stadiumRequiredRy / stadiumRequiredRx
+            // (HexView.kt, pure JVM) so it is unit-testable off-device. `ratio` is a unitless
+            // multiplier like `weight`, NOT a percentage: 1.0 (the default) is a true circle,
+            // 0.62 reproduces the old flattened ellipse.
+            //
+            // A child flagged `felt` is not a seat: it is sized by THIS layout to the exact
+            // path the seats sit on (2rx by 2ry) and centred, so seats straddle its rail by
+            // construction and the script never has to guess the felt's dimensions. In stadium
+            // mode the table also grows with the seat count so seats can never overlap.
             val ratio = (v.props.ratio ?: 1f).coerceIn(0.1f, 4f).toDouble()
+            val stadium = v.props.stadium
             val wantRxDp = ((v.props.sizeDp ?: 150) * s)
+            val feltIdx = v.children.indexOfFirst { it.props.felt }
             Layout(
                 content = { v.children.forEach { Render(it, onAction) } },
                 modifier = m,
             ) { measurables, constraints ->
-                // Measure children at their natural size. Passing our own constraints down would
-                // let a fill/weight child stretch to the ring's width and swallow the layout.
-                val placeables = measurables.map {
-                    it.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                // Measure SEAT children at their natural size. Passing our own constraints down
+                // would let a fill/weight child stretch to the ring's width and swallow the
+                // layout. The felt child is measured after the path size is known.
+                val seatPl = measurables.filterIndexed { i, _ -> i != feltIdx }
+                    .map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+                val childW = seatPl.maxOfOrNull { it.width } ?: 0
+                val childH = seatPl.maxOfOrNull { it.height } ?: 0
+                val nSeats = seatPl.size
+                // Shrink to fit rather than overflow a narrow screen; in stadium mode grow the
+                // long axis with the seat count instead.
+                val widthClamp = ((constraints.maxWidth - childW) / 2).coerceAtLeast(0).toDouble()
+                val rx: Double
+                val ry: Double
+                if (stadium && ratio < 1.0) {
+                    // horizontal capsule: ry fixed from the requested size, rx grows for seats
+                    ry = (wantRxDp.dp.toPx() * ratio).coerceAtLeast(childH / 2.0 + 4.0)
+                    rx = stadiumRequiredRx(nSeats, ry, wantRxDp.dp.toPx().toDouble(), childW.toDouble())
+                        .coerceAtMost(maxOf(widthClamp, ry))
+                } else if (stadium) {
+                    // vertical capsule: rx fits the width, ry grows for seats
+                    rx = minOf(wantRxDp.dp.toPx().toDouble(), widthClamp)
+                    ry = stadiumRequiredRy(nSeats, rx, rx * ratio, childH.toDouble())
+                } else {
+                    // legacy ellipse: unchanged
+                    rx = minOf(wantRxDp.dp.toPx().toDouble(), widthClamp)
+                    ry = rx * ratio
                 }
-                val childW = placeables.maxOfOrNull { it.width } ?: 0
-                val childH = placeables.maxOfOrNull { it.height } ?: 0
-                // Shrink to fit rather than overflow a narrow screen, and scale ry with it so a
-                // circle stays a circle instead of silently turning back into an ellipse.
-                val rx = minOf(
-                    wantRxDp.dp.roundToPx(),
-                    ((constraints.maxWidth - childW) / 2).coerceAtLeast(0),
-                )
-                val ry = (rx * ratio).roundToInt()
-                // Size to the content. Children are CENTRED on the ellipse, so half of the widest
-                // and tallest one hangs outside it on each side. The old code reserved a fixed
-                // 96dp for that, which clipped any child taller than 96.
-                val w = rx * 2 + childW
-                val h = ry * 2 + childH
+                val feltPl = if (feltIdx >= 0) measurables[feltIdx].measure(
+                    Constraints.fixed((rx * 2).roundToInt(), (ry * 2).roundToInt())
+                ) else null
+                // Size to the content: seats are CENTRED on the perimeter, so half of the
+                // widest and tallest one hangs outside it on each side. The old code reserved a
+                // fixed 96dp for that, which clipped any child taller than 96.
+                val w = (rx * 2).roundToInt() + childW
+                val h = (ry * 2).roundToInt() + childH
+                val offsets = ringOffsets(nSeats, rx, ry, stadium, childW.toDouble(), childH.toDouble())
                 layout(w, h) {
-                    val n = placeables.size.coerceAtLeast(1)
-                    placeables.forEachIndexed { i, p ->
-                        val a = Math.toRadians(90.0 + i * (360.0 / n))   // child 0 anchored at the bottom
+                    feltPl?.place(x = (w - feltPl.width) / 2, y = (h - feltPl.height) / 2)
+                    seatPl.forEachIndexed { i, p ->
+                        val (ox, oy) = offsets[i]
                         p.place(
-                            x = w / 2 + (cos(a) * rx).roundToInt() - p.width / 2,
-                            y = h / 2 + (sin(a) * ry).roundToInt() - p.height / 2,
+                            x = w / 2 + ox.roundToInt() - p.width / 2,
+                            y = h / 2 + oy.roundToInt() - p.height / 2,
                         )
                     }
                 }
@@ -200,7 +229,8 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
                 var bm = m
                 if (v.props.elevationDp > 0) bm = bm.shadow((v.props.elevationDp * s).dp, shape)
                 Box(
-                    bm.clip(shape).background(bg).clickable { onAction(v.actionId, v.args) }
+                    bm.focusHighlight(shape).clip(shape).background(bg)
+                        .clickable { onAction(v.actionId, v.args) }
                         .padding(horizontal = (12 * s).dp, vertical = (6 * s).dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -212,7 +242,7 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
                     )
                 }
             } else {
-                Button({ onAction(v.actionId, v.args) }, m) { Text(v.label) }
+                Button({ onAction(v.actionId, v.args) }, m.focusHighlight()) { Text(v.label) }
             }
         }
 

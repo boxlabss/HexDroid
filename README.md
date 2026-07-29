@@ -103,6 +103,8 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 | `standard-replies` | Structured FAIL/WARN/NOTE |
 | `utf8only` | Signals UTF-8 intent to server |
 | `draft/multiline` | When the server supports multiline for messages over 512 bytes |
+| `sts` | Strict Transport Security. A plaintext connection that is told to upgrade reconnects over TLS immediately; a TLS connection stores a per-host TLS-only policy that also disables the invalid-certificate override until it expires. Observed only, never requested. A stale policy can be cleared from network settings |
+| `draft/extended-isupport` | Fetches the `ISUPPORT` list before registration completes, so server limits and tokens are known before the first message is sent. Token withdrawals (`-KEY`) are honoured |
 
 </details>
 
@@ -111,7 +113,7 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 
 | Cap | Notes |
 |---|---|
-| `chathistory` / `draft/chathistory` | Replay on join; BEFORE paging on scroll-to-top; LATEST for unread catch-up |
+| `chathistory` / `draft/chathistory` | Replay on join; BEFORE paging on scroll-to-top; LATEST for unread catch-up. Request sizes respect the server's `CHATHISTORY` limit, and selectors fall back to a supported reference type per `MSGREFTYPES` |
 | `draft/event-playback` | JOIN/PART/MODE events included in history batches |
 | `draft/read-marker` / `soju.im/read` | Read pointer sync; drives the unread separator line |
 
@@ -122,7 +124,7 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 
 | Cap | Notes |
 |---|---|
-| `away-notify` | `* nick is now away` / `* nick is back` in every shared channel; initial away state seeded from WHOX flags on join |
+| `away-notify` | `* nick is now away` / `* nick is back` in every shared channel; away users are dimmed in the member list; initial away state seeded from WHOX flags on join |
 | `account-notify` | Services login/logout notifications |
 | `extended-join` | JOIN line shows `[logged in as account]` for authenticated users |
 | `chghost` | Live ident/hostname changes reflected in nicklist |
@@ -142,8 +144,14 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 |---|---|
 | `account-tag` | Sender account exposed on every PRIVMSG/NOTICE |
 | `draft/typing` / `typing` | Composing indicators; sending opt-in (off by default), receiving opt-out |
-| `draft/message-reactions` | Emoji reactions via TAGMSG `+draft/react`; displayed as status lines |
+| `draft/message-reactions` | Emoji reactions via TAGMSG `+draft/react`; displayed as status lines. Removal sends `+draft/unreact` and the older `+draft/react-removed` |
 | `+draft/reply` / `+reply` | Reply-to msgid threading; forwarded on PRIVMSG and NOTICE |
+| `draft/message-redaction` | Message deletion. Long-press one of your own messages > **Delete message**, or `/redact <msgid>`. Incoming redactions leave a tombstone rather than a hole. Applied only when the server relays the `REDACT` back, so a rejected delete never desyncs your view |
+| `draft/oper-tag` | Messages from IRC operators are marked with a star before the nick |
+| `bot` mode / tag | Users flagged as bots (the `BOT` ISUPPORT mode letter in WHO/WHOX, or the `bot` message tag) are badged `[bot]` in the member list, on their messages, and in the nick tap sheet |
+| `+draft/channel-context` | A private message sent from a channel's context is annotated with that channel |
+| `draft/metadata-2` | User and channel metadata. Subscribes to `display-name`, `avatar`, `color`, and `status`; the display name appears beside the nick, a `color` tints the nick, and tapping a nick shows their avatar and status. A metadata editor (overflow menu, or `/metadata`) sets your own keys. Deferred syncs are retried automatically |
+| `draft/account-registration` | A guided Register account dialog (or `/register` and `/verify`) creates and confirms a services account without NickServ syntax; the prompts adapt to what the server requires, with an option to save the password for SASL auto-login |
 | `draft/relaymsg` | Relay bot messages attributed to the relayed nick (off by default) |
 | `pre-away` / `draft/pre-away` | Sends AWAY before 001 so the session starts marked away when an away message is configured |
 
@@ -160,8 +168,12 @@ HexDroid negotiates a comprehensive set of capabilities. All are enabled by defa
 | `soju.im/no-implicit-names` / `draft/no-implicit-names` | Suppress auto-NAMES on JOIN (avoids flood on reconnect) |
 | `znc.in/server-time-iso` | Legacy ZNC < 1.7 timestamps |
 | `znc.in/playback` | ZNC *playback module for missed-message replay |
+| `soju.im/FILEHOST` / `draft/FILEHOST` | File uploads. An ISUPPORT token; when the server offers an endpoint an attach button appears in the input, and the returned URL is placed in your message ready to send |
+| `draft/icon` | Server-supplied icon (`ICON` / `draft/ICON` ISUPPORT token) shown next to the network name on the Networks screen, in the sidebar, and in the network switcher. Server-supplied images (network icons and metadata avatars) are only fetched when media previews are enabled, only over HTTPS, and never on a proxied profile. |
 
 </details>
+
+HexDroid also acts on a range of `ISUPPORT` tokens beyond the caps above: `CHATHISTORY` and `MSGREFTYPES` shape history requests; `TOPICLEN` / `AWAYLEN` / `QUITLEN` / `KICKLEN` trim over-long topic, away, quit, and kick text to the server's limit before sending; `CHANLIMIT` enriches the "too many channels" error; `KNOCK` enables `/knock`; and `BOT` identifies bot users.
 
 ### Character Encoding
 

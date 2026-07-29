@@ -45,9 +45,19 @@ sealed class IrcAction {
      * can halt auto-reconnect (see authBlockedReconnect).
      */
     data class EmitAuthFailed(val reason: String) : IrcAction()
+    /**
+     * IRCv3 STS: the `sts` capability value was observed in CAP LS or CAP NEW.
+     * The cap is never REQ'd; [port] matters on insecure connections (TLS upgrade
+     * target), [durationSec] on secure connections (policy persistence; 0 = delete).
+     */
+    data class EmitSts(val port: Int?, val durationSec: Long?, val preload: Boolean) : IrcAction()
 }
 
 class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
+    /** Localized string lookup, set by IrcClient after construction. */
+    var strings: StringLookup? = null
+    /** Resolve a localized string resource with optional format args. */
+    private fun tr(id: Int, vararg args: Any?): String = strings?.invoke(id, args) ?: ""
     private var capLsDone = false
     private var capEnded = false
 
@@ -70,6 +80,72 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     private val serverCaps = mutableSetOf<String>()
     private val enabledCaps = mutableSetOf<String>()
 
+    /**
+     * True once EmitSts has been produced from CAP LS for this session, so a multi-line
+     * LS carrying `sts` on an early chunk doesn't emit again on a later chunk. CAP NEW
+     * deliberately bypasses this - a post-registration sts announcement is a fresh signal.
+     */
+    private var stsSignalled = false
+
+    /**
+     * Raw capability values from CAP LS / CAP NEW (name lowercased, value verbatim,
+     * null for valueless caps). Some caps are pure signals whose VALUE carries the
+     * configuration - sts (handled separately), sasl mechanism lists, and
+     * draft/account-registration's flags (before-connect, email-required,
+     * custom-account-name). Exposed via [capValue] for the command layer.
+     */
+    private val capValues = mutableMapOf<String, String?>()
+
+    /** True once the ISUPPORT request for draft/extended-isupport has been sent (ACKs arrive chunked). */
+    private var isupportRequested = false
+
+    /**
+     * True once RPL_WELCOME (001) has been seen, set via [markRegistered] from the
+     * core's 001 handler. Lets the CAP handling tell "before registration" from
+     * "after": a draft/metadata-2 that arrives via CAP NEW post-registration can be
+     * subscribed to immediately (before-connect only governs METADATA sent *during*
+     * registration).
+     */
+    private var registered = false
+
+    /** Called when RPL_WELCOME arrives, so post-registration CAP handling behaves. */
+    fun markRegistered() { registered = true }
+
+    /** True once the initial draft/metadata-2 key subscription has been sent (ACKs arrive chunked). */
+    private var metadataSubSent = false
+
+    /**
+     * Returns the initial draft/metadata-2 subscription line the first time it is
+     * needed, or null if the cap is not enabled or the subscription already went out.
+     * Self-guarding so both callers (CAP ACK when the server allows metadata during
+     * registration, and RPL_WELCOME otherwise) can call it unconditionally.
+     *
+     * Keys are sent in preference order: the spec processes them in order and stops
+     * at the subscription limit, so the most useful key must come first.
+     */
+    fun takeMetadataSubLine(): String? {
+        if (metadataSubSent) return null
+        if (!enabledCaps.contains("draft/metadata-2")) return null
+        metadataSubSent = true
+        // Keys we actually render, in preference order. The server stops at the
+        // max-subs limit, so the most visible keys lead: display-name and avatar,
+        // then colour and status, then the tap-sheet extras. bio trails since it's
+        // the largest and least essential.
+        return "METADATA * SUB display-name avatar color status pronouns homepage bio"
+    }
+
+    /**
+     * True when the server's draft/metadata-2 value carries the `before-connect`
+     * token, i.e. it accepts METADATA commands during connection registration.
+     * Without it the spec only permits METADATA after registration completes.
+     */
+    fun metadataBeforeConnect(): Boolean =
+        (capValues["draft/metadata-2"] ?: "")
+            .split(',')
+            .any { it.trim().substringBefore('=').lowercase() == "before-connect" }
+
+    fun capValue(name: String): String? = capValues[name.lowercase()]
+
     fun hasCap(name: String): Boolean = enabledCaps.contains(name)
     private var scram: ScramSha256Client? = null
 
@@ -89,13 +165,36 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 .map { it.substringBefore('=') }
                 .map { it.lowercase() })
 
+            // Record cap values (sasl mech lists, account-registration flags, etc).
+            for (tok in capsPart.split(' ')) {
+                val t = tok.trim()
+                if (t.isEmpty()) continue
+                capValues[t.substringBefore('=').lowercase()] =
+                    if (t.contains('=')) t.substringAfter('=') else null
+            }
+
+            // IRCv3 STS: `sts` always carries a value and must never be REQ'd - just
+            // observe it. Any LS chunk may carry it; emit once per session.
+            // parseStsCapValue returns null for a valueless or invalid sts, which the
+            // spec says to ignore.
+            if (!stsSignalled) {
+                val stsRaw = capsPart.split(' ')
+                    .map { it.trim() }
+                    .firstOrNull { it.substringBefore('=').lowercase() == "sts" }
+                    ?.let { if (it.contains('=')) it.substringAfter('=') else null }
+                parseStsCapValue(stsRaw)?.let { v ->
+                    stsSignalled = true
+                    out += IrcAction.EmitSts(v.port, v.durationSec, v.preload)
+                }
+            }
+
             // CAP LS multi-line: the continuation marker "*" is params[2] (after client-nick and "LS").
             // Using drop(2).any{} would match the client-nick "*" during pre-registration and
             // stall cap negotiation forever on some servers.
             val isContinuation = m.params.getOrNull(2) == "*"
             if (!isContinuation && !capLsDone) {
                 capLsDone = true
-                out += IrcAction.EmitStatus("Server CAP LS complete")
+                out += IrcAction.EmitStatus(tr(R.string.session_cap_ls_complete))
                 val chunks = buildCapReqChunks()
                 if (chunks.isEmpty()) {
                     // Nothing to request - end cap negotiation immediately.
@@ -116,7 +215,23 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 .map { it.trim().substringBefore('=').lowercase() }
                 .filter { it.isNotBlank() }
             serverCaps.addAll(newCaps)
-            out += IrcAction.EmitStatus("CAP NEW: ${newCaps.joinToString(" ")}")
+            // Record/refresh cap values from CAP NEW too.
+            for (tok in (m.allParams.getOrNull(2) ?: "").split(' ')) {
+                val t = tok.trim()
+                if (t.isEmpty()) continue
+                capValues[t.substringBefore('=').lowercase()] =
+                    if (t.contains('=')) t.substringAfter('=') else null
+            }
+            // STS can also arrive via CAP NEW on a live connection (e.g. a secure
+            // connection announcing or refreshing its policy after a services sync).
+            val stsRawNew = (m.allParams.getOrNull(2) ?: "").split(' ')
+                .map { it.trim() }
+                .firstOrNull { it.substringBefore('=').lowercase() == "sts" }
+                ?.let { if (it.contains('=')) it.substringAfter('=') else null }
+            parseStsCapValue(stsRawNew)?.let { v ->
+                out += IrcAction.EmitSts(v.port, v.durationSec, v.preload)
+            }
+            out += IrcAction.EmitStatus(tr(R.string.session_cap_new, newCaps.joinToString(" ")))
             out += IrcAction.EmitCapNew(newCaps)
             val want = buildCapReqList().filter { newCaps.contains(it) && !enabledCaps.contains(it) }
             // CAP NEW is post-registration; we don't send CAP END and the list is small enough
@@ -132,7 +247,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 .filter { it.isNotBlank() }
             serverCaps.removeAll(delCaps.toSet())
             enabledCaps.removeAll(delCaps.toSet())
-            out += IrcAction.EmitStatus("CAP DEL: ${delCaps.joinToString(" ")}")
+            out += IrcAction.EmitStatus(tr(R.string.session_cap_del, delCaps.joinToString(" ")))
             out += IrcAction.EmitCapDel(delCaps)
             return out
         }
@@ -144,14 +259,35 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 .map { it.substringBefore('=') }
                 .map { it.lowercase() }
             enabledCaps.addAll(ack)
-            out += IrcAction.EmitStatus("CAP ACK: ${ack.joinToString(" ")}")
+            out += IrcAction.EmitStatus(tr(R.string.session_cap_ack, ack.joinToString(" ")))
 
             // Decrement pending count; only proceed when all chunks are resolved.
             if (pendingCapReqs > 0) pendingCapReqs--
 
+            // draft/extended-isupport: once enabled, ask for the full RPL_ISUPPORT list
+            // right away so tokens (CLIENTTAGDENY, FILEHOST, NETWORK, ...) are known
+            // before registration completes. The reply is plain 005s (in a
+            // draft/isupport batch when batch is also enabled), which flow through the
+            // normal ISUPPORT handling; the pre-registration form uses "*" as the
+            // client parameter, which the 005 parser already skips.
+            if (!isupportRequested && enabledCaps.contains("draft/extended-isupport")) {
+                isupportRequested = true
+                out += IrcAction.Send("ISUPPORT")
+            }
+
+            // draft/metadata-2: subscribe to the keys this client actually renders.
+            // During registration this is only permitted when the server advertised
+            // `before-connect`; otherwise the subscription is deferred to RPL_WELCOME
+            // (see the "001" numeric handler). Once registered, METADATA is always
+            // allowed, so a cap enabled later via CAP NEW subscribes here regardless.
+            // "*" is the required self-target before a nick has been assigned.
+            if (metadataBeforeConnect() || registered) {
+                takeMetadataSubLine()?.let { out += IrcAction.Send(it) }
+            }
+
             if (wantSasl && enabledCaps.contains("sasl") && !saslInProgress && !saslDone) {
                 saslInProgress = true
-                out += IrcAction.EmitStatus("Starting SASL…")
+                out += IrcAction.EmitStatus(tr(R.string.session_starting_sasl))
                 out += IrcAction.Send(startSasl())
                 return out
             }
@@ -164,7 +300,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         }
 
         if (m.command == "CAP" && m.params.getOrNull(1) == "NAK") {
-            out += IrcAction.EmitError("CAP NAK: ${m.allParams.getOrNull(2) ?: ""}")
+            out += IrcAction.EmitError(tr(R.string.session_cap_nak, m.allParams.getOrNull(2) ?: ""))
             if (pendingCapReqs > 0) pendingCapReqs--
             if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
             return out
@@ -173,7 +309,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         when (m.command) {
             "903" -> {
                 saslDone = true; saslInProgress = false
-                out += IrcAction.EmitStatus("SASL authentication succeeded")
+                out += IrcAction.EmitStatus(tr(R.string.session_sasl_success))
                 if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
                 return out
             }
@@ -332,13 +468,19 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         if (config.capPrefs.channelRename) req += "draft/channel-rename"
 
         // draft/extended-monitor: richer MONONLINE replies with account + realname.
-        if (config.capPrefs.extendedMonitor) req += "draft/extended-monitor"
+        if (config.capPrefs.extendedMonitor) {
+            req += "draft/extended-monitor"
+            req += "extended-monitor"        // graduated: registry lists the bare name
+        }
 
         // draft/message-reactions: TAGMSG +draft/react emoji reactions.
         if (config.capPrefs.messageReactions) req += "draft/message-reactions"
 
         // draft/no-implicit-names: generic graduated form (not just soju).
-        if (config.capPrefs.noImplicitNames) req += "draft/no-implicit-names"
+        if (config.capPrefs.noImplicitNames) {
+            req += "draft/no-implicit-names"
+            req += "no-implicit-names"       // graduated: registry lists the bare name
+        }
 
         // multiline: receive messages longer than 512 bytes / containing line breaks
         // as a single grouped BATCH. Request both the draft and the (forward-compat)
@@ -346,6 +488,27 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         // version MUST use the draft/ prefix; the graduated name will be used once
         // the spec finalizes. Requesting both means the cap negotiates against
         // whichever form the server advertises today.
+        // draft/metadata-2: user/channel key-value metadata (display names, avatars).
+        // The spec REQUIRES the batch capability, and forbids requesting metadata-notify
+        // alongside it (hexdroid never requests the deprecated metadata-notify at all).
+        // Draft name only, same MUST NOT-unprefixed clause as the other WIP specs.
+        if (config.capPrefs.metadata2 && config.capPrefs.batch) req += "draft/metadata-2"
+
+        // draft/extended-isupport: ISUPPORT metadata before registration completes.
+        // Its spec also carries the MUST NOT-use-unprefixed-name clause, so only the
+        // draft form is requested.
+        if (config.capPrefs.extendedIsupport) req += "draft/extended-isupport"
+
+        // draft/account-registration: unlike most drafts here, its spec explicitly says
+        // implementations MUST NOT use the unprefixed name while work-in-progress, so
+        // only the draft form is requested (no forward-compat bare REQ).
+        if (config.capPrefs.accountRegistration) req += "draft/account-registration"
+
+        if (config.capPrefs.messageRedaction) {
+            req += "draft/message-redaction"
+            req += "message-redaction"       // forward-compat with eventual ratification
+        }
+
         if (config.capPrefs.multiline) {
             req += "draft/multiline"
             req += "multiline"
@@ -430,7 +593,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.PLAIN -> when (serverPayload) {
                 "+" -> {
                     if (!config.useTls) {
-                        out += IrcAction.EmitError("SASL PLAIN aborted: refusing to send password over an unencrypted connection. Enable TLS or switch to SCRAM-SHA-256.")
+                        out += IrcAction.EmitError(tr(R.string.session_sasl_plain_no_tls))
                         out += IrcAction.Send("AUTHENTICATE *")
                         // Abort locally so CAP END is still sent even if the server
                         // doesn't reply with 906 (the spec says it SHOULD; not all do).
@@ -444,7 +607,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     // "SASL: Authentication failed" the server returns. Common trigger: backup
                     // restore on a fresh install (secrets don't survive uninstall by design).
                     if (s.password.isNullOrEmpty()) {
-                        out += IrcAction.EmitError("SASL PLAIN aborted: no password set for this profile. Open Network Settings and re-enter the SASL password (passwords are not included in backups for security reasons).")
+                        out += IrcAction.EmitError(tr(R.string.session_sasl_plain_no_pw))
                         out += IrcAction.Send("AUTHENTICATE *")
                         saslAbort(out)
                         return out
@@ -485,14 +648,14 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 }
                 "*" -> {
                     // Server aborted the exchange.
-                    out += IrcAction.EmitError("SASL PLAIN: server aborted authentication")
+                    out += IrcAction.EmitError(tr(R.string.session_sasl_plain_aborted))
                     saslAbort(out)
                 }
                 else -> {
                     // PLAIN is a single-round mechanism; the server should only send "+"
                     // or a numeric. Any other payload is unexpected. abort cleanly so
                     // CAP END is still sent and the connection does not stall.
-                    out += IrcAction.EmitError("SASL PLAIN: unexpected server challenge \"$serverPayload\", aborting")
+                    out += IrcAction.EmitError(tr(R.string.session_sasl_plain_unexpected, serverPayload))
                     out += IrcAction.Send("AUTHENTICATE *")
                     saslAbort(out)
                 }
@@ -500,11 +663,11 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.EXTERNAL -> when (serverPayload) {
                 "+" -> out += IrcAction.Send("AUTHENTICATE +")
                 "*" -> {
-                    out += IrcAction.EmitError("SASL EXTERNAL: server aborted authentication")
+                    out += IrcAction.EmitError(tr(R.string.session_sasl_external_aborted))
                     saslAbort(out)
                 }
                 else -> {
-                    out += IrcAction.EmitError("SASL EXTERNAL: unexpected server challenge \"$serverPayload\", aborting")
+                    out += IrcAction.EmitError(tr(R.string.session_sasl_external_unexpected, serverPayload))
                     out += IrcAction.Send("AUTHENTICATE *")
                     saslAbort(out)
                 }
@@ -530,7 +693,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     // and read the diagnostic.
                     val pass = s.password
                     if (pass.isNullOrEmpty()) {
-                        out += IrcAction.EmitError("SASL SCRAM-SHA-256 aborted: no password set for this profile. Open Network Settings and re-enter the SASL password (passwords are not included in backups for security reasons).")
+                        out += IrcAction.EmitError(tr(R.string.session_sasl_scram_no_pw))
                         out += IrcAction.Send("AUTHENTICATE *")
                         saslAbort(out)
                         return out
@@ -558,7 +721,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 val decoded = try {
                     String(Base64.decode(fullB64, Base64.DEFAULT), Charsets.UTF_8)
                 } catch (_: Throwable) {
-                    out += IrcAction.EmitError("SASL: could not decode server AUTHENTICATE payload")
+                    out += IrcAction.EmitError(tr(R.string.session_sasl_decode_fail))
                     out += IrcAction.Send("AUTHENTICATE *")
                     // Defensive abort: server SHOULD reply with 904/906 after our `*` but
                     // some implementations stall instead. Force-end CAP locally.
@@ -566,7 +729,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     return out
                 }
 
-                val sc = scram ?: return listOf(IrcAction.EmitError("SCRAM state missing"))
+                val sc = scram ?: return listOf(IrcAction.EmitError(tr(R.string.session_scram_state_missing)))
                 // Defensive try/catch around the SCRAM state machine: hi() can throw
                 // IllegalArgumentException on degenerate inputs (empty password — which
                 // the pre-flight above already filters, but belt-and-braces), and
@@ -578,7 +741,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 val next = try {
                     sc.onServerMessage(decoded)
                 } catch (t: Throwable) {
-                    out += IrcAction.EmitError("SASL SCRAM-SHA-256 aborted: ${t.message ?: t.javaClass.simpleName}")
+                    out += IrcAction.EmitError(tr(R.string.session_sasl_scram_aborted, t.message ?: t.javaClass.simpleName))
                     out += IrcAction.Send("AUTHENTICATE *")
                     saslAbort(out)
                     return out
@@ -593,13 +756,13 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         // The server will follow up with numeric 903, which is what sets
                         // saslDone = true and sends CAP END. If 903 never arrives (broken
                         // server), the SASL timeout watchdog will abort the connection.
-                        out += IrcAction.EmitStatus("SCRAM: server signature verified")
+                        out += IrcAction.EmitStatus(tr(R.string.session_scram_sig_verified))
                     } else {
                         // Server signature verification failed (or server sent an "e=" error).
                         // Abort so the server doesn't hang waiting for our client-final, and
                         // also abort locally in case the server itself stalls waiting for our
                         // next AUTHENTICATE rather than responding with 904.
-                        out += IrcAction.EmitError("SCRAM server signature verification failed")
+                        out += IrcAction.EmitError(tr(R.string.session_scram_sig_failed))
                         out += IrcAction.Send("AUTHENTICATE *")
                         saslAbort(out)
                     }

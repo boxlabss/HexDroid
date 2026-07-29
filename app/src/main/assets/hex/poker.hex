@@ -1186,6 +1186,15 @@ on SIGNAL:poker_newgame {
 ; The view DSL supports if/elseif/else + foreach, so the table is state-aware.
 ; Multi-word dynamic text is quoted ("…") so it survives as a single label.
 ; ============================================================================
+; The host fires this when the device rotates while our view is mounted: re-render so the
+; table swaps between the portrait stadium and the landscape/TV ring immediately instead of
+; waiting for the next game action to repaint. Guard on %closed == 0 exactly: unset (never
+; opened) expands to "", so a rotation before the first poker_open cannot pop the table, and
+; poker_render's own %closed == 1 latch covers the closed-with-X case.
+on SIGNAL:screenchange {
+  if (%closed == 0) { poker_render }
+}
+
 alias poker_render {
   ; The table was closed with the X. Inbound state/deltas, clock ticks and bot steps all render, so
   ; without this latch any of them would pop the table straight back open. Re-opening from the
@@ -1370,24 +1379,30 @@ alias poker_render {
   set %ringseats $list()
   if (%seated == 1) { push %ringseats %me }
   foreach %fp %topseats { push %ringseats %fp }
-  ; TUNE ON DEVICE: the ring the seats sit on, and the felt it encircles.
-  ;
-  ; The ring is now a true circle by default (ScriptView.Ring: ry = size * ratio, a unitless
-  ; multiplier like `weight` that defaults to 1.0). It used to be hardcoded to a 0.62 squash,
-  ; which is what made the seats collide: at 5+ players the left and right pods sat only ~ry apart
-  ; vertically while a pod is taller than that, so they piled onto each other. Circular spaces
-  ; them out to 6 players.
-  ;
-  ; Rule for the felt: a seat pod is CENTRED on the ring, so it covers the felt if the felt reaches
-  ; past (ringr - podsize/2). Pods run about 66 wide and 118 tall, so with ringr 132 keep the felt
-  ; inside roughly 198 wide and 146 tall. Add `ratio <mult>` to the ring below to flatten it again
-  ; if the circle eats too much height (ratio 0.62 is exactly the old look; whole numbers like 62
-  ; are NOT percentages and get clamped to the renderer maximum of 4.0).
-  set %ringr 132
-  set %feltw 170
-  set %felth 140
-  ; TUNE ON DEVICE: compact square felt size in px. Larger = more felt, less room for seats.
-  set %feltsz 188
+  ; ---- orientation-aware table geometry. TUNE ON DEVICE. --------------------------------------
+  ; One layout, two axes: the seats sit on the perimeter of a CAPSULE (stadium), and the ratio
+  ; picks the axis. Portrait: vertical, you on the bottom cap, opponents up the straight sides.
+  ; Landscape / TV: horizontal, opponents across the top edge facing you. The renderer grows
+  ; the table with the seat count so seats can never overlap, and it sizes the felt to the
+  ; exact seat path, so every pod straddles the rail: players AT the table, not floating above.
+  set %land $screen.landscape
+  if (%land == 1) {
+    ; landscape / TV: horizontal capsule (ratio < 1 picks the axis), opponents across the top
+    ; edge facing you. The radius scales with the screen so a 16:9 TV gets a proper wide table.
+    set %ringr $int($calc(($screen.width - 400) / 2))
+    if (%ringr > 260) { set %ringr 260 }
+    if (%ringr < 130) { set %ringr 130 }
+    set %ringratio 0.5
+  }
+  else {
+    ; portrait: vertical capsule (ratio >= 1), you on the bottom cap, opponents flanking the
+    ; straight sides with an odd opponent at the top apex.
+    set %ringr 92
+    set %ringratio 1.4
+  }
+  ; The felt is the ring child flagged `felt` below: the RENDERER sizes it to the exact seat
+  ; path (and grows the table with the seat count), so nothing here needs to mirror renderer
+  ; geometry. The huge corner radius clamps to a capsule in either orientation.
 
   view {
     surface gradient linear:#1e2138:#0a0c18 bg #0a0c18 pad 7 {
@@ -1416,7 +1431,11 @@ alias poker_render {
             ; its rim (you at the bottom). Replaces the old opponents-across-the-top strip, which read
             ; as a list of avatars rather than a table.
             stack align center {
-              surface ellipse gradient radial:#2c9c6a:#0f4a37 bg #12633f border #0a3327 5 elevation 6 width %feltw height %felth {
+              ring size %ringr ratio %ringratio stadium {
+              ; Felt first, flagged `felt`: the renderer sizes it to the exact path the seats
+              ; sit on, so every pod straddles the rail with half its avatar on the felt -
+              ; players AT the table, not floating above it.
+              surface felt radius 999 gradient radial:#2c9c6a:#0f4a37 bg #12633f border #0a3327 5 elevation 6 {
                 column align center gap 5 fill {
                   spacer weight 1
                   surface bg #0b2418 radius 14 pad 5 border #2f7d54 1 elevation 3 {
@@ -1441,7 +1460,6 @@ alias poker_render {
                   spacer weight 1
                 }
               }
-              ring size %ringr {
                 foreach %fp %ringseats {
                   column align center gap 2 {
                     stack {

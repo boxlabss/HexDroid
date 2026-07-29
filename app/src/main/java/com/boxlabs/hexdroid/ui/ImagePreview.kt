@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -68,9 +69,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import com.boxlabs.hexdroid.R
 
 // Twitter / X
-
 private val twitterRegex = Regex(
     """(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/([A-Za-z0-9_]{1,50})/status/(\d{1,20})"""
 )
@@ -350,7 +351,7 @@ private val previewStateSaver = Saver<PreviewState, String>(
     }},
     restore = { saved -> when (saved) {
         "ready"  -> PreviewState.Loading // trigger a re-fetch; loadRequested will be true
-        "failed" -> PreviewState.Failed("Failed to load preview")
+        "failed" -> PreviewState.Failed("Failed to load preview")  // transient; re-fetch overwrites it
         else     -> PreviewState.Idle
     }}
 )
@@ -394,7 +395,7 @@ private fun YouTubePlayer(videoId: String, onClose: () -> Unit) {
         ) {
             Icon(
                 imageVector        = Icons.Default.Close,
-                contentDescription = "Close player",
+                contentDescription = stringResource(R.string.img_close_player),
                 tint               = Color.White,
                 modifier           = Modifier.size(18.dp),
             )
@@ -468,7 +469,7 @@ private fun TwitterVideoPlayer(videoUrl: String, onClose: () -> Unit) {
         ) {
             Icon(
                 imageVector        = Icons.Default.Close,
-                contentDescription = "Close player",
+                contentDescription = stringResource(R.string.img_close_player),
                 tint               = Color.White,
                 modifier           = Modifier.size(18.dp),
             )
@@ -599,7 +600,7 @@ fun InlinePreview(
         if (!loadRequested) return@LaunchedEffect
         if (state is PreviewState.Ready) return@LaunchedEffect
         if (wifiOnly && !isOnWifi(context)) {
-            state = PreviewState.Failed("Wi-Fi only – connect to Wi-Fi")
+            state = PreviewState.Failed(context.getString(R.string.img_wifi_only))
             return@LaunchedEffect
         }
 
@@ -611,15 +612,15 @@ fun InlinePreview(
                     is FetchResult.Success -> state = PreviewState.Ready(
                         bitmap = result.bitmap, isYouTube = true, videoId = youtubeId
                     )
-                    FetchResult.TooLarge -> state = PreviewState.Failed("Preview too large (max 5 MB)")
-                    FetchResult.Error    -> state = PreviewState.Failed("Failed to load preview")
+                    FetchResult.TooLarge -> state = PreviewState.Failed(context.getString(R.string.img_too_large))
+                    FetchResult.Error    -> state = PreviewState.Failed(context.getString(R.string.img_failed_load))
                 }
             }
             twitterData != null -> {
                 val meta = fetchTwitterMeta(twitterData, context)
                 if (meta == null) {
                     // Text-only tweet or API failure — nothing to show.
-                    state = PreviewState.Failed("No media in this tweet")
+                    state = PreviewState.Failed(context.getString(R.string.img_no_media))
                 } else {
                     when (val result = fetchBitmap(meta.thumbnailUrl, context)) {
                         is FetchResult.Success -> state = PreviewState.Ready(
@@ -628,8 +629,8 @@ fun InlinePreview(
                             twitterUrl = meta.tweetUrl,
                             twitterVideoUrl = meta.videoUrl,
                         )
-                        FetchResult.TooLarge -> state = PreviewState.Failed("Preview too large (max 5 MB)")
-                        FetchResult.Error    -> state = PreviewState.Failed("Failed to load preview")
+                        FetchResult.TooLarge -> state = PreviewState.Failed(context.getString(R.string.img_too_large))
+                        FetchResult.Error    -> state = PreviewState.Failed(context.getString(R.string.img_failed_load))
                     }
                 }
             }
@@ -640,8 +641,8 @@ fun InlinePreview(
                         rawBytes = result.rawBytes,
                         isGif = result.isGif,
                     )
-                    FetchResult.TooLarge   -> state = PreviewState.Failed("Preview too large (max 5 MB)")
-                    FetchResult.Error      -> state = PreviewState.Failed("Failed to load preview")
+                    FetchResult.TooLarge   -> state = PreviewState.Failed(context.getString(R.string.img_too_large))
+                    FetchResult.Error      -> state = PreviewState.Failed(context.getString(R.string.img_failed_load))
                 }
             }
         }
@@ -664,7 +665,7 @@ fun InlinePreview(
                 androidx.compose.material3.Text(
                     text = when {
                         s is PreviewState.Failed -> s.message
-                        else -> "Load preview"
+                        else -> stringResource(R.string.img_load_preview)
                     },
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -739,9 +740,9 @@ fun InlinePreview(
                             Image(
                                 bitmap             = s.bitmap.asImageBitmap(),
                                 contentDescription = when {
-                                    s.isYouTube      -> "YouTube thumbnail"
-                                    s.isTwitterVideo -> "Twitter/X video thumbnail"
-                                    else             -> "Image preview"
+                                    s.isYouTube      -> stringResource(R.string.img_youtube_thumb)
+                                    s.isTwitterVideo -> stringResource(R.string.img_twitter_video_thumb)
+                                    else             -> stringResource(R.string.img_preview)
                                 },
                                 contentScale = ContentScale.Crop,
                                 modifier     = Modifier.fillMaxWidth().heightIn(max = 240.dp),
@@ -750,7 +751,7 @@ fun InlinePreview(
                         if (hasPlayOverlay) {
                             Icon(
                                 imageVector        = Icons.Default.PlayCircleOutline,
-                                contentDescription = if (s.isYouTube || s.twitterVideoUrl != null) "Play video" else "Open tweet video",
+                                contentDescription = if (s.isYouTube || s.twitterVideoUrl != null) stringResource(R.string.img_play_video) else stringResource(R.string.img_open_tweet_video),
                                 tint               = Color.White,
                                 modifier           = Modifier
                                     .size(64.dp)
@@ -767,7 +768,7 @@ fun InlinePreview(
                         ) {
                             Icon(
                                 imageVector        = Icons.Default.Close,
-                                contentDescription = "Dismiss preview",
+                                contentDescription = stringResource(R.string.img_dismiss_preview),
                                 tint               = Color.White,
                                 modifier           = Modifier.size(14.dp),
                             )

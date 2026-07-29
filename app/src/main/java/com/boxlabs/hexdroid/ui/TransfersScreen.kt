@@ -123,7 +123,7 @@ fun TransfersScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.transfers_title)) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←") } }
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.focusHighlight()) { Text("←") } }
             )
         }
     ) { padding ->
@@ -137,7 +137,7 @@ fun TransfersScreen(
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(stringResource(R.string.transfers_enable_dcc))
-                    Switch(checked = state.settings.dccEnabled, onCheckedChange = { onSetDccEnabled(it) }, modifier = Modifier.tourTarget(TourTarget.TRANSFERS_ENABLE_DCC))
+                    Switch(checked = state.settings.dccEnabled, onCheckedChange = { onSetDccEnabled(it) }, modifier = Modifier.tourTarget(TourTarget.TRANSFERS_ENABLE_DCC).focusHighlight(RoundedCornerShape(16.dp)))
                 }
             }
 
@@ -152,7 +152,7 @@ fun TransfersScreen(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(stringResource(R.string.transfers_dcc_send_mode))
                         Box {
-                            OutlinedButton(onClick = { modeMenu = true }) {
+                            OutlinedButton(onClick = { modeMenu = true }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                 Text(state.settings.dccSendMode.name.lowercase().replaceFirstChar { it.titlecase() })
                             }
                             DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
@@ -198,7 +198,7 @@ fun TransfersScreen(
                 Button(
                     onClick = { picker.launch(arrayOf("*/*")) },
                     enabled = state.settings.dccEnabled && target.trim().isNotBlank(),
-                    modifier = Modifier.tourTarget(TourTarget.TRANSFERS_PICK_FILE)
+                    modifier = Modifier.tourTarget(TourTarget.TRANSFERS_PICK_FILE).focusHighlight(RoundedCornerShape(50))
                 ) { Text(stringResource(R.string.transfers_pick_file)) }
             }
 
@@ -219,7 +219,8 @@ fun TransfersScreen(
             item {
                 Button(
                     onClick = { onStartChat(chatTarget.trim()) },
-                    enabled = state.settings.dccEnabled && chatTarget.trim().isNotBlank()
+                    enabled = state.settings.dccEnabled && chatTarget.trim().isNotBlank(),
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                 ) { Text(stringResource(R.string.transfers_start_dcc_chat)) }
             }
 
@@ -271,13 +272,14 @@ fun TransfersScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Button(
                                     onClick = { onAcceptChat(o) },
-                                    enabled = state.settings.dccEnabled
+                                    enabled = state.settings.dccEnabled,
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                 ) { Text(stringResource(R.string.transfers_accept)) }
-                                OutlinedButton(onClick = { onRejectChat(o) }) { Text(stringResource(R.string.transfers_reject)) }
+                                OutlinedButton(onClick = { onRejectChat(o) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.transfers_reject)) }
                                 // "Open buffer" shortcut - navigates to the pre-created DCCCHAT buffer
                                 if (onOpenBuffer != null) {
                                     val bufKey = "${o.netId}::DCCCHAT:${o.from}"
-                                    TextButton(onClick = {
+                                    TextButton(modifier = Modifier.focusHighlight(RoundedCornerShape(50)), onClick = {
                                         onAcceptChat(o)  // accept and then navigate
                                     }) { Text(stringResource(R.string.transfers_accept_open)) }
                                 }
@@ -401,18 +403,21 @@ fun TransfersScreen(
                                 val partial = partialFor(o)
                                 Button(
                                     onClick = { onAccept(o) },
-                                    enabled = state.settings.dccEnabled
+                                    enabled = state.settings.dccEnabled,
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                 ) { Text(stringResource(R.string.transfers_accept)) }
                                 if (partial != null) {
                                     OutlinedButton(
                                         onClick = { onAcceptResume(o) },
-                                        enabled = state.settings.dccEnabled
+                                        enabled = state.settings.dccEnabled,
+                                        modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                     ) {
                                         Text(stringResource(R.string.transfers_resume))
                                     }
                                 }
                                 OutlinedButton(
-                                    onClick = { onReject(o) }
+                                    onClick = { onReject(o) },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                 ) { Text(stringResource(R.string.transfers_reject)) }
                             }
                             // Subtle note when a partial is available so the Resume button isn't a mystery.
@@ -575,7 +580,7 @@ fun TransfersScreen(
                                             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                                                 contentColor = MaterialTheme.colorScheme.error
                                             ),
-                                            modifier = Modifier.align(Alignment.End)
+                                            modifier = Modifier.align(Alignment.End).focusHighlight(RoundedCornerShape(50))
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
@@ -583,7 +588,7 @@ fun TransfersScreen(
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Spacer(Modifier.size(4.dp))
-                                            Text("Cancel")
+                                            Text(stringResource(R.string.cancel))
                                         }
                                     }
 
@@ -606,11 +611,11 @@ fun TransfersScreen(
                                             // Clear button: removes this entry from the list
                                             IconButton(
                                                 onClick = { onClearTransfer(t) },
-                                                modifier = Modifier.size(32.dp)
+                                                modifier = Modifier.size(32.dp).focusHighlight()
                                             ) {
                                                 Icon(
                                                     Icons.Default.Close,
-                                                    contentDescription = "Clear",
+                                                    contentDescription = stringResource(R.string.clear),
                                                     modifier = Modifier.size(16.dp),
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
@@ -619,7 +624,7 @@ fun TransfersScreen(
                                         if (t.savedPath != null) {
                                             Button(
                                                 onClick = { onShareFile(t.savedPath) },
-                                                modifier = Modifier.fillMaxWidth()
+                                                modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))
                                             ) { Text(stringResource(R.string.transfers_share_open)) }
                                         }
                                     }
@@ -639,11 +644,11 @@ fun TransfersScreen(
                                             )
                                             IconButton(
                                                 onClick = { onClearTransfer(t) },
-                                                modifier = Modifier.size(32.dp)
+                                                modifier = Modifier.size(32.dp).focusHighlight()
                                             ) {
                                                 Icon(
                                                     Icons.Default.Close,
-                                                    contentDescription = "Clear",
+                                                    contentDescription = stringResource(R.string.clear),
                                                     modifier = Modifier.size(16.dp),
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
@@ -760,7 +765,7 @@ fun TransfersScreen(
                                             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                                                 contentColor = MaterialTheme.colorScheme.error
                                             ),
-                                            modifier = Modifier.align(Alignment.End)
+                                            modifier = Modifier.align(Alignment.End).focusHighlight(RoundedCornerShape(50))
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
@@ -768,7 +773,7 @@ fun TransfersScreen(
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Spacer(Modifier.size(4.dp))
-                                            Text("Cancel")
+                                            Text(stringResource(R.string.cancel))
                                         }
                                     }
 
@@ -787,9 +792,9 @@ fun TransfersScreen(
                                             )
                                             IconButton(
                                                 onClick = { onClearTransfer(t) },
-                                                modifier = Modifier.size(32.dp)
+                                                modifier = Modifier.size(32.dp).focusHighlight()
                                             ) {
-                                                Icon(Icons.Default.Close, contentDescription = "Clear",
+                                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear),
                                                     modifier = Modifier.size(16.dp),
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                             }

@@ -50,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.IrcViewModel
 import com.boxlabs.hexdroid.crypto.E2eScheme
+import com.boxlabs.hexdroid.R
 
 /**
  * Per-target end-to-end encryption settings dialog.
@@ -133,7 +135,7 @@ fun EncryptionDialog(
                      tint = if (anythingActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Encryption", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.enc_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },
         text = {
@@ -141,18 +143,18 @@ fun EncryptionDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                    modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
-                Text("for $target", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.enc_for_target, target), style = MaterialTheme.typography.labelMedium)
 
                 // ── Current state ─────────────────────────────────────────────────
                 val cur = current
                 if (!anythingActive) {
                     Text(
-                        "Messages in this ${targetTypeLabel(target)} are sent and received in cleartext.",
+                        stringResource(R.string.enc_cleartext_desc, targetKind(target)),
                          style = MaterialTheme.typography.bodyMedium,
                     )
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Active: ", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.enc_active), style = MaterialTheme.typography.bodyMedium)
                         Text(
                             activeLabel,
                              style = MaterialTheme.typography.bodyMedium,
@@ -164,14 +166,13 @@ fun EncryptionDialog(
                         // dormant. Say so plainly instead of showing that key's safety number as if it were
                         // the active one (the +AGE safety number lives in the +AGE panel below).
                         ageInfo.enabled && cur != null -> Text(
-                            "+AGE is on and encrypts messages here. Your saved ${cur.scheme.displayName} " +
-                                "key is kept but stays unused until you turn +AGE off.",
+                            stringResource(R.string.enc_age_dormant_key, cur.scheme.displayName),
                              style = MaterialTheme.typography.bodySmall,
                              color = MaterialTheme.colorScheme.tertiary,
                         )
                         // A keyed scheme is active (no +AGE): show its safety number to compare out of band.
                         cur != null -> {
-                            Text("Safety number", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.enc_safety_number), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             SelectionContainer {
                                 Text(
                                     cur.fingerprint,
@@ -179,7 +180,7 @@ fun EncryptionDialog(
                                 )
                             }
                             Text(
-                                "Verify this matches what the other party sees.",
+                                stringResource(R.string.enc_verify_match),
                                  style = MaterialTheme.typography.bodySmall,
                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -190,9 +191,10 @@ fun EncryptionDialog(
                 HorizontalDivider()
 
                 // ── Scheme picker ─────────────────────────────────────────────────
-                Text("Cipher", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.enc_cipher), style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     FilterChip(
+                        modifier = Modifier.focusHighlight(),
                         selected = pickedScheme == E2eScheme.AGM,
                         onClick = { pickedScheme = E2eScheme.AGM; importError = null },
                         label = { Text("AES-GCM") },
@@ -201,6 +203,7 @@ fun EncryptionDialog(
                                } else null,
                     )
                     FilterChip(
+                        modifier = Modifier.focusHighlight(),
                         selected = pickedScheme == E2eScheme.AGE,
                         onClick = { pickedScheme = E2eScheme.AGE; importError = null },
                         label = { Text("+AGE") },
@@ -209,6 +212,7 @@ fun EncryptionDialog(
                                } else null,
                     )
                     FilterChip(
+                        modifier = Modifier.focusHighlight(),
                         selected = pickedScheme == E2eScheme.BLOWFISH,
                         onClick = { pickedScheme = E2eScheme.BLOWFISH; importError = null },
                         label = { Text("FiSH") },
@@ -216,17 +220,17 @@ fun EncryptionDialog(
                 }
                 when (pickedScheme) {
                     E2eScheme.AGM -> Text(
-                        "HexDroid's Authenticated Group Messaging.  One 256-bit random key, per-message authenticated encryption. You share the key.",
+                        stringResource(R.string.enc_agm_desc),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     E2eScheme.AGE -> Text(
-                        "Authenticated Group Exchange.  Keys are negotiated automatically and rotate forward. Forward-secrecy for PMs.",
+                        stringResource(R.string.enc_age_desc),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     E2eScheme.BLOWFISH -> Text(
-                        "Only use FiSH when the other side can't speak +AGM or +AGE.",
+                        stringResource(R.string.enc_fish_desc),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.tertiary,
                     )
@@ -298,25 +302,25 @@ fun EncryptionDialog(
                     HorizontalDivider()
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         if (curManage.scheme == E2eScheme.AGM) {
-                            OutlinedButton(onClick = { pendingRegen = true }, modifier = Modifier.weight(1f)) {
-                                Text("Regen")
+                            OutlinedButton(onClick = { pendingRegen = true }, modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))) {
+                                Text(stringResource(R.string.enc_regen))
                             }
                         }
                         OutlinedButton(
                             onClick = { pendingClear = true },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+                            modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.clear), color = MaterialTheme.colorScheme.error) }
                     }
                 }
                 if (pendingRegen) {
                     HorizontalDivider()
                     Text(
-                        "Generate a new key? The current key stops working immediately and the other party must import the new one.",
+                        stringResource(R.string.enc_regen_confirm),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.error,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { pendingRegen = false }, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                        OutlinedButton(onClick = { pendingRegen = false }, modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.cancel)) }
                         Button(
                             onClick = {
                                 val info = viewModel.generateE2eKey(networkId, target)
@@ -324,26 +328,26 @@ fun EncryptionDialog(
                                 revealKey = true
                                 pendingRegen = false
                             },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Confirm") }
+                            modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.confirm)) }
                     }
                 }
                 if (pendingClear) {
                     HorizontalDivider()
                     Text(
-                        "Remove encryption for this ${targetTypeLabel(target)}? Messages will be sent and received in cleartext.",
+                        stringResource(R.string.enc_clear_confirm, targetKind(target)),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.error,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { pendingClear = false }, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                        OutlinedButton(onClick = { pendingClear = false }, modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.cancel)) }
                         Button(
                             onClick = {
                                 viewModel.clearE2eKeyForTarget(networkId, target)
                                 resync()
                             },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Confirm") }
+                            modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.confirm)) }
                     }
                 }
             }
@@ -352,19 +356,19 @@ fun EncryptionDialog(
             // Only the AGM "first key" action lives in the button row.
             val cur = current
             if (cur == null && pickedScheme == E2eScheme.AGM) {
-                Button(onClick = {
+                Button(modifier = Modifier.focusHighlight(RoundedCornerShape(50)), onClick = {
                     val info = viewModel.generateE2eKey(networkId, target)
                     current = info
                     revealKey = true
-                }) { Text("Generate key") }
+                }) { Text(stringResource(R.string.enc_generate_key)) }
             }
         },
         dismissButton = {
-            TextButton(onClick = {
+            TextButton(modifier = Modifier.focusHighlight(RoundedCornerShape(50)), onClick = {
                 pendingClear = false
                 pendingRegen = false
                 onDismiss()
-            }) { Text("Close") }
+            }) { Text(stringResource(R.string.close)) }
         },
     )
 }
@@ -388,7 +392,7 @@ private fun AgeControls(
     }
 
     // Your identity safety number.
-    Text("Your +AGE safety number", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(R.string.enc_age_safety_number), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(6.dp),
@@ -404,10 +408,10 @@ private fun AgeControls(
     }
     OutlinedButton(
         onClick = { copyToClipboard(ctx, "+AGE safety number", info.myFingerprint) },
-           modifier = Modifier.fillMaxWidth(),
-    ) { Text("Copy safety number") }
+           modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50)),
+    ) { Text(stringResource(R.string.enc_copy_safety_number)) }
     Text(
-        "Share this so contacts can confirm they're really talking to you.",
+        stringResource(R.string.enc_share_safety_desc),
          style = MaterialTheme.typography.bodySmall,
          color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -415,14 +419,14 @@ private fun AgeControls(
     HorizontalDivider()
 
     if (info.isChannel) {
-        Text("This channel", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.enc_this_channel), style = MaterialTheme.typography.labelMedium)
         Text(
             "+AGE encrypts to a per-channel group key shared by invite; every member's messages are signed with their own identity, and the key is rotated when a member leaves.",
              style = MaterialTheme.typography.bodySmall,
              color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     } else {
-        Text("This contact", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.enc_this_contact), style = MaterialTheme.typography.labelMedium)
         Text(
             "+AGE runs a short handshake, then seals each message with its own key (a double ratchet), so earlier messages stay protected even if a later key is exposed.",
              style = MaterialTheme.typography.bodySmall,
@@ -430,7 +434,7 @@ private fun AgeControls(
         )
         if (!info.peerKnown || info.peerFingerprint == null) {
             Text(
-                "No +AGE identity seen for $target yet. It pins automatically the first time they advertise one (trust-on-first-use); then you can verify it here.",
+                stringResource(R.string.enc_no_identity, target),
                  style = MaterialTheme.typography.bodySmall,
                  color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -450,17 +454,17 @@ private fun AgeControls(
             }
             if (info.peerVerified) {
                 Text(
-                    "Verified.",
+                    stringResource(R.string.enc_verified),
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.primary,
                 )
             } else {
                 Text(
-                    "Pinned but not verified. Compare this with what $target reads out, then confirm.",
+                    stringResource(R.string.enc_pinned_unverified, target),
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.tertiary,
                 )
-                OutlinedButton(onClick = onVerify, modifier = Modifier.fillMaxWidth()) { Text("Mark verified") }
+                OutlinedButton(onClick = onVerify, modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.enc_mark_verified)) }
             }
         }
     }
@@ -473,16 +477,16 @@ private fun AgeControls(
              style = MaterialTheme.typography.bodyMedium,
              color = MaterialTheme.colorScheme.primary,
         )
-        OutlinedButton(onClick = onDisable, modifier = Modifier.fillMaxWidth()) {
-            Text("Turn off +AGE", color = MaterialTheme.colorScheme.error)
+        OutlinedButton(onClick = onDisable, modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))) {
+            Text(stringResource(R.string.enc_turn_off_age), color = MaterialTheme.colorScheme.error)
         }
     } else {
         Text(
-            "Turn on identity-based (Ed25519) forward-secret (X25519/X3DH) encryption here. Keys are exchanged automatically once both sides advertise +AGE.",
+            stringResource(R.string.enc_age_enable_desc),
              style = MaterialTheme.typography.bodySmall,
              color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Button(onClick = onEnable, modifier = Modifier.fillMaxWidth()) { Text("Turn on +AGE") }
+        Button(onClick = onEnable, modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.enc_turn_on_age)) }
     }
 }
 
@@ -500,11 +504,11 @@ private fun AgmControls(
 ) {
     if (cur != null) {
         if (!revealKey) {
-            OutlinedButton(onClick = onRevealKey, modifier = Modifier.fillMaxWidth()) {
-                Text("Reveal key to share")
+            OutlinedButton(onClick = onRevealKey, modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))) {
+                Text(stringResource(R.string.enc_reveal_key))
             }
         } else {
-            Text("Key (32 bytes, base64)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.enc_key_bytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(6.dp),
@@ -521,15 +525,15 @@ private fun AgmControls(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
                     onClick = { copyToClipboard(ctx, "HexDroid encryption key", cur.keyB64) },
-                               modifier = Modifier.weight(1f),
-                ) { Text("Copy") }
+                               modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.copy)) }
                 OutlinedButton(
                     onClick = { shareAgmKey(ctx, cur.keyB64, cur.fingerprint) },
-                               modifier = Modifier.weight(1f),
-                ) { Text("Share") }
+                               modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.share)) }
             }
             Text(
-                "Anyone with this string can decrypt messages for this target.",
+                stringResource(R.string.enc_key_leak_warn),
                  style = MaterialTheme.typography.bodySmall,
                  color = MaterialTheme.colorScheme.error,
             )
@@ -537,11 +541,11 @@ private fun AgmControls(
         HorizontalDivider()
     }
 
-    Text("Paste a key from another user", style = MaterialTheme.typography.labelMedium)
+    Text(stringResource(R.string.enc_paste_key), style = MaterialTheme.typography.labelMedium)
     OutlinedTextField(
         value = importText,
         onValueChange = onImportTextChange,
-        placeholder = { Text("Base64-enc 32-byte key") },
+        placeholder = { Text(stringResource(R.string.enc_key_placeholder)) },
                       isError = importError != null,
                       singleLine = false,
                       modifier = Modifier.fillMaxWidth(),
@@ -550,8 +554,8 @@ private fun AgmControls(
         Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = onPasteFromClipboard, modifier = Modifier.weight(1f)) { Text("Paste") }
-        Button(onClick = onImport, enabled = importText.isNotBlank(), modifier = Modifier.weight(1f)) { Text("Import") }
+        OutlinedButton(onClick = onPasteFromClipboard, modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.paste)) }
+        Button(onClick = onImport, enabled = importText.isNotBlank(), modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.action_import)) }
     }
 }
 
@@ -569,8 +573,8 @@ private fun BlowfishControls(
 ) {
     if (cur != null) {
         if (!revealKey) {
-            OutlinedButton(onClick = onRevealKey, modifier = Modifier.fillMaxWidth()) {
-                Text("Reveal passphrase")
+            OutlinedButton(onClick = onRevealKey, modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))) {
+                Text(stringResource(R.string.enc_reveal_passphrase))
             }
         } else {
             val decoded = remember(cur.keyB64) {
@@ -578,7 +582,7 @@ private fun BlowfishControls(
                     String(android.util.Base64.decode(cur.keyB64, android.util.Base64.DEFAULT), Charsets.UTF_8)
                 } catch (_: Throwable) { "" }
             }
-            Text("Passphrase", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.enc_passphrase), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(6.dp),
@@ -595,22 +599,22 @@ private fun BlowfishControls(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
                     onClick = { copyToClipboard(ctx, "Blowfish passphrase", decoded) },
-                               modifier = Modifier.weight(1f),
-                ) { Text("Copy") }
+                               modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.copy)) }
             }
         }
         HorizontalDivider()
     }
 
     Text(
-        "Type the same passphrase your FiSH contact will use.",
+        stringResource(R.string.enc_passphrase_desc),
          style = MaterialTheme.typography.bodySmall,
          color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     OutlinedTextField(
         value = passphrase,
         onValueChange = onPassphraseChange,
-        placeholder = { Text("Passphrase (4-56 chars)…") },
+        placeholder = { Text(stringResource(R.string.enc_passphrase_placeholder)) },
                       isError = importError != null,
                       singleLine = true,
                       modifier = Modifier.fillMaxWidth(),
@@ -619,20 +623,25 @@ private fun BlowfishControls(
         Text(importError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     } else if (passphrase.isNotEmpty() && passphrase.length < 8) {
         Text(
-            "Short passphrases (<8 chars) are easy to brute-force. Use at least 12.",
+            stringResource(R.string.enc_passphrase_weak),
              color = MaterialTheme.colorScheme.tertiary,
              style = MaterialTheme.typography.bodySmall,
         )
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = onPasteFromClipboard, modifier = Modifier.weight(1f)) { Text("Paste") }
+        OutlinedButton(onClick = onPasteFromClipboard, modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.paste)) }
         Button(
             onClick = onSetPassphrase,
             enabled = passphrase.isNotBlank(),
-               modifier = Modifier.weight(1f),
-        ) { Text(if (cur == null) "Set" else "Replace") }
+               modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+        ) { Text(if (cur == null) stringResource(R.string.set) else stringResource(R.string.replace)) }
     }
 }
+
+/** Localized "channel"/"query" word for [target], for use in composable text. */
+@androidx.compose.runtime.Composable
+private fun targetKind(target: String): String =
+    stringResource(if (target.firstOrNull() in setOf('#', '&', '+', '!')) R.string.enc_kind_channel else R.string.enc_kind_query)
 
 /** Returns "channel" or "query" based on whether [target] looks like a channel name. */
 private fun targetTypeLabel(target: String): String =

@@ -317,9 +317,9 @@ fun IntroTourOverlay(
                             // Next / Done
                             IconButton(onClick = onNext, modifier = Modifier.size(36.dp)) {
                                 if (stepIndex + 1 == stepCount) {
-                                    Icon(Icons.Default.Close, contentDescription = "Done", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.done), modifier = Modifier.size(18.dp))
                                 } else {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.next), modifier = Modifier.size(18.dp))
                                 }
                             }
                         }

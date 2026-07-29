@@ -1,0 +1,2 @@
+IRCv3.x additions: Added several new IRCv3 capabilities: FILEHOST, network icons, metadata2, message deletion, extended-isupport, strict transport security and more. IRCv3 capabilities are complete.
+Expanded translations

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenu
@@ -86,7 +87,7 @@ fun IgnoreListScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.ignore_title)) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.focusHighlight()) { Text("←") } },
             )
         }
     ) { padding ->
@@ -110,7 +111,7 @@ fun IgnoreListScreen(
             ) {
                 Text(stringResource(R.string.ignore_network_label), style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.weight(1f))
-                OutlinedButton(onClick = { netMenuExpanded = true }) {
+                OutlinedButton(onClick = { netMenuExpanded = true }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                     Text(selNet?.name ?: selectedNetId)
                 }
                 DropdownMenu(expanded = netMenuExpanded, onDismissRequest = { netMenuExpanded = false }) {
@@ -142,6 +143,7 @@ fun IgnoreListScreen(
                     modifier = Modifier.weight(1f)
                 )
                 Button(
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                     enabled = addNick.trim().isNotBlank() && selectedNetId.isNotBlank(),
                     onClick = {
                         val nick = addNick.trim()
@@ -191,7 +193,8 @@ fun IgnoreListScreen(
                                 Text(nick, modifier = Modifier.weight(1f))
                                 Spacer(Modifier.width(8.dp))
                                 OutlinedButton(
-                                    onClick = { onUnignoreNick(selectedNetId, nick) }
+                                    onClick = { onUnignoreNick(selectedNetId, nick) },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                 ) { Text(stringResource(R.string.ignore_remove)) }
                             }
                         }

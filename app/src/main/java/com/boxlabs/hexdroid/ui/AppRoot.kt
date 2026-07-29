@@ -339,7 +339,12 @@ fun AppRoot(
                 AppScreen.NETWORK_EDIT -> NetworkEditScreen(
                     state = state,
                     onCancel = vm::cancelEditNetwork,
-                    onSave = vm::saveEditingNetwork
+                    onSave = vm::saveEditingNetwork,
+                    stsPolicyActive = state.editingNetwork?.host
+                        ?.let { vm.hasActiveStsPolicy(it) } == true,
+                    onClearStsPolicy = {
+                        state.editingNetwork?.host?.let { vm.clearStsPolicy(it) }
+                    }
                 )
 
                 AppScreen.LIST -> ListScreen(
@@ -459,7 +464,12 @@ fun AppRoot(
     }
 
     mountedScriptView?.let { mv ->
-        ScriptViewHost(view = mv, onAction = vm::scriptViewAction, onClose = vm::closeScriptView)
+        ScriptViewHost(
+            view = mv,
+            onAction = vm::scriptViewAction,
+            onClose = vm::closeScriptView,
+            onScreenChanged = vm::scriptScreenChanged,
+        )
     }
 }
 

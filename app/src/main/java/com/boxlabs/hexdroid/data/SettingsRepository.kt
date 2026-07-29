@@ -478,6 +478,11 @@ class SettingsRepository(private val ctx: Context) {
                         messageReactions = o.optBoolean("cap_messageReactions", true),
                         noImplicitNames = o.optBoolean("cap_noImplicitNames", false),
                         multiline = o.optBoolean("cap_multiline", true),
+                        messageRedaction = o.optBoolean("cap_messageRedaction", true),
+                        accountRegistration = o.optBoolean("cap_accountRegistration", true),
+                        extendedIsupport = o.optBoolean("cap_extendedIsupport", true),
+                        metadata2 = o.optBoolean("cap_metadata2", true),
+                        filehostUploads = o.optBoolean("cap_filehostUploads", true),
                     ),
 
                     autoJoin = o.optJSONArray("autoJoin")?.let { aj ->
@@ -614,6 +619,11 @@ class SettingsRepository(private val ctx: Context) {
             o.put("cap_messageReactions", n.caps.messageReactions)
             o.put("cap_noImplicitNames", n.caps.noImplicitNames)
             o.put("cap_multiline", n.caps.multiline)
+            o.put("cap_messageRedaction", n.caps.messageRedaction)
+            o.put("cap_accountRegistration", n.caps.accountRegistration)
+            o.put("cap_extendedIsupport", n.caps.extendedIsupport)
+            o.put("cap_metadata2", n.caps.metadata2)
+            o.put("cap_filehostUploads", n.caps.filehostUploads)
 
             o.put("autoJoin", JSONArray(n.autoJoin.map { it.toLine() }))
             o.put("autoConnect", n.autoConnect)
@@ -988,6 +998,97 @@ class SettingsRepository(private val ctx: Context) {
     private fun toFlapJson(map: Map<String, Long>): String {
         val obj = JSONObject()
         map.forEach { (k, v) -> obj.put(k, v) }
+        return obj.toString()
+    }
+
+    // ---- IRCv3 STS policy persistence ----
+    // Keyed by lowercased hostname. JSON shape: {"irc.example.org":{"p":6697,"e":1730000000000}}
+    // ("p" omitted when the policy was only ever seen over TLS). Stored outside
+    // networks_json because a policy belongs to a HOST, not a profile: two profiles
+    // pointing at the same server share one policy, and deleting a profile must not
+    // erase the host's policy.
+
+    private fun ownMetadataKey() = stringPreferencesKey("metadata_own_v1_json")
+
+    /**
+     * The user's own metadata values, keyed by network id then metadata key. Re-applied
+     * on connect so they survive reconnects even on servers that don't persist them.
+     */
+    suspend fun readOwnMetadata(): Map<String, Map<String, String>> {
+        return ctx.dataStore.data.map { prefs -> parseOwnMetadataJson(prefs[ownMetadataKey()]) }.first()
+    }
+
+    suspend fun writeOwnMetadata(map: Map<String, Map<String, String>>) {
+        ctx.dataStore.edit { prefs -> prefs[ownMetadataKey()] = toOwnMetadataJson(map) }
+    }
+
+    private fun parseOwnMetadataJson(json: String?): Map<String, Map<String, String>> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return try {
+            val obj = JSONObject(json)
+            buildMap {
+                for (netId in obj.keys()) {
+                    val inner = obj.optJSONObject(netId) ?: continue
+                    val keys = buildMap<String, String> {
+                        for (k in inner.keys()) inner.optString(k, "").takeIf { it.isNotEmpty() }?.let { put(k, it) }
+                    }
+                    if (keys.isNotEmpty()) put(netId, keys)
+                }
+            }
+        } catch (_: Throwable) { emptyMap() }
+    }
+
+    private fun toOwnMetadataJson(map: Map<String, Map<String, String>>): String {
+        val obj = JSONObject()
+        map.forEach { (netId, keys) ->
+            if (keys.isNotEmpty()) {
+                val inner = JSONObject()
+                keys.forEach { (k, v) -> inner.put(k, v) }
+                obj.put(netId, inner)
+            }
+        }
+        return obj.toString()
+    }
+
+    private fun stsKey() = stringPreferencesKey("sts_policies_v1_json")
+
+    suspend fun readStsPolicies(): Map<String, com.boxlabs.hexdroid.StsPolicyEntry> {
+        return ctx.dataStore.data.map { prefs ->
+            parseStsJson(prefs[stsKey()])
+        }.first()
+    }
+
+    /** Persist the full STS policy map atomically. */
+    suspend fun writeStsPolicies(map: Map<String, com.boxlabs.hexdroid.StsPolicyEntry>) {
+        ctx.dataStore.edit { prefs ->
+            prefs[stsKey()] = toStsJson(map)
+        }
+    }
+
+    private fun parseStsJson(json: String?): Map<String, com.boxlabs.hexdroid.StsPolicyEntry> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return try {
+            val obj = JSONObject(json)
+            buildMap {
+                for (key in obj.keys()) {
+                    val entry = obj.optJSONObject(key) ?: continue
+                    val expires = entry.optLong("e", -1L)
+                    if (expires <= 0) continue
+                    val port = entry.optInt("p", -1).takeIf { it in 1..65535 }
+                    put(key, com.boxlabs.hexdroid.StsPolicyEntry(port = port, expiresAtMs = expires))
+                }
+            }
+        } catch (_: Throwable) { emptyMap() }
+    }
+
+    private fun toStsJson(map: Map<String, com.boxlabs.hexdroid.StsPolicyEntry>): String {
+        val obj = JSONObject()
+        map.forEach { (host, e) ->
+            val entry = JSONObject()
+            e.port?.let { entry.put("p", it) }
+            entry.put("e", e.expiresAtMs)
+            obj.put(host, entry)
+        }
         return obj.toString()
     }
 }

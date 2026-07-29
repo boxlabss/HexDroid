@@ -70,6 +70,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -149,11 +150,11 @@ fun NetworksScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.networks_title)) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.focusHighlight()) { Text("←") } },
                 actions = {
                     IconButton(
                         onClick = onOpenSettings,
-                        modifier = Modifier.tourTarget(TourTarget.NETWORKS_SETTINGS)
+                        modifier = Modifier.tourTarget(TourTarget.NETWORKS_SETTINGS).focusHighlight()
                     ) { Text("⚙") }
                 }
             )
@@ -161,7 +162,10 @@ fun NetworksScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onAdd,
-                modifier = Modifier.tourTarget(TourTarget.NETWORKS_ADD_FAB)
+                modifier = Modifier
+                    .tourTarget(TourTarget.NETWORKS_ADD_FAB)
+                    .focusHighlight(RoundedCornerShape(16.dp))
+                    .then(if (sortedNetworks.isEmpty()) Modifier.tvInitialFocus() else Modifier)
             ) { Text("+") }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -234,11 +238,13 @@ fun NetworksScreen(
                     )
                     val visualOffset = if (isDragging) dragOffsetY else animatedOffset
 
-                    val cardMod = if (isAfterNet) {
+                    val cardMod = (if (isAfterNet) {
                         Modifier.fillMaxWidth().tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
                     } else {
                         Modifier.fillMaxWidth()
-                    }
+                    })
+                        .focusHighlight(RoundedCornerShape(12.dp))
+                        .then(if (idx == 0) Modifier.tvInitialFocus() else Modifier)
 
                     Box(
                         modifier = Modifier
@@ -265,7 +271,7 @@ fun NetworksScreen(
                                     // Favourite toggle
                                     IconButton(
                                         onClick = { onToggleFavourite(n.id) },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(32.dp).focusHighlight()
                                     ) {
                                         if (n.isFavourite) {
                                             Icon(
@@ -284,6 +290,33 @@ fun NetworksScreen(
                                         }
                                     }
 
+                                    // ICON / draft/ICON ISUPPORT token: server-advertised icon (ICON=<url>,
+                                    // optional literal {size} template). Gated on the global image-previews
+                                    // opt-in, https only, and never fetched for proxied profiles - the fetch
+                                    // would bypass the SOCKS proxy and leak the user's IP, same fail-closed
+                                    // rule as filehost uploads.
+                                    val iconUrl = state.connections[n.id]?.networkIconUrl
+                                        ?.replace("{size}", "64")
+                                        ?.takeIf {
+                                            it.startsWith("https://") &&
+                                                state.settings.imagePreviewsEnabled &&
+                                                n.proxyType == com.boxlabs.hexdroid.connection.ProxyType.NONE
+                                        }
+                                    if (iconUrl != null) {
+                                        var iconBmp by remember(iconUrl) {
+                                            mutableStateOf(RemoteImage.cached(iconUrl))
+                                        }
+                                        LaunchedEffect(iconUrl) {
+                                            if (iconBmp == null) iconBmp = RemoteImage.fetch(iconUrl)
+                                        }
+                                        iconBmp?.let { bmp ->
+                                            Image(
+                                                bitmap = bmp,
+                                                contentDescription = null,
+                                                modifier = Modifier.padding(end = 6.dp).size(20.dp)
+                                            )
+                                        }
+                                    }
                                     Text(
                                         n.name,
                                         fontWeight = FontWeight.Bold,
@@ -372,7 +405,8 @@ fun NetworksScreen(
                                     )
                                     Switch(
                                         checked = n.autoConnect,
-                                        onCheckedChange = { onSetAutoConnect(n.id, it) }
+                                        onCheckedChange = { onSetAutoConnect(n.id, it) },
+                                        modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp))
                                     )
                                 }
 
@@ -384,7 +418,8 @@ fun NetworksScreen(
                                     )
                                     Switch(
                                         checked = n.showInSidebar,
-                                        onCheckedChange = { onSetShowInSidebar(n.id, it) }
+                                        onCheckedChange = { onSetShowInSidebar(n.id, it) },
+                                        modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp))
                                     )
                                 }
 
@@ -407,13 +442,13 @@ fun NetworksScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    OutlinedButton(onClick = { onEdit(n.id) }) { Text(stringResource(R.string.networks_edit)) }
-                                    OutlinedButton(onClick = { onDelete(n.id) }) { Text(stringResource(R.string.delete)) }
+                                    OutlinedButton(onClick = { onEdit(n.id) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.networks_edit)) }
+                                    OutlinedButton(onClick = { onDelete(n.id) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.delete)) }
                                     Spacer(Modifier.weight(1f))
 
-                                    val connectMod = if (n.id == active) {
+                                    val connectMod = (if (n.id == active) {
                                         Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON)
-                                    } else Modifier
+                                    } else Modifier).focusHighlight(RoundedCornerShape(50))
 
                                     if (isConn || isConnecting) {
                                         Button(
@@ -473,7 +508,7 @@ fun NetworksScreen(
 
             if (active != null) {
                 val c = state.connections[active]
-                val label = state.networks.firstOrNull { it.id == active }?.name ?: "Active"
+                val label = state.networks.firstOrNull { it.id == active }?.name ?: stringResource(R.string.networks_active_fallback)
                 val status = c?.status ?: state.status
                 Spacer(Modifier.height(8.dp))
                 Text("$label: $status", style = MaterialTheme.typography.bodySmall)
@@ -485,7 +520,7 @@ fun NetworksScreen(
     val warnNetId = state.plaintextWarningNetworkId
     if (warnNetId != null) {
         val prof = state.networks.firstOrNull { it.id == warnNetId }
-        val hostPort = if (prof != null) "${prof.host}:${prof.port}" else "this network"
+        val hostPort = if (prof != null) "${prof.host}:${prof.port}" else stringResource(R.string.net_this_network)
         AlertDialog(
             onDismissRequest = onDismissPlaintextWarning,
             title = { Text(stringResource(R.string.networks_insecure_title)) },
@@ -497,14 +532,14 @@ fun NetworksScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { onAllowPlaintextConnect(warnNetId) }) {
+                TextButton(onClick = { onAllowPlaintextConnect(warnNetId) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.networks_allow_connect))
                 }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { onEdit(warnNetId); onDismissPlaintextWarning() }) { Text(stringResource(R.string.network_edit_title)) }
-                    TextButton(onClick = onDismissPlaintextWarning) { Text(stringResource(R.string.cancel)) }
+                    TextButton(onClick = { onEdit(warnNetId); onDismissPlaintextWarning() }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.network_edit_title)) }
+                    TextButton(onClick = onDismissPlaintextWarning, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.cancel)) }
                 }
             }
         )
@@ -515,18 +550,18 @@ fun NetworksScreen(
     val localWarnNetId = state.localNetworkWarningNetworkId
     if (localWarnNetId != null) {
         val prof = state.networks.firstOrNull { it.id == localWarnNetId }
-        val hostPort = if (prof != null) "${prof.host}:${prof.port}" else "this network"
+        val hostPort = if (prof != null) "${prof.host}:${prof.port}" else stringResource(R.string.net_this_network)
         AlertDialog(
             onDismissRequest = onDismissLocalNetworkWarning,
             title = { Text(stringResource(R.string.networks_local_title)) },
             text = { Text(stringResource(R.string.networks_local_body, hostPort)) },
             confirmButton = {
-                TextButton(onClick = { onRequestLocalNetworkPermission(localWarnNetId) }) {
+                TextButton(onClick = { onRequestLocalNetworkPermission(localWarnNetId) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.networks_local_grant))
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDismissLocalNetworkWarning) {
+                TextButton(onClick = onDismissLocalNetworkWarning, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.cancel))
                 }
             }
@@ -597,7 +632,7 @@ private fun BouncerNetworksSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onRefresh) {
+                IconButton(onClick = onRefresh, modifier = Modifier.focusHighlight()) {
                     Icon(
                         Icons.Default.Refresh,
                         contentDescription = stringResource(R.string.bouncer_networks_refresh)
@@ -685,7 +720,7 @@ private fun BouncerUpstreamRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
-            OutlinedButton(onClick = onClone, enabled = canClone) {
+            OutlinedButton(onClick = onClone, enabled = canClone, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                 Text(stringResource(R.string.bouncer_networks_import))
             }
         }

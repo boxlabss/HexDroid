@@ -255,7 +255,9 @@ fun WelcomeScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
+                        .height(52.dp)
+                        .tvInitialFocus()
+                        .focusHighlight(),
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(

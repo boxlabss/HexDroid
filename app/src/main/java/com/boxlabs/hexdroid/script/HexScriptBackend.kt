@@ -401,7 +401,7 @@ class HexScriptBackend : ScriptBackend {
             val argExprs = if (inner.isBlank()) emptyList() else splitTop(inner, ",").map { it.trim() }
             return callIdVal(name, argExprs, env).asStr() to close + 1
         }
-        if (name.startsWith("age.") || name.startsWith("media.")) return cb.capability(name, emptyList()) to after
+        if (name.startsWith("age.") || name.startsWith("media.") || name.startsWith("screen.")) return cb.capability(name, emptyList()) to after
         if (aliases.containsKey(name.lowercase())) return (callUser(name, emptyList(), env)?.asStr() ?: "") to after
         if (name == "0") return env.args.size.toString() to after
         return (env.fields[name] ?: "") to after
@@ -758,7 +758,7 @@ class HexScriptBackend : ScriptBackend {
     private fun callIdVal(name: String, argExprs: List<String>, env: Env): HexVal {
         fun v(i: Int) = if (i < argExprs.size) evalVal(argExprs[i], env) else HexVal.EMPTY
         fun str(i: Int, def: String = "") = if (i < argExprs.size) expandArg(argExprs[i], env) else def
-        if (name.startsWith("age.") || name.startsWith("media."))
+        if (name.startsWith("age.") || name.startsWith("media.") || name.startsWith("screen."))
             return HexVal.Str(cb.capability(name, argExprs.map { expandArg(it, env) }))
         if (aliases.containsKey(name.lowercase()))
             return callUser(name, argExprs, env) ?: HexVal.EMPTY

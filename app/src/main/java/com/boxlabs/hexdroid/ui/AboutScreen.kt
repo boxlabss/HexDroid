@@ -828,7 +828,7 @@ private fun FlaskHero(
         Box(modifier = Modifier.fillMaxSize()) {
             Image(
                 painter = painterResource(R.drawable.hexdroid_logo),
-                contentDescription = "HexDroid logo",
+                contentDescription = stringResource(R.string.about_logo_desc),
                 modifier = Modifier
                     .size(logoSize)
                     .align(Alignment.TopCenter)
@@ -995,7 +995,7 @@ private fun ImprovedFlask(
 
         Image(
             painter = painterResource(R.drawable.boxlabs),
-            contentDescription = "boxlabs",
+            contentDescription = stringResource(R.string.about_boxlabs_desc),
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .align(Alignment.TopCenter)

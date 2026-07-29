@@ -1,6 +1,10 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
+## [1.7.0] - 2026-07-30
+- **IRCv3.x additions** Added several new IRCv3 capabilities: FILEHOST, network icons, metadata2, message deletion, extended-isupport, strict transport security and more. IRCv3 capabilities are complete.
+- **Expanded translations** 
+
 ## [1.6.9] - 2026-07-20
 - Improve art detection with an option to disable it completely.
 - Improve auto reconnection and selecting of text in input box.
