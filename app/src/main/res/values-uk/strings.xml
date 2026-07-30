@@ -1,0 +1,1389 @@
+<resources>
+    <string name="app_name">HexDroid IRC</string>
+
+    <!-- Welcome / Setup Screen -->
+    <string name="welcome_title">Вітаємо в HexDroid</string>
+    <string name="welcome_subtitle">Спершу налаштуємо все, перш ніж почати.</string>
+    <string name="welcome_language_label">Мова</string>
+    <string name="welcome_nick_label">Нік</string>
+    <string name="welcome_nick_hint">Виберіть свій нік для IRC</string>
+    <string name="welcome_nick_helper">Він використовуватиметься в усіх типових профілях серверів.</string>
+    <string name="welcome_continue">Продовжити</string>
+    <string name="welcome_nick_error_empty">Нік не може бути порожнім</string>
+    <string name="welcome_nick_error_invalid">Нік містить недопустимі символи</string>
+    <string name="welcome_nick_error_long">Нік має містити не більше 16 символів</string>
+
+    <!-- Common / Navigation -->
+    <string name="back">Назад</string>
+    <string name="cancel">Скасувати</string>
+    <string name="save">Зберегти</string>
+    <string name="delete">Видалити</string>
+    <string name="close">Закрити</string>
+    <string name="done">Готово</string>
+    <string name="next">Далі</string>
+    <string name="skip">Пропустити</string>
+    <string name="run">Виконати</string>
+    <string name="set">Встановити</string>
+    <string name="reset">Скинути</string>
+    <string name="manage">Керувати</string>
+    <string name="not_now">Не зараз</string>
+    <string name="copy_text">Копіювати</string>
+
+    <!-- Buffer-list sidepanel toolbar -->
+    <string name="buffer_toolbar_collapse_all">Згорнути всі мережі</string>
+    <string name="buffer_toolbar_mark_all_read">Позначити все як прочитане</string>
+    <string name="buffer_toolbar_search">Пошук у буфері</string>
+    <string name="buffer_toolbar_search_dialog_title">Пошук у буфері</string>
+    <string name="buffer_toolbar_search_placeholder">Текст або відправник…</string>
+    <string name="buffer_toolbar_search_global">Шукати в усіх буферах цієї мережі</string>
+    <string name="buffer_toolbar_search_action">Знайти</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Налаштування</string>
+    <string name="settings_intro_tour">Ознайомчий тур</string>
+    <string name="settings_intro_tour_desc">Швидкий огляд основних екранів і скорочень.</string>
+    <string name="section_appearance">Вигляд</string>
+    <string name="section_ui">Інтерфейс</string>
+    <string name="section_landscape">Бічна панель у горизонтальному режимі</string>
+    <string name="section_portrait">Список ніків у вертикальному режимі</string>
+    <string name="section_highlights">Виділення</string>
+    <string name="section_irc">IRC</string>
+    <string name="section_notifications">Сповіщення</string>
+    <string name="section_logging">Журналювання</string>
+    <string name="section_privacy">Приватність</string>
+    <string name="section_ircv3_history">Історія IRCv3</string>
+    <string name="section_file_transfers">Передавання файлів</string>
+    <string name="setting_font_size">Розмір шрифту</string>
+    <string name="setting_colorise_nicks">Розфарбовувати ніки</string>
+    <string name="setting_own_nick_colour_title">Колір власного ніка</string>
+    <string name="setting_own_nick_colour_auto">Авто</string>
+    <string name="setting_own_nick_colour_custom">Власний</string>
+    <string name="setting_own_nick_colour_pick">Вибрати колір</string>
+    <string name="setting_own_nick_colour_reset">Скинути</string>
+    <string name="setting_mirc_colours">Увімкнути кольори mIRC</string>
+    <string name="setting_ansi_colours">Увімкнути кольори ANSI</string>
+    <string name="setting_art_detection">Зменшувати ASCII/ANSI-арт</string>
+    <string name="setting_show_topic_bar">Показувати панель теми</string>
+    <string name="setting_show_timestamps">Показувати позначки часу</string>
+    <string name="setting_timestamp_format">Формат позначки часу (Java)</string>
+    <string name="setting_hide_motd">Приховувати MOTD під час підключення</string>
+    <string name="setting_hide_joinpartquit">Приховувати повідомлення про вхід, вихід і відключення</string>
+    <string name="setting_hide_away_notify">Приховувати повідомлення про відсутність і повернення</string>
+    <string name="setting_color_channel_events">Кольорові події каналу</string>
+    <string name="setting_hide_topic_on_entry">Приховувати тему під час входу</string>
+    <string name="setting_show_buffers_default">Типово показувати мережі та канали</string>
+    <string name="setting_show_nicklist_default">Типово показувати список ніків</string>
+    <string name="setting_highlight_on_nick">Виділяти за власним ніком</string>
+    <string name="setting_extra_highlights">Додаткові слова для виділення (по одному в рядку)</string>
+    <string name="setting_compact_mode">Компактний режим</string>
+    <string name="setting_network_tabs">Вкладки мереж</string>
+    <string name="setting_network_tabs_desc">Показувати мережі вкладками замість дерева.</string>
+    <string name="setting_network_tabs_bottom">Панель мереж над полем введення</string>
+    <string name="setting_network_tabs_bottom_desc">Показувати перемикач каналів унизу чату.</string>
+    <string name="setting_portrait_nicklist_overlay">Список ніків як бічна панель</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Показувати список ніків як бічну панель зі змінним розміром замість спливаючого вікна. Якщо увімкнено, кнопка списку ніків працює як постійне показати або приховати.</string>
+    <string name="setting_ignore_list">Список ігнорування</string>
+    <string name="setting_ignore_list_desc">Приховувати повідомлення та пропозиції DCC від певних ніків (окремо для кожної мережі).</string>
+    <string name="setting_quit_message">Повідомлення про відключення</string>
+    <string name="setting_part_message">Повідомлення про вихід</string>
+    <string name="setting_auto_reconnect">Автоматичне перепідключення</string>
+    <string name="setting_reconnect_interval">Інтервал перепідключення (секунди)</string>
+    <string name="setting_reconnect_interval_desc">Як часто повторювати спробу після втрати з\'єднання.</string>
+    <string name="setting_seconds">Секунди</string>
+    <string name="setting_auto_connect_startup">Підключатися під час запуску</string>
+    <string name="setting_rejoin_on_kick">Повторно входити після кіку</string>
+    <string name="setting_rejoin_on_kick_desc">Автоматично повертатися до каналу після кіку. Другий кік у тому самому каналі протягом 60 секунд не призводить до повторного входу, щоб уникнути циклів через режими +i/+k/+b.</string>
+    <string name="setting_enable_notifications">Увімкнути сповіщення</string>
+    <string name="setting_notify_highlights">Сповіщення про виділення</string>
+    <string name="setting_notify_pm">Сповіщення про приватні повідомлення</string>
+    <string name="setting_connection_status">Показувати сповіщення про стан з\'єднання</string>
+    <string name="setting_sound_highlight">Звук при виділенні</string>
+    <string name="setting_vibrate_highlight">Вібрація при виділенні</string>
+    <string name="setting_enable_logging">Увімкнути журналювання</string>
+    <string name="setting_log_server">Журналювати буфер сервера</string>
+    <string name="setting_log_folder">Тека журналів</string>
+    <string name="setting_choose_folder">Вибрати теку</string>
+    <string name="setting_retention_days">Днів зберігання</string>
+    <string name="setting_retention_days_hint">0 = зберігати завжди</string>
+    <string name="setting_retention_forever">Журнали зберігаються завжди (автовидалення вимкнено)</string>
+    <string name="setting_max_scrollback">Макс. рядків прокручування</string>
+    <string name="setting_history_limit">Обмеження вибірки історії</string>
+    <string name="setting_history_limit_desc">Кількість повідомлень, які запитуються для кожного каналу під час входу (CHATHISTORY LATEST). 0 вимикає функцію.</string>
+    <string name="setting_messages">Повідомлення</string>
+    <string name="setting_count_unread">Вважати отриману історію непрочитаною</string>
+    <string name="setting_trigger_notif">Створювати сповіщення для отриманої історії</string>
+    <string name="setting_download_folder">Тека завантажень</string>
+    <string name="setting_incoming_port_min">Мін. вхідний порт</string>
+    <string name="setting_incoming_port_max">Макс. вхідний порт</string>
+    <string name="setting_keep_alive">Підтримувати з\'єднання активним</string>
+    <string name="setting_enable_dcc">Увімкнути DCC</string>
+    <string name="setting_open_app_settings">Відкрити налаштування застосунку</string>
+    <string name="setting_battery_optimization">Список оптимізації батареї</string>
+
+    <!-- Theme picker -->
+    <string name="theme_label">Тема оформлення</string>
+    <string name="theme_dark">Темна</string>
+    <string name="theme_light">Світла</string>
+    <string name="theme_system">Системна</string>
+
+    <!-- Font picker -->
+    <string name="font_open_sans">Open Sans</string>
+    <string name="font_inter">Inter</string>
+    <string name="font_monospace">Monospace</string>
+    <string name="font_custom">Власний файл шрифту…</string>
+
+    <!-- Chat font style -->
+    <string name="chat_font_style">Стиль шрифту чату</string>
+    <string name="style_regular">Звичайний</string>
+    <string name="style_bold">Жирний</string>
+    <string name="style_italic">Курсив</string>
+    <string name="style_bold_italic">Жирний + курсив</string>
+
+    <!-- Vibration -->
+    <string name="vibration_intensity">Сила вібрації</string>
+    <string name="vibration_low">Слабка</string>
+    <string name="vibration_medium">Середня</string>
+    <string name="vibration_high">Сильна</string>
+
+    <!-- Chat Screen -->
+    <string name="chat_nicklist">Список ніків</string>
+    <string name="chat_users_format">%1$s • %2$d користувачів</string>
+    <string name="chat_no_channel">Не в каналі</string>
+    <string name="chat_disconnected">Відключено</string>
+    <string name="chat_type_message">Введіть повідомлення…</string>
+    <string name="chat_channel_tools">Інструменти каналу</string>
+    <string name="chat_topic">Тема</string>
+    <string name="chat_new_topic">Нова тема</string>
+    <string name="chat_kick_ban">Кік / бан</string>
+    <string name="chat_nick">Нік</string>
+    <string name="chat_reason">Причина</string>
+    <string name="chat_duration_label">Тривалість</string>
+    <string name="chat_duration_hint">напр. 1d, 2h; 0 зазвичай означає назавжди</string>
+    <string name="chat_kick">Кікнути</string>
+    <string name="chat_ban">Забанити</string>
+    <string name="chat_kick_ban_btn">Кік+бан</string>
+
+    <!-- Network screens -->
+    <string name="networks_title">Мережі</string>
+    <string name="networks_connect">Підключитися</string>
+    <string name="networks_disconnect">Відключитися</string>
+    <string name="networks_edit">Змінити</string>
+    <string name="networks_add">Додати мережу</string>
+    <string name="networks_auto_connect">Автопідключення</string>
+    <string name="network_edit_title">Змінити мережу</string>
+    <string name="network_add_title">Додати мережу</string>
+    <string name="network_name">Назва</string>
+    <string name="network_host">Хост</string>
+    <string name="network_port">Порт</string>
+    <string name="network_use_tls">Використовувати TLS (SSL)</string>
+    <string name="network_allow_invalid_certs">Дозволити недійсні сертифікати</string>
+    <string name="network_pinned_cert_label">Закріплені відпечатки сертифікатів (TOFU)</string>
+    <string name="network_pinned_cert_dormant">Закріплення TOFU діє лише тоді, коли увімкнено \"Дозволити недійсні сертифікати\". Відпечатки нижче зберігаються для довідки; поточне з\'єднання перевіряється системним ланцюжком ЦС.</string>
+    <string name="network_reset_pinned_cert">Скинути &amp; закріпити заново (очистити всі)</string>
+    <string name="network_sts_active_label">Політика STS активна</string>
+    <string name="network_sts_active_desc">Цей сервер опублікував політику Strict Transport Security: з\'єднання примусово використовують TLS, а помилки сертифіката неможливо обійти, доки політика не втратить чинність або сервер її не відкличе.</string>
+    <string name="network_sts_forget">Забути політику STS для цього хоста</string>
+    <string name="list_retry">Повторити</string>
+    <string name="network_trust_extra_pinned_cert">Довіряти і цьому серверу (round-robin DNS)</string>
+    <string name="network_nick">Нік</string>
+    <string name="network_alt_nick">Альтернативний нік</string>
+    <string name="network_username">Ім\'я користувача</string>
+    <string name="network_realname">Справжнє ім\'я</string>
+
+    <!-- Tour steps -->
+    <string name="tour_add_network_title">Ваші мережі</string>
+    <string name="tour_add_network_body">Натисніть +, щоб додати сервер, або змініть наявні. HexDroid постачається з кількома типовими.</string>
+    <string name="tour_connect_title">Підключення</string>
+    <string name="tour_connect_body">Натисніть «Підключитися», щоб установити з\'єднання. Можна бути підключеним до кількох мереж одночасно.</string>
+    <string name="tour_switcher_title">Список буферів</string>
+    <string name="tour_switcher_body">Ця панель показує кожен відкритий сервер, канал і приватний чат. Проведіть пальцем або натисніть ☰, щоб її показати. Натисніть будь-який пункт, щоб перейти до нього</string>
+    <string name="tour_send_title">Надсилання повідомлень</string>
+    <string name="tour_send_body">Пишіть тут, щоб спілкуватися. Команди зі слешем також працюють: /join #channel, /msg nick text, /part, /whois nick, /me action text та інші.</string>
+    <string name="tour_more_title">Інші дії</string>
+    <string name="tour_more_body">З цього меню доступні список каналів, передавання файлів, список ігнорування, налаштування мережі та інше. Там же з\'являється керування режимами каналу й темою, якщо ви оператор.</string>
+    <string name="tour_settings_title">Вигляд &amp; налаштування</string>
+    <string name="tour_settings_body">Виберіть тему оформлення, змініть розмір шрифту, налаштуйте звуки сповіщень, параметри приватності та багато іншого. Зміни застосовуються одразу.</string>
+    <string name="tour_dcc_title">Передавання файлів (DCC)</string>
+    <string name="tour_dcc_body">Увімкніть DCC, щоб надсилати й отримувати файли напряму між користувачами. Якщо ви за маршрутизатором, пасивний DCC дає змогу обійтися без переспрямування портів. SDCC також підтримується.</string>
+    <string name="tour_send_file_title">Надсилання файлу</string>
+    <string name="tour_send_file_body">Введіть нік отримувача, потім виберіть файл у сховищі. Вхідні пропозиції DCC теж надходять сюди, приймайте або відхиляйте їх зі сповіщень.</string>
+    <string name="tour_support_title">Потрібна допомога?</string>
+    <string name="tour_support_body">Підключіться до AfterNET і зайдіть у #HexDroid, щоб отримати підтримку, запропонувати функції або просто поспілкуватися з іншими користувачами HexDroid.</string>
+    <string name="tour_support_fallback">AfterNET ще немає у вашому списку: натисніть «Додати AfterNET», потім підключіться і зайдіть у #HexDroid за підтримкою.</string>
+    <string name="tour_support_action">Додати AfterNET</string>
+    <string name="tour_replay_title">Повторити цей тур</string>
+    <string name="tour_replay_body">Ви можете пройти огляд ще раз у будь-який час через Налаштування → Про програму. Натисніть «Готово», щоб завершити.</string>
+
+    <!-- About -->
+    <string name="about_title">Про програму</string>
+
+    <!-- Transfers -->
+    <string name="transfers_title">Передавання файлів</string>
+
+    <!-- Ignore -->
+    <string name="ignore_title">Список ігнорування</string>
+
+    <!-- List -->
+    <string name="list_title">Список каналів</string>
+
+    <!-- Language names -->
+    <!-- <string name="lang_en" translatable="false">English</string> -->
+    <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
+    <!-- <string name="lang_es" translatable="false">Español</string> -->
+    <!-- <string name="lang_fr" translatable="false">Français</string> -->
+    <!-- <string name="lang_it" translatable="false">Italiano</string> -->
+    <!-- <string name="lang_nl" translatable="false">Nederlands</string> -->
+    <!-- <string name="lang_pl" translatable="false">Polski</string> -->
+    <!-- <string name="lang_pt" translatable="false">Português</string> -->
+    <!-- <string name="lang_ru" translatable="false">Русский</string> -->
+    <!-- <string name="lang_tr" translatable="false">Türkçe</string> -->
+    <!-- <string name="lang_uk" translatable="false">Українська</string> -->
+    <!-- <string name="lang_ar" translatable="false">العربية</string> -->
+    <!-- <string name="lang_ja" translatable="false">日本語</string> -->
+    <!-- <string name="lang_ko" translatable="false">한국어</string> -->
+    <!-- <string name="lang_zh" translatable="false">中文</string> -->
+
+    <string name="network_edit_advanced_caps">Розширені можливості IRCv3</string>
+    <string name="network_edit_caps_hint">Базові функції IRCv3 увімкнено типово. Увімкніть, щоб побачити розширені параметри.</string>
+    <string name="network_edit_bouncer_caps">Можливості bouncer\'а</string>
+
+    <!-- DCC / Transfers Screen -->
+    <string name="transfers_enable_dcc">Увімкнути DCC</string>
+    <string name="transfers_dcc_send_mode">Режим надсилання DCC</string>
+    <string name="transfers_send_file">Надіслати файл</string>
+    <string name="transfers_target_nick">Нік отримувача</string>
+    <string name="transfers_pick_file">Виберіть файл для надсилання</string>
+    <string name="transfers_dcc_chat">Чат DCC</string>
+    <string name="transfers_start_dcc_chat">Почати DCC CHAT</string>
+    <string name="transfers_incoming_chat_offers">Вхідні пропозиції чату</string>
+    <string name="transfers_incoming_offers">Вхідні пропозиції файлів</string>
+    <string name="transfers_no_chat_offers">Пропозицій чату ще немає.</string>
+    <string name="transfers_no_offers">Пропозицій файлів ще немає.</string>
+    <string name="transfers_accept">Прийняти</string>
+    <string name="transfers_reject">Відхилити</string>
+    <string name="transfers_resume">Продовжити</string>
+    <string name="transfers_resuming_from">Продовження з %1$s</string>
+    <string name="transfers_partial_available">%1$s завантажено частково. Продовжити?</string>
+    <string name="transfers_accept_open">Прийняти &amp; відкрити</string>
+    <string name="transfers_active">Активні передавання</string>
+    <string name="transfers_no_transfers">Немає активних передавань.</string>
+    <string name="transfers_share_file">Поділитися файлом</string>
+
+    <!-- Nick completion hints -->
+    <string name="nick_hint_tap_to_mention">Натисніть, щоб згадати</string>
+
+    <!-- Notification channel names (displayed in Android Settings) -->
+    <string name="notif_channel_connection">З\'єднання IRC</string>
+    <string name="notif_channel_highlight_silent">Виділення IRC (без звуку)</string>
+    <string name="notif_channel_highlight_sound">Виділення IRC</string>
+    <string name="notif_channel_pm">Приватні повідомлення IRC</string>
+    <string name="notif_channel_dcc">Запити DCC</string>
+
+    <!-- DCC notification strings -->
+    <string name="notif_dcc_incoming_chat_title">Вхідний чат DCC від %1$s</string>
+    <string name="notif_dcc_incoming_chat_text">Натисніть, щоб відкрити, або скористайтеся екраном передавання файлів, щоб прийняти чи відхилити</string>
+    <string name="notif_dcc_incoming_file_title">Вхідний файл від %1$s</string>
+    <string name="notif_dcc_file_done_title">DCC завершено</string>
+    <string name="notif_dcc_file_done_text">%1$s збережено до %2$s</string>
+    <string name="notif_open_transfers">Відкрити передавання файлів</string>
+
+    <!-- draft/typing indicator strings -->
+    <string name="typing_one">%1$s пише…</string>
+    <string name="typing_two">%1$s і %2$s пишуть…</string>
+    <string name="typing_several">Кілька людей пишуть…</string>
+
+    <!-- Settings: typing privacy -->
+    <string name="setting_send_typing">Надсилати індикатори набору</string>
+    <string name="setting_send_typing_desc">Дозволити іншим бачити, коли ви складаєте повідомлення (draft/typing). Типово вимкнено з міркувань приватності.</string>
+    <string name="setting_receive_typing">Показувати індикатори набору інших</string>
+    <string name="setting_receive_typing_desc">Показувати індикатор, коли хтось інший складає повідомлення в каналі або приватному чаті.</string>
+
+    <!-- draft/channel-rename -->
+    <string name="channel_renamed">Канал перейменовано з %1$s на %2$s</string>
+
+    <!-- draft/message-reactions -->
+    <string name="reaction_added">%1$s поставив(ла) реакцію %2$s</string>
+    <string name="reaction_removed">%1$s прибрав(ла) реакцію %2$s</string>
+
+    <!-- CHATHISTORY TARGETS section title -->
+    <string name="chathistory_targets_title">Історія доступна для</string>
+
+    <!-- Network edit screen -->
+    <string name="network_name_label">Назва мережі</string>
+    <string name="network_host_label">Хост</string>
+    <string name="network_port_label">Порт</string>
+    <string name="network_nickname_label">Нік</string>
+    <string name="network_alt_nick_label">Альтернативний нік</string>
+    <string name="network_username_label">Ім\'я користувача (ident)</string>
+    <string name="network_bouncer_username_label">Ім\'я користувача</string>
+    <string name="network_username_bouncer_hint">Для профілів bouncer\'а це ваше <b>ім\'я для входу на bouncer</b></string>
+    <string name="network_realname_label">Справжнє ім\'я</string>
+    <string name="network_use_tls_label">Використовувати TLS</string>
+    <string name="network_allow_plaintext">Дозволити незахищений відкритий текст</string>
+    <string name="network_auto_connect_label">Підключатися під час запуску застосунку</string>
+    <string name="network_show_in_switcher_label">Показувати в перемикачі каналів</string>
+    <string name="network_auto_reconnect_label">Перепідключатися після відключення</string>
+    <string name="network_bouncer_label">Режим bouncer\'а</string>
+    <string name="network_bouncer_kind_label">Тип bouncer\'а</string>
+    <string name="network_bouncer_kind_none">Немає / не вказано</string>
+    <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
+    <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
+    <string name="network_bouncer_kind_generic">Загальний  (user/network)</string>
+    <string name="network_bouncer_network_label">Назва мережі (необов\'язково)</string>
+    <string name="network_bouncer_network_help">Яку висхідну мережу на bouncer\'і використовує цей профіль (напр. \"afternet\", \"libera\"). Поєднується з полем імені користувача bouncer\'а вище і, залежно від вибраного способу автентифікації, використовується в SASL або в рядку PASS.</string>
+    <string name="network_bouncer_clientid_label">Ідентифікатор клієнта (необов\'язково)</string>
+    <string name="network_bouncer_clientid_help">Короткий ідентифікатор цього пристрою, напр. \"phone\" або \"hexdroid\". Дає змогу мати окремі буфери та історію для кожного клієнта, якщо bouncer це підтримує (ZNC clientbuffer, soju per-client history). Залиште порожнім, щоб усі клієнти використовували спільний буфер.</string>
+    <string name="network_server_password_label">Пароль сервера (PASS)</string>
+    <string name="network_enable_sasl">Увімкнути SASL</string>
+    <string name="network_sasl_mechanism_label">Механізм</string>
+    <string name="network_sasl_username_label">Ім\'я користувача (authcid)</string>
+    <string name="network_sasl_password_label">Пароль</string>
+    <string name="network_sasl_recommended_for_bouncers">Рекомендовано для bouncer\'ів (залиште поле імені користувача порожнім, щоб використати ім\'я користувача bouncer\'а з розділу «Загальне» вище.)</string>
+    <string name="network_cert_format_label">Формат сертифіката</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
+    <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
+    <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
+    <string name="network_key_password_label">Пароль ключа (якщо зашифрований)</string>
+    <string name="network_encoding_label">Кодування</string>
+    <string name="network_command_delay_label">Затримка перед командами (секунди)</string>
+    <string name="network_command_delay_desc">Чекати стільки секунд після підключення перед виконанням команд</string>
+    <string name="network_service_auth_label">Команда автентифікації в сервісах</string>
+    <string name="network_service_auth_hint">напр., /msg NickServ IDENTIFY password</string>
+    <string name="network_commands_hint">Одна команда в рядку. Додайте ;wait N, щоб зробити паузу N секунд після цього рядка, напр. /msg NickServ identify pass ;wait 3</string>
+    <string name="network_no_network_selected">Мережу не вибрано</string>
+    <string name="network_undo_remove">Скасувати видалення</string>
+
+    <!-- Networks screen -->
+    <string name="networks_selected">Вибрано</string>
+    <string name="networks_add_favourite">Додати до улюблених</string>
+    <string name="networks_remove_favourite">Вилучити з улюблених</string>
+    <string name="networks_drag_reorder">Перетягніть, щоб змінити порядок</string>
+    <string name="networks_insecure_title">Незахищене з\'єднання заблоковано</string>
+    <string name="networks_local_title">Потрібен доступ до локальної мережі</string>
+    <string name="networks_local_body">Для підключення до {0} потрібен дозвіл на доступ до локальної мережі.
+
+        Це нова вимога Android 17 для підключення до серверів у вашій локальній мережі (домашня мережа, bouncer тощо).</string>
+    <string name="networks_local_grant">Надати дозвіл</string>
+    <string name="networks_insecure_body">З\'єднання IRC у відкритому вигляді не шифруються і можуть розкрити ваші повідомлення та пароль.</string>
+    <string name="networks_insecure_body2">Щоб підключитися до %1$s без TLS, потрібно явно дозволити незахищені з\'єднання у відкритому вигляді для цієї мережі.</string>
+    <string name="networks_allow_connect">Дозволити &amp; підключитися</string>
+    <string name="networks_reconnect">Перепідключитися</string>
+
+    <!-- Channel / List screen -->
+    <string name="list_channels_title">Канали</string>
+    <string name="list_search_hint">Пошук за каналом або темою</string>
+
+    <!-- Chat screen — channel tools -->
+    <string name="chat_fetch_modes">Отримати поточні режими</string>
+    <string name="chat_key_password_label">Ключ / пароль</string>
+    <string name="chat_max_users_label">Макс. користувачів</string>
+    <string name="chat_message_label">Повідомлення</string>
+    <string name="chat_channel_label">Канал</string>
+    <string name="chat_nick_mask_label">Нік або маска хоста</string>
+    <string name="chat_bans_title">Бани</string>
+    <string name="chat_quiets_title">Заглушення</string>
+    <string name="chat_except_title">Винятки</string>
+    <string name="chat_invex_title">Invex</string>
+    <string name="chat_text_formatting">Форматування тексту</string>
+    <string name="chat_send_message">Надіслати повідомлення</string>
+    <string name="chat_user_list">Список користувачів</string>
+    <string name="chat_drag_reorder">Перетягніть, щоб змінити порядок</string>
+    <string name="chat_clear_all">Очистити все</string>
+
+    <!-- Chat screen — menu items -->
+    <string name="menu_channel_list">Список каналів</string>
+    <string name="menu_file_transfers">Передавання файлів</string>
+    <string name="menu_settings">Налаштування</string>
+    <string name="menu_networks">Мережі</string>
+    <string name="menu_system_info">Інформація про систему</string>
+    <string name="menu_ircop_tools">Інструменти IRCop</string>
+    <string name="menu_about">Про програму</string>
+    <string name="menu_reconnect">Перепідключитися</string>
+    <string name="menu_disconnect">Відключитися</string>
+    <string name="menu_exit">Вийти</string>
+
+    <!-- ChatScreen tail -->
+    <string name="chat_cd_launch_scripts">Запустити скрипти</string>
+    <string name="chat_cd_edit_topic">Змінити тему</string>
+    <string name="chat_cd_jump_unread">Перейти до непрочитаних</string>
+    <string name="chat_cd_scroll_bottom">Прокрутити донизу</string>
+    <string name="chat_cd_close_label">Закрити %1$s</string>
+    <string name="chat_cd_cancel_reply">Скасувати відповідь</string>
+    <string name="chat_cd_encryption_configured">Шифрування налаштовано (%1$s, %2$s)</string>
+    <string name="chat_cd_upload_file">Завантажити файл на сервер</string>
+    <string name="chat_reply_to">Відповісти %1$s</string>
+    <string name="chat_delete_message">Видалити повідомлення</string>
+    <string name="chat_delete_message_desc">Видаляє його для всіх через сервер</string>
+    <string name="chat_copy_messages">Копіювати повідомлення…</string>
+    <string name="chat_copy_messages_desc">Виберіть кілька повідомлень для копіювання</string>
+
+    <!-- IRCop tools -->
+    <string name="ircop_kline">K-line</string>
+    <string name="ircop_gline">G-line</string>
+    <string name="ircop_dline">D-line</string>
+    <string name="ircop_zline">Z-line</string>
+    <string name="ircop_shun">Shun</string>
+    <string name="ircop_kill">Kill</string>
+    <string name="ircop_sajoin">SAJoin</string>
+    <string name="ircop_sapart">SAPart</string>
+    <string name="ircop_wallops">WALLOPS</string>
+    <string name="ircop_globops">GLOBOPS</string>
+    <string name="ircop_locops">LOCOPS</string>
+    <string name="ircop_admin">ADMIN</string>
+    <string name="ircop_motd">MOTD</string>
+    <string name="ircop_links">Links</string>
+    <string name="ircop_uptime">Uptime</string>
+
+    <!-- Ignore list screen -->
+    <string name="ignore_nick_label">Нік для ігнорування</string>
+    <string name="ignore_no_nicks">Немає ігнорованих ніків.</string>
+    <string name="ignore_no_networks">Мереж ще не налаштовано.</string>
+    <string name="ignore_add">Додати</string>
+    <string name="ignore_remove">Вилучити</string>
+
+    <!-- Settings screen — extras -->
+    <string name="settings_export_backup">Експортувати резервну копію</string>
+    <string name="settings_restore_backup">Відновити з резервної копії</string>
+    <string name="settings_restore_confirm_title">Відновити з резервної копії?</string>
+    <string name="settings_restore_confirm_ok">Відновити</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">Системний</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">Власний файл шрифту…</string>
+
+    <!-- Transfers screen — extras -->
+    <string name="transfers_share_open">Поділитися файлом або відкрити</string>
+
+    <!-- About screen -->
+    <string name="about_open_website">Відкрити вебсайт</string>
+
+    <!-- DCC mode options -->
+    <string name="transfers_dcc_auto">Авто</string>
+    <string name="transfers_dcc_active">Активний</string>
+    <string name="transfers_dcc_passive">Пасивний</string>
+
+    <!-- Channel tools -->
+    <string name="chat_channel_lists">Списки каналу…</string>
+
+    <!-- Network edit: clear certificate -->
+    <string name="network_clear">Очистити</string>
+
+
+    <!-- NetworkEditScreen: section headers -->
+    <string name="network_section_connection">З\'єднання</string>
+    <string name="network_section_identity">Ідентифікація</string>
+    <string name="network_section_autoconnect">Автопідключення &amp; пароль</string>
+    <string name="network_section_sasl">Автентифікація SASL</string>
+    <string name="network_section_tls_cert">Клієнтський сертифікат TLS</string>
+    <string name="network_section_autojoin">Автоматичний вхід у канали</string>
+    <string name="network_section_postcmds">Команди після підключення</string>
+    <string name="network_section_encoding">Кодування символів</string>
+    <string name="network_section_ircv3">Можливості IRCv3.x</string>
+    <!-- NetworkEditScreen: proxy/Tor -->
+    <string name="network_section_proxy">Проксі (SOCKS/Tor)</string>
+    <string name="network_proxy_type_label">Тип проксі</string>
+    <string name="network_proxy_type_none">Немає (пряме з\'єднання)</string>
+    <string name="network_proxy_type_socks5">SOCKS5</string>
+    <string name="network_proxy_type_socks4a">SOCKS4a</string>
+    <string name="network_proxy_host_label">Хост проксі</string>
+    <string name="network_proxy_port_label">Порт</string>
+    <string name="network_proxy_username_label">Ім\'я користувача (необов\'язково)</string>
+    <string name="network_proxy_password_label">Пароль (необов\'язково)</string>
+    <string name="network_proxy_preset_orbot">Tor (Orbot)</string>
+    <string name="network_proxy_preset_tor_browser">Tor Browser</string>
+    <string name="network_proxy_hint">Адреса призначення розпізнається на проксі (віддалений DNS), тому .onion-адреси працюють, а ім\'я хоста сервера не потрапляє у вашу локальну мережу. Для Tor запустіть Orbot і вкажіть 127.0.0.1 з портом 9050. Надсилання файлів через DCC проходить через проксі й автоматично використовує пасивний режим; приймання пасивних пропозицій і розміщення DCC-чату недоступні, поки проксі активний, оскільки для них потрібно слухати порт поза тунелем.</string>
+    <!-- NetworkEditScreen: notifications -->
+    <string name="network_section_notifications">Сповіщення</string>
+    <string name="network_notify_errors_label">Сповіщати про помилки</string>
+    <string name="network_notify_errors_desc">Показувати сповіщення про помилки сервера та з\'єднання. Типово вимкнено; тимчасові перепідключення ніколи не сповіщають.</string>
+    <string name="network_highlight_ignore_label">Не виділяти від</string>
+    <string name="network_highlight_ignore_hint">напр. GitHub, *-bot або /^(travis|circleci)/ [по одному в рядку]</string>
+    <string name="network_highlight_ignore_desc">По одному відправнику в рядку, чиї повідомлення ніколи не мають виділятися чи сповіщати. Використовуйте звичайний нік, шаблон IRC (* і ?) або регулярний вираз у /слешах/. Повідомлення все одно з\'являються у своєму каналі.</string>
+    <!-- NetworkEditScreen: misc -->
+    <string name="network_default_name">Мережа</string>
+    <string name="network_bouncer_desc">Пропускає автоматичний вхід, запитує відтворення пропущених повідомлень</string>
+    <string name="network_sasl_external_desc">Використовує клієнтський сертифікат TLS для автентифікації</string>
+    <string name="network_cert_selected">Вибрано: %1$s</string>
+    <string name="network_cert_none">Сертифікат не вибрано.</string>
+    <string name="network_cert_pem_hint">Файл .pem має містити і ваш сертифікат, і приватний ключ.</string>
+    <string name="network_cert_choose_pem">Вибрати PEM</string>
+    <string name="network_cert_replace_pem">Замінити PEM</string>
+    <string name="network_cert_choose_crt">Вибрати .crt</string>
+    <string name="network_cert_replace_crt">Замінити .crt</string>
+    <string name="network_cert_choose_key">Вибрати .key</string>
+    <string name="network_cert_replace_key">Замінити .key</string>
+    <string name="network_cert_choose_p12">Вибрати .p12/.pfx</string>
+    <string name="network_cert_replace_p12">Замінити .p12/.pfx</string>
+    <string name="network_cert_p12_hint">Якщо файл захищено паролем, введіть пароль нижче.</string>
+    <string name="network_cert_label">Сертифікат: %1$s</string>
+    <string name="network_key_label">Ключ: %1$s</string>
+    <string name="network_autojoin_hint">По одному в рядку. Формат: #channel [key]</string>
+    <string name="network_postcmds_hint">Додаткові команди (по одній в рядку):</string>
+    <string name="network_encoding_auto_desc">Рекомендовано. Починає з UTF-8 і автоматично визначає інші кодування.</string>
+    <string name="network_encoding_cyrillic_desc">Використовуйте для болгарських, російських, сербських та інших кириличних мереж.</string>
+    <string name="network_encoding_utf8_desc">Стандартний Unicode. Працює з більшістю сучасних мереж IRC.</string>
+    <string name="network_encoding_manual_desc">Вибір кодування вручну для старих мереж.</string>
+    <string name="network_cert_error">Виберіть і сертифікат, і ключ</string>
+    <!-- SettingsScreen -->
+    <string name="setting_intro_tour">Ознайомчий тур</string>
+    <string name="setting_intro_tour_desc">Швидкий огляд основних екранів і скорочень.</string>
+    <string name="setting_ui_font">Шрифт інтерфейсу</string>
+    <string name="setting_chat_font">Шрифт чату</string>
+    <string name="setting_font_size_label">Розмір шрифту</string>
+    <string name="setting_log_internal">Внутрішнє сховище</string>
+    <string name="setting_log_custom">Вибрано власну теку</string>
+    <string name="setting_dcc_downloads_default">Завантаження (типово)</string>
+    <string name="setting_dcc_downloads_custom">Власна тека</string>
+    <string name="section_backup_restore">Резервне копіювання &amp; відновлення</string>
+    <string name="setting_backup_export_desc">Експортуйте налаштування мереж і застосунку до файлу JSON. Паролі та сертифікати TLS не включаються.</string>
+    <string name="setting_restore_desc">Відновлення замінює всі поточні мережі й налаштування.</string>
+    <string name="setting_restore_confirm">Це замінить усі поточні мережі й налаштування тими, що є у файлі резервної копії. Паролі не було включено до резервної копії, тому їх доведеться ввести заново. Цю дію не можна скасувати.</string>
+    <string name="setting_backup_error">Помилка</string>
+    <string name="setting_backup_done">Готово</string>
+    <string name="setting_battery_tip">Щоб залишатися підключеним усю ніч, вимкніть оптимізацію батареї для цього застосунку та дозвольте роботу у фоні.</string>
+    <string name="setting_battery_oneplus">Порада для OnePlus: додатково закріпіть застосунок у списку останніх (замочок) і переконайтеся, що в налаштуваннях батареї дозволено роботу у фоні та автозапуск.</string>
+    <string name="setting_lang_system">Системна</string>
+    <string name="theme_matrix">Matrix</string>
+    <string name="theme_terminal">Terminal</string>
+    <string name="section_media_previews">Попередній перегляд медіа</string>
+    <string name="setting_image_previews">Увімкнути перегляд зображень &amp; відео</string>
+    <string name="setting_image_previews_desc">Дозволити попередній перегляд зображень і посилань YouTube, надісланих у чат. Посилання Twitter/X розпізнаються через fxtwitter.com - перегляд не відбувається автоматично.</string>
+    <string name="setting_previews_wifi_only">Лише Wi-Fi</string>
+    <string name="setting_previews_wifi_only_desc">Завантажувати перегляди лише за підключення до Wi-Fi, щоб не витрачати мобільні дані.</string>
+    <string name="theme_system_default">Системна</string>
+    <!-- TransfersScreen -->
+    <string name="transfers_send_file_section">Надіслати файл</string>
+    <string name="transfers_dcc_chat_section">DCC CHAT</string>
+    <string name="transfers_dcc_disabled">DCC зараз вимкнено. Увімкніть його, щоб надсилати й приймати файли.</string>
+    <string name="transfers_dcc_auto_desc">Авто: спробувати пасивний DCC, а якщо відповіді немає, перейти до активного.</string>
+    <string name="transfers_dcc_active_desc">Активний: класичний DCC SEND (отримувач підключається до вас).</string>
+    <string name="transfers_dcc_passive_desc">Пасивний: попросити отримувача відкрити порт, після чого ви підключаєтеся до нього.</string>
+    <string name="transfers_chat_offers_section">Вхідні пропозиції чату</string>
+    <string name="transfers_offers_section">Вхідні пропозиції</string>
+    <string name="transfers_in_progress_section">Передавання</string>
+    <string name="transfers_unknown_size">невідомий розмір</string>
+    <string name="transfers_passive_port">пасивний (очікування порту)</string>
+    <string name="transfers_error">Помилка: %1$s</string>
+    <!-- ChatScreen: channel mode panel -->
+    <string name="chat_topic_panel">Тема</string>
+    <string name="chat_modes_panel">Режими каналу</string>
+    <string name="chat_mode_no_external">Без зовнішніх повідомлень</string>
+    <string name="chat_mode_no_external_desc">Блокувати повідомлення від користувачів, яких немає в каналі</string>
+    <string name="chat_mode_ops_topic">Тема лише для операторів</string>
+    <string name="chat_mode_ops_topic_desc">Змінювати тему можуть лише оператори</string>
+    <string name="chat_mode_moderated">Модерований</string>
+    <string name="chat_mode_moderated_desc">Писати можуть лише користувачі з голосом та оператори</string>
+    <string name="chat_mode_invite_only">Лише за запрошенням</string>
+    <string name="chat_mode_invite_only_desc">Щоб увійти, користувачів потрібно запросити</string>
+    <string name="chat_mode_secret">Секретний</string>
+    <string name="chat_mode_secret_desc">Канал приховано від /LIST і /WHOIS</string>
+    <string name="chat_mode_private">Приватний</string>
+    <string name="chat_mode_private_desc">Канал показується як приватний у /LIST</string>
+    <string name="chat_mode_registered">Лише зареєстровані</string>
+    <string name="chat_mode_registered_desc">Увійти можуть лише зареєстровані ніки</string>
+    <string name="chat_mode_no_colour">Без кольорів</string>
+    <string name="chat_mode_no_colour_desc">Вилучати коди кольорів mIRC з повідомлень</string>
+    <string name="chat_mode_no_ctcp">Без CTCP</string>
+    <string name="chat_mode_no_ctcp_desc">Блокувати повідомлення CTCP до каналу</string>
+    <string name="chat_mode_key_label">Ключ каналу (+k)</string>
+    <string name="chat_mode_limit_label">Обмеження користувачів (+l)</string>
+    <string name="chat_mode_kick_ban">Кік / бан</string>
+    <string name="chat_current_modes">Поточні режими: %1$s</string>
+    <string name="chat_ircop_tools">Інструменти IRCop</string>
+    <string name="chat_target_label">Ціль</string>
+    <string name="chat_punishments">Покарання</string>
+    <string name="chat_no_reason">Без причини</string>
+    <string name="chat_force_joinpart">Примусовий вхід / вихід</string>
+    <string name="chat_broadcast">Розсилка</string>
+    <string name="chat_server_queries">Запити до сервера</string>
+    <string name="chat_text_colour">Колір тексту</string>
+    <string name="chat_bg_colour">Тло</string>
+    <string name="chat_colour_code">Код %1$s  %2$s</string>
+    <string name="chat_no_entries">Записів немає.</string>
+    <string name="chat_set_by">встановив %1$s</string>
+    <string name="chat_refresh">Оновити</string>
+    <string name="chat_no_quiet_support">Списки заглушення не підтримуються на цьому сервері</string>
+    <string name="chat_no_except_support">Списки винятків не підтримуються на цьому сервері</string>
+    <string name="chat_no_invex_support">Списки Invex не підтримуються на цьому сервері</string>
+    <string name="chat_no_quiet_server">Цей сервер не повідомляє про список заглушення +q.</string>
+    <string name="chat_no_except_server">Цей сервер не повідомляє про список винятків +e.</string>
+    <string name="chat_no_invex_server">Цей сервер не повідомляє про список винятків запрошення +I.</string>
+    <string name="chat_ban_list">Список банів (+b)</string>
+    <string name="chat_quiet_list">Список заглушення (+q)</string>
+    <string name="chat_except_list">Список винятків (+e)</string>
+    <string name="chat_invex_list">Список Invex (+I)</string>
+    <string name="chat_unban">Розбанити</string>
+    <string name="chat_unquiet">Прибрати заглушення</string>
+    <string name="chat_remove">Вилучити</string>
+    <string name="chat_irc_colour_title">Колір IRC</string>
+    <!-- ChatScreen: nick action sheet -->
+    <string name="nick_open_query">Відкрити приватний чат</string>
+    <string name="nick_open_query_desc">Почати приватну розмову</string>
+    <string name="nick_whois">Whois</string>
+    <string name="nick_whois_desc">Показати інформацію про користувача, канали, час неактивності</string>
+    <string name="nick_mention">Згадати</string>
+    <string name="nick_mention_desc">Вставити @%1$s у ваше повідомлення</string>
+    <string name="nick_dcc_section">Пряме з\'єднання (DCC)</string>
+    <string name="nick_send_file">Надіслати файл</string>
+    <string name="nick_send_file_desc">Надіслати файл через DCC SEND</string>
+    <string name="nick_dcc_disabled">DCC вимкнено в налаштуваннях</string>
+    <string name="nick_dcc_chat">Чат DCC</string>
+    <string name="nick_dcc_chat_desc">Відкрити пряму сесію чату між користувачами</string>
+    <string name="nick_ignore">Ігнорувати</string>
+    <string name="nick_unignore">Не ігнорувати</string>
+    <string name="nick_ignore_desc">Приховати всі повідомлення цього користувача</string>
+    <string name="nick_unignore_desc">Знову показувати повідомлення цього користувача</string>
+    <string name="nick_ignore_notifs">Вимкнути сповіщення</string>
+    <string name="nick_unignore_notifs">Увімкнути сповіщення</string>
+    <string name="nick_ignore_notifs_desc">Вимкнути оповіщення про виділення &amp; приватні повідомлення; повідомлення залишаться видимими</string>
+    <string name="nick_unignore_notifs_desc">Знову дозволити оповіщення від цього користувача</string>
+    <string name="nick_moderation">Модерація</string>
+    <string name="nick_kick_ban">Кік / бан…</string>
+    <string name="nick_kick_ban_desc">Вилучити або забанити %1$s у цьому каналі</string>
+    <string name="nick_privileges">Права в каналі</string>
+    <string name="nick_op">Надати оператора (+o)</string>
+    <string name="nick_deop">Забрати оператора (-o)</string>
+    <string name="nick_voice">Голос (+v)</string>
+    <string name="nick_devoice">Забрати голос (-v)</string>
+    <!-- IgnoreListScreen -->
+    <string name="ignore_network_label">Мережа</string>
+    <string name="ignore_list_desc">Ігноровані ніки порівнюються без урахування регістру й діють для чату, повідомлень notice та вхідних пропозицій DCC у цій мережі.</string>
+    <string name="ignore_list_tip">Порада: ігнорувати когось також можна зі списку ніків або натиснувши на його ім\'я в чаті.</string>
+    <!-- ListScreen -->
+    <string name="list_loading">Завантаження… (%1$d)</string>
+    <string name="list_join_button">Увійти</string>
+    <!-- AboutScreen -->
+    <string name="about_tagline">Клієнт IRC для Android</string>
+    <string name="about_support_title">Документація &amp; підтримка</string>
+    <string name="about_support_desc">Відвідайте вебсайт, щоб знайти інструкції, відповіді на питання та повідомити про проблеми.</string>
+    <string name="about_credits_title">Учасники</string>
+    <string name="about_credits_contribute">Хочете допомогти проєкту?</string>
+
+    <!-- SDCC settings -->
+    <string name="setting_dcc_secure">Використовувати SDCC (шифрування TLS)</string>
+    <string name="setting_dcc_secure_desc">Вихідні передавання файлів використовують DCC SSEND (обгорнутий у TLS). Клієнт співрозмовника також має підтримувати SDCC.</string>
+
+    <!-- Channel list user count filter -->
+    <string name="list_users_filter_label">Користувачі:</string>
+    <string name="list_users_min">Мін.</string>
+    <string name="list_users_max">Макс.</string>
+    <string name="list_users_server_hint">натисніть «Застосувати», щоб отримати список заново з цими межами</string>
+    <string name="list_users_local_hint">Фільтрує завантажений список (цей сервер не може фільтрувати за розміром на своєму боці)</string>
+    <string name="list_users_apply">Застосувати</string>
+
+    <!-- Topic quick-edit dialog -->
+    <string name="topic_edit_title">Змінити тему</string>
+    <string name="topic_edit_label">Тема</string>
+    <string name="topic_set">Встановити</string>
+
+    <!-- Bouncer multinetwork UI -->
+    <string name="bouncer_networks_section_title">Мережі bouncer\'а</string>
+    <string name="bouncer_networks_section_subtitle">Висхідні мережі, повідомлені %1$s</string>
+    <string name="bouncer_networks_refresh">Оновити</string>
+    <string name="bouncer_networks_empty">Висхідних мереж ще не повідомлено. Натисніть «Оновити», коли bouncer зареєструється.</string>
+    <string name="bouncer_networks_state_connected">підключено</string>
+    <string name="bouncer_networks_state_connecting">підключення</string>
+    <string name="bouncer_networks_state_disconnected">відключено</string>
+    <string name="bouncer_networks_state_unknown">невідомо</string>
+    <string name="bouncer_networks_import">Імпортувати</string>
+    <string name="bouncer_networks_already_imported">Імпортовано</string>
+    <string name="bouncer_networks_unnamed">(безіменна висхідна мережа)</string>
+    <string name="bouncer_networks_clone_dismiss">Приховати</string>
+
+    <!-- Bouncer-aware password field hint -->
+    <string name="network_server_password_bouncer_hint">Для bouncer\'ів рекомендовано SASL. Якщо ви все ж використовуєте це поле PASS, просто введіть пароль; ім\'я користувача bouncer\'а та мережу з полів вище буде додано автоматично. Введення повного <b>username/network:password</b> також працює.</string>
+
+    <!-- IRCv3 metadata editor (draft/metadata-2) -->
+    <string name="menu_edit_metadata">Змінити метадані</string>
+    <string name="metadata_editor_title">Ваші метадані</string>
+    <string name="metadata_editor_subtitle">Дані профілю, які бачать інші клієнти в цій мережі. Залиште поле порожнім, щоб очистити його.</string>
+    <string name="metadata_editor_clear_hint">Якщо очистити поле та зберегти, це значення буде вилучено з сервера.</string>
+    <string name="metadata_display_name">Відображуване ім\'я</string>
+    <string name="metadata_status">Статус</string>
+    <string name="metadata_color">Колір ніка (6 шістнадцяткових цифр)</string>
+    <string name="metadata_color_hint">Введіть рівно 6 шістнадцяткових цифр, напр. 3f8ac2</string>
+    <string name="metadata_avatar">URL аватара (https)</string>
+    <string name="metadata_homepage">URL домашньої сторінки</string>
+    <string name="metadata_pronouns">Займенники</string>
+    <string name="metadata_bio">Про себе</string>
+
+    <!-- IRCv3 account registration (draft/account-registration) -->
+    <string name="menu_register_account">Зареєструвати акаунт</string>
+    <string name="register_title">Зареєструвати акаунт</string>
+    <string name="register_subtitle">Зареєструйте акаунт безпосередньо в цій мережі, без звернення до сервісів.</string>
+    <string name="register_account_optional">Назва акаунта (необов\'язково)</string>
+    <string name="register_email_required">Ел. пошта (обов\'язково)</string>
+    <string name="register_email_optional">Ел. пошта (необов\'язково)</string>
+    <string name="register_password">Пароль</string>
+    <string name="register_password_confirm">Підтвердьте пароль</string>
+    <string name="register_action">Зареєструвати</string>
+    <string name="register_code">Код підтвердження</string>
+    <string name="register_verify_action">Підтвердити</string>
+    <string name="register_verify_prompt">Введіть код підтвердження, який надіслав сервер.</string>
+    <string name="register_success">Вас зареєстровано як %1$s, і ви увійшли.</string>
+    <string name="register_your_account">ваш акаунт</string>
+    <string name="register_save_password">Зберегти цей пароль для автоматичного входу (SASL) наступного разу</string>
+    <string name="register_failed">Не вдалося зареєструватися. Перевірте дані й спробуйте ще раз.</string>
+
+    <!-- Nick tap sheet -->
+    <string name="nick_away">Відсутній</string>
+    <string name="nick_bot">Бот</string>
+
+    <!-- Ban/extban editor -->
+    <string name="chat_add">Додати</string>
+    <string name="chat_add_mask">Маска або акаунт для розширеного бану</string>
+    <string name="chat_ban_account">Забанити акаунт</string>
+    <string name="chat_extban_hint">Підтримувані розширені бани (%1$s): %2$s</string>
+
+    <!-- Encryption dialog -->
+    <string name="copy">Копіювати</string>
+    <string name="share">Поділитися</string>
+    <string name="paste">Вставити</string>
+    <string name="confirm">Підтвердити</string>
+    <string name="action_import">Імпортувати</string>
+    <string name="clear">Очистити</string>
+    <string name="enc_title">Шифрування</string>
+    <string name="enc_for_target">для %1$s</string>
+    <string name="enc_kind_channel">каналу</string>
+    <string name="enc_kind_query">приватного чату</string>
+    <string name="enc_cleartext_desc">Повідомлення цього %1$s надсилаються й отримуються у відкритому вигляді.</string>
+    <string name="enc_active">Активно: </string>
+    <string name="enc_age_dormant_key">+AGE увімкнено, і він шифрує повідомлення тут. Ваш збережений ключ %1$s залишається, але не використовується, поки +AGE увімкнено.</string>
+    <string name="enc_safety_number">Код безпеки</string>
+    <string name="enc_verify_match">Переконайтеся, що він збігається з тим, який бачить інша сторона.</string>
+    <string name="enc_cipher">Шифр</string>
+    <string name="enc_agm_desc">Authenticated Group Messaging від HexDroid.  Один випадковий 256-бітний ключ, автентифіковане шифрування кожного повідомлення. Ключ ви передаєте самі.</string>
+    <string name="enc_age_desc">Authenticated Group Exchange.  Ключі узгоджуються автоматично й оновлюються вперед. Пряма секретність для приватних повідомлень.</string>
+    <string name="enc_fish_desc">Використовуйте FiSH лише тоді, коли інша сторона не підтримує +AGM чи +AGE.</string>
+    <string name="enc_regen">Створити заново</string>
+    <string name="enc_regen_confirm">Створити новий ключ? Поточний ключ одразу перестане працювати, і інша сторона має імпортувати новий.</string>
+    <string name="enc_clear_confirm">Вилучити шифрування для цього %1$s? Повідомлення надсилатимуться й отримуватимуться у відкритому вигляді.</string>
+    <string name="enc_generate_key">Створити ключ</string>
+    <string name="enc_age_safety_number">Ваш код безпеки +AGE</string>
+    <string name="enc_copy_safety_number">Копіювати код безпеки</string>
+    <string name="enc_share_safety_desc">Поділіться ним, щоб контакти могли переконатися, що справді спілкуються з вами.</string>
+    <string name="enc_this_channel">Цей канал</string>
+    <string name="enc_this_contact">Цей контакт</string>
+    <string name="enc_no_identity">Для %1$s ще не бачили ідентичності +AGE. Вона закріплюється автоматично під час першого оголошення (довіра за першого використання); після цього її можна перевірити тут.</string>
+    <string name="enc_verified">Перевірено.</string>
+    <string name="enc_pinned_unverified">Закріплено, але не перевірено. Порівняйте це з тим, що зачитає %1$s, потім підтвердьте.</string>
+    <string name="enc_mark_verified">Позначити як перевірене</string>
+    <string name="enc_turn_off_age">Вимкнути +AGE</string>
+    <string name="enc_age_enable_desc">Увімкнути тут шифрування на основі ідентичності (Ed25519) з прямою секретністю (X25519/X3DH). Ключі обмінюються автоматично, щойно обидві сторони оголосять +AGE.</string>
+    <string name="enc_turn_on_age">Увімкнути +AGE</string>
+    <string name="enc_reveal_key">Показати ключ для передавання</string>
+    <string name="enc_key_bytes">Ключ (32 байти, base64)</string>
+    <string name="enc_key_leak_warn">Будь-хто, у кого є цей рядок, зможе розшифрувати повідомлення для цієї цілі.</string>
+    <string name="enc_paste_key">Вставити ключ від іншого користувача</string>
+    <string name="enc_key_placeholder">32-байтовий ключ у base64</string>
+    <string name="enc_reveal_passphrase">Показати парольну фразу</string>
+    <string name="enc_passphrase">Парольна фраза</string>
+    <string name="enc_passphrase_desc">Введіть ту саму парольну фразу, яку використає ваш контакт FiSH.</string>
+    <string name="enc_passphrase_placeholder">Парольна фраза (4-56 символів)…</string>
+    <string name="enc_passphrase_weak">Короткі парольні фрази (&lt;8 символів) легко зламати перебором. Використовуйте щонайменше 12.</string>
+
+    <!-- Image/link preview -->
+    <string name="img_load_preview">Завантажити перегляд</string>
+    <string name="img_close_player">Закрити плеєр</string>
+    <string name="img_youtube_thumb">Мініатюра YouTube</string>
+    <string name="img_twitter_video_thumb">Мініатюра відео Twitter/X</string>
+    <string name="img_preview">Перегляд зображення</string>
+    <string name="img_play_video">Відтворити відео</string>
+    <string name="img_open_tweet_video">Відкрити відео з твіту</string>
+    <string name="img_dismiss_preview">Закрити перегляд</string>
+    <string name="img_failed_load">Не вдалося завантажити перегляд</string>
+    <string name="img_too_large">Перегляд завеликий (макс. 5 МБ)</string>
+    <string name="img_no_media">У цьому твіті немає медіа</string>
+    <string name="img_wifi_only">Лише Wi-Fi – підключіться до Wi-Fi</string>
+
+    <!-- Connection/reconnect status lines -->
+    <string name="status_cooldown_over">Період очікування після нестабільності завершився. Автоперепідключення відновлюється…</string>
+    <string name="status_network_lost">Мережу втрачено. Очікування з\'єднання…</string>
+    <string name="status_network_changed">Мережу змінено. Перепідключення…</string>
+    <string name="status_network_available_reconnect">Мережа доступна. Перепідключення…</string>
+    <string name="status_disconnected">Відключено</string>
+    <string name="status_reconnect_in">Перепідключення через %1$s (спроба %2$s)…</string>
+    <string name="status_network_available_retry">Мережа доступна. Повторна спроба…</string>
+    <string name="status_battery_saver_paused">Активний режим енергозбереження - перепідключення припинено. Спроба повториться, коли режим буде вимкнено.</string>
+    <string name="status_battery_saver_off">Режим енергозбереження вимкнено. Повторна спроба…</string>
+    <string name="status_retry_connect">Повторна спроба підключення (спроба %1$s)…</string>
+    <string name="status_resuming">Відновлення з\'єднання…</string>
+
+    <!-- CAP/SASL session status (IrcSession) -->
+    <string name="session_cap_ls_complete">CAP LS сервера завершено</string>
+    <string name="session_cap_new">CAP NEW: %1$s</string>
+    <string name="session_cap_del">CAP DEL: %1$s</string>
+    <string name="session_cap_ack">CAP ACK: %1$s</string>
+    <string name="session_starting_sasl">Запуск SASL…</string>
+    <string name="session_cap_nak">CAP NAK: %1$s</string>
+    <string name="session_sasl_success">Автентифікація SASL успішна</string>
+    <string name="session_sasl_plain_no_tls">SASL PLAIN перервано: пароль не буде надіслано незашифрованим з\'єднанням. Увімкніть TLS або перейдіть на SCRAM-SHA-256.</string>
+    <string name="session_sasl_plain_no_pw">SASL PLAIN перервано: для цього профілю не задано пароль. Відкрийте налаштування мережі та введіть пароль SASL заново (паролі не включаються до резервних копій з причин безпеки).</string>
+    <string name="session_sasl_plain_aborted">SASL PLAIN: сервер перервав автентифікацію</string>
+    <string name="session_sasl_plain_unexpected">SASL PLAIN: неочікуваний запит сервера &quot;%1$s&quot;, перервано</string>
+    <string name="session_sasl_external_aborted">SASL EXTERNAL: сервер перервав автентифікацію</string>
+    <string name="session_sasl_external_unexpected">SASL EXTERNAL: неочікуваний запит сервера &quot;%1$s&quot;, перервано</string>
+    <string name="session_sasl_scram_no_pw">SASL SCRAM-SHA-256 перервано: для цього профілю не задано пароль. Відкрийте налаштування мережі та введіть пароль SASL заново (паролі не включаються до резервних копій з причин безпеки).</string>
+    <string name="session_sasl_decode_fail">SASL: не вдалося декодувати вміст AUTHENTICATE від сервера</string>
+    <string name="session_scram_state_missing">відсутній стан SCRAM</string>
+    <string name="session_sasl_scram_aborted">SASL SCRAM-SHA-256 перервано: %1$s</string>
+    <string name="session_scram_sig_verified">SCRAM: підпис сервера перевірено</string>
+    <string name="session_scram_sig_failed">Не вдалося перевірити підпис сервера SCRAM</string>
+
+    <!-- IrcCore status/server text -->
+    <string name="core_looking_up_ban">Пошук %1$s для бану за %2$s…</string>
+    <string name="core_ctcp_ratelimited">CTCP %1$s від %2$s проігноровано (обмеження частоти)</string>
+    <string name="core_ctcp_version_sent">Відповідь CTCP VERSION надіслано %1$s</string>
+    <string name="core_ctcp_ping_reply_sent">Відповідь CTCP PING надіслано %1$s</string>
+    <string name="core_ctcp_time_sent">Відповідь CTCP TIME надіслано %1$s</string>
+    <string name="core_ctcp_reply_sent">Відповідь CTCP %1$s надіслано %2$s</string>
+    <string name="core_ctcp_clientinfo_reply_sent">Відповідь CTCP CLIENTINFO надіслано %1$s</string>
+    <string name="core_ctcp_source_sent">Відповідь CTCP SOURCE надіслано %1$s</string>
+    <string name="core_ctcp_unknown">Невідомий CTCP %1$s від %2$s</string>
+    <string name="core_ctcp_generic_from">* %1$s від %2$s: %3$s</string>
+    <string name="core_usage_knock">Використання: /knock &lt;channel&gt; [reason]</string>
+    <string name="core_no_knock">Сервер не підтримує KNOCK</string>
+    <string name="core_ctcp_sent">CTCP %1$s надіслано %2$s</string>
+    <string name="core_ctcp_finger_sent">CTCP FINGER надіслано %1$s</string>
+    <string name="core_ctcp_userinfo_sent">CTCP USERINFO надіслано %1$s</string>
+    <string name="core_ctcp_clientinfo_sent">CTCP CLIENTINFO надіслано %1$s</string>
+    <string name="core_usage_setname">Використання: /setname &lt;new realname&gt;</string>
+    <string name="core_no_setname">Сервер не підтримує SETNAME (CAP setname не узгоджено)</string>
+    <string name="core_ctcp_ping_sent">CTCP PING надіслано %1$s</string>
+    <string name="core_looking_up">Пошук %1$s...</string>
+    <string name="core_resolved_to">Розпізнано як:</string>
+    <string name="core_no_resolution">Не вдалося розпізнати %1$s</string>
+    <string name="core_dns_failed">Помилка запиту DNS: %1$s</string>
+    <string name="core_unknown_error">Невідома помилка</string>
+    <string name="core_connecting">Підключення…</string>
+    <string name="core_tls">TLS: %1$s</string>
+    <string name="core_using_encoding">Використовується кодування: %1$s</string>
+    <string name="core_regained_nick">Основний нік %1$s повернено.</string>
+    <string name="core_regaining_nick">Спроба повернути основний нік %1$s…</string>
+    <string name="core_metadata_unsub">Метадані: скасовано підписку на %1$s</string>
+    <string name="core_metadata_subs">Підписки на метадані: %1$s</string>
+    <string name="core_metadata_subs_none">(немає)</string>
+    <string name="core_monitor_empty">Список MONITOR порожній</string>
+    <string name="core_monitor_list">Список MONITOR (%1$s): %2$s</string>
+    <string name="core_negotiating_caps">Узгодження можливостей…</string>
+    <string name="core_legacy_encoding">Автоматично визначено старе кодування: %1$s — його можна задати явно в налаштуваннях мережі</string>
+    <string name="core_nick_in_use_alt">Нік зайнято; пробуємо альтернативний нік: %1$s</string>
+    <string name="core_nick_in_use_next">Нік зайнято; пробуємо: %1$s</string>
+    <string name="core_netsplit">%1$s%2$s — зачеплено: %3$s</string>
+
+    <!-- IrcViewModel command/feedback status -->
+    <string name="vm_no_matches">Немає збігів для \"%1$s\"</string>
+    <string name="vm_age_offer">%1$s хоче спілкуватися з наскрізним шифруванням +AGE. Увімкніть його в меню замка, щоб зашифрувати цю розмову.</string>
+    <string name="vm_sts_secure">STS: %1$s вимагає TLS - захищене підключення через порт %2$s</string>
+    <string name="vm_turn_on_data">Увімкніть Wi-Fi або мобільні дані для автоматичного перепідключення.</string>
+    <string name="vm_conn_error">Помилка з\'єднання: %1$s (трасування стека в logcat)</string>
+    <string name="vm_agmkey_usage">/agm-key gen [target] | set &lt;target&gt; &lt;b64&gt; | clear &lt;target&gt; | info [target]</string>
+    <string name="vm_agmkey_gen_needs_target">для /agm-key gen потрібна ціль (або виконайте команду в каналі чи приватному чаті)</string>
+    <string name="vm_agmkey_generated">Ключ AGM створено для %1$s. Відпечаток: %2$s</string>
+    <string name="vm_agmkey_run_other">На іншому пристрої виконайте:   /agm-key set %1$s %2$s</string>
+    <string name="vm_agmkey_verify">(Переконайтеся, що відпечаток збігається з обох сторін, перш ніж надсилати щось важливе.)</string>
+    <string name="vm_agmkey_set_usage">Використання: /agm-key set &lt;target&gt; &lt;base64&gt;</string>
+    <string name="vm_agmkey_bad_base64">/agm-key set: некоректний base64 в аргументі ключа</string>
+    <string name="vm_agmkey_bad_len">/agm-key set: очікувався 32-байтовий ключ (після декодування base64 отримано %1$s байтів)</string>
+    <string name="vm_agmkey_installed">Ключ AGM встановлено для %1$s. Відпечаток: %2$s</string>
+    <string name="vm_agmkey_store_fail">Не вдалося зберегти ключ: %1$s</string>
+    <string name="vm_agmkey_clear_needs_target">для /agm-key clear потрібна ціль (або виконайте команду в каналі чи приватному чаті)</string>
+    <string name="vm_agmkey_cleared">Ключ AGM для %1$s вилучено. Повідомлення тепер надсилатимуться у відкритому вигляді.</string>
+    <string name="vm_agmkey_info_needs_target">для /agm-key info потрібна ціль (або виконайте команду в каналі чи приватному чаті)</string>
+    <string name="vm_agmkey_none">Для %1$s не налаштовано ключ шифрування</string>
+    <string name="vm_agmkey_info">%1$s: схема=%2$s  відпечаток=%3$s</string>
+    <string name="vm_react_usage">Використання: /%1$s &lt;emoji&gt; [n]   - n задає, на скільки повідомлень назад, типово 1</string>
+    <string name="vm_react_needs_target">для /%1$s потрібен активний канал або приватний чат</string>
+    <string name="vm_react_no_tags">Цей сервер не підтримує реакції (немає можливості message-tags)</string>
+    <string name="vm_react_no_msgid">/%1$s не вдалося знайти %2$s із серверним msgId - можливо, сервер не підтримує message-tags</string>
+    <string name="vm_find_usage">Використання: /find &lt;text&gt;</string>
+    <string name="vm_gsearch_usage">Використання: /gsearch &lt;text&gt;</string>
+    <string name="vm_no_matches_buffers">Немає збігів для \"%1$s\" у %2$s буферах</string>
+    <string name="vm_found_matches">Знайдено збігів для \"%2$s\": %1$s - скористайтеся накладкою /gsearch для переходу</string>
+    <string name="vm_ignore_empty">Список ігнорування порожній. Використання: /ignore &lt;nick&gt;</string>
+    <string name="vm_ignored_list">Ігноруються (%1$s): %2$s</string>
+    <string name="vm_ignore_usage">Використання: /ignore &lt;nick&gt;</string>
+    <string name="vm_unignore_usage">Використання: /unignore &lt;nick&gt;</string>
+    <string name="vm_not_connected">Немає підключення.</string>
+    <string name="vm_names_usage">Використання: /names #channel</string>
+    <string name="vm_slap_usage">Використання: /slap &lt;nick&gt;</string>
+
+    <!-- IrcViewModel multi-line status -->
+    <string name="vm_reconnect_halted">Автоперепідключення припинено: %1$s (потрібно перепідключитися вручну)</string>
+    <string name="vm_reconnect_halted_auth">Автоперепідключення припинено: помилка автентифікації. Виправте облікові дані, потім перепідключіться вручну.</string>
+    <string name="vm_status_auth_halted">Помилка автентифікації — перепідключення припинено</string>
+    <string name="vm_sasl_keystore_invalid">Облікові дані SASL недоступні. Ключ у Android Keystore став недійсним (це може статися після зміни біометрії або блокування екрана). Підключення без SASL; будь ласка, введіть пароль SASL заново в налаштуваннях мережі, щоб відновити автентифікацію в сервісах.</string>
+    <string name="vm_age_key_warning">ПОПЕРЕДЖЕННЯ +AGE: %1$s оголосив ключ (%2$s), відмінний від закріпленого за цим ніком (%3$s). Це нормально після перевстановлення або на другому пристрої, але так само виглядає й захоплення ніка. Повідомлення +AGE від нього ігноруються, доки ви не вирішите. Перевірте відпечаток іншим каналом зв\'язку, потім: /age trust %1$s  або  /age reject %1$s</string>
+
+    <!-- IrcViewModel list/STS/DCC/feedback status -->
+    <string name="vm_banlist_usage">Використання: /banlist #channel</string>
+    <string name="vm_quietlist_usage">Використання: /quietlist #channel</string>
+    <string name="vm_exceptlist_usage">Використання: /exceptlist #channel</string>
+    <string name="vm_invexlist_usage">Використання: /invexlist #channel</string>
+    <string name="vm_dcc_chat_usage">Використання: /dcc chat &lt;nick&gt;</string>
+    <string name="vm_age_send_failed">Не вдалося надіслати через +AGE; повідомлення не надіслано.</string>
+    <string name="vm_ignoring">%1$s ігнорується</string>
+    <string name="vm_unignored">%1$s більше не ігнорується</string>
+    <string name="vm_notif_muted">Сповіщення для %1$s вимкнено</string>
+    <string name="vm_notif_unmuted">Сповіщення для %1$s увімкнено</string>
+    <string name="vm_halted_rejected">Автоперепідключення припинено: сервер відхилив підключення.</string>
+    <string name="vm_tls_persist_fail">TLS: не вдалося зберегти відпечаток сертифіката: %1$s</string>
+    <string name="vm_mode_change">Режим %1$s %2$s</string>
+    <string name="vm_sts_cleared">STS: політику для %1$s скасовано сервером</string>
+    <string name="vm_sts_stored">STS: збережено політику «лише TLS» для %1$s (дійсна %2$sс)</string>
+    <string name="vm_sts_upgrade">STS: сервер вимагає TLS - захищене перепідключення через порт %1$s</string>
+    <string name="vm_registered_as">Зареєстровано як %1$s</string>
+    <string name="vm_reconnected">Перепідключено</string>
+    <string name="vm_waiting_autojoin">Очікування %1$sс перед автовходом &amp; командами…</string>
+    <string name="vm_waiting">Очікування %1$sс…</string>
+    <string name="vm_dcc_incoming">Вхідна пропозиція файлу DCC від %1$s: %2$s (для приймання відкрийте екран передавання файлів)</string>
+
+    <!-- IrcViewModel TLS/halt multi-line -->
+    <string name="vm_halted_tls">Автоперепідключення припинено: помилка TLS навряд чи зникне сама. Змініть налаштування довіри до сертифікатів, потім перепідключіться вручну.</string>
+    <string name="vm_halted_unreachable">Автоперепідключення припинено: сервер недоступний (ім\'я хоста не розпізнається або порт закрито). Перевірте хост і порт у налаштуваннях мережі, потім перепідключіться вручну.</string>
+    <string name="vm_tls_tofu_pinned">TLS: відпечаток сертифіката вивчено й закріплено (TOFU). Майбутні підключення перевірятимуть: %1$s</string>
+    <string name="vm_cert_hostname_mismatch">Незбіг імені хоста в сертифікаті: підключено до %1$s, але SAN сертифіката: %2$s. Підключення дозволено.</string>
+
+    <!-- IrcViewModel DCC/bouncer/channel status -->
+    <string name="vm_dcc_resume_nomatch">DCC RESUME від %1$s для %2$s проігноровано — немає відповідного активного надсилання.</string>
+    <string name="vm_dcc_resume_oor">У DCC RESUME від %1$s позиція %2$s поза допустимим діапазоном (розмір %3$s); ігнорується.</string>
+    <string name="vm_dcc_resume_honour">DCC RESUME від %1$s з позиції %2$s байтів прийнято.</string>
+    <string name="vm_dcc_chat_incoming">Вхідний DCC CHAT від %1$s - натисніть буфер \'DCCCHAT:%1$s\' або відкрийте екран передавання файлів для приймання</string>
+    <string name="vm_dcc_chat_offer">Пропозиція DCC CHAT від %1$s (%2$s:%3$s). Скористайтеся /dcc accept %1$s або відкрийте екран передавання файлів для приймання.</string>
+    <string name="vm_closed_buffer">Буфер %1$s закрито (вас немає в каналі)</string>
+    <string name="vm_left_channel">Ви покинули %1$s</string>
+    <string name="vm_autorejoin_suppressed">Автоматичний повторний вхід скасовано (повторний кік протягом %1$sс)</string>
+    <string name="vm_command_error">%1$s: %2$s</string>
+    <string name="vm_try_again">будь ласка, спробуйте ще раз трохи пізніше</string>
+    <string name="vm_invited_here">%1$s запросив вас сюди</string>
+    <string name="vm_caps_added">Сервер додав можливості: %1$s</string>
+    <string name="vm_caps_removed">Сервер вилучив можливості: %1$s</string>
+    <string name="vm_bouncer_removed">Мережу bouncer\'а вилучено: %1$s</string>
+    <string name="vm_bouncer_state">Мережа bouncer\'а %1$s: %2$s%3$s [%4$s]</string>
+    <string name="vm_deleted_message">%1$s видалив повідомлення</string>
+    <string name="vm_names_none">NAMES для %1$s: (немає)</string>
+    <string name="vm_names_header">NAMES для %1$s (%2$s):</string>
+    <string name="vm_log_write_failed">Не вдалося записати журнал для %1$s: %2$s</string>
+    <string name="vm_dcc_lan_perm">DCC від %1$s: потрібен дозвіл на доступ до локальної мережі (Android 17+). Надайте його в Налаштування → Застосунки → HexDroid → Дозволи.</string>
+    <string name="vm_dcc_accepted_passive">Пасивну пропозицію DCC прийнято: %1$s (прослуховування на %2$s)%3$s</string>
+    <string name="vm_dcc_resume_requested">Запрошено DCC RESUME для %1$s з позиції %2$s байтів…</string>
+    <string name="vm_dcc_resume_agreed">Відправник прийняв RESUME з позиції %1$s байтів (запитували %2$s)</string>
+    <string name="vm_dcc_resume_none">Немає DCC ACCEPT від %1$s — передавання починається заново.</string>
+    <string name="vm_dcc_rejected">Пропозицію DCC відхилено: %1$s</string>
+    <string name="vm_dcc_chat_disconnected">DCC CHAT відключено%1$s</string>
+
+    <!-- IrcViewModel DCC CHAT/send status -->
+    <string name="vm_dcc_passive_proxy">Неможливо прийняти пасивний DCC від %1$s, поки активний проксі: для цього потрібно слухати порт поза тунелем. Попросіть надіслати активним способом або вимкніть проксі для цього передавання.</string>
+    <string name="vm_dcc_refuse_private">Відмова від DCC від %1$s: оголошено приватну або локальну адресу (%2$s), недосяжну через проксі. Вимкніть проксі для цього передавання, якщо співрозмовник у вашій локальній мережі.</string>
+    <string name="vm_dcc_chat_refuse_private">Відмова від DCC CHAT від %1$s: оголошено приватну або локальну адресу (%2$s), недосяжну через проксі. Вимкніть проксі для цієї мережі, якщо співрозмовник у вашій локальній мережі.</string>
+    <string name="vm_dcc_chat_failed">Збій DCC CHAT: %1$s</string>
+    <string name="vm_dcc_chat_closed">DCC CHAT закрито</string>
+    <string name="vm_dcc_chat_connected">DCC CHAT підключено до %1$s</string>
+    <string name="vm_dcc_chat_not_connected">DCC CHAT не підключено.</string>
+    <string name="vm_dcc_chat_send_failed">Не вдалося надіслати в DCC CHAT: %1$s</string>
+    <string name="vm_dcc_chat_lan_perm">DCC CHAT від %1$s: потрібен дозвіл на доступ до локальної мережі (Android 17+). Надайте його в Налаштування → Застосунки → HexDroid → Дозволи.</string>
+    <string name="vm_dcc_chat_connecting">Підключення DCC CHAT до %1$s (%2$s:%3$s)…</string>
+    <string name="vm_dcc_chat_connect_failed">Не вдалося підключитися по DCC CHAT: %1$s</string>
+    <string name="vm_dcc_chat_rejected">Пропозицію DCC CHAT від %1$s відхилено</string>
+    <string name="vm_dcc_chat_offering">Пропонування DCC%1$s CHAT для %2$s…</string>
+    <string name="vm_dcc_chat_sent">Пропозицію DCC%1$s CHAT надіслано %2$s (порт %3$s)</string>
+    <string name="vm_dcc_chat_offer_failed">Не вдалося запропонувати DCC CHAT: %1$s</string>
+    <string name="vm_dcc_offering_active">Пропонування %1$s для %2$s через DCC%3$s (активний, порт %4$s)…</string>
+    <string name="vm_dcc_offering_passive">Пропонування %1$s для %2$s через DCC%3$s (пасивний)…</string>
+    <string name="vm_dcc_accepted_resume">%1$s прийняв; продовження з %2$s байтів…</string>
+    <string name="vm_dcc_accepted_connecting">%1$s прийняв; підключення…</string>
+    <string name="vm_dcc_proxy_passive">Проксі активний: використовується пасивний DCC (активне надсилання не може слухати порт через проксі).</string>
+    <string name="vm_dcc_send_complete">Надсилання DCC завершено: %1$s → %2$s</string>
+    <string name="vm_dcc_send_failed">Збій надсилання DCC: %1$s</string>
+    <string name="vm_dcc_send_cancelled">Надсилання DCC скасовано: %1$s</string>
+
+    <!-- IrcViewModel connection status labels -->
+    <string name="vm_status_disconnected">Відключено</string>
+    <string name="vm_status_connected">Підключено</string>
+    <string name="vm_status_plaintext_disabled">Відкритий текст вимкнено</string>
+    <string name="vm_status_lan_perm">Потрібен дозвіл на локальну мережу</string>
+    <string name="vm_status_not_configured">Не налаштовано</string>
+    <string name="vm_status_waiting_network">Очікування мережі…</string>
+    <string name="vm_status_connecting">Підключення…</string>
+    <string name="vm_status_reconnecting">Перепідключення…</string>
+    <string name="vm_status_reconnecting_in">Перепідключення через %1$sс…</string>
+    <string name="vm_status_paused_battery">Припинено (енергозбереження)</string>
+    <string name="vm_status_retrying">Повторна спроба підключення…</string>
+    <string name="vm_status_connected_to">Підключено до %1$s</string>
+    <string name="vm_status_unstable_paused">Нестабільно - пауза %1$s хв</string>
+    <string name="vm_status_unstable_reconnect">Нестабільно - перепідключення припинено</string>
+    <string name="vm_status_tls_halted">Помилка TLS: перепідключення припинено</string>
+    <string name="vm_event_handler_error">Помилка обробника подій: %1$s</string>
+
+    <!-- IrcViewModel final status -->
+    <string name="vm_status_unreachable_halted">Сервер недоступний: перепідключення припинено</string>
+    <string name="vm_status_rejected_halted">Сервер відхилив підключення: перепідключення припинено</string>
+    <string name="vm_server_error">Помилка сервера: %1$s</string>
+    <string name="vm_dcc_disabled">DCC вимкнено в налаштуваннях.</string>
+    <string name="vm_dcc_chat_proxy">Неможливо запропонувати DCC CHAT, поки активний проксі (для цього потрібно слухати порт поза тунелем). Вимкніть проксі для цієї мережі, щоб використовувати DCC CHAT.</string>
+
+    <!-- IrcViewModel auth hints / reactions -->
+    <string name="vm_auth_pass_rejected">Пароль сервера (PASS) відхилено. Якщо це профіль bouncer\'а, формат пароля зазвичай user:password або user/network:password.</string>
+    <string name="vm_auth_sasl_bouncer">Автентифікацію SASL відхилено. Bouncer\'ам потрібен дійсний SASL, щоб маршрутизувати з\'єднання. Перевірте ім\'я користувача та пароль SASL (або клієнтський сертифікат) у цьому профілі.</string>
+    <string name="vm_auth_sasl_rejected">Автентифікацію SASL відхилено. Перевірте ім\'я користувача та пароль SASL (або клієнтський сертифікат) у цьому профілі.</string>
+    <string name="vm_auth_rejected">Автентифікацію відхилено.</string>
+    <string name="vm_auth_halt_suffix">Автоперепідключення припинено; натисніть «Перепідключитися» після виправлення облікових даних.</string>
+    <string name="vm_reacted_with">поставив реакцію</string>
+    <string name="vm_removed_reaction">прибрав реакцію</string>
+    <string name="vm_ref">(посилання: %1$s)</string>
+
+    <!-- IrcViewModel misc -->
+    <string name="vm_cert_changed">Відпечаток сертифіката сервера ЗМІНИВСЯ! Очікувався: %1$s  •  Отримано: %2$s  - У підключенні відмовлено. Автоперепідключення припинено. Якщо цей сервер використовує round-robin DNS (irc.example.tld), відкрийте налаштування мережі й натисніть \'Довіряти і цьому серверу\', щоб додати новий відпечаток, не втративши інші. Якщо сертифікат було замінено або продовжено, натисніть замість цього \'Скинути &amp; закріпити заново\' - це відкине всі раніше довірені відпечатки й почне навчання з нуля.</string>
+    <string name="vm_no_local_profile">немає локального профілю для \"%1$s\" - створіть його, щоб підключитися до цієї висхідної мережі.</string>
+    <string name="vm_scrollback_divider">Прокручування з журналів • Останнє повідомлення: %1$s</string>
+
+    <!-- Screen tails: About/NetworkEdit/Settings -->
+    <string name="ok">OK</string>
+    <string name="remove">Вилучити</string>
+    <string name="add">Додати</string>
+    <string name="about_logo_desc">Логотип HexDroid</string>
+    <string name="about_boxlabs_desc">boxlabs</string>
+    <string name="netedit_port_range">Порт має бути від 1 до 65535</string>
+    <string name="netedit_sasl_external">EXTERNAL (клієнтський сертифікат)</string>
+    <string name="netedit_cert_pem">PEM (.pem)</string>
+    <string name="netedit_cert_crtkey">CRT + KEY (.crt/.key)</string>
+    <string name="settings_reset_100">Скинути до 100%</string>
+    <string name="settings_custom_aliases">Власні аліаси</string>
+    <string name="settings_no_aliases">Аліасів ще немає.</string>
+    <string name="settings_alias_name">Назва аліаса (без “/”)</string>
+    <string name="settings_alias_expansion">Розкриття (команда, без “/”)</string>
+    <string name="settings_add_alias">Додати аліас</string>
+    <string name="settings_scripts">Скрипти</string>
+    <string name="settings_scripts_desc">Завантаження та керування скриптами .hex (ігри, інструменти, власні команди).</string>
+    <string name="net_this_network">ця мережа</string>
+    <!-- Connection / disconnect reasons emitted by IrcCore.
+         These are display text only. The machine-readable cause travels separately as
+         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
+         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <string name="core_disconnected">Відключено</string>
+    <string name="core_disconnect_server_error">Помилка сервера: %1$s</string>
+    <string name="core_disconnect_tls_fingerprint_changed">Відпечаток сертифіката TLS змінився</string>
+    <string name="core_disconnect_connect_failed">Не вдалося підключитися: %1$s</string>
+    <string name="core_disconnect_connection_error">Помилка з\'єднання: %1$s</string>
+    <string name="core_disconnect_registration_timeout">Час реєстрації вичерпано</string>
+    <string name="core_disconnect_ping_timeout">Час очікування пінгу вичерпано</string>
+    <string name="core_error_registration_timeout">Час реєстрації вичерпано: сервер не надіслав 001 протягом %1$dс</string>
+
+    <!-- friendlyErrorMessage(): human-readable renderings of socket and TLS failures. -->
+    <string name="core_err_proxy">Помилка проксі: %1$s</string>
+    <string name="core_err_tls_cert_verify">Не вдалося перевірити сертифікат TLS. Можливо, сертифікат сервера прострочений, самопідписаний або недовірений.</string>
+    <string name="core_err_tls_protocol">Збій рукостискання TLS. Можливо, сервер не підтримує TLS 1.2/1.3.</string>
+    <string name="core_err_tls_rejected">Сервер відхилив рукостискання TLS. Перевірте порт і налаштування TLS.</string>
+    <string name="core_err_tls_handshake_other">Збій рукостискання TLS: %1$s</string>
+    <string name="core_err_tls_interrupted">Сеанс TLS перервано. Підключення буде повторено.</string>
+    <string name="core_err_tls_proto_error">Помилка протоколу TLS. Підключення буде повторено.</string>
+    <string name="core_err_tls_read">Помилка читання TLS. Можливо, мережа змінилася.</string>
+    <string name="core_err_tls_write">Помилка запису TLS. Можливо, мережа змінилася.</string>
+    <string name="core_err_tls_closed">Сеанс TLS закрито</string>
+    <string name="core_err_tls_other">Помилка TLS: %1$s</string>
+    <string name="core_err_connection_refused">У підключенні відмовлено. Перевірте ім\'я хоста й порт.</string>
+    <string name="core_err_network_unreachable">Мережа недоступна. Перевірте своє інтернет-з\'єднання.</string>
+    <string name="core_err_connection_timed_out">Час підключення вичерпано</string>
+    <string name="core_err_dns_timeout">Час розпізнавання DNS вичерпано. Сервер імен не відповідає.</string>
+    <string name="core_err_dns_failed">Не вдалося розпізнати ім\'я хоста</string>
+    <string name="core_err_broken_pipe">З\'єднання втрачено (broken pipe)</string>
+    <string name="core_err_connection_reset">З\'єднання скинуто сервером</string>
+    <string name="core_err_connection_closed">З\'єднання закрито</string>
+
+    <!-- Disconnect rendering and flap detection in IrcViewModel. -->
+    <string name="vm_disconnected_reason">Відключено: %1$s</string>
+    <string name="vm_flap_paused">⚠ З\'єднання нестабільне: %1$d перевищень часу очікування пінгу за останні %2$d хвилин. Автоперепідключення припинено на %2$d хвилин, щоб не перевантажувати сервер. Натисніть «Перепідключитися», щоб спробувати раніше.</string>
+    <!-- IrcCore: command usage and unsupported-capability notices.
+         Command SYNTAX (the part the user types) stays in English on purpose; only the
+         surrounding prose is translated. -->
+    <string name="core_usage_generic">Використання: /%1$s %2$s</string>
+    <string name="core_usage_syntax">Використання: %1$s</string>
+    <string name="core_usage_msg">Використання: /msg &lt;nick|#channel&gt; &lt;message&gt;</string>
+    <string name="core_usage_query">Використання: /query &lt;nick&gt; [message]</string>
+    <string name="core_usage_kill">Використання: /kill &lt;nick&gt; [reason]</string>
+    <string name="core_usage_notice">Використання: /notice &lt;nick|#channel&gt; &lt;message&gt;</string>
+    <string name="core_usage_mode_target">Використання: /%1$s &lt;nick&gt; [#channel]</string>
+    <string name="core_usage_redact">Використання: /redact [target] &lt;msgid&gt; [reason]</string>
+    <string name="core_usage_metadata_sub">Використання: /metadata %1$s &lt;key&gt; [key...]</string>
+    <string name="core_usage_verify">Використання: /verify [account] &lt;code&gt;</string>
+    <string name="core_usage_monitor">Використання: /monitor +nick[,nick] | -nick[,nick] | C | L | S%1$s</string>
+    <string name="core_needs_channel_first_arg">для /%1$s потрібен канал. Перейдіть до каналу або вкажіть #channel першим аргументом.</string>
+    <string name="core_needs_channel_second_arg">для /%1$s потрібен канал. Перейдіть до каналу або вкажіть його другим аргументом.</string>
+    <string name="core_invite_needs_channel">для /invite потрібен канал. Перейдіть до каналу або вкажіть його другим аргументом.</string>
+    <string name="core_no_text_to_send">Немає тексту для надсилання</string>
+    <string name="core_redact_wrong_buffer">Виконайте /redact у тому каналі або приватному чаті, де є повідомлення.</string>
+    <string name="core_no_redact">Цей сервер не підтримує видалення повідомлень (draft/message-redaction).</string>
+    <string name="core_no_metadata">Цей сервер не підтримує метадані IRCv3 (draft/metadata-2).</string>
+    <string name="core_no_registration">Цей сервер не підтримує реєстрацію акаунта IRCv3. Спробуйте через сервіси: /ns REGISTER &lt;password&gt; &lt;email&gt;</string>
+    <string name="core_no_verify">Цей сервер не підтримує підтвердження акаунта IRCv3. Спробуйте через сервіси: /ns VERIFY ...</string>
+    <string name="core_register_nick_is_account">Цей сервер реєструє ваш поточний нік як назву акаунта, тому пропустіть аргумент акаунта. %1$s</string>
+    <!-- Leading spaces are significant: this is appended to the usage line. Keep the
+         surrounding double quotes, which is what preserves them. -->
+    <string name="core_register_email_required">"  - цей сервер потребує адресу ел. пошти"</string>
+    <string name="core_no_monitor">MONITOR не підтримується цим сервером.</string>
+    <string name="core_monitor_no_limit">"  (сервер не повідомляє обмеження)"</string>
+    <string name="core_monitor_limit">"  (обмеження сервера: %1$d записів)"</string>
+    <string name="core_no_read_markers">Сервер не підтримує позначки прочитання</string>
+    <string name="core_dns_proxy_disabled">/dns вимкнено, поки активний проксі (локальний запит обійшов би проксі й розкрив вміст запиту).</string>
+    <string name="core_dns_ipv6_note">(Записи IPv6 можуть існувати, але цей пристрій не має зв\'язку через IPv6)</string>
+
+    <!-- IrcCore: ban helper -->
+    <string name="core_ban_no_account">%1$s не увійшов у сервіси</string>
+    <string name="core_ban_no_host">Не вдалося розпізнати хост для %1$s</string>
+    <string name="core_ban_fallback">Бан за %1$s не вдався: %2$s. Використовується маска ніка.</string>
+
+    <!-- IrcCore: status lines for server-driven events -->
+    <string name="core_youre_oper">Тепер ви оператор IRC</string>
+    <string name="core_sets_mode">%1$s встановлює режим %2$s%3$s</string>
+    <string name="core_invited_to">%1$s запросив %2$s до %3$s</string>
+    <string name="core_bouncer_error">Помилка bouncer\'а: %1$s</string>
+    <string name="core_channel_renamed">Канал перейменовано: %1$s → %2$s</string>
+    <string name="core_channel_renamed_reason">Канал перейменовано: %1$s → %2$s (%3$s)</string>
+    <string name="core_account_registered">Акаунт %1$s зареєстровано. Ви увійшли.</string>
+    <string name="core_account_verified">Акаунт %1$s підтверджено. Ви увійшли.</string>
+    <string name="core_verification_required">Для %1$s потрібне підтвердження: %2$s. Завершіть його командою /verify &lt;code&gt;</string>
+    <string name="core_check_your_email">перевірте свою ел. пошту</string>
+    <string name="core_reg_hint_account_exists">(уже зареєстровано? спробуйте /verify &lt;code&gt; або виберіть іншу назву)</string>
+    <string name="core_reg_hint_weak_password">(виберіть інший пароль і спробуйте ще раз)</string>
+    <string name="core_reg_hint_invalid_email">(перевірте адресу ел. пошти)</string>
+    <string name="core_reg_hint_invalid_code">(ще раз перевірте код із повідомлення про підтвердження)</string>
+    <string name="core_reg_hint_not_connected">(дочекайтеся повного підключення, потім спробуйте ще раз)</string>
+    <string name="core_reg_hint_temp_unavailable">(спробуйте пізніше)</string>
+    <string name="core_age_plaintext_refused">+AGE увімкнено для %1$s, але це повідомлення не було зашифровано, тому його НЕ надіслано (HexDroid не передає його у відкритому вигляді). Вимкніть +AGE тут, щоб спілкуватися звичайним чином.</string>
+    <string name="core_nick_still_in_use">%1$s досі зайнято; повторні спроби виконуються тихо у фоні (зависла сесія зазвичай звільняється протягом кількох хвилин).</string>
+    <string name="core_nick_gave_up">Спроби повернути %1$s припинено, нік досі зайнято. Скористайтеся /nick %1$s для повторної спроби.</string>
+    <string name="core_oversize_line_dropped">Відкинуто завелику вхідну лінію IRC (&gt;32 КіБ). З\'єднання збережено; подальші відкидання будуть без повідомлень.</string>
+    <string name="core_sasl_handler_error">Помилка обробника SASL: %1$s</string>
+    <string name="core_monitor_list_full_rejected">Список MONITOR заповнений (обмеження: %1$s). Не вдалося додати: %2$s</string>
+    <string name="core_monitor_list_full">Список MONITOR заповнений (обмеження: %1$s)</string>
+
+    <!-- IrcCore: join errors and other numerics we phrase ourselves when the server
+         sends no trailing text of its own. -->
+    <string name="core_not_on_channel">Вас немає в цьому каналі</string>
+    <string name="core_channel_limit_reached">Ви досягли обмеження сервера на кількість каналів (%1$d)</string>
+    <string name="core_too_many_channels">Ви увійшли до занадто багатьох каналів</string>
+    <string name="core_cannot_join">Не вдалося увійти до каналу</string>
+    <string name="core_cannot_join_full">Не вдалося увійти до каналу (+l)</string>
+    <string name="core_cannot_join_invite">Не вдалося увійти до каналу (+i)</string>
+    <string name="core_cannot_join_banned">Не вдалося увійти до каналу (+b)</string>
+    <string name="core_cannot_join_key">Не вдалося увійти до каналу (+k)</string>
+    <string name="core_password_incorrect">Неправильний пароль</string>
+
+    <!-- IrcCore formatNumeric(): MOTD, LUSERS, channel info -->
+    <string name="core_motd_start">— MOTD —</string>
+    <string name="core_motd_end">— Кінець команди MOTD —</string>
+    <string name="core_no_motd">MOTD не знайдено</string>
+    <string name="core_hidden_host">Ваш прихований хост тепер %1$s</string>
+    <string name="core_lusers_251">Користувачів: %1$s, невидимих: %2$s, серверів: %3$s</string>
+    <string name="core_lusers_operators">операторів у мережі</string>
+    <string name="core_lusers_channels">каналів створено</string>
+    <string name="core_lusers_unknown_conns">невідомих з\'єднань</string>
+    <string name="core_lusers_255">У мене %1$s клієнтів і %2$s серверів</string>
+    <string name="core_lusers_265">Локальних користувачів зараз: %1$s  Максимум: %2$s</string>
+    <string name="core_lusers_266">Глобальних користувачів зараз: %1$s  Максимум: %2$s</string>
+    <string name="core_channel_url">URL каналу: %1$s</string>
+    <string name="core_channel_created">Канал створено: %1$s</string>
+    <string name="core_unknown">невідомо</string>
+
+    <!-- IrcCore formatNumeric(): WHOIS -->
+    <string name="core_away_default">Відсутній</string>
+    <string name="core_whois_away">%1$s відсутній: %2$s</string>
+    <string name="core_whois_oper">%1$s — оператор IRC</string>
+    <string name="core_whois_idle">неактивний %1$dг %2$dхв %3$dс</string>
+    <string name="core_whois_signon">увійшов %1$s</string>
+    <string name="core_whois_end">Кінець списку /WHOIS.</string>
+    <string name="core_whois_channels">%1$s у каналах: %2$s</string>
+    <string name="core_whois_special">%1$s має особливий або зареєстрований статус</string>
+    <string name="core_whois_logged_in_verb">увійшов як</string>
+    <string name="core_whois_logged_in_as">%1$s увійшов як %2$s</string>
+    <string name="core_whois_bot">%1$s позначено як бота або сервіс</string>
+    <string name="core_whois_actual_host">%1$s: фактичні дані хоста</string>
+    <string name="core_whois_metadata_set">%1$s %2$s (метадані задано)</string>
+    <string name="core_whois_secure_tail">підключений через SSL</string>
+
+    <!-- IrcCore formatNumeric(): common errors and RPL_ADMIN -->
+    <string name="core_err_no_such_nick_channel">Немає такого ніка або каналу</string>
+    <string name="core_err_no_such_server">Немає такого сервера</string>
+    <string name="core_err_no_such_channel">Немає такого каналу</string>
+    <string name="core_err_no_such_channel_named">Немає такого каналу: %1$s</string>
+    <string name="core_err_cannot_send_to_channel">Не вдалося надіслати до каналу</string>
+    <string name="core_err_no_such_nickname">Такого ніка не було</string>
+    <string name="core_err_unknown_command">Невідома команда</string>
+    <string name="core_err_unknown_command_named">Невідома команда: %1$s</string>
+    <string name="core_err_nick_in_use">Нік уже зайнято</string>
+    <string name="core_err_not_enough_params">Недостатньо параметрів</string>
+    <string name="core_err_may_not_reregister">Повторна реєстрація неможлива</string>
+    <string name="core_err_banned_from_server">Вас забанено на цьому сервері</string>
+    <string name="core_admin_info">Адміністративні дані про цей сервер</string>
+    <string name="core_admin_location">Розташування адміністратора: %1$s</string>
+    <string name="core_admin_info_line">Дані адміністратора: %1$s</string>
+    <string name="core_admin_contact">Контакт адміністратора: %1$s</string>
+    <string name="core_admin_extended">Розширені дані адміністратора: %1$s</string>
+    <!-- IrcViewModel: setup, credentials, backup and restore -->
+    <string name="vm_netcallback_failed">Не вдалося зареєструвати мережевий зворотний виклик: %1$s. Автоперепідключення після зміни мережі може не працювати на цьому пристрої.</string>
+    <string name="vm_keystore_error">помилка keystore</string>
+    <string name="vm_creds_save_failed">Не вдалося зберегти облікові дані: %1$s. Спробуйте ще раз або перезапустіть застосунок, якщо проблема не зникає.</string>
+    <string name="vm_cert_import_failed">Не вдалося імпортувати сертифікат</string>
+    <string name="vm_backup_no_output">Не вдалося відкрити потік запису для файлу резервної копії</string>
+    <string name="vm_backup_saved">Резервну копію збережено.\nПримітка: паролі та сертифікати не включено.</string>
+    <string name="vm_backup_failed">Не вдалося створити резервну копію: %1$s</string>
+    <string name="vm_restore_no_input">Не вдалося прочитати файл резервної копії</string>
+    <string name="vm_restore_done">Резервну копію відновлено.\nПаролі не відновлено, тому введіть їх заново в налаштуваннях кожної мережі.</string>
+    <string name="vm_restore_failed">Не вдалося відновити: %1$s</string>
+
+    <!-- IrcViewModel: bouncer discover-and-clone -->
+    <string name="vm_clone_no_parent">Батьківський профіль не знайдено.</string>
+    <string name="vm_clone_unsupported">Виявлення й клонування доступне лише для soju та ZNC.</string>
+    <string name="vm_clone_no_name">Ця мережа bouncer\'а ще не має назви. Спробуйте оновити.</string>
+    <string name="vm_clone_already">Уже імпортовано як \"%1$s\".</string>
+    <string name="vm_clone_imported_sasl">Імпортовано \"%1$s\". Увімкніть автопідключення, щоб скористатися.</string>
+    <string name="vm_clone_imported_plain">Імпортовано \"%1$s\" з автентифікацією SASL PLAIN на основі пароля сервера. Увімкніть автопідключення, щоб скористатися.</string>
+    <string name="vm_clone_imported_preformatted">Імпортовано \"%1$s\". Пароль батьківського профілю виглядає вже відформатованим для bouncer\'а, тому перегляньте налаштування автентифікації клона перед увімкненням автопідключення.</string>
+    <string name="vm_clone_imported_plain_none">Імпортовано \"%1$s\". Задайте облікові дані та увімкніть автопідключення в новому профілі, щоб скористатися.</string>
+    <string name="vm_bouncer_verb_discovered">виявлено</string>
+    <string name="vm_bouncer_verb_state_changed">змінила стан</string>
+
+    <!-- IrcViewModel: +AGE encryption status and the /age command -->
+    <string name="vm_age_negotiating">Встановлення шифрування +AGE з %1$s…</string>
+    <string name="vm_age_established">Шифрування +AGE з %1$s встановлено. Повідомлення захищені наскрізним шифруванням.</string>
+    <string name="vm_age_failed">Не вдалося встановити шифрування +AGE з %1$s: %2$s. Повідомлення НЕ зашифровані.</string>
+    <string name="vm_age_unavailable">+AGE недоступний у цій мережі.</string>
+    <string name="vm_age_none_pending">+AGE: немає ідентичностей, що очікують рішення.</string>
+    <string name="vm_age_pending_list">+AGE очікує рішення:</string>
+    <string name="vm_age_usage">Використання: /age trust &lt;nick&gt; | /age reject &lt;nick&gt; | /age pending</string>
+    <string name="vm_age_trusted">+AGE: новий ключ %1$s закріплено. Його повідомлення знову перевірятимуться.</string>
+    <string name="vm_age_rejected">+AGE: новий ключ %1$s відкинуто; раніше закріплений ключ залишається чинним.</string>
+    <string name="vm_age_nothing_pending">+AGE: для %1$s немає нічого в очікуванні.</string>
+    <string name="vm_age_still_keying">+AGE для %1$s досі обмінюється ключами з іншими учасниками +AGE. Ваше повідомлення НЕ надіслано. Спробуйте ще раз за мить.</string>
+
+    <!-- IrcViewModel: encryption key and passphrase import -->
+    <string name="vm_key_empty">Ключ порожній</string>
+    <string name="vm_key_not_base64">Некоректний рядок base64</string>
+    <string name="vm_key_wrong_length">Після декодування base64 очікувалося 32 байти, отримано %1$d</string>
+    <string name="vm_key_store_failed">Не вдалося зберегти ключ: %1$s</string>
+    <string name="vm_pass_empty">Парольна фраза порожня</string>
+    <string name="vm_pass_too_short">Парольна фраза має бути не коротшою за 4 байти</string>
+    <string name="vm_pass_too_long">Парольна фраза має бути не довшою за 56 байтів (отримано %1$d)</string>
+
+    <!-- IrcViewModel: /alias and /react -->
+    <string name="vm_alias_none">Аліасів немає. Додайте: /alias add &lt;name&gt; &lt;expansion&gt;</string>
+    <string name="vm_alias_usage_add">Використання: /alias add &lt;name&gt; &lt;expansion&gt;   напр. /alias add bl msg *backlog $channel $1</string>
+    <string name="vm_alias_usage_remove">Використання: /alias remove &lt;name&gt;</string>
+    <string name="vm_alias_usage">Використання: /alias [list] | add &lt;name&gt; &lt;expansion&gt; | remove &lt;name&gt;</string>
+    <string name="vm_alias_bad_name">Назва аліаса не може містити пробіли або \'/\'.</string>
+    <string name="vm_alias_saved">Аліас збережено:  /%1$s  &gt;  %2$s</string>
+    <string name="vm_alias_no_such">Немає такого аліаса: /%1$s</string>
+    <string name="vm_alias_removed">Аліас вилучено: /%1$s</string>
+    <string name="vm_react_latest">останнє повідомлення</string>
+    <string name="vm_react_nback">повідомлення №%1$d назад</string>
+
+    <!-- IrcViewModel: in-buffer event lines.  -->
+    <string name="vm_ev_you_now_known_as">Тепер вас звати %1$s</string>
+    <string name="vm_ev_now_known_as">%1$s тепер відомий як %2$s</string>
+    <string name="vm_ev_now_talking">Ви увійшли до %1$s</string>
+    <string name="vm_ev_has_joined">%1$s (%2$s) увійшов до %3$s</string>
+    <string name="vm_ev_logged_in_as">увійшов як %1$s</string>
+    <string name="vm_ev_you_left">Ви покинули канал %1$s</string>
+    <string name="vm_ev_has_left">%1$s (%2$s) покинув %3$s</string>
+    <string name="vm_ev_you_kicked">Вас кікнув %2$s з %1$s</string>
+    <string name="vm_ev_kicked">%2$s кікнув %1$s</string>
+    <string name="vm_ev_has_quit">%1$s (%2$s) вийшов</string>
+    <string name="vm_ev_topic_is">Тема %1$s: %2$s</string>
+    <string name="vm_ev_topic_set_by">Тему %1$s встановив %2$s о %3$s</string>
+    <string name="vm_ev_topic_changed_by">%1$s змінив тему на: %2$s</string>
+    <string name="vm_ev_topic_changed">Тему змінено на: %1$s</string>
+    <string name="vm_ev_unknown_time">невідомий час</string>
+    <string name="vm_ev_your_host_now">Ваш хост тепер %1$s@%2$s</string>
+    <string name="vm_ev_host_now">%1$s тепер %2$s@%3$s</string>
+    <string name="vm_ev_you_logged_out">Ви більше не в системі</string>
+    <string name="vm_ev_logged_out">%1$s вийшов із системи</string>
+    <string name="vm_ev_you_logged_in_as">Ви увійшли як %1$s</string>
+    <string name="vm_ev_nick_logged_in_as">%1$s тепер увійшов як %2$s</string>
+    <string name="vm_ev_your_realname_now">Ваше справжнє ім\'я тепер \"%1$s\"</string>
+    <string name="vm_ev_realname_changed">%1$s змінив справжнє ім\'я на \"%2$s\"</string>
+    <string name="vm_ev_invited_you">%1$s запросив вас до %2$s</string>
+    <string name="vm_ev_now_away">%1$s тепер відсутній</string>
+    <string name="vm_ev_now_away_msg">%1$s тепер відсутній (%2$s)</string>
+    <string name="vm_ev_back">%1$s повернувся</string>
+    <string name="vm_ev_monitor_online">%1$s у мережі</string>
+    <string name="vm_ev_monitor_offline">%1$s не в мережі</string>
+    <string name="vm_ev_ctcp_ping_ms">Відповідь CTCP PING від %1$s: %2$dмс</string>
+    <string name="vm_ev_ctcp_ping_raw">Відповідь CTCP PING від %1$s: %2$s</string>
+    <string name="vm_ev_ctcp_reply">Відповідь CTCP %1$s від %2$s: %3$s</string>
+    <string name="vm_ev_list_ratelimited">Сервер обмежує частоту LIST (спробуйте ще раз трохи пізніше).</string>
+    <string name="vm_ev_message_deleted">(повідомлення видалив %1$s)</string>
+    <string name="vm_ev_message_deleted_reason">(повідомлення видалив %1$s: %2$s)</string>
+    <string name="vm_history_divider">── Історія чату • Останнє повідомлення: %1$s ──</string>
+
+    <!-- IrcViewModel: notifications -->
+    <string name="vm_notif_networks">Мережі (%1$d): %2$s</string>
+    <string name="vm_notif_connected_connecting">Підключено (%1$d), підключення (%2$d)</string>
+
+    <!-- IrcViewModel: DCC, uploads and file handling -->
+    <string name="vm_dcc_invalid_reply">Некоректна відповідь пасивного DCC</string>
+    <string name="vm_dcc_timeout">Немає відповіді від %1$s, час DCC вичерпано</string>
+    <string name="vm_file_open_failed">Не вдалося відкрити вибраний файл</string>
+    <string name="vm_file_cannot_open">Не вдалося відкрити цей файл</string>
+    <string name="vm_upload_unsupported">Цей сервер не підтримує завантаження файлів</string>
+    <string name="vm_upload_disabled">Завантаження файлів вимкнено для цієї мережі</string>
+    <string name="vm_upload_no_proxy">Завантаження файлів через проксі SOCKS ще не підтримується</string>
+    <string name="vm_upload_failed">Не вдалося завантажити: %1$s</string>
+    <string name="vm_open_with">Відкрити за допомогою</string>
+
+    <!-- Generic actions added during string extraction -->
+    <string name="edit">Змінити</string>
+    <string name="replace">Замінити</string>
+    <string name="expand">Розгорнути</string>
+    <string name="collapse">Згорнути</string>
+    <string name="sort_ascending">За зростанням</string>
+    <string name="sort_descending">За спаданням</string>
+
+    <!-- ScriptsScreen -->
+    <string name="scripts_title">Скрипти</string>
+    <string name="scripts_reload">Перезавантажити</string>
+    <string name="scripts_import_file">Імпортувати файл…</string>
+    <string name="scripts_import">Імпортувати…</string>
+    <string name="scripts_paste">Вставити…</string>
+    <string name="scripts_enabled_count">%1$d/%2$d увімк.</string>
+    <string name="scripts_none">Скриптів ще не встановлено.</string>
+    <string name="scripts_none_hint">Імпортуйте файл або вставте вихідний код нижче, щоб додати скрипт.</string>
+    <string name="scripts_revert">Повернути</string>
+    <string name="scripts_revert_title">Повернути %1$s?</string>
+    <string name="scripts_revert_body">Замінить ваші зміни на вбудовану версію за замовчуванням. Це не можна скасувати.</string>
+    <string name="scripts_paste_title">Вставити скрипт</string>
+    <string name="scripts_name_hint">Назва (.%1$s)</string>
+    <string name="scripts_source">Вихідний код</string>
+
+    <!-- ChatScreen: unread divider and formatting toolbar.
+         The toolbar labels are the initials of Bold/Italic/Underline/Reverse and the
+         colour swatch, so they are translated, not fixed glyphs. -->
+    <string name="chat_unread_divider">"  непрочитані  "</string>
+    <string name="chat_fmt_bold">Ж</string>
+    <string name="chat_fmt_italic">К</string>
+    <string name="chat_fmt_underline">П</string>
+    <string name="chat_fmt_reverse">Інв</string>
+    <string name="chat_fmt_colour">A</string>
+
+    <!-- ListScreen sort chips -->
+    <string name="list_sort_size">Розмір</string>
+    <string name="list_sort_name">Назва</string>
+
+    <!-- NetworksScreen: fallback label when the active network has no name yet -->
+    <string name="networks_active_fallback">Активна</string>
+
+    <!-- SettingsScreen: SAF folder grant lost after reinstall -->
+    <string name="setting_log_permission_lost">Дозвіл втрачено — натисніть \"Вибрати теку\", щоб указати її заново. Дозволи SAF не зберігаються після видалення та перевстановлення, тому тека з вашої резервної копії недоступна цій установці. Журналювання та прокручування тихо пропускаються, доки ви не виберете теку заново.</string>
+
+    <!-- IrcCore: /invite usage -->
+    <string name="core_usage_invite">Використання: /invite &lt;nick&gt; [#channel]</string>
+
+    <!-- ScriptsScreen: header, status and errors -->
+    <string name="scripts_backend_hint">Функції містяться у скриптах .%1$s (увімкніть або вимкніть їх)</string>
+    <string name="scripts_header_desc">Додавайте або вилучайте функції як скрипти .%1$s. Вимкнені скрипти залишаються встановленими, але не завантажуються.</string>
+    <string name="scripts_enabled_of">Увімкнено %1$d з %2$d</string>
+    <string name="scripts_with_errors">" · з помилками: %1$d"</string>
+    <string name="scripts_load_error">помилка завантаження</string>
+    <string name="scripts_status_disabled">Вимкнено</string>
+    <string name="scripts_status_loaded">Завантажено</string>
+    <string name="scripts_status_error">Помилка</string>
+</resources>

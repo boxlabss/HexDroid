@@ -237,6 +237,7 @@
     <string name="lang_pt" translatable="false">Português</string>
     <string name="lang_ru" translatable="false">Русский</string>
     <string name="lang_tr" translatable="false">Türkçe</string>
+    <string name="lang_uk" translatable="false">Українська</string>
     <string name="lang_ar" translatable="false">العربية</string>
     <string name="lang_ja" translatable="false">日本語</string>
     <string name="lang_ko" translatable="false">한국어</string>
@@ -1328,4 +1329,61 @@
     <string name="vm_upload_no_proxy">File upload over a SOCKS proxy is not supported yet</string>
     <string name="vm_upload_failed">Upload failed: %1$s</string>
     <string name="vm_open_with">Open with</string>
+
+    <!-- Generic actions added during string extraction -->
+    <string name="edit">Edit</string>
+    <string name="replace">Replace</string>
+    <string name="expand">Expand</string>
+    <string name="collapse">Collapse</string>
+    <string name="sort_ascending">Ascending</string>
+    <string name="sort_descending">Descending</string>
+
+    <!-- ScriptsScreen -->
+    <string name="scripts_title">Scripts</string>
+    <string name="scripts_reload">Reload</string>
+    <string name="scripts_import_file">Import file…</string>
+    <string name="scripts_import">Import…</string>
+    <string name="scripts_paste">Paste…</string>
+    <string name="scripts_enabled_count">%1$d/%2$d on</string>
+    <string name="scripts_none">No scripts installed yet.</string>
+    <string name="scripts_none_hint">Import a file or paste source below to add one.</string>
+    <string name="scripts_revert">Revert</string>
+    <string name="scripts_revert_title">Revert %1$s?</string>
+    <string name="scripts_revert_body">Replace your edits with the bundled default. This can\'t be undone.</string>
+    <string name="scripts_paste_title">Paste a script</string>
+    <string name="scripts_name_hint">Name (.%1$s)</string>
+    <string name="scripts_source">Source</string>
+
+    <!-- ChatScreen: unread divider and formatting toolbar.
+         The toolbar labels are the initials of Bold/Italic/Underline/Reverse and the
+         colour swatch, so they are translated, not fixed glyphs. -->
+    <string name="chat_unread_divider">"  unread  "</string>
+    <string name="chat_fmt_bold">B</string>
+    <string name="chat_fmt_italic">I</string>
+    <string name="chat_fmt_underline">U</string>
+    <string name="chat_fmt_reverse">Rev</string>
+    <string name="chat_fmt_colour">A</string>
+
+    <!-- ListScreen sort chips -->
+    <string name="list_sort_size">Size</string>
+    <string name="list_sort_name">Name</string>
+
+    <!-- NetworksScreen: fallback label when the active network has no name yet -->
+    <string name="networks_active_fallback">Active</string>
+
+    <!-- SettingsScreen: SAF folder grant lost after reinstall -->
+    <string name="setting_log_permission_lost">Permission lost — tap \"Choose folder\" to re-pick. SAF grants don\'t survive uninstall/reinstall, so the saved folder from your backup isn\'t accessible to this install. Logging and scrollback are silently skipped until you re-pick.</string>
+
+    <!-- IrcCore: /invite usage -->
+    <string name="core_usage_invite">Usage: /invite &lt;nick&gt; [#channel]</string>
+
+    <!-- ScriptsScreen: header, status and errors -->
+    <string name="scripts_backend_hint">Features live in .%1$s scripts (toggle them on or off)</string>
+    <string name="scripts_header_desc">Add or remove features as .%1$s scripts. Disabled scripts stay installed but are unloaded.</string>
+    <string name="scripts_enabled_of">%1$d of %2$d enabled</string>
+    <string name="scripts_with_errors">" · %1$d with errors"</string>
+    <string name="scripts_load_error">load error</string>
+    <string name="scripts_status_disabled">Disabled</string>
+    <string name="scripts_status_loaded">Loaded</string>
+    <string name="scripts_status_error">Error</string>
 </resources>
