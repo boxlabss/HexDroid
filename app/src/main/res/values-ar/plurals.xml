@@ -1,0 +1,55 @@
+<resources>
+
+    <!-- Arabic uses all six CLDR categories:
+         zero = 0, one = 1, two = 2, few = 3-10, many = 11-99, other = 100+ -->
+
+    <plurals name="core_lusers_operators">
+        <item quantity="zero">%1$d مشغّل متصل</item>
+        <item quantity="one">%1$d مشغّل متصل</item>
+        <item quantity="two">%1$d مشغّلان متصلان</item>
+        <item quantity="few">%1$d مشغّلين متصلين</item>
+        <item quantity="many">%1$d مشغّلاً متصلاً</item>
+        <item quantity="other">%1$d مشغّل متصل</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="zero">%1$d قناة مُنشأة</item>
+        <item quantity="one">%1$d قناة مُنشأة</item>
+        <item quantity="two">%1$d قناتان مُنشأتان</item>
+        <item quantity="few">%1$d قنوات مُنشأة</item>
+        <item quantity="many">%1$d قناة مُنشأة</item>
+        <item quantity="other">%1$d قناة مُنشأة</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="zero">%1$d اتصال غير معروف</item>
+        <item quantity="one">%1$d اتصال غير معروف</item>
+        <item quantity="two">%1$d اتصالان غير معروفين</item>
+        <item quantity="few">%1$d اتصالات غير معروفة</item>
+        <item quantity="many">%1$d اتصالاً غير معروف</item>
+        <item quantity="other">%1$d اتصال غير معروف</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="zero">%1$d مستخدم</item>
+        <item quantity="one">%1$d مستخدم</item>
+        <item quantity="two">%1$d مستخدمان</item>
+        <item quantity="few">%1$d مستخدمين</item>
+        <item quantity="many">%1$d مستخدماً</item>
+        <item quantity="other">%1$d مستخدم</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="zero">%1$d غير مقروءة</item>
+        <item quantity="one">رسالة واحدة غير مقروءة</item>
+        <item quantity="two">رسالتان غير مقروءتين</item>
+        <item quantity="few">%1$d رسائل غير مقروءة</item>
+        <item quantity="many">%1$d رسالة غير مقروءة</item>
+        <item quantity="other">%1$d رسالة غير مقروءة</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="zero">%1$d نشط</item>
+        <item quantity="one">%1$d نشط</item>
+        <item quantity="two">%1$d نشطان</item>
+        <item quantity="few">%1$d نشطة</item>
+        <item quantity="many">%1$d نشطاً</item>
+        <item quantity="other">%1$d نشط</item>
+    </plurals>
+
+</resources>
