@@ -1,0 +1,26 @@
+<resources>
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d operátor elérhető</item>
+        <item quantity="other">%1$d operátor elérhető</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">%1$d csatorna létrejött</item>
+        <item quantity="other">%1$d csatorna létrejött</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d ismeretlen kapcsolat</item>
+        <item quantity="other">%1$d ismeretlen kapcsolat</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d felhasználó</item>
+        <item quantity="other">%1$d felhasználó</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d olvasatlan</item>
+        <item quantity="other">%1$d olvasatlan</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d aktív</item>
+        <item quantity="other">%1$d aktív</item>
+    </plurals>
+</resources>
