@@ -1184,6 +1184,8 @@ internal fun resolveAllWithTimeout(
 
 /** App-provided localized-string lookup: (resId, args) -> formatted string. */
 typealias StringLookup = (Int, Array<out Any?>) -> String
+/** Quantity-aware lookup, backed by Resources.getQuantityString. */
+typealias PluralLookup = (Int, Int, Array<out Any?>) -> String
 
 class IrcClient(val config: IrcConfig) {
     /**
@@ -1194,6 +1196,14 @@ class IrcClient(val config: IrcConfig) {
     var strings: StringLookup? = null
     /** Resolve a localized string resource with optional format args. */
     internal fun tr(id: Int, vararg args: Any?): String = strings?.invoke(id, args) ?: ""
+    /**
+     * Quantity lookup, set alongside [strings]. Needed because languages with more
+     * than two plural forms cannot be served by gluing a number onto a fixed noun.
+     */
+    var plurals: PluralLookup? = null
+    /** Resolve a localized plural resource for [quantity], with optional format args. */
+    internal fun trPlural(id: Int, quantity: Int, vararg args: Any?): String =
+        plurals?.invoke(id, quantity, args) ?: ""
     private val parser = IrcParser()
     private val outbound = Channel<String>(capacity = 300)
 
@@ -6255,19 +6265,22 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			"251" -> t ?: tr(R.string.core_lusers_251, p(1) ?: "?", p(2) ?: "?", p(3) ?: "?")
 			"252" -> {
 				val n = p(1) ?: return t
-				val tail = t ?: tr(R.string.core_lusers_operators)
-				"$n $tail"
+				// Server trailing wins when present; our own wording is quantity-aware.
+				if (t != null) "$n $t"
+				else trPlural(R.plurals.core_lusers_operators, n.toIntOrNull() ?: 0, n)
 			}
 			"254" -> {
 				val n = p(1) ?: return t
-				val tail = t ?: tr(R.string.core_lusers_channels)
-				"$n $tail"
+				// Server trailing wins when present; our own wording is quantity-aware.
+				if (t != null) "$n $t"
+				else trPlural(R.plurals.core_lusers_channels, n.toIntOrNull() ?: 0, n)
 			}
 			// Count is a middle param, wording is the trailing; both halves needed (cf. 252/254).
 			"253" -> {
 				val n = p(1) ?: return t
-				val tail = t ?: tr(R.string.core_lusers_unknown_conns)
-				"$n $tail"
+				// Server trailing wins when present; our own wording is quantity-aware.
+				if (t != null) "$n $t"
+				else trPlural(R.plurals.core_lusers_unknown_conns, n.toIntOrNull() ?: 0, n)
 			}
 			"255" -> t ?: tr(R.string.core_lusers_255, p(1) ?: "?", p(2) ?: "?")
 			"265" -> t ?: tr(R.string.core_lusers_265, p(1) ?: "?", p(2) ?: "?")
@@ -6340,8 +6353,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				// ircd-seven says "is signed in as". Either way, account is in params[2].)
 				val nick = p(1) ?: return null
 				val account = p(2) ?: return null
-				val verb = t?.takeIf { it.isNotBlank() } ?: tr(R.string.core_whois_logged_in_verb)
-				"$nick $verb $account"
+				// Server trailing wins; otherwise use a whole sentence so verb-final
+				// languages can order the nick and account themselves.
+				if (t != null && t.isNotBlank()) "$nick $t $account"
+				else tr(R.string.core_whois_logged_in_as, nick, account)
 			}
 			"335" -> {
 				val nick = p(1) ?: return null
@@ -6390,8 +6405,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			"671" -> {
 				// RPL_WHOISSECURE: <client> <nick> :is using a secure connection [cipher info]
 				val nick = p(1) ?: return null
-				val tail = t?.takeIf { it.isNotBlank() } ?: tr(R.string.core_whois_secure_tail)
-				"$nick $tail"
+				if (t != null && t.isNotBlank()) "$nick $t"
+				else tr(R.string.core_whois_secure, nick)
 			}
 
 			// Common errors

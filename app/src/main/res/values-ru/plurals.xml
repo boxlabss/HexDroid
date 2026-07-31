@@ -1,0 +1,38 @@
+<resources>
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d оператор онлайн</item>
+        <item quantity="few">%1$d оператора онлайн</item>
+        <item quantity="many">%1$d операторов онлайн</item>
+        <item quantity="other">%1$d оператора онлайн</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">создан %1$d канал</item>
+        <item quantity="few">создано %1$d канала</item>
+        <item quantity="many">создано %1$d каналов</item>
+        <item quantity="other">создано %1$d канала</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d неизвестное подключение</item>
+        <item quantity="few">%1$d неизвестных подключения</item>
+        <item quantity="many">%1$d неизвестных подключений</item>
+        <item quantity="other">%1$d неизвестных подключения</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d пользователь</item>
+        <item quantity="few">%1$d пользователя</item>
+        <item quantity="many">%1$d пользователей</item>
+        <item quantity="other">%1$d пользователя</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d непрочитанное</item>
+        <item quantity="few">%1$d непрочитанных</item>
+        <item quantity="many">%1$d непрочитанных</item>
+        <item quantity="other">%1$d непрочитанных</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d активная</item>
+        <item quantity="few">%1$d активных</item>
+        <item quantity="many">%1$d активных</item>
+        <item quantity="other">%1$d активных</item>
+    </plurals>
+</resources>

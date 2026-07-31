@@ -1,0 +1,44 @@
+<resources>
+
+    <!-- Counted quantities. These live in their own file so strings.xml keeps its
+         line-for-line parity with the translated locales, and so the locale rebuild
+         tooling (which only walks <string> elements) is unaffected.
+
+         English needs only one/other. Locales with richer plural systems add the
+         forms they need: ru/uk use one/few/many/other, ar adds zero/two. A locale
+         that omits this file falls back to the English quantities. -->
+
+    <!-- IrcCore LUSERS numerics 252/253/254. The count is a middle param and the
+         wording is ours only when the server sends no trailing text. -->
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d operator online</item>
+        <item quantity="other">%1$d operators online</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">%1$d channel formed</item>
+        <item quantity="other">%1$d channels formed</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d unknown connection</item>
+        <item quantity="other">%1$d unknown connections</item>
+    </plurals>
+
+    <!-- Nicklist header count -->
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d user</item>
+        <item quantity="other">%1$d users</item>
+    </plurals>
+
+    <!-- Jump-to-unread chip -->
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d unread</item>
+        <item quantity="other">%1$d unread</item>
+    </plurals>
+
+    <!-- Transfers badge -->
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d active</item>
+        <item quantity="other">%1$d active</item>
+    </plurals>
+
+</resources>

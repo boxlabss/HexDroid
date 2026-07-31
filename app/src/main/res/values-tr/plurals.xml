@@ -1,0 +1,26 @@
+<resources>
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d operatör çevrimiçi</item>
+        <item quantity="other">%1$d operatör çevrimiçi</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">%1$d kanal oluşturuldu</item>
+        <item quantity="other">%1$d kanal oluşturuldu</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d bilinmeyen bağlantı</item>
+        <item quantity="other">%1$d bilinmeyen bağlantı</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d kullanıcı</item>
+        <item quantity="other">%1$d kullanıcı</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d okunmamış</item>
+        <item quantity="other">%1$d okunmamış</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d etkin</item>
+        <item quantity="other">%1$d etkin</item>
+    </plurals>
+</resources>

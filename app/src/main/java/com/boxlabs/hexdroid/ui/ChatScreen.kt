@@ -207,6 +207,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.toClipEntry
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
@@ -251,134 +252,141 @@ import java.util.Locale
 import com.boxlabs.hexdroid.toSpanStyle as ansiToSpanStyle
 
 /** Commands with a short description shown in the hint popup. */
-private data class IrcCommand(val name: String, val usage: String, val description: String)
+private data class IrcCommand(
+    val name: String,
+    val usage: String,
+    /** Localized description for built-in commands. */
+    @androidx.annotation.StringRes val descriptionRes: Int? = null,
+    /** Runtime description for commands supplied by .hex scripts. */
+    val description: String? = null,
+)
 
 private val IRC_COMMANDS = listOf(
     // Messaging
-    IrcCommand("me",         "/me <action>",                   "Send a CTCP ACTION (/me waves)"),
-    IrcCommand("msg",        "/msg <nick> <message>",          "Send a private message"),
-    IrcCommand("notice",     "/notice <target> <text>",        "Send a NOTICE to a user or channel"),
-    IrcCommand("react",      "/react <emoji> [n]",             "Add an emoji reaction to a recent message (n = how many back; default 1)"),
-    IrcCommand("unreact",    "/unreact <emoji> [n]",           "Remove your emoji reaction from a recent message"),
-    IrcCommand("amsg",       "/amsg <message>",                "Send a message to all open channels"),
-    IrcCommand("ame",        "/ame <action>",                  "Send an action to all open channels"),
+    IrcCommand("me", "/me <action>", R.string.cmd_me),
+    IrcCommand("msg", "/msg <nick> <message>", R.string.cmd_msg),
+    IrcCommand("notice", "/notice <target> <text>", R.string.cmd_notice),
+    IrcCommand("react", "/react <emoji> [n]", R.string.cmd_react),
+    IrcCommand("unreact", "/unreact <emoji> [n]", R.string.cmd_unreact),
+    IrcCommand("amsg", "/amsg <message>", R.string.cmd_amsg),
+    IrcCommand("ame", "/ame <action>", R.string.cmd_ame),
 
     // Channels
-    IrcCommand("join",       "/join <channel> [key]",          "Join a channel"),
-    IrcCommand("part",       "/part [channel] [reason]",       "Leave a channel"),
-    IrcCommand("cycle",      "/cycle [channel]",               "Rejoin a channel (part then join)"),
-    IrcCommand("topic",      "/topic [new topic]",             "Show or set the channel topic"),
-    IrcCommand("invite",     "/invite <nick> [channel]",       "Invite a user to a channel"),
-    IrcCommand("knock",      "/knock <channel> [reason]",      "Ask for an invite to an invite-only channel"),
-    IrcCommand("list",       "/list",                          "List all channels on the server"),
-    IrcCommand("names",      "/names [channel]",               "List users in a channel"),
+    IrcCommand("join", "/join <channel> [key]", R.string.cmd_join),
+    IrcCommand("part", "/part [channel] [reason]", R.string.cmd_part),
+    IrcCommand("cycle", "/cycle [channel]", R.string.cmd_cycle),
+    IrcCommand("topic", "/topic [new topic]", R.string.cmd_topic),
+    IrcCommand("invite", "/invite <nick> [channel]", R.string.cmd_invite),
+    IrcCommand("knock", "/knock <channel> [reason]", R.string.cmd_knock),
+    IrcCommand("list", "/list", R.string.cmd_list),
+    IrcCommand("names", "/names [channel]", R.string.cmd_names),
 
     // Buffer management
-    IrcCommand("clear",      "/clear",                         "Clear current buffer"),
-    IrcCommand("close",      "/close",                         "Close the current buffer"),
-    IrcCommand("closekey",   "/closekey <net::buffer>",        "Close a specific buffer by key"),
-    IrcCommand("find",       "/find <text>",                   "Search messages in the current buffer"),
-    IrcCommand("grep",       "/grep <text>",                   "Alias for /find"),
-    IrcCommand("search",     "/search <text>",                 "Alias for /find"),
-    IrcCommand("gsearch",    "/gsearch <text>",                "Search messages across all buffers on this network"),
-    IrcCommand("gfind",      "/gfind <text>",                  "Alias for /gsearch"),
+    IrcCommand("clear", "/clear", R.string.cmd_clear),
+    IrcCommand("close", "/close", R.string.cmd_close),
+    IrcCommand("closekey", "/closekey <net::buffer>", R.string.cmd_closekey),
+    IrcCommand("find", "/find <text>", R.string.cmd_find),
+    IrcCommand("grep", "/grep <text>", R.string.cmd_grep),
+    IrcCommand("search", "/search <text>", R.string.cmd_search),
+    IrcCommand("gsearch", "/gsearch <text>", R.string.cmd_gsearch),
+    IrcCommand("gfind", "/gfind <text>", R.string.cmd_gfind),
 
     // User & nick
-    IrcCommand("nick",       "/nick <new nick>",               "Change your nickname"),
-    IrcCommand("away",       "/away [message]",                "Set away; /away with no args clears it"),
-    IrcCommand("whois",      "/whois <nick>",                  "Query detailed info about a user"),
-    IrcCommand("who",        "/who <mask>",                    "Query users matching a mask"),
-    IrcCommand("ignore",     "/ignore [nick]",                 "Ignore a user (no args = list ignored)"),
-    IrcCommand("unignore",   "/unignore <nick>",               "Remove a user from the ignore list"),
-    IrcCommand("quit",       "/quit [reason]",                 "Quit IRC and disconnect"),
+    IrcCommand("nick", "/nick <new nick>", R.string.cmd_nick),
+    IrcCommand("away", "/away [message]", R.string.cmd_away),
+    IrcCommand("whois", "/whois <nick>", R.string.cmd_whois),
+    IrcCommand("who", "/who <mask>", R.string.cmd_who),
+    IrcCommand("ignore", "/ignore [nick]", R.string.cmd_ignore),
+    IrcCommand("unignore", "/unignore <nick>", R.string.cmd_unignore),
+    IrcCommand("quit", "/quit [reason]", R.string.cmd_quit),
 
     // Moderation
-    IrcCommand("kick",       "/kick <nick> [reason]",          "Kick a user from the channel"),
-    IrcCommand("ban",        "/ban <nick|mask> [n|u|h|d|a]",   "Ban: nick (default), user, host, domain, account"),
-    IrcCommand("unban",      "/unban <nick|mask>",             "Remove a ban (paste exact mask from /banlist for non-nick bans)"),
-    IrcCommand("kb",         "/kb <nick> [n|u|h|d|a] [reason]","Kick and ban a user (same mask types as /ban)"),
-    IrcCommand("kickban",    "/kickban <nick> [type] [reason]","Alias for /kb"),
-    IrcCommand("mute",       "/mute <nick|mask> [n|u|h|d|a]",  "Quiet a user (+q, falls back to +b)"),
-    IrcCommand("quiet",      "/quiet <nick|mask> [type]",      "Alias for /mute"),
-    IrcCommand("unmute",     "/unmute <nick|mask>",            "Remove a quiet (-q, or -b on ircds without +q)"),
-    IrcCommand("unquiet",    "/unquiet <nick|mask>",           "Alias for /unmute"),
-    IrcCommand("op",         "/op <nick> [channel]",           "Grant operator (+o) to a user"),
-    IrcCommand("deop",       "/deop <nick> [channel]",         "Remove operator (-o) from a user"),
-    IrcCommand("voice",      "/voice <nick> [channel]",        "Grant voice (+v) to a user"),
-    IrcCommand("devoice",    "/devoice <nick> [channel]",      "Remove voice (-v) from a user"),
-    IrcCommand("mode",       "/mode [target] <modes>",         "Set channel or user modes"),
+    IrcCommand("kick", "/kick <nick> [reason]", R.string.cmd_kick),
+    IrcCommand("ban", "/ban <nick|mask> [n|u|h|d|a]", R.string.cmd_ban),
+    IrcCommand("unban", "/unban <nick|mask>", R.string.cmd_unban),
+    IrcCommand("kb", "/kb <nick> [n|u|h|d|a] [reason]", R.string.cmd_kb),
+    IrcCommand("kickban", "/kickban <nick> [type] [reason]", R.string.cmd_kickban),
+    IrcCommand("mute", "/mute <nick|mask> [n|u|h|d|a]", R.string.cmd_mute),
+    IrcCommand("quiet", "/quiet <nick|mask> [type]", R.string.cmd_quiet),
+    IrcCommand("unmute", "/unmute <nick|mask>", R.string.cmd_unmute),
+    IrcCommand("unquiet", "/unquiet <nick|mask>", R.string.cmd_unquiet),
+    IrcCommand("op", "/op <nick> [channel]", R.string.cmd_op),
+    IrcCommand("deop", "/deop <nick> [channel]", R.string.cmd_deop),
+    IrcCommand("voice", "/voice <nick> [channel]", R.string.cmd_voice),
+    IrcCommand("devoice", "/devoice <nick> [channel]", R.string.cmd_devoice),
+    IrcCommand("mode", "/mode [target] <modes>", R.string.cmd_mode),
 
     // Mode lists
-    IrcCommand("banlist",    "/banlist",                       "Show the channel ban list (+b)"),
-    IrcCommand("quietlist",  "/quietlist",                     "Show the quiet/mute list (+q)"),
-    IrcCommand("exceptlist", "/exceptlist",                    "Show the ban exception list (+e)"),
-    IrcCommand("invexlist",  "/invexlist",                     "Show the invite exception list (+I)"),
+    IrcCommand("banlist", "/banlist", R.string.cmd_banlist),
+    IrcCommand("quietlist", "/quietlist", R.string.cmd_quietlist),
+    IrcCommand("exceptlist", "/exceptlist", R.string.cmd_exceptlist),
+    IrcCommand("invexlist", "/invexlist", R.string.cmd_invexlist),
 
     // CTCP
-    IrcCommand("ctcp",       "/ctcp <nick> <command>",         "Send a CTCP request"),
-    IrcCommand("ping",       "/ping <nick>",                   "CTCP PING a user"),
-    IrcCommand("ctcpping",   "/ctcpping <nick>",               "Alias for /ping"),
-    IrcCommand("version",    "/version [nick]",                "CTCP VERSION query (no arg = server)"),
-    IrcCommand("time",       "/time [server]",                 "Request server or remote time"),
-    IrcCommand("finger",     "/finger <nick>",                 "CTCP FINGER a user"),
-    IrcCommand("userinfo",   "/userinfo <nick>",               "CTCP USERINFO query"),
-    IrcCommand("clientinfo", "/clientinfo <nick>",             "CTCP CLIENTINFO query"),
+    IrcCommand("ctcp", "/ctcp <nick> <command>", R.string.cmd_ctcp),
+    IrcCommand("ping", "/ping <nick>", R.string.cmd_ping),
+    IrcCommand("ctcpping", "/ctcpping <nick>", R.string.cmd_ctcpping),
+    IrcCommand("version", "/version [nick]", R.string.cmd_version),
+    IrcCommand("time", "/time [server]", R.string.cmd_time),
+    IrcCommand("finger", "/finger <nick>", R.string.cmd_finger),
+    IrcCommand("userinfo", "/userinfo <nick>", R.string.cmd_userinfo),
+    IrcCommand("clientinfo", "/clientinfo <nick>", R.string.cmd_clientinfo),
 
     // Server queries
-    IrcCommand("motd",       "/motd [server]",                 "Request the server Message of the Day"),
-    IrcCommand("admin",      "/admin [server]",                "Show server admin info"),
-    IrcCommand("info",       "/info [server]",                 "Show server software info"),
-    IrcCommand("dns",        "/dns <host|ip>",                 "Resolve a hostname or IP address"),
+    IrcCommand("motd", "/motd [server]", R.string.cmd_motd),
+    IrcCommand("admin", "/admin [server]", R.string.cmd_admin),
+    IrcCommand("info", "/info [server]", R.string.cmd_info),
+    IrcCommand("dns", "/dns <host|ip>", R.string.cmd_dns),
 
     // DCC
-    IrcCommand("dcc",        "/dcc chat <nick>",               "Open a direct DCC chat with a user"),
+    IrcCommand("dcc", "/dcc chat <nick>", R.string.cmd_dcc),
 
     // IRC operator
-    IrcCommand("oper",       "/oper <user> <password>",        "Authenticate as an IRC operator"),
-    IrcCommand("sajoin",     "/sajoin <nick> <channel>",       "Force-join a user (IRCop only)"),
-    IrcCommand("sapart",     "/sapart <nick> [channel]",       "Force-part a user (IRCop only)"),
-    IrcCommand("kill",       "/kill <nick> [reason]",          "Kill (disconnect) a user (IRCop only)"),
-    IrcCommand("kline",      "/kline <mask> <duration> [reason]","K-Line: ban by user@host (IRCop)"),
-    IrcCommand("gline",      "/gline <mask> <duration> [reason]","G-Line: global ban (IRCop)"),
-    IrcCommand("zline",      "/zline <ip> <duration> [reason]","Z-Line: ban by IP (IRCop)"),
-    IrcCommand("dline",      "/dline <ip> <duration> [reason]","D-Line: deny connection by IP (IRCop)"),
-    IrcCommand("eline",      "/eline <mask> <duration> [reason]","E-Line: ban exception (IRCop)"),
-    IrcCommand("qline",      "/qline <mask> <duration> [reason]","Q-Line: nickname ban (IRCop)"),
-    IrcCommand("shun",       "/shun <mask> <duration> [reason]","Shun: silence a user (IRCop)"),
-    IrcCommand("wallops",    "/wallops <message>",             "Send a WALLOPS message (IRCop)"),
-    IrcCommand("globops",    "/globops <message>",             "Send a GLOBOPS message (IRCop)"),
-    IrcCommand("locops",     "/locops <message>",              "Send a LOCOPS message (IRCop)"),
-    IrcCommand("operwall",   "/operwall <message>",            "Send an OPERWALL message (IRCop)"),
+    IrcCommand("oper", "/oper <user> <password>", R.string.cmd_oper),
+    IrcCommand("sajoin", "/sajoin <nick> <channel>", R.string.cmd_sajoin),
+    IrcCommand("sapart", "/sapart <nick> [channel]", R.string.cmd_sapart),
+    IrcCommand("kill", "/kill <nick> [reason]", R.string.cmd_kill),
+    IrcCommand("kline", "/kline <mask> <duration> [reason]", R.string.cmd_kline),
+    IrcCommand("gline", "/gline <mask> <duration> [reason]", R.string.cmd_gline),
+    IrcCommand("zline", "/zline <ip> <duration> [reason]", R.string.cmd_zline),
+    IrcCommand("dline", "/dline <ip> <duration> [reason]", R.string.cmd_dline),
+    IrcCommand("eline", "/eline <mask> <duration> [reason]", R.string.cmd_eline),
+    IrcCommand("qline", "/qline <mask> <duration> [reason]", R.string.cmd_qline),
+    IrcCommand("shun", "/shun <mask> <duration> [reason]", R.string.cmd_shun),
+    IrcCommand("wallops", "/wallops <message>", R.string.cmd_wallops),
+    IrcCommand("globops", "/globops <message>", R.string.cmd_globops),
+    IrcCommand("locops", "/locops <message>", R.string.cmd_locops),
+    IrcCommand("operwall", "/operwall <message>", R.string.cmd_operwall),
 
     // Misc
-    IrcCommand("alias",        "/alias [list | add <name> <expansion> | remove <name>]",                 "List, create, or delete an alias cmd. With no argument, lists your aliases"),
-    IrcCommand("slap",        "/slap <nick>",                 "Slap a user with a fish"),
-    IrcCommand("raw",        "/raw <command>",                 "Send a raw IRC line to the server"),
-    IrcCommand("quote",      "/quote <command>",               "Alias for /raw — send a raw IRC line to the server"),
-    IrcCommand("sysinfo",    "/sysinfo",                       "Post device system info to chat"),
+    IrcCommand("alias", "/alias [list | add <name> <expansion> | remove <name>]", R.string.cmd_alias),
+    IrcCommand("slap", "/slap <nick>", R.string.cmd_slap),
+    IrcCommand("raw", "/raw <command>", R.string.cmd_raw),
+    IrcCommand("quote", "/quote <command>", R.string.cmd_quote),
+    IrcCommand("sysinfo", "/sysinfo", R.string.cmd_sysinfo),
 
     // Query / services shorthands
-    IrcCommand("query",      "/query <nick> [message]",        "Open a PM buffer with a user"),
-    IrcCommand("ns",         "/ns <command>",                  "Alias for /msg NickServ"),
-    IrcCommand("cs",         "/cs <command>",                  "Alias for /msg ChanServ"),
-    IrcCommand("as",         "/as <command>",                  "Alias for /msg AuthServ"),
-    IrcCommand("hs",         "/hs <command>",                  "Alias for /msg HostServ"),
-    IrcCommand("ms",         "/ms <command>",                  "Alias for /msg MemoServ"),
-    IrcCommand("bs",         "/bs <command>",                  "Alias for /msg BotServ"),
+    IrcCommand("query", "/query <nick> [message]", R.string.cmd_query),
+    IrcCommand("ns", "/ns <command>", R.string.cmd_ns),
+    IrcCommand("cs", "/cs <command>", R.string.cmd_cs),
+    IrcCommand("as", "/as <command>", R.string.cmd_as),
+    IrcCommand("hs", "/hs <command>", R.string.cmd_hs),
+    IrcCommand("ms", "/ms <command>", R.string.cmd_ms),
+    IrcCommand("bs", "/bs <command>", R.string.cmd_bs),
 
     // Bouncer shortcuts
-    IrcCommand("znc",        "/znc <command>",                 "Send a command to ZNC's *status"),
-    IrcCommand("bouncerserv","/bouncerserv <command>",         "Send a command to soju's BouncerServ"),
-    IrcCommand("bnc",        "/bnc <command>",                 "Alias for /bouncerserv"),
+    IrcCommand("znc", "/znc <command>", R.string.cmd_znc),
+    IrcCommand("bouncerserv", "/bouncerserv <command>", R.string.cmd_bouncerserv),
+    IrcCommand("bnc", "/bnc <command>", R.string.cmd_bnc),
 
     // IRCv3
-    IrcCommand("setname",    "/setname <realname>",            "Change your realname without reconnecting (SETNAME cap)"),
-    IrcCommand("markread",   "/markread [target] [timestamp]", "Mark a buffer as read (IRCv3 read-marker)"),
-    IrcCommand("monitor",    "/monitor +nick | -nick | C | L | S", "Watch for nicks coming online (IRCv3 MONITOR)"),
-    IrcCommand("register",   "/register [account] [email] <password>", "Create a services account (IRCv3 account-registration)"),
-    IrcCommand("verify",     "/verify [account] <code>",       "Complete account verification (email/CAPTCHA code)"),
-    IrcCommand("metadata",   "/metadata [target] <sub> | <key> [value]", "View or set IRCv3 metadata (display-name, avatar)"),
-    IrcCommand("redact",     "/redact [target] <msgid> [reason]", "Delete a message for everyone (IRCv3 message-redaction)"),
+    IrcCommand("setname", "/setname <realname>", R.string.cmd_setname),
+    IrcCommand("markread", "/markread [target] [timestamp]", R.string.cmd_markread),
+    IrcCommand("monitor", "/monitor +nick | -nick | C | L | S", R.string.cmd_monitor),
+    IrcCommand("register", "/register [account] [email] <password>", R.string.cmd_register),
+    IrcCommand("verify", "/verify [account] <code>", R.string.cmd_verify),
+    IrcCommand("metadata", "/metadata [target] <sub> | <key> [value]", R.string.cmd_metadata),
+    IrcCommand("redact", "/redact [target] <msgid> [reason]", R.string.cmd_redact),
 )
 
 /**
@@ -405,157 +413,157 @@ private val IRC_COMMANDS = listOf(
 private val SUB_COMMANDS: Map<String, List<IrcCommand>> = mapOf(
     // NickServ — Atheme/Anope-compatible verbs
     "ns" to listOf(
-        IrcCommand("IDENTIFY", "IDENTIFY [account] <password>", "Log in to your account"),
-        IrcCommand("LOGIN",    "LOGIN [account] <password>",    "Alias for IDENTIFY (Anope)"),
-        IrcCommand("REGISTER", "REGISTER <password> <email>",   "Register a new nickname"),
-        IrcCommand("GHOST",    "GHOST <nick> [password]",       "Kill a ghost session holding your nick"),
-        IrcCommand("RECOVER",  "RECOVER <nick> [password]",     "Recover a nickname (Atheme)"),
-        IrcCommand("RELEASE",  "RELEASE <nick> [password]",     "Release a held nickname"),
-        IrcCommand("GROUP",    "GROUP <nick> <password>",       "Group this nick to another account (Anope)"),
-        IrcCommand("UNGROUP",  "UNGROUP <nick>",                "Remove a nick from your group"),
-        IrcCommand("SET",      "SET <option> <value>",          "Set an account option (password, email, …)"),
-        IrcCommand("CERT",     "CERT [ADD|DEL|LIST] [fingerprint]", "Manage CertFP fingerprints"),
-        IrcCommand("INFO",     "INFO [nick]",                   "Show account info"),
-        IrcCommand("LIST",     "LIST <pattern>",                "List matching nicknames"),
-        IrcCommand("DROP",     "DROP <nick> [password]",        "Drop (unregister) a nickname"),
-        IrcCommand("LOGOUT",   "LOGOUT",                        "Log out of your account"),
-        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+        IrcCommand("IDENTIFY", "IDENTIFY [account] <password>", R.string.cmd_ns_identify),
+        IrcCommand("LOGIN", "LOGIN [account] <password>", R.string.cmd_ns_login),
+        IrcCommand("REGISTER", "REGISTER <password> <email>", R.string.cmd_ns_register),
+        IrcCommand("GHOST", "GHOST <nick> [password]", R.string.cmd_ns_ghost),
+        IrcCommand("RECOVER", "RECOVER <nick> [password]", R.string.cmd_ns_recover),
+        IrcCommand("RELEASE", "RELEASE <nick> [password]", R.string.cmd_ns_release),
+        IrcCommand("GROUP", "GROUP <nick> <password>", R.string.cmd_ns_group),
+        IrcCommand("UNGROUP", "UNGROUP <nick>", R.string.cmd_ns_ungroup),
+        IrcCommand("SET", "SET <option> <value>", R.string.cmd_ns_set),
+        IrcCommand("CERT", "CERT [ADD|DEL|LIST] [fingerprint]", R.string.cmd_ns_cert),
+        IrcCommand("INFO", "INFO [nick]", R.string.cmd_ns_info),
+        IrcCommand("LIST", "LIST <pattern>", R.string.cmd_ns_list),
+        IrcCommand("DROP", "DROP <nick> [password]", R.string.cmd_ns_drop),
+        IrcCommand("LOGOUT", "LOGOUT", R.string.cmd_ns_logout),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_ns_help),
     ),
     // ChanServ — Atheme/Anope-compatible verbs
     "cs" to listOf(
-        IrcCommand("REGISTER", "REGISTER <channel>",            "Register a channel"),
-        IrcCommand("DROP",     "DROP <channel>",                "Unregister a channel"),
-        IrcCommand("INFO",     "INFO <channel>",                "Show channel info"),
-        IrcCommand("ACCESS",   "ACCESS <channel> [LIST|ADD|DEL] [mask] [level]", "Manage the access list"),
-        IrcCommand("FLAGS",    "FLAGS <channel> [target] [flags]", "Manage channel flags (Atheme)"),
-        IrcCommand("OP",       "OP <channel> [nick]",           "Grant op (+o)"),
-        IrcCommand("DEOP",     "DEOP <channel> [nick]",         "Remove op (-o)"),
-        IrcCommand("VOICE",    "VOICE <channel> [nick]",        "Grant voice (+v)"),
-        IrcCommand("DEVOICE",  "DEVOICE <channel> [nick]",      "Remove voice (-v)"),
-        IrcCommand("HALFOP",   "HALFOP <channel> [nick]",       "Grant half-op (+h)"),
-        IrcCommand("PROTECT",  "PROTECT <channel> [nick]",      "Grant protect (+a)"),
-        IrcCommand("OWNER",    "OWNER <channel> [nick]",        "Grant owner (+q)"),
-        IrcCommand("INVITE",   "INVITE <channel> [nick]",       "Invite yourself or a nick"),
-        IrcCommand("UNBAN",    "UNBAN <channel> [nick]",        "Remove bans preventing you or [nick] from joining"),
-        IrcCommand("KICK",     "KICK <channel> <nick> [reason]", "Kick via services"),
-        IrcCommand("BAN",      "BAN <channel> <mask>",          "Ban via services"),
-        IrcCommand("QUIET",    "QUIET <channel> <mask>",        "Quiet (+q on $~a/+q) via services"),
-        IrcCommand("TOPIC",    "TOPIC <channel> [topic]",       "Set or lock topic"),
-        IrcCommand("CLEAR",    "CLEAR <channel> <what>",        "Clear bans / users / modes"),
-        IrcCommand("RECOVER", "RECOVER <channel>",              "Recover a channel (unban, deop takeover)"),
-        IrcCommand("SET",      "SET <channel> <option> <value>","Set a channel option"),
-        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+        IrcCommand("REGISTER", "REGISTER <channel>", R.string.cmd_cs_register),
+        IrcCommand("DROP", "DROP <channel>", R.string.cmd_cs_drop),
+        IrcCommand("INFO", "INFO <channel>", R.string.cmd_cs_info),
+        IrcCommand("ACCESS", "ACCESS <channel> [LIST|ADD|DEL] [mask] [level]", R.string.cmd_cs_access),
+        IrcCommand("FLAGS", "FLAGS <channel> [target] [flags]", R.string.cmd_cs_flags),
+        IrcCommand("OP", "OP <channel> [nick]", R.string.cmd_cs_op),
+        IrcCommand("DEOP", "DEOP <channel> [nick]", R.string.cmd_cs_deop),
+        IrcCommand("VOICE", "VOICE <channel> [nick]", R.string.cmd_cs_voice),
+        IrcCommand("DEVOICE", "DEVOICE <channel> [nick]", R.string.cmd_cs_devoice),
+        IrcCommand("HALFOP", "HALFOP <channel> [nick]", R.string.cmd_cs_halfop),
+        IrcCommand("PROTECT", "PROTECT <channel> [nick]", R.string.cmd_cs_protect),
+        IrcCommand("OWNER", "OWNER <channel> [nick]", R.string.cmd_cs_owner),
+        IrcCommand("INVITE", "INVITE <channel> [nick]", R.string.cmd_cs_invite),
+        IrcCommand("UNBAN", "UNBAN <channel> [nick]", R.string.cmd_cs_unban),
+        IrcCommand("KICK", "KICK <channel> <nick> [reason]", R.string.cmd_cs_kick),
+        IrcCommand("BAN", "BAN <channel> <mask>", R.string.cmd_cs_ban),
+        IrcCommand("QUIET", "QUIET <channel> <mask>", R.string.cmd_cs_quiet),
+        IrcCommand("TOPIC", "TOPIC <channel> [topic]", R.string.cmd_cs_topic),
+        IrcCommand("CLEAR", "CLEAR <channel> <what>", R.string.cmd_cs_clear),
+        IrcCommand("RECOVER", "RECOVER <channel>", R.string.cmd_cs_recover),
+        IrcCommand("SET", "SET <channel> <option> <value>", R.string.cmd_cs_set),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_cs_help),
     ),
     // MemoServ — same verbs on Atheme/Anope
     "ms" to listOf(
-        IrcCommand("SEND",   "SEND <nick> <message>",           "Send a memo"),
-        IrcCommand("LIST",   "LIST",                            "List your memos"),
-        IrcCommand("READ",   "READ <number>",                   "Read memo by number"),
-        IrcCommand("DELETE", "DELETE <number|ALL>",             "Delete a memo"),
-        IrcCommand("FORWARD","FORWARD <number> <nick>",         "Forward a memo"),
-        IrcCommand("IGNORE", "IGNORE [ADD|DEL|LIST] [mask]",    "Manage memo ignore list"),
-        IrcCommand("SET",    "SET <option> <value>",            "Set memo options"),
-        IrcCommand("HELP",   "HELP [command]",                  "Show help"),
+        IrcCommand("SEND", "SEND <nick> <message>", R.string.cmd_ms_send),
+        IrcCommand("LIST", "LIST", R.string.cmd_ms_list),
+        IrcCommand("READ", "READ <number>", R.string.cmd_ms_read),
+        IrcCommand("DELETE", "DELETE <number|ALL>", R.string.cmd_ms_delete),
+        IrcCommand("FORWARD", "FORWARD <number> <nick>", R.string.cmd_ms_forward),
+        IrcCommand("IGNORE", "IGNORE [ADD|DEL|LIST] [mask]", R.string.cmd_ms_ignore),
+        IrcCommand("SET", "SET <option> <value>", R.string.cmd_ms_set),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_ms_help),
     ),
     // HostServ
     "hs" to listOf(
-        IrcCommand("REQUEST", "REQUEST <vhost>",                "Request a vhost from staff"),
-        IrcCommand("ON",      "ON",                             "Enable your vhost"),
-        IrcCommand("OFF",     "OFF",                            "Disable your vhost"),
-        IrcCommand("TAKE",    "TAKE <vhost>",                   "Take a pre-offered vhost (Atheme)"),
-        IrcCommand("DROP",    "DROP",                           "Drop your vhost"),
-        IrcCommand("INFO",    "INFO [nick]",                    "Show vhost info"),
-        IrcCommand("HELP",    "HELP [command]",                 "Show help"),
+        IrcCommand("REQUEST", "REQUEST <vhost>", R.string.cmd_hs_request),
+        IrcCommand("ON", "ON", R.string.cmd_hs_on),
+        IrcCommand("OFF", "OFF", R.string.cmd_hs_off),
+        IrcCommand("TAKE", "TAKE <vhost>", R.string.cmd_hs_take),
+        IrcCommand("DROP", "DROP", R.string.cmd_hs_drop),
+        IrcCommand("INFO", "INFO [nick]", R.string.cmd_hs_info),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_hs_help),
     ),
     // BotServ — Anope; Atheme has a similar but narrower set
     "bs" to listOf(
-        IrcCommand("ASSIGN",   "ASSIGN <channel> <bot>",        "Assign a bot to a channel"),
-        IrcCommand("UNASSIGN", "UNASSIGN <channel>",            "Unassign the bot"),
-        IrcCommand("BOTLIST",  "BOTLIST",                       "List available bots"),
-        IrcCommand("INFO",     "INFO <channel|bot>",            "Show bot or channel info"),
-        IrcCommand("KICK",     "KICK <channel> <option> [args]","Configure auto-kick triggers"),
-        IrcCommand("SET",      "SET <channel> <option> <value>","Configure bot options"),
-        IrcCommand("SAY",      "SAY <channel> <text>",          "Make the bot say something"),
-        IrcCommand("ACT",      "ACT <channel> <action>",        "Make the bot perform an action"),
-        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+        IrcCommand("ASSIGN", "ASSIGN <channel> <bot>", R.string.cmd_bs_assign),
+        IrcCommand("UNASSIGN", "UNASSIGN <channel>", R.string.cmd_bs_unassign),
+        IrcCommand("BOTLIST", "BOTLIST", R.string.cmd_bs_botlist),
+        IrcCommand("INFO", "INFO <channel|bot>", R.string.cmd_bs_info),
+        IrcCommand("KICK", "KICK <channel> <option> [args]", R.string.cmd_bs_kick),
+        IrcCommand("SET", "SET <channel> <option> <value>", R.string.cmd_bs_set),
+        IrcCommand("SAY", "SAY <channel> <text>", R.string.cmd_bs_say),
+        IrcCommand("ACT", "ACT <channel> <action>", R.string.cmd_bs_act),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_bs_help),
     ),
     // AuthServ/X3
     "as" to listOf(
-        IrcCommand("AUTH",     "AUTH <account> <password>",     "Authenticate to AuthServ"),
-        IrcCommand("REGISTER", "REGISTER <account> <password> <email>", "Register an account"),
-        IrcCommand("HELP",     "HELP [command]",                "Show help"),
+        IrcCommand("AUTH", "AUTH <account> <password>", R.string.cmd_as_auth),
+        IrcCommand("REGISTER", "REGISTER <account> <password> <email>", R.string.cmd_as_register),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_as_help),
     ),
     "x3" to listOf(
-        IrcCommand("REGISTER", "REGISTER <channel>",                    "Register a channel"),
-        IrcCommand("DROP",     "DROP <channel>",                        "Drop/unregister a channel"),
-        IrcCommand("INFO",     "INFO <channel|user>",                   "Show info about a channel or user"),
-        IrcCommand("OP",       "OP <channel> <user>",                   "Give operator status (+o)"),
-        IrcCommand("DEOP",     "DEOP <channel> <user>",                 "Remove operator status (-o)"),
-        IrcCommand("VOICE",    "VOICE <channel> <user>",                "Give voice (+v)"),
-        IrcCommand("DEVOICE",  "DEVOICE <channel> <user>",              "Remove voice (-v)"),
-        IrcCommand("HALFOP",   "HALFOP <channel> <user>",               "Give half-op (+h)"),
-        IrcCommand("INVITE",   "INVITE <channel> [user]",               "Invite yourself or a user"),
-        IrcCommand("KICK",     "KICK <channel> <user> [reason]",        "Kick a user via services"),
-        IrcCommand("BAN",      "BAN <channel> <mask>",                  "Ban a mask via services"),
-        IrcCommand("UNBAN",    "UNBAN <channel> [mask]",                "Remove a ban"),
-        IrcCommand("TOPIC",    "TOPIC <channel> [topic]",               "Set channel topic"),
-        IrcCommand("FLAGS",    "FLAGS <channel> <user> [flags]",        "Manage user flags/privileges"),
-        IrcCommand("ACCESS",   "ACCESS <channel> [LIST|ADD|DEL] [user] [level]", "Manage access list"),
-        IrcCommand("HELP",     "HELP [command]",                        "Show help"),
+        IrcCommand("REGISTER", "REGISTER <channel>", R.string.cmd_as_register_2),
+        IrcCommand("DROP", "DROP <channel>", R.string.cmd_as_drop),
+        IrcCommand("INFO", "INFO <channel|user>", R.string.cmd_as_info),
+        IrcCommand("OP", "OP <channel> <user>", R.string.cmd_as_op),
+        IrcCommand("DEOP", "DEOP <channel> <user>", R.string.cmd_as_deop),
+        IrcCommand("VOICE", "VOICE <channel> <user>", R.string.cmd_as_voice),
+        IrcCommand("DEVOICE", "DEVOICE <channel> <user>", R.string.cmd_as_devoice),
+        IrcCommand("HALFOP", "HALFOP <channel> <user>", R.string.cmd_as_halfop),
+        IrcCommand("INVITE", "INVITE <channel> [user]", R.string.cmd_as_invite),
+        IrcCommand("KICK", "KICK <channel> <user> [reason]", R.string.cmd_as_kick),
+        IrcCommand("BAN", "BAN <channel> <mask>", R.string.cmd_as_ban),
+        IrcCommand("UNBAN", "UNBAN <channel> [mask]", R.string.cmd_as_unban),
+        IrcCommand("TOPIC", "TOPIC <channel> [topic]", R.string.cmd_as_topic),
+        IrcCommand("FLAGS", "FLAGS <channel> <user> [flags]", R.string.cmd_as_flags),
+        IrcCommand("ACCESS", "ACCESS <channel> [LIST|ADD|DEL] [user] [level]", R.string.cmd_as_access),
+        IrcCommand("HELP", "HELP [command]", R.string.cmd_as_help),
     ),
     // ZNC *status — curated from https://wiki.znc.in/Using_commands
     "znc" to listOf(
-        IrcCommand("Help",          "Help [filter]",                   "List available commands"),
-        IrcCommand("Version",       "Version",                         "Print ZNC version"),
-        IrcCommand("ListNetworks",  "ListNetworks",                    "List your networks"),
-        IrcCommand("JumpNetwork",   "JumpNetwork <network>",           "Switch to another network"),
-        IrcCommand("AddNetwork",    "AddNetwork <name>",               "Add a new network"),
-        IrcCommand("DelNetwork",    "DelNetwork <name>",               "Delete a network"),
-        IrcCommand("ListServers",   "ListServers",                     "List servers on the current network"),
-        IrcCommand("AddServer",     "AddServer <host> [+port] [pass]", "Add an alternate server"),
-        IrcCommand("DelServer",     "DelServer <host> [port] [pass]",  "Remove an alternate server"),
-        IrcCommand("Connect",       "Connect",                         "Reconnect this network"),
-        IrcCommand("Disconnect",    "Disconnect [message]",            "Disconnect this network"),
-        IrcCommand("Jump",          "Jump [server]",                   "Cycle to the next/given server"),
-        IrcCommand("ListChans",     "ListChans",                       "List joined channels"),
-        IrcCommand("ListClients",   "ListClients",                     "List clients connected to this session"),
-        IrcCommand("ListMods",      "ListMods",                        "List loaded modules"),
-        IrcCommand("ListAvailMods", "ListAvailMods",                   "List available modules"),
-        IrcCommand("LoadMod",       "LoadMod <module> [args]",         "Load a module"),
-        IrcCommand("UnloadMod",     "UnloadMod <module>",              "Unload a module"),
-        IrcCommand("ReloadMod",     "ReloadMod <module> [args]",       "Reload a module"),
-        IrcCommand("Attach",        "Attach <#chan>",                  "Attach to a detached channel"),
-        IrcCommand("Detach",        "Detach <#chan>",                  "Detach from a channel (stay joined server-side)"),
-        IrcCommand("PlayBuffer",    "PlayBuffer <#chan>",              "Replay a channel buffer"),
-        IrcCommand("ClearBuffer",   "ClearBuffer <#chan>",             "Clear a channel buffer"),
-        IrcCommand("ClearAllChannelBuffers", "ClearAllChannelBuffers", "Clear all channel buffers"),
-        IrcCommand("ClearAllQueryBuffers",   "ClearAllQueryBuffers",   "Clear all query buffers"),
-        IrcCommand("SetBuffer",     "SetBuffer <#chan> [lines]",       "Set the buffer line limit for a channel"),
-        IrcCommand("Topics",        "Topics",                          "Show topics across joined channels"),
-        IrcCommand("Uptime",        "Uptime",                          "Show ZNC uptime"),
-        IrcCommand("Traffic",       "Traffic",                         "Show bytes in/out"),
-        IrcCommand("Rehash",        "Rehash",                          "Reload znc.conf"),
-        IrcCommand("SaveConfig",    "SaveConfig",                      "Write znc.conf"),
-        IrcCommand("ShowMOTD",      "ShowMOTD",                        "Show the ZNC MOTD"),
+        IrcCommand("Help", "Help [filter]", R.string.cmd_znc_help),
+        IrcCommand("Version", "Version", R.string.cmd_znc_version),
+        IrcCommand("ListNetworks", "ListNetworks", R.string.cmd_znc_listnetworks),
+        IrcCommand("JumpNetwork", "JumpNetwork <network>", R.string.cmd_znc_jumpnetwork),
+        IrcCommand("AddNetwork", "AddNetwork <name>", R.string.cmd_znc_addnetwork),
+        IrcCommand("DelNetwork", "DelNetwork <name>", R.string.cmd_znc_delnetwork),
+        IrcCommand("ListServers", "ListServers", R.string.cmd_znc_listservers),
+        IrcCommand("AddServer", "AddServer <host> [+port] [pass]", R.string.cmd_znc_addserver),
+        IrcCommand("DelServer", "DelServer <host> [port] [pass]", R.string.cmd_znc_delserver),
+        IrcCommand("Connect", "Connect", R.string.cmd_znc_connect),
+        IrcCommand("Disconnect", "Disconnect [message]", R.string.cmd_znc_disconnect),
+        IrcCommand("Jump", "Jump [server]", R.string.cmd_znc_jump),
+        IrcCommand("ListChans", "ListChans", R.string.cmd_znc_listchans),
+        IrcCommand("ListClients", "ListClients", R.string.cmd_znc_listclients),
+        IrcCommand("ListMods", "ListMods", R.string.cmd_znc_listmods),
+        IrcCommand("ListAvailMods", "ListAvailMods", R.string.cmd_znc_listavailmods),
+        IrcCommand("LoadMod", "LoadMod <module> [args]", R.string.cmd_znc_loadmod),
+        IrcCommand("UnloadMod", "UnloadMod <module>", R.string.cmd_znc_unloadmod),
+        IrcCommand("ReloadMod", "ReloadMod <module> [args]", R.string.cmd_znc_reloadmod),
+        IrcCommand("Attach", "Attach <#chan>", R.string.cmd_znc_attach),
+        IrcCommand("Detach", "Detach <#chan>", R.string.cmd_znc_detach),
+        IrcCommand("PlayBuffer", "PlayBuffer <#chan>", R.string.cmd_znc_playbuffer),
+        IrcCommand("ClearBuffer", "ClearBuffer <#chan>", R.string.cmd_znc_clearbuffer),
+        IrcCommand("ClearAllChannelBuffers", "ClearAllChannelBuffers", R.string.cmd_znc_clearallchannelbuffers),
+        IrcCommand("ClearAllQueryBuffers", "ClearAllQueryBuffers", R.string.cmd_znc_clearallquerybuffers),
+        IrcCommand("SetBuffer", "SetBuffer <#chan> [lines]", R.string.cmd_znc_setbuffer),
+        IrcCommand("Topics", "Topics", R.string.cmd_znc_topics),
+        IrcCommand("Uptime", "Uptime", R.string.cmd_znc_uptime),
+        IrcCommand("Traffic", "Traffic", R.string.cmd_znc_traffic),
+        IrcCommand("Rehash", "Rehash", R.string.cmd_znc_rehash),
+        IrcCommand("SaveConfig", "SaveConfig", R.string.cmd_znc_saveconfig),
+        IrcCommand("ShowMOTD", "ShowMOTD", R.string.cmd_znc_showmotd),
     ),
     // soju BouncerServ — curated from soju(1) manpage; commands parsed as shell tokens
     "bouncerserv" to listOf(
-        IrcCommand("help",            "help [command]",                      "Show help for a command"),
-        IrcCommand("network create",  "network create -addr <uri> -name <name> [-nick <nick>] [-pass <pw>]", "Add a new upstream network"),
-        IrcCommand("network update",  "network update <name> [options]",     "Update an existing network"),
-        IrcCommand("network delete",  "network delete <name>",               "Delete a network"),
-        IrcCommand("network status",  "network status",                      "List networks and connection status"),
-        IrcCommand("network quote",   "network quote <name> <raw line>",     "Send a raw IRC line on a network"),
-        IrcCommand("channel status",  "channel status [-network <name>]",    "List saved channels"),
-        IrcCommand("channel update",  "channel update <name> [options]",     "Update channel options (-detached, -relay-detached, …)"),
-        IrcCommand("channel delete",  "channel delete <name>",               "Delete (leave) a saved channel"),
-        IrcCommand("certfp generate", "certfp generate [-network <name>]",   "Generate a client CertFP for upstream"),
-        IrcCommand("certfp fingerprint", "certfp fingerprint [-network <name>]", "Show the current CertFP"),
-        IrcCommand("sasl status",     "sasl status [-network <name>]",       "Show SASL status"),
-        IrcCommand("sasl set-plain",  "sasl set-plain [-network <name>] <user> <pass>", "Set PLAIN credentials"),
-        IrcCommand("sasl reset",      "sasl reset [-network <name>]",        "Remove SASL credentials"),
-        IrcCommand("user update",     "user update [options]",               "Update your own user (-nick, -realname, -pass)"),
-        IrcCommand("server status",   "server status",                       "Show bouncer statistics (admin)"),
+        IrcCommand("help", "help [command]", R.string.cmd_soju_help),
+        IrcCommand("network create", "network create -addr <uri> -name <name> [-nick <nick>] [-pass <pw>]", R.string.cmd_soju_network_create),
+        IrcCommand("network update", "network update <name> [options]", R.string.cmd_soju_network_update),
+        IrcCommand("network delete", "network delete <name>", R.string.cmd_soju_network_delete),
+        IrcCommand("network status", "network status", R.string.cmd_soju_network_status),
+        IrcCommand("network quote", "network quote <name> <raw line>", R.string.cmd_soju_network_quote),
+        IrcCommand("channel status", "channel status [-network <name>]", R.string.cmd_soju_channel_status),
+        IrcCommand("channel update", "channel update <name> [options]", R.string.cmd_soju_channel_update),
+        IrcCommand("channel delete", "channel delete <name>", R.string.cmd_soju_channel_delete),
+        IrcCommand("certfp generate", "certfp generate [-network <name>]", R.string.cmd_soju_certfp_generate),
+        IrcCommand("certfp fingerprint", "certfp fingerprint [-network <name>]", R.string.cmd_soju_certfp_fingerprint),
+        IrcCommand("sasl status", "sasl status [-network <name>]", R.string.cmd_soju_sasl_status),
+        IrcCommand("sasl set-plain", "sasl set-plain [-network <name>] <user> <pass>", R.string.cmd_soju_sasl_set_plain),
+        IrcCommand("sasl reset", "sasl reset [-network <name>]", R.string.cmd_soju_sasl_reset),
+        IrcCommand("user update", "user update [options]", R.string.cmd_soju_user_update),
+        IrcCommand("server status", "server status", R.string.cmd_soju_server_status),
     ),
 )
 
@@ -703,7 +711,7 @@ private fun CommandHints(
                             Spacer(Modifier.weight(1f))
                         }
                         Text(
-                            text = cmd.description,
+                            text = cmd.descriptionRes?.let { stringResource(it) } ?: cmd.description.orEmpty(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -831,7 +839,7 @@ private fun SubCommandHints(
                             Spacer(Modifier.weight(1f))
                         }
                         Text(
-                            text = cmd.description,
+                            text = cmd.descriptionRes?.let { stringResource(it) } ?: cmd.description.orEmpty(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -2243,7 +2251,7 @@ fun ChatScreen(
                          else (nickPaneDp.value / 9f).coerceIn(10f, 18f)
         Column(mod.padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Text(
-                text = "${nicklist.size} users",
+                text = pluralStringResource(R.plurals.chat_nicklist_users, nicklist.size, nicklist.size),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2984,7 +2992,7 @@ fun ChatScreen(
                             TextButton(
                                 onClick = { topicExpanded = !topicExpanded },
                                 contentPadding = PaddingValues(0.dp)
-                            ) { Text(if (topicExpanded) "less" else "more") }
+                            ) { Text(stringResource(if (topicExpanded) R.string.chat_topic_less else R.string.chat_topic_more)) }
                         }
                         if (canTopic) {
                             Icon(
@@ -3276,7 +3284,7 @@ fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (selectedMsgIds.isEmpty()) "Tap messages to select"
+                            text = if (selectedMsgIds.isEmpty()) stringResource(R.string.chat_select_hint)
                                    else "${selectedMsgIds.size} selected",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -3368,7 +3376,9 @@ fun ChatScreen(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            text = if (unreadCount > 0) "$unreadCount unread$sinceLabel" else "Jump to unread",
+                            text = if (unreadCount > 0)
+                                pluralStringResource(R.plurals.chat_unread_count, unreadCount, unreadCount) + sinceLabel
+                            else stringResource(R.string.chat_cd_jump_unread),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                         )
@@ -4830,7 +4840,7 @@ fun ChatScreen(
                         reverse = reverseActive
                     )
                     withStyle(styleState.toSpanStyle()) {
-                        append("The quick brown fox jumps over the lazy dog")
+                        append(stringResource(R.string.chat_font_preview))
                     }
                 }
                 Surface(
@@ -6202,15 +6212,16 @@ private fun SingleMessageItem(
             } else if (m.isAction) {
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
+                val botPrefix = stringResource(R.string.chat_bot_prefix)
                 val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         append(ts); append("* ")
                         // draft/oper-tag: amber star marks messages from IRC operators.
                         if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
                         // Bot Mode: a muted [bot] tag marks messages from bots.
-                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append("[bot] ") }
+                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append(botPrefix) }
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
                             append(fromDisplay)
@@ -6227,15 +6238,16 @@ private fun SingleMessageItem(
             } else {
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
+                val botPrefix = stringResource(R.string.chat_bot_prefix)
                 val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         append(ts); append("<")
                         // draft/oper-tag: amber star marks messages from IRC operators.
                         if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
                         // Bot Mode: a muted [bot] tag marks messages from bots.
-                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append("[bot] ") }
+                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append(botPrefix) }
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
                             append(fromDisplay)

@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
 
@@ -256,7 +257,7 @@ fun TransfersScreen(
                                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "DCC CHAT from ${o.from}",
+                                    stringResource(R.string.transfers_dcc_chat_from, o.from),
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                                 )
@@ -336,7 +337,7 @@ fun TransfersScreen(
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
                                     Text(
-                                        "from ${o.from}",
+                                        stringResource(R.string.transfers_from, o.from),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
                                     )
@@ -452,7 +453,7 @@ fun TransfersScreen(
                     }
                     if (inProgress > 0) {
                         androidx.compose.material3.Badge(containerColor = MaterialTheme.colorScheme.primary) {
-                            Text("$inProgress active")
+                            Text(pluralStringResource(R.plurals.transfers_active_count, inProgress, inProgress))
                         }
                     }
                 }
@@ -515,7 +516,7 @@ fun TransfersScreen(
                                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                             )
                                             Text(
-                                                "from ${t.offer.from}",
+                                                stringResource(R.string.transfers_from, t.offer.from),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -557,10 +558,11 @@ fun TransfersScreen(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             if (speedBps > 0) {
+                                                val etaLabel = if (etaSec >= 0) stringResource(R.string.transfers_eta, formatEta(etaSec)) else ""
                                                 Text(
                                                     buildString {
                                                         append(formatSpeed(speedBps))
-                                                        if (etaSec >= 0) append("  ETA ${formatEta(etaSec)}")
+                                                        if (etaSec >= 0) append(etaLabel)
                                                     },
                                                     style = MaterialTheme.typography.bodySmall,
                                                     fontFamily = FontFamily.Monospace,
@@ -604,7 +606,7 @@ fun TransfersScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                "Complete — ${formatBytes(t.received)} in ${formatEta(elapsedDoneSec.toLong())}  (${formatSpeed(t.received / elapsedDoneSec)} avg)",
+                                                stringResource(R.string.transfers_complete, formatBytes(t.received), formatEta(elapsedDoneSec.toLong()), formatSpeed(t.received / elapsedDoneSec)),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = Color(0xFF4CAF50)
                                             )
@@ -637,7 +639,7 @@ fun TransfersScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                "Error: ${t.error}",
+                                                stringResource(R.string.transfers_error, t.error ?: ""),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.weight(1f)
@@ -743,16 +745,17 @@ fun TransfersScreen(
                                                 if (totalBytes > 0)
                                                     "${formatBytes(t.bytesSent)} / ${formatBytes(totalBytes)}  (${"%.1f".format(pct)}%)"
                                                 else
-                                                    "${formatBytes(t.bytesSent)} sent",
+                                                    stringResource(R.string.transfers_sent, formatBytes(t.bytesSent)),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 fontFamily = FontFamily.Monospace,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             if (speedBps > 0) {
+                                                val etaLabel = if (etaSec >= 0) stringResource(R.string.transfers_eta, formatEta(etaSec)) else ""
                                                 Text(
                                                     buildString {
                                                         append(formatSpeed(speedBps))
-                                                        if (etaSec >= 0) append("  ETA ${formatEta(etaSec)}")
+                                                        if (etaSec >= 0) append(etaLabel)
                                                     },
                                                     style = MaterialTheme.typography.bodySmall,
                                                     fontFamily = FontFamily.Monospace,
@@ -786,7 +789,7 @@ fun TransfersScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                "Complete — ${formatBytes(t.bytesSent)} in ${formatEta(elapsedDoneSec.toLong())}  (${formatSpeed(t.bytesSent / elapsedDoneSec)} avg)",
+                                                stringResource(R.string.transfers_complete, formatBytes(t.bytesSent), formatEta(elapsedDoneSec.toLong()), formatSpeed(t.bytesSent / elapsedDoneSec)),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = Color(0xFF4CAF50)
                                             )

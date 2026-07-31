@@ -4710,6 +4710,7 @@ fun startAddNetwork() {
         val client = IrcClient(cfg.copy(pinnedNetwork = chosenNetwork))
         // Wire localized status text into the protocol engine (and its session).
         client.strings = { id, args -> appContext.getString(id, *args) }
+        client.plurals = { id, qty, args -> appContext.resources.getQuantityString(id, qty, *args) }
         // Attach the E2E codec for this network. The codec wraps the per-process
         // shared keystore (which lazily hydrates from SecretStore) and is held by
         // the IrcClient for its lifetime - reconnecting the same network reuses
@@ -9132,10 +9133,13 @@ if (code == "442") {
             // Surface as a brief status line in the target buffer.
             is IrcEvent.MessageReaction -> {
                 val bufKey = resolveBufferKey(netId, ev.target)
-                val verb = if (ev.adding) appContext.getString(R.string.vm_reacted_with) else appContext.getString(R.string.vm_removed_reaction)
+                // Whole sentence, so word order is the translator's to choose.
+                val line = appContext.getString(
+                    if (ev.adding) R.string.reaction_added else R.string.reaction_removed,
+                    ev.fromNick, ev.reaction)
                 val refStr = ev.msgId?.let { " " + appContext.getString(R.string.vm_ref, it) } ?: ""
                 append(bufKey, from = null,
-                    text = "* ${ev.fromNick} $verb ${ev.reaction}$refStr",
+                    text = "* $line$refStr",
                     timeMs = ev.timeMs, doNotify = false, isLocal = true)
             }
 
