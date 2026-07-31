@@ -1,0 +1,26 @@
+<resources>
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d operator online</item>
+        <item quantity="other">%1$d operators online</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">%1$d kanaal gevormd</item>
+        <item quantity="other">%1$d kanalen gevormd</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d onbekende verbinding</item>
+        <item quantity="other">%1$d onbekende verbindingen</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d gebruiker</item>
+        <item quantity="other">%1$d gebruikers</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d ongelezen</item>
+        <item quantity="other">%1$d ongelezen</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d actief</item>
+        <item quantity="other">%1$d actief</item>
+    </plurals>
+</resources>
