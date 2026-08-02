@@ -1385,7 +1385,6 @@
     <string name="transfers_from">من %1$s</string>
     <string name="transfers_eta">"  المتبقي %1$s"</string>
     <string name="transfers_complete">اكتمل — %1$s خلال %2$s  (بمعدل %3$s)</string>
-    <string name="transfers_error">خطأ: %1$s</string>
     <string name="transfers_sent">تم إرسال %1$s</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">‏أمر من سكربت</string>
     <string name="cmd_me">يرسل CTCP ACTION (/me يلوّح)</string>
     <string name="cmd_msg">يرسل رسالة خاصة</string>
     <string name="cmd_notice">يرسل NOTICE إلى مستخدم أو قناة</string>
@@ -1625,4 +1625,25 @@
     <string name="cmd_soju_sasl_reset">يزيل بيانات اعتماد SASL</string>
     <string name="cmd_soju_user_update">يحدّث المستخدم الخاص بك (‎-nick، -realname، -pass)</string>
     <string name="cmd_soju_server_status">يعرض إحصاءات الـ bouncer (مسؤول)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">‏قبول الملفات تلقائياً</string>
+    <string name="nick_dcc_auto_off">‏إيقاف القبول التلقائي</string>
+    <string name="nick_dcc_auto_on_desc">قبول عروض الملفات من هذا المستخدم دون سؤال</string>
+    <string name="nick_dcc_auto_off_desc">تُقبل ملفات هذا المستخدم تلقائياً</string>
+    <string name="dcc_auto_confirm_title">‏قبول الملفات من %1$s تلقائياً؟</string>
+    <string name="dcc_auto_confirm_body">‏سيتم قبول الملفات المعروضة من %1$s وتنزيلها دون سؤال، حتى وأنت بعيد عن الجهاز.\n\nلا تفعل ذلك إلا مع من تثق بهم. أسماء IRC ليست هويات: إذا انقطع اتصال %1$s، يمكن لشخص آخر أخذ ذلك الاسم ووراثة هذه الثقة. يمكنك إيقاف ذلك من القائمة نفسها.</string>
+    <string name="dcc_auto_confirm_ok">‏الثقة بهذا الاسم</string>
+    <string name="vm_dcc_auto_accept_on">‏سيتم الآن قبول ملفات DCC من %1$s تلقائياً</string>
+    <string name="vm_dcc_auto_accept_off">‏لم تعد ملفات DCC من %1$s تُقبل تلقائياً</string>
+    <string name="vm_dcc_auto_accepted">‏يتم قبول %2$s من %1$s تلقائياً</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">‏المرسلون الموثوقون</string>
+    <string name="dcc_trusted_nick_label">‏الاسم المراد الوثوق به</string>
+    <string name="dcc_trusted_desc">‏تُقبل عروض الملفات من هذه الأسماء دون سؤال، حتى تكتمل عمليات النقل وأنت بعيد عن الجهاز. القائمة خاصة بكل شبكة ولا تفرّق بين الأحرف الكبيرة والصغيرة.</string>
+    <string name="dcc_trusted_none">‏لا يوجد مرسلون موثوقون بعد.</string>
+    <string name="dcc_trusted_tip">‏نصيحة: يمكنك أيضاً الوثوق بشخص من قائمة الأسماء، أو بالضغط على اسمه في الدردشة.</string>
+    <string name="dcc_trusted_dcc_off">‏الـ DCC معطّل حالياً، لذا لن يسري أي مما هنا حتى تفعّله.</string>
+    <string name="dcc_trusted_entry_none">‏لا أحد موثوق بعد</string>
 </resources>

@@ -1385,7 +1385,6 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="transfers_from">tőle: %1$s</string>
     <string name="transfers_eta">"  Hátra %1$s"</string>
     <string name="transfers_complete">Kész — %1$s ennyi idő alatt: %2$s  (átlag %3$s)</string>
-    <string name="transfers_error">Hiba: %1$s</string>
     <string name="transfers_sent">%1$s elküldve</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Szkriptparancs</string>
     <string name="cmd_me">CTCP ACTION küldése (/me integet)</string>
     <string name="cmd_msg">Privát üzenet küldése</string>
     <string name="cmd_notice">NOTICE küldése felhasználónak vagy csatornára</string>
@@ -1625,4 +1625,25 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="cmd_soju_sasl_reset">A SASL hitelesítő adatok eltávolítása</string>
     <string name="cmd_soju_user_update">A saját felhasználód módosítása (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Bouncer statisztikák megjelenítése (adminisztrátor)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Fájlok automatikus fogadása</string>
+    <string name="nick_dcc_auto_off">Automatikus fogadás leállítása</string>
+    <string name="nick_dcc_auto_on_desc">Rákérdezés nélkül fogadja a felhasználó fájljait</string>
+    <string name="nick_dcc_auto_off_desc">A felhasználó fájljait a program automatikusan fogadja</string>
+    <string name="dcc_auto_confirm_title">Automatikusan fogadja a(z) %1$s fájljait?</string>
+    <string name="dcc_auto_confirm_body">%1$s fájljait a program rákérdezés nélkül fogadja és letölti, akkor is, ha nem vagy a készüléknél.\n\nCsak olyanoknál használd, akikben megbízol. Az IRC-becenevek nem személyazonosságok: ha %1$s lecsatlakozik, valaki más átveheti a becenevet, és örökli ezt a bizalmat. Ugyanabban a menüben ki is kapcsolhatod.</string>
+    <string name="dcc_auto_confirm_ok">Megbízom ebben a becenévben</string>
+    <string name="vm_dcc_auto_accept_on">%1$s DCC-fájljait mostantól automatikusan fogadjuk</string>
+    <string name="vm_dcc_auto_accept_off">%1$s DCC-fájljait többé nem fogadjuk automatikusan</string>
+    <string name="vm_dcc_auto_accepted">%1$s %2$s nevű fájljának automatikus fogadása</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Megbízható küldők</string>
+    <string name="dcc_trusted_nick_label">Megbízható becenév</string>
+    <string name="dcc_trusted_desc">Az itt felsorolt becenevek fájljait a program rákérdezés nélkül fogadja, így az átvitel akkor is befejeződhet, ha nem vagy a készüléknél. A lista hálózatonként külön él, és nem érzékeny a kis- és nagybetűkre.</string>
+    <string name="dcc_trusted_none">Még nincs megbízható küldő.</string>
+    <string name="dcc_trusted_tip">Tipp: megbízhatóvá tehetsz valakit a becenévlistából is, vagy a nevére koppintva a csevegésben.</string>
+    <string name="dcc_trusted_dcc_off">A DCC jelenleg ki van kapcsolva, így ezek addig nem lépnek életbe, amíg be nem kapcsolod.</string>
+    <string name="dcc_trusted_entry_none">Még senki nem megbízható</string>
 </resources>

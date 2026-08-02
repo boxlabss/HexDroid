@@ -238,7 +238,7 @@ fun NetworkEditScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.network_edit_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onCancel, modifier = Modifier.focusHighlight()) {
+                    IconButton(onClick = onCancel, modifier = Modifier.tvInitialFocus().focusHighlight()) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cancel))
                     }
                 },

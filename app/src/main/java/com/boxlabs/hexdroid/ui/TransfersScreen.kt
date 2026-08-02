@@ -36,7 +36,9 @@ import com.boxlabs.hexdroid.DccSendMode
 import com.boxlabs.hexdroid.DccTransferState
 import com.boxlabs.hexdroid.UiState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -111,7 +113,9 @@ fun TransfersScreen(
     /** Look up the partial bytes available for an offer (null = none / not resumable). */
     partialFor: (DccOffer) -> com.boxlabs.hexdroid.PartialTransfer? = { null },
     /** Navigate directly to a buffer (e.g. a DCC chat buffer) and close Transfers. */
-    onOpenBuffer: ((String) -> Unit)? = null
+    onOpenBuffer: ((String) -> Unit)? = null,
+    /** Open the list of nicks whose file offers are auto-accepted. */
+    onOpenTrusted: (() -> Unit)? = null
 ) {
     var target by remember { mutableStateOf("") }
     var chatTarget by remember { mutableStateOf("") }
@@ -124,7 +128,7 @@ fun TransfersScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.transfers_title)) },
-                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.focusHighlight()) { Text("←") } }
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } }
             )
         }
     ) { padding ->
@@ -139,6 +143,35 @@ fun TransfersScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(stringResource(R.string.transfers_enable_dcc))
                     Switch(checked = state.settings.dccEnabled, onCheckedChange = { onSetDccEnabled(it) }, modifier = Modifier.tourTarget(TourTarget.TRANSFERS_ENABLE_DCC).focusHighlight(RoundedCornerShape(16.dp)))
+                }
+            }
+
+            // Entry point for the per-nick auto-accept list. Kept next to the DCC toggle
+            // because it only has an effect while DCC is on; the count is shown so the
+            // state is visible without opening the screen.
+            if (onOpenTrusted != null) {
+                item {
+                    val trustedCount = state.networks.sumOf { it.dccAutoAcceptNicks.size }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .focusHighlight(RoundedCornerShape(12.dp))
+                            .clickable { onOpenTrusted() }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.dcc_trusted_title))
+                            Text(
+                                if (trustedCount == 0) stringResource(R.string.dcc_trusted_entry_none)
+                                else pluralStringResource(R.plurals.dcc_trusted_entry_count, trustedCount, trustedCount),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("›", style = MaterialTheme.typography.titleLarge)
+                    }
                 }
             }
 
@@ -639,7 +672,7 @@ fun TransfersScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                stringResource(R.string.transfers_error, t.error ?: ""),
+                                                stringResource(R.string.transfers_error, t.error),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.weight(1f)

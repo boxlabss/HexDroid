@@ -1385,7 +1385,6 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="transfers_from">de %1$s</string>
     <string name="transfers_eta">"  ETA %1$s"</string>
     <string name="transfers_complete">Terminé — %1$s en %2$s  (%3$s en moyenne)</string>
-    <string name="transfers_error">Erreur : %1$s</string>
     <string name="transfers_sent">%1$s envoyés</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Commande de script</string>
     <string name="cmd_me">Envoie une CTCP ACTION (/me salue)</string>
     <string name="cmd_msg">Envoie un message privé</string>
     <string name="cmd_notice">Envoie un NOTICE à un utilisateur ou un canal</string>
@@ -1625,4 +1625,25 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="cmd_soju_sasl_reset">Retire les identifiants SASL</string>
     <string name="cmd_soju_user_update">Met à jour votre propre utilisateur (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Affiche les statistiques du bouncer (admin)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Accepter les fichiers automatiquement</string>
+    <string name="nick_dcc_auto_off">Ne plus accepter automatiquement</string>
+    <string name="nick_dcc_auto_on_desc">Accepte les fichiers de cet utilisateur sans demander</string>
+    <string name="nick_dcc_auto_off_desc">Les fichiers de cet utilisateur sont acceptés automatiquement</string>
+    <string name="dcc_auto_confirm_title">Accepter automatiquement les fichiers de %1$s ?</string>
+    <string name="dcc_auto_confirm_body">Les fichiers proposés par %1$s seront acceptés et téléchargés sans confirmation, même lorsque vous n\'êtes pas devant l\'appareil.\n\nNe faites cela que pour des personnes de confiance. Les pseudos IRC ne sont pas des identités : si %1$s se déconnecte, quelqu\'un d\'autre peut prendre ce pseudo et hériter de cette confiance. Vous pouvez le désactiver depuis le même menu.</string>
+    <string name="dcc_auto_confirm_ok">Faire confiance à ce pseudo</string>
+    <string name="vm_dcc_auto_accept_on">Les fichiers DCC de %1$s sont désormais acceptés automatiquement</string>
+    <string name="vm_dcc_auto_accept_off">Les fichiers DCC de %1$s ne sont plus acceptés automatiquement</string>
+    <string name="vm_dcc_auto_accepted">Acceptation automatique de %2$s de la part de %1$s</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Expéditeurs de confiance</string>
+    <string name="dcc_trusted_nick_label">Pseudo à approuver</string>
+    <string name="dcc_trusted_desc">Les fichiers proposés par ces pseudos sont acceptés sans confirmation, ce qui permet aux transferts de se terminer en votre absence. La liste est propre à chaque réseau et insensible à la casse.</string>
+    <string name="dcc_trusted_none">Aucun expéditeur de confiance pour l\'instant.</string>
+    <string name="dcc_trusted_tip">Astuce : vous pouvez aussi approuver quelqu\'un depuis la liste des pseudos, ou en touchant son nom dans la conversation.</string>
+    <string name="dcc_trusted_dcc_off">DCC est actuellement désactivé : rien de tout cela ne s\'applique tant que vous ne l\'activez pas.</string>
+    <string name="dcc_trusted_entry_none">Personne n\'est approuvé</string>
 </resources>

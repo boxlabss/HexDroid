@@ -1,0 +1,37 @@
+<resources>
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d operador online</item>
+        <item quantity="many">%1$d de operadores online</item>
+        <item quantity="other">%1$d operadores online</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">%1$d canal formado</item>
+        <item quantity="many">%1$d de canais formados</item>
+        <item quantity="other">%1$d canais formados</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d ligação desconhecida</item>
+        <item quantity="many">%1$d de ligações desconhecidas</item>
+        <item quantity="other">%1$d ligações desconhecidas</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d utilizador</item>
+        <item quantity="many">%1$d de utilizadores</item>
+        <item quantity="other">%1$d utilizadores</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d não lida</item>
+        <item quantity="many">%1$d de não lidas</item>
+        <item quantity="other">%1$d não lidas</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d ativa</item>
+        <item quantity="many">%1$d de ativas</item>
+        <item quantity="other">%1$d ativas</item>
+    </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d fidedigno</item>
+        <item quantity="many">%1$d de fidedignos</item>
+        <item quantity="other">%1$d fidedignos</item>
+    </plurals>
+</resources>

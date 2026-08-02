@@ -1385,7 +1385,6 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="transfers_from">da %1$s</string>
     <string name="transfers_eta">"  ETA %1$s"</string>
     <string name="transfers_complete">Completato — %1$s in %2$s  (%3$s in media)</string>
-    <string name="transfers_error">Errore: %1$s</string>
     <string name="transfers_sent">%1$s inviati</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Comando script</string>
     <string name="cmd_me">Invia una CTCP ACTION (/me saluta)</string>
     <string name="cmd_msg">Invia un messaggio privato</string>
     <string name="cmd_notice">Invia un NOTICE a un utente o a un canale</string>
@@ -1625,4 +1625,25 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="cmd_soju_sasl_reset">Rimuove le credenziali SASL</string>
     <string name="cmd_soju_user_update">Aggiorna il tuo utente (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Mostra le statistiche del bouncer (admin)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Accetta i file automaticamente</string>
+    <string name="nick_dcc_auto_off">Non accettare più automaticamente</string>
+    <string name="nick_dcc_auto_on_desc">Accetta i file di questo utente senza chiedere</string>
+    <string name="nick_dcc_auto_off_desc">I file di questo utente vengono accettati automaticamente</string>
+    <string name="dcc_auto_confirm_title">Accettare automaticamente i file di %1$s?</string>
+    <string name="dcc_auto_confirm_body">I file offerti da %1$s verranno accettati e scaricati senza chiedere, anche quando non sei davanti al dispositivo.\n\nFallo solo con persone di cui ti fidi. I nick IRC non sono identità: se %1$s si disconnette, qualcun altro può prendere quel nick ed ereditare questa fiducia. Puoi disattivarlo dallo stesso menu.</string>
+    <string name="dcc_auto_confirm_ok">Fidati di questo nick</string>
+    <string name="vm_dcc_auto_accept_on">D\'ora in poi i file DCC di %1$s vengono accettati automaticamente</string>
+    <string name="vm_dcc_auto_accept_off">I file DCC di %1$s non vengono più accettati automaticamente</string>
+    <string name="vm_dcc_auto_accepted">Accettazione automatica di %2$s da %1$s</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Mittenti fidati</string>
+    <string name="dcc_trusted_nick_label">Nick da considerare fidato</string>
+    <string name="dcc_trusted_desc">I file offerti da questi nick vengono accettati senza chiedere, così i trasferimenti possono completarsi mentre non sei davanti al dispositivo. La lista è per rete e non distingue maiuscole e minuscole.</string>
+    <string name="dcc_trusted_none">Nessun mittente fidato per ora.</string>
+    <string name="dcc_trusted_tip">Suggerimento: puoi considerare fidato qualcuno anche dalla lista dei nick o toccando il suo nome in chat.</string>
+    <string name="dcc_trusted_dcc_off">Il DCC è disattivato, quindi nulla di tutto questo ha effetto finché non lo attivi.</string>
+    <string name="dcc_trusted_entry_none">Nessuno considerato fidato</string>
 </resources>

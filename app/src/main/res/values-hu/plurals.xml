@@ -23,4 +23,8 @@
         <item quantity="one">%1$d aktív</item>
         <item quantity="other">%1$d aktív</item>
     </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d megbízható</item>
+        <item quantity="other">%1$d megbízható</item>
+    </plurals>
 </resources>

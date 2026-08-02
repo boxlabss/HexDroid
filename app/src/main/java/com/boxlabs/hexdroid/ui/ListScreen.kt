@@ -89,9 +89,9 @@ fun ListScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.list_channels_title)) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
                 actions = {
-                    IconButton(onClick = { onRefresh(minUsers, maxUsers) }) { Text("⟳") }
+                    IconButton(onClick = { onRefresh(minUsers, maxUsers) }, modifier = Modifier.focusHighlight()) { Text("⟳") }
                     IconButton(onClick = onOpenSettings) { Text("⚙") }
                 }
             )

@@ -374,8 +374,8 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.settings_title)) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
-                actions = { IconButton(onClick = onOpenNetworks) { Text("🌐") } }
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
+                actions = { IconButton(onClick = onOpenNetworks, modifier = Modifier.focusHighlight()) { Text("🌐") } }
             )
         }
     ) { padding ->

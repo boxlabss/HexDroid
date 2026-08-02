@@ -46,7 +46,7 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 - `irc://` / `ircs://` link handling, image/video previews, mIRC + ANSI colour and ASCII art rendering
 - Per-network ignore list, mute list, channel op tools, IRCop panel
 - Channel /list, lag indicator, nick `@` and `/command` autocompletion
-- Material Design 3 light, dark, and Matrix themes; adjustable fonts; 13 languages
+- Material Design 3 light, dark, and Matrix themes; adjustable fonts; 15 languages
 - Backup/restore: network profiles and settings exported as JSON
 
 ### Secure Chat (End-to-End Encryption)

@@ -158,7 +158,7 @@ fun AboutScreen(onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.about_title)) },
-                navigationIcon = { IconButton(onClick = onBack) { Text("←") } },
+                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF111111)
                 )

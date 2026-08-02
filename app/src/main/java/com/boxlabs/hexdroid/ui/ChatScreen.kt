@@ -102,6 +102,8 @@ import androidx.compose.material.icons.automirrored.filled.SendToMobile
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -126,6 +128,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -256,7 +259,7 @@ private data class IrcCommand(
     val name: String,
     val usage: String,
     /** Localized description for built-in commands. */
-    @androidx.annotation.StringRes val descriptionRes: Int? = null,
+    @param:androidx.annotation.StringRes val descriptionRes: Int? = null,
     /** Runtime description for commands supplied by .hex scripts. */
     val description: String? = null,
 )
@@ -659,7 +662,7 @@ private fun CommandHints(
                                 MaterialTheme.colorScheme.primaryContainer
                             else
                                 MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.clickable {
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(50)).clickable {
                                 highlighted = cmd
                                 onPick("/${cmd.name} ")
                             }
@@ -684,6 +687,7 @@ private fun CommandHints(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusHighlight(RoundedCornerShape(8.dp))
                             .clickable { onPick("/${cmd.name} ") }
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -781,7 +785,7 @@ private fun SubCommandHints(
                                 MaterialTheme.colorScheme.primaryContainer
                             else
                                 MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.clickable {
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(50)).clickable {
                                 highlighted = cmd
                                 onPick("/$parentCmd ${cmd.name} ")
                             }
@@ -1054,6 +1058,7 @@ private fun ReplyQuote(
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
+            .focusHighlight(RoundedCornerShape(4.dp))
             .clickable(enabled = canScroll, onClick = onTap)
             .background(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -1115,6 +1120,7 @@ fun ChatScreen(
     onWhois: (String) -> Unit,
     onIgnoreNick: (String, String) -> Unit,
     onUnignoreNick: (String, String) -> Unit,
+    onSetDccAutoAccept: (String, String, Boolean) -> Unit = { _, _, _ -> },
     /** Mute/unmute highlight & PM notifications from a nick (adds/removes a bare-nick entry in highlightIgnoreMasks). */
     onIgnoreNotifications: (String, String) -> Unit,
     onUnignoreNotifications: (String, String) -> Unit,
@@ -1302,6 +1308,7 @@ fun ChatScreen(
                     Text(
                         text = "✕",
                         modifier = Modifier
+                            .focusHighlight(RoundedCornerShape(50))
                             .clickable { onClose() }
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.bodySmall
@@ -1514,6 +1521,8 @@ fun ChatScreen(
     var showNickSheet by remember { mutableStateOf(false) }
 
     var showNickActions by remember { mutableStateOf(false) }
+    /** Nick awaiting confirmation before DCC auto-accept is switched on; null when idle. */
+    var confirmAutoAcceptFor by remember { mutableStateOf<String?>(null) }
     var selectedNick by remember { mutableStateOf("") }
     /** Message long-pressed: shown in a small context sheet with Copy / Reply options. */
     var longPressedMessage by remember { mutableStateOf<UiMessage?>(null) }
@@ -2758,6 +2767,7 @@ fun ChatScreen(
                             modifier = Modifier
                                 .size(accentBtnSize)
                                 .scale(if (colorPressed) 0.92f else 1f)
+                                .focusHighlight(CircleShape)
                                 .clickable(
                                     interactionSource = colorInteraction,
                                     indication = ripple(bounded = false),
@@ -2814,7 +2824,7 @@ fun ChatScreen(
                                 .alpha(if (isChannel) 1f else 0.4f)
                                 .then(
                                     if (isChannel) {
-                                        Modifier.clickable(
+                                        Modifier.focusHighlight(CircleShape).clickable(
                                             interactionSource = nicklistInteraction,
                                             indication = ripple(bounded = false),
                                             onClick = {
@@ -3353,6 +3363,7 @@ fun ChatScreen(
                         .align(Alignment.BottomEnd)
                         .padding(end = 12.dp, bottom = if (!isAtBottom) 56.dp else 8.dp)
                         .zIndex(1f)
+                        .focusHighlight(CircleShape)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = ripple(bounded = true)
@@ -3398,6 +3409,7 @@ fun ChatScreen(
                         .padding(end = 12.dp, bottom = 8.dp)
                         .zIndex(1f)
                         .size(40.dp)
+                        .focusHighlight(CircleShape)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = ripple(bounded = false)
@@ -3619,6 +3631,7 @@ fun ChatScreen(
                                                 modifier = Modifier
                                                     .size(16.dp)
                                                     .clip(CircleShape)
+                                                    .focusHighlight(CircleShape)
                                                     .clickable { onSend("/closekey $key") }
                                             )
                                         }
@@ -3664,11 +3677,12 @@ fun ChatScreen(
                 // User-facing commands from loaded .hex scripts (e.g. /tr). Every script alias becomes
                 // a command, so drop internal helpers (which contain '_') and anything that duplicates
                 // a built-in. This surfaces script commands in the chips without the helper noise.
-                val scriptCmdHints = remember(viewModel) {
+                val scriptCmdLabel = stringResource(R.string.cmd_script_command)
+                val scriptCmdHints = remember(viewModel, scriptCmdLabel) {
                     (viewModel?.scriptEngine?.commandNames() ?: emptyList())
                         .filter { '_' !in it && IRC_COMMANDS.none { c -> c.name.equals(it, ignoreCase = true) } }
                         .sorted()
-                        .map { IrcCommand(it, "/$it", "Script command") }
+                        .map { IrcCommand(it, "/$it", description = scriptCmdLabel) }
                 }
                 CommandHints(
                     query = cmdQuery,
@@ -3998,6 +4012,7 @@ fun ChatScreen(
                                 ),
                                 shape = RoundedCornerShape(4.dp)
                             )
+                            .focusHighlight(RoundedCornerShape(4.dp))
                             .clickable(
                                 interactionSource = opsInteraction,
                                 indication = ripple(bounded = false),
@@ -4437,6 +4452,7 @@ fun ChatScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
+                                .focusHighlight(RoundedCornerShape(8.dp))
                                 .clickable { toggle() }
                                 .padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -4891,6 +4907,7 @@ fun ChatScreen(
                             border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
                             modifier = Modifier
                                 .size(28.dp)
+                                .focusHighlight(CircleShape)
                                 .clickable { selectedFgColor = null }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -4907,6 +4924,7 @@ fun ChatScreen(
                             border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
                             modifier = Modifier
                                 .size(28.dp)
+                                .focusHighlight(CircleShape)
                                 .clickable { selectedBgColor = null }
                         ) {}
                     }
@@ -4925,6 +4943,7 @@ fun ChatScreen(
                                 else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .weight(1f)
+                            .focusHighlight(RoundedCornerShape(8.dp))
                             .clickable { colorMode = 0 }
                     ) {
                         Row(
@@ -4960,6 +4979,7 @@ fun ChatScreen(
                                 else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .weight(1f)
+                            .focusHighlight(RoundedCornerShape(8.dp))
                             .clickable { colorMode = 1 }
                     ) {
                         Row(
@@ -5019,6 +5039,7 @@ fun ChatScreen(
                                 if (isSelected) Modifier.border(2.dp, Color.White)
                                 else Modifier
                             )
+                            .focusHighlight(RoundedCornerShape(4.dp))
                             .clickable {
                                 if (colorMode == 0)
                                     selectedFgColor = if (selectedFgColor == code) null else code
@@ -5647,6 +5668,27 @@ fun ChatScreen(
         }
     }
 
+    confirmAutoAcceptFor?.let { pendingNick ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmAutoAcceptFor = null },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null) },
+            title = { Text(stringResource(R.string.dcc_auto_confirm_title, pendingNick)) },
+            text = { Text(stringResource(R.string.dcc_auto_confirm_body, pendingNick)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSetDccAutoAccept(selNetId, pendingNick, true)
+                    confirmAutoAcceptFor = null
+                    showNickActions = false
+                }) { Text(stringResource(R.string.dcc_auto_confirm_ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmAutoAcceptFor = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     if (showNickActions && selectedNick.isNotBlank()) {
         val dccEnabled = state.settings.dccEnabled
         val dccSecure  = state.settings.dccSecure
@@ -5748,6 +5790,7 @@ fun ChatScreen(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
                                         .padding(top = 2.dp)
+                                        .focusHighlight(RoundedCornerShape(4.dp))
                                         .clickable { runCatching { sheetUri.openUri(hp) } },
                                 )
                             }
@@ -5786,6 +5829,7 @@ fun ChatScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusHighlight(RoundedCornerShape(8.dp))
                             .let { if (enabled) it.clickable(onClick = onClick) else it }
                             .padding(horizontal = 16.dp, vertical = 12.dp)
                             .alpha(if (enabled) 1f else 0.38f),
@@ -5843,6 +5887,35 @@ fun ChatScreen(
                         onDccSendFile?.invoke(selectedNick)
                     }
                 )
+                val autoAcceptList = state.networks.firstOrNull { it.id == selNetId }
+                    ?.dccAutoAcceptNicks.orEmpty()
+                val isAutoAccept = autoAcceptList.any { it.equals(selectedNick, ignoreCase = true) }
+
+                ActionRow(
+                    icon = if (isAutoAccept) Icons.Default.DownloadDone else Icons.Default.Download,
+                    label = if (isAutoAccept) stringResource(R.string.nick_dcc_auto_off)
+                            else stringResource(R.string.nick_dcc_auto_on),
+                    subtitle = when {
+                        !dccEnabled  -> stringResource(R.string.nick_dcc_disabled)
+                        isAutoAccept -> stringResource(R.string.nick_dcc_auto_off_desc)
+                        else         -> stringResource(R.string.nick_dcc_auto_on_desc)
+                    },
+                    enabled = dccEnabled,
+                    tint = if (isAutoAccept) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        if (isAutoAccept) {
+                            // Turning trust off never needs a confirmation.
+                            onSetDccAutoAccept(selNetId, selectedNick, false)
+                            showNickActions = false
+                        } else {
+                            // Turning it on does: files will land on the device with nobody
+                            // watching, so the risk is spelled out before it takes effect.
+                            confirmAutoAcceptFor = selectedNick
+                        }
+                    }
+                )
+
                 ActionRow(
                     icon = Icons.Default.Terminal,
                     label = stringResource(R.string.nick_dcc_chat),

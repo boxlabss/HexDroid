@@ -35,4 +35,10 @@
         <item quantity="many">%1$d активных</item>
         <item quantity="other">%1$d активных</item>
     </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d доверенный</item>
+        <item quantity="few">%1$d доверенных</item>
+        <item quantity="many">%1$d доверенных</item>
+        <item quantity="other">%1$d доверенных</item>
+    </plurals>
 </resources>

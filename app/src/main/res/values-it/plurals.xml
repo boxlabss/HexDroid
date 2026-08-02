@@ -23,4 +23,8 @@
         <item quantity="one">%1$d attivo</item>
         <item quantity="other">%1$d attivi</item>
     </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d fidato</item>
+        <item quantity="other">%1$d fidati</item>
+    </plurals>
 </resources>

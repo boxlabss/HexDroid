@@ -23,4 +23,8 @@
         <item quantity="one">%1$d etkin</item>
         <item quantity="other">%1$d etkin</item>
     </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d güvenilen</item>
+        <item quantity="other">%1$d güvenilen</item>
+    </plurals>
 </resources>

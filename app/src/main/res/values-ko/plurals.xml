@@ -1,0 +1,24 @@
+<resources>
+    <!-- Korean has no grammatical plural: a single "other" form covers every count. -->
+    <plurals name="core_lusers_operators">
+        <item quantity="other">오퍼레이터 %1$d명 접속 중</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="other">채널 %1$d개 생성됨</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="other">알 수 없는 연결 %1$d개</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="other">%1$d명</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="other">읽지 않음 %1$d개</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="other">진행 중 %1$d개</item>
+    </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="other">신뢰 %1$d명</item>
+    </plurals>
+</resources>

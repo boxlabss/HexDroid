@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,13 +57,15 @@ import com.boxlabs.hexdroid.UiState
 import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
 
+/**
+ * Manage the per-network list of nicknames whose incoming DCC file offers are accepted without prompting.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IgnoreListScreen(
+fun DccTrustedScreen(
     state: UiState,
     onBack: () -> Unit,
-    onIgnoreNick: (String, String) -> Unit,
-    onUnignoreNick: (String, String) -> Unit,
+    onSetDccAutoAccept: (String, String, Boolean) -> Unit,
 ) {
     val nets = state.networks
 
@@ -79,14 +82,34 @@ fun IgnoreListScreen(
     }
 
     val selNet = nets.firstOrNull { it.id == selectedNetId }
-    val ignored = selNet?.ignoredNicks.orEmpty().sortedBy { it.lowercase() }
+    val trusted = selNet?.dccAutoAcceptNicks.orEmpty().sortedBy { it.lowercase() }
 
     var addNick by remember { mutableStateOf("") }
+    /** Nick awaiting confirmation before it is trusted; null when idle. */
+    var confirmFor by remember { mutableStateOf<String?>(null) }
+
+    confirmFor?.let { pendingNick ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmFor = null },
+            title = { Text(stringResource(R.string.dcc_auto_confirm_title, pendingNick)) },
+            text = { Text(stringResource(R.string.dcc_auto_confirm_body, pendingNick)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSetDccAutoAccept(selectedNetId, pendingNick, true)
+                    addNick = ""
+                    confirmFor = null
+                }) { Text(stringResource(R.string.dcc_auto_confirm_ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFor = null }) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.ignore_title)) },
+                title = { Text(stringResource(R.string.dcc_trusted_title)) },
                 navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
             )
         }
@@ -129,7 +152,7 @@ fun IgnoreListScreen(
 
             HorizontalDivider()
 
-            // Add nick
+            // Add nick via the same confirmation dialog as the nick action sheet.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -138,7 +161,7 @@ fun IgnoreListScreen(
                 OutlinedTextField(
                     value = addNick,
                     onValueChange = { addNick = it },
-                    label = { Text(stringResource(R.string.ignore_nick_label)) },
+                    label = { Text(stringResource(R.string.dcc_trusted_nick_label)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
@@ -147,29 +170,41 @@ fun IgnoreListScreen(
                     enabled = addNick.trim().isNotBlank() && selectedNetId.isNotBlank(),
                     onClick = {
                         val nick = addNick.trim()
-                        if (nick.isNotBlank()) {
-                            onIgnoreNick(selectedNetId, nick)
-                            addNick = ""
-                        }
+                        if (nick.isNotBlank()) confirmFor = nick
                     }
                 ) { Text(stringResource(R.string.ignore_add)) }
             }
 
             Text(
-                stringResource(R.string.ignore_list_desc),
+                stringResource(R.string.dcc_trusted_desc),
                 style = MaterialTheme.typography.bodySmall
             )
 
-            if (ignored.isEmpty()) {
+            if (!state.settings.dccEnabled) {
+                // The list is still editable, but nothing will act on it until DCC is on.
+                Surface(
+                    tonalElevation = 1.dp,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        stringResource(R.string.dcc_trusted_dcc_off),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth().padding(12.dp)
+                    )
+                }
+            }
+
+            if (trusted.isEmpty()) {
                 Surface(
                     tonalElevation = 1.dp,
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(stringResource(R.string.ignore_no_nicks))
+                        Text(stringResource(R.string.dcc_trusted_none))
                         Spacer(Modifier.height(4.dp))
-                        Text(stringResource(R.string.ignore_list_tip), style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.dcc_trusted_tip), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             } else {
@@ -177,10 +212,7 @@ fun IgnoreListScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // key is the lowercased nick, so two entries differing only in case
-                    // ("Bob" and "bob") would collide and crash Compose's measure pass on a
-                    // fling. distinctBy on the same lowercased form keeps the keys unique.
-                    items(ignored.distinctBy { it.lowercase() }, key = { it.lowercase() }) { nick ->
+                    items(trusted.distinctBy { it.lowercase() }, key = { it.lowercase() }) { nick ->
                         Surface(
                             tonalElevation = 1.dp,
                             shape = MaterialTheme.shapes.medium,
@@ -193,7 +225,7 @@ fun IgnoreListScreen(
                                 Text(nick, modifier = Modifier.weight(1f))
                                 Spacer(Modifier.width(8.dp))
                                 OutlinedButton(
-                                    onClick = { onUnignoreNick(selectedNetId, nick) },
+                                    onClick = { onSetDccAutoAccept(selectedNetId, nick, false) },
                                     modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                 ) { Text(stringResource(R.string.ignore_remove)) }
                             }

@@ -501,6 +501,12 @@ class SettingsRepository(private val ctx: Context) {
                         }.distinctBy { it.lowercase() }
                     } ?: emptyList(),
 
+                    dccAutoAcceptNicks = o.optJSONArray("dccAutoAccept")?.let { aa ->
+                        (0 until aa.length()).mapNotNull { j ->
+                            aa.optString(j)?.trim()?.takeIf { it.isNotBlank() }
+                        }.distinctBy { it.lowercase() }
+                    } ?: emptyList(),
+
                     notifyOnErrors = o.optBoolean("notifyOnErrors", false),
                     highlightIgnoreMasks = o.optJSONArray("highlightIgnoreMasks")?.let { hm ->
                         (0 until hm.length()).mapNotNull { j ->
@@ -629,6 +635,7 @@ class SettingsRepository(private val ctx: Context) {
             o.put("autoConnect", n.autoConnect)
             o.put("autoReconnect", n.autoReconnect)
             o.put("ignoreList", JSONArray(n.ignoredNicks))
+            o.put("dccAutoAccept", JSONArray(n.dccAutoAcceptNicks))
             o.put("notifyOnErrors", n.notifyOnErrors)
             if (n.highlightIgnoreMasks.isNotEmpty()) {
                 o.put("highlightIgnoreMasks", JSONArray(n.highlightIgnoreMasks))
@@ -830,14 +837,8 @@ class SettingsRepository(private val ctx: Context) {
     fun exportBackupJson(networks: List<NetworkProfile>, settings: com.boxlabs.hexdroid.UiSettings): String {
         val root = JSONObject()
         // version: bumped when the schema gains fields whose absence in a round-trip through
-        //   an older build would silently change behaviour (not just lose data). e.g. bouncerKind:
-        //   a v3 ZNC profile written, imported on a v2-only build, re-exported and re-imported
-        //   would come back as soju-style routing. Distinct from a no-op field loss.
-        // minCompatVersion: the oldest app version that can still *open* this backup without
-        //   errors. Kept at 1 — older builds get default behaviour for unknown fields via the
-        //   optXxx() parse calls; they just miss the new features (bouncer-kind distinction,
-        //   TOFU pins, rejoinOnKick). That's acceptable graceful downgrade, not corruption.
-        root.put("version", 4)
+        //   an older build would silently change behaviour.
+        root.put("version", 5)
         root.put("minCompatVersion", 1)
         root.put("app", "HexDroid")
         root.put("exportedAt", java.time.Instant.now().toString())
@@ -847,7 +848,8 @@ class SettingsRepository(private val ctx: Context) {
             "v3: added bouncerKind, bouncerClientId, tlsTofuFingerprint on NetworkProfile; " +
                 "added rejoinOnKick on UiSettings. bouncerNetworkName pre-v3 profiles are " +
                 "migrated to bouncerKind=SOJU on import.",
-            "v4: added proxyType, proxyHost, proxyPort, proxyUsername on NetworkProfile (SOCKS/Tor)."
+            "v4: added proxyType, proxyHost, proxyPort, proxyUsername on NetworkProfile (SOCKS/Tor).",
+            "v5: updated cap fields"
         )))
         root.put("settings", toSettingsJson(settings))
         root.put("networks", toNetworksJson(networks))
@@ -1129,6 +1131,16 @@ data class NetworkProfile(
 
     // Ignored nicknames (case-insensitive match).
     val ignoredNicks: List<String> = emptyList(),
+
+    /**
+     * Nicknames whose incoming DCC file offers are accepted without prompting
+     * (case-insensitive match). Populated from the nick action sheet, one entry per
+     * nick the user has explicitly chosen to trust on this network.
+     *
+     * Trust is per network and keyed on the nick alone, so it follows whoever holds
+     * that nick at the time — see the takeover caveat on IrcViewModel.isDccAutoAccepted.
+     */
+    val dccAutoAcceptNicks: List<String> = emptyList(),
 
     /**
      * If true, genuine (non-transient) server/connection errors on this network are

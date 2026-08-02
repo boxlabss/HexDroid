@@ -1385,7 +1385,6 @@
     <string name="transfers_from">from %1$s</string>
     <string name="transfers_eta">"  ETA %1$s"</string>
     <string name="transfers_complete">Complete — %1$s in %2$s  (%3$s avg)</string>
-    <string name="transfers_error">Error: %1$s</string>
     <string name="transfers_sent">%1$s sent</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Script command</string>
     <string name="cmd_me">Send a CTCP ACTION (/me waves)</string>
     <string name="cmd_msg">Send a private message</string>
     <string name="cmd_notice">Send a NOTICE to a user or channel</string>
@@ -1625,4 +1625,25 @@
     <string name="cmd_soju_sasl_reset">Remove SASL credentials</string>
     <string name="cmd_soju_user_update">Update your own user (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Show bouncer statistics (admin)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Auto-accept files</string>
+    <string name="nick_dcc_auto_off">Stop auto-accepting</string>
+    <string name="nick_dcc_auto_on_desc">Accept this user\'s file offers without asking</string>
+    <string name="nick_dcc_auto_off_desc">Files from this user are accepted automatically</string>
+    <string name="dcc_auto_confirm_title">Auto-accept files from %1$s?</string>
+    <string name="dcc_auto_confirm_body">File offers from %1$s will be accepted and downloaded without asking, even when you are away from the device.\n\nOnly do this for people you trust. IRC nicknames are not identities: if %1$s disconnects, someone else can take that nickname and inherit this trust. You can turn it off again from the same menu.</string>
+    <string name="dcc_auto_confirm_ok">Trust this nick</string>
+    <string name="vm_dcc_auto_accept_on">Now auto-accepting DCC files from %1$s</string>
+    <string name="vm_dcc_auto_accept_off">No longer auto-accepting DCC files from %1$s</string>
+    <string name="vm_dcc_auto_accepted">Auto-accepting %2$s from %1$s</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Trusted senders</string>
+    <string name="dcc_trusted_nick_label">Nick to trust</string>
+    <string name="dcc_trusted_desc">File offers from these nicknames are accepted without asking, so transfers can complete while you are away from the device. The list is per network and matched case-insensitively.</string>
+    <string name="dcc_trusted_none">No trusted senders yet.</string>
+    <string name="dcc_trusted_tip">Tip: you can also trust someone from the nick list, or by tapping their name in chat.</string>
+    <string name="dcc_trusted_dcc_off">DCC is currently off, so nothing here takes effect until you enable it.</string>
+    <string name="dcc_trusted_entry_none">Nobody trusted yet</string>
 </resources>

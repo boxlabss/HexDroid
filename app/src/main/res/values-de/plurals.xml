@@ -23,4 +23,8 @@
         <item quantity="one">%1$d aktiv</item>
         <item quantity="other">%1$d aktiv</item>
     </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d vertraut</item>
+        <item quantity="other">%1$d vertraut</item>
+    </plurals>
 </resources>

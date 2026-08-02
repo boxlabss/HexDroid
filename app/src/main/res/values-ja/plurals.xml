@@ -1,0 +1,24 @@
+<resources>
+    <!-- Japanese has no grammatical plural: a single "other" form covers every count. -->
+    <plurals name="core_lusers_operators">
+        <item quantity="other">オペレーター %1$d 人がオンライン</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="other">チャンネル %1$d 個が作成済み</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="other">不明な接続 %1$d 件</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="other">%1$d 人</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="other">未読 %1$d 件</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="other">実行中 %1$d 件</item>
+    </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="other">信頼済み %1$d 件</item>
+    </plurals>
+</resources>

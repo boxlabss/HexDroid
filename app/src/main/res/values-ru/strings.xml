@@ -1385,7 +1385,6 @@
     <string name="transfers_from">от %1$s</string>
     <string name="transfers_eta">"  Осталось %1$s"</string>
     <string name="transfers_complete">Завершено — %1$s за %2$s  (в среднем %3$s)</string>
-    <string name="transfers_error">Ошибка: %1$s</string>
     <string name="transfers_sent">Отправлено %1$s</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Команда скрипта</string>
     <string name="cmd_me">Отправляет CTCP ACTION (/me машет рукой)</string>
     <string name="cmd_msg">Отправляет личное сообщение</string>
     <string name="cmd_notice">Отправляет NOTICE пользователю или в канал</string>
@@ -1625,4 +1625,25 @@
     <string name="cmd_soju_sasl_reset">Убирает учётные данные SASL</string>
     <string name="cmd_soju_user_update">Обновляет вашего пользователя (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Показывает статистику bouncer (админ)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Автоматически принимать файлы</string>
+    <string name="nick_dcc_auto_off">Больше не принимать автоматически</string>
+    <string name="nick_dcc_auto_on_desc">Принимать файлы от этого пользователя без подтверждения</string>
+    <string name="nick_dcc_auto_off_desc">Файлы от этого пользователя принимаются автоматически</string>
+    <string name="dcc_auto_confirm_title">Принимать файлы от %1$s автоматически?</string>
+    <string name="dcc_auto_confirm_body">Файлы от %1$s будут приниматься и загружаться без подтверждения, даже когда вас нет у устройства.\n\nДелайте это только для тех, кому доверяете. Ник в IRC не является удостоверением личности: если %1$s отключится, этот ник может занять кто-то другой и унаследовать это доверие. Отключить можно в том же меню.</string>
+    <string name="dcc_auto_confirm_ok">Доверять этому нику</string>
+    <string name="vm_dcc_auto_accept_on">Файлы DCC от %1$s теперь принимаются автоматически</string>
+    <string name="vm_dcc_auto_accept_off">Файлы DCC от %1$s больше не принимаются автоматически</string>
+    <string name="vm_dcc_auto_accepted">Автоматически принимается %2$s от %1$s</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Доверенные отправители</string>
+    <string name="dcc_trusted_nick_label">Ник, которому доверять</string>
+    <string name="dcc_trusted_desc">Файлы от этих ников принимаются без подтверждения, поэтому передача может завершиться, пока вас нет у устройства. Список ведётся отдельно для каждой сети, регистр не учитывается.</string>
+    <string name="dcc_trusted_none">Доверенных отправителей пока нет.</string>
+    <string name="dcc_trusted_tip">Совет: доверять кому-то можно также из списка ников или нажав на имя в чате.</string>
+    <string name="dcc_trusted_dcc_off">DCC сейчас выключен, поэтому ничего из этого не действует, пока вы его не включите.</string>
+    <string name="dcc_trusted_entry_none">Никому не доверяете</string>
 </resources>

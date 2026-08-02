@@ -1,0 +1,45 @@
+<resources>
+    <!-- Polish: one (1), few (2-4, 22-24…), many (0, 5-21…), other (fractions) -->
+    <plurals name="core_lusers_operators">
+        <item quantity="one">%1$d operator online</item>
+        <item quantity="few">%1$d operatorzy online</item>
+        <item quantity="many">%1$d operatorów online</item>
+        <item quantity="other">%1$d operatora online</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="one">utworzono %1$d kanał</item>
+        <item quantity="few">utworzono %1$d kanały</item>
+        <item quantity="many">utworzono %1$d kanałów</item>
+        <item quantity="other">utworzono %1$d kanału</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="one">%1$d nieznane połączenie</item>
+        <item quantity="few">%1$d nieznane połączenia</item>
+        <item quantity="many">%1$d nieznanych połączeń</item>
+        <item quantity="other">%1$d nieznanego połączenia</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="one">%1$d użytkownik</item>
+        <item quantity="few">%1$d użytkownicy</item>
+        <item quantity="many">%1$d użytkowników</item>
+        <item quantity="other">%1$d użytkownika</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="one">%1$d nieprzeczytana</item>
+        <item quantity="few">%1$d nieprzeczytane</item>
+        <item quantity="many">%1$d nieprzeczytanych</item>
+        <item quantity="other">%1$d nieprzeczytanej</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="one">%1$d aktywny</item>
+        <item quantity="few">%1$d aktywne</item>
+        <item quantity="many">%1$d aktywnych</item>
+        <item quantity="other">%1$d aktywnego</item>
+    </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="one">%1$d zaufany</item>
+        <item quantity="few">%1$d zaufanych</item>
+        <item quantity="many">%1$d zaufanych</item>
+        <item quantity="other">%1$d zaufanych</item>
+    </plurals>
+</resources>

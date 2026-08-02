@@ -51,5 +51,12 @@
         <item quantity="many">%1$d نشطاً</item>
         <item quantity="other">%1$d نشط</item>
     </plurals>
-
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="zero">%1$d موثوق</item>
+        <item quantity="one">%1$d موثوق</item>
+        <item quantity="two">%1$d موثوقان</item>
+        <item quantity="few">%1$d موثوقين</item>
+        <item quantity="many">%1$d موثوقاً</item>
+        <item quantity="other">%1$d موثوق</item>
+    </plurals>
 </resources>

@@ -1385,7 +1385,6 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="transfers_from">van %1$s</string>
     <string name="transfers_eta">"  Resterend %1$s"</string>
     <string name="transfers_complete">Voltooid — %1$s in %2$s  (gem. %3$s)</string>
-    <string name="transfers_error">Fout: %1$s</string>
     <string name="transfers_sent">%1$s verstuurd</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Scriptcommando</string>
     <string name="cmd_me">Stuurt een CTCP ACTION (/me zwaait)</string>
     <string name="cmd_msg">Stuurt een privébericht</string>
     <string name="cmd_notice">Stuurt een NOTICE naar een gebruiker of kanaal</string>
@@ -1625,4 +1625,25 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="cmd_soju_sasl_reset">Verwijdert de SASL-inloggegevens</string>
     <string name="cmd_soju_user_update">Werkt je eigen gebruiker bij (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Toont bouncerstatistieken (beheerder)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Bestanden automatisch accepteren</string>
+    <string name="nick_dcc_auto_off">Niet meer automatisch accepteren</string>
+    <string name="nick_dcc_auto_on_desc">Accepteert bestanden van deze gebruiker zonder te vragen</string>
+    <string name="nick_dcc_auto_off_desc">Bestanden van deze gebruiker worden automatisch geaccepteerd</string>
+    <string name="dcc_auto_confirm_title">Bestanden van %1$s automatisch accepteren?</string>
+    <string name="dcc_auto_confirm_body">Bestanden van %1$s worden zonder vragen geaccepteerd en gedownload, ook als je niet bij het apparaat bent.\n\nDoe dit alleen bij mensen die je vertrouwt. IRC-nicks zijn geen identiteiten: als %1$s de verbinding verbreekt, kan iemand anders die nick overnemen en dit vertrouwen erven. Je kunt het via hetzelfde menu weer uitzetten.</string>
+    <string name="dcc_auto_confirm_ok">Deze nick vertrouwen</string>
+    <string name="vm_dcc_auto_accept_on">DCC-bestanden van %1$s worden nu automatisch geaccepteerd</string>
+    <string name="vm_dcc_auto_accept_off">DCC-bestanden van %1$s worden niet meer automatisch geaccepteerd</string>
+    <string name="vm_dcc_auto_accepted">%2$s van %1$s wordt automatisch geaccepteerd</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Vertrouwde afzenders</string>
+    <string name="dcc_trusted_nick_label">Te vertrouwen nick</string>
+    <string name="dcc_trusted_desc">Bestanden van deze nicks worden zonder vragen geaccepteerd, zodat overdrachten kunnen doorlopen terwijl je niet bij het apparaat bent. De lijst geldt per netwerk en let niet op hoofdletters.</string>
+    <string name="dcc_trusted_none">Nog geen vertrouwde afzenders.</string>
+    <string name="dcc_trusted_tip">Tip: je kunt iemand ook vertrouwen via de nicklijst of door in de chat op de naam te tikken.</string>
+    <string name="dcc_trusted_dcc_off">DCC staat momenteel uit, dus hier gebeurt niets tot je het inschakelt.</string>
+    <string name="dcc_trusted_entry_none">Nog niemand vertrouwd</string>
 </resources>

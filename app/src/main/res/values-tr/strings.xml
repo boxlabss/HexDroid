@@ -1385,7 +1385,6 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="transfers_from">gönderen: %1$s</string>
     <string name="transfers_eta">"  Kalan %1$s"</string>
     <string name="transfers_complete">Tamamlandı — %2$s içinde %1$s  (ortalama %3$s)</string>
-    <string name="transfers_error">Hata: %1$s</string>
     <string name="transfers_sent">%1$s gönderildi</string>
 
     <!-- ChatScreen: topic expander, selection hint, font sample, bot marker -->
@@ -1400,6 +1399,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
          descriptions are translated. Keys are prefixed by service where the same
          verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
          AuthServ, ZNC *status and soju BouncerServ. -->
+    <string name="cmd_script_command">Betik komutu</string>
     <string name="cmd_me">CTCP ACTION gönderir (/me el sallar)</string>
     <string name="cmd_msg">Özel mesaj gönderir</string>
     <string name="cmd_notice">Bir kullanıcıya veya kanala NOTICE gönderir</string>
@@ -1625,4 +1625,25 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="cmd_soju_sasl_reset">SASL kimlik bilgilerini kaldırır</string>
     <string name="cmd_soju_user_update">Kendi kullanıcınızı günceller (-nick, -realname, -pass)</string>
     <string name="cmd_soju_server_status">Bouncer istatistiklerini gösterir (yönetici)</string>
+
+    <!-- Per-nick DCC auto-accept (nick action sheet + confirmation dialog). -->
+    <string name="nick_dcc_auto_on">Dosyaları otomatik kabul et</string>
+    <string name="nick_dcc_auto_off">Otomatik kabulü durdur</string>
+    <string name="nick_dcc_auto_on_desc">Bu kullanıcının dosyalarını sormadan kabul eder</string>
+    <string name="nick_dcc_auto_off_desc">Bu kullanıcının dosyaları otomatik olarak kabul ediliyor</string>
+    <string name="dcc_auto_confirm_title">%1$s kullanıcısının dosyaları otomatik kabul edilsin mi?</string>
+    <string name="dcc_auto_confirm_body">%1$s kullanıcısının gönderdiği dosyalar, siz cihazın başında olmasanız bile sorulmadan kabul edilip indirilir.\n\nBunu yalnızca güvendiğiniz kişiler için yapın. IRC nickleri bir kimlik değildir: %1$s bağlantısını keserse, bu nicki başka biri alıp bu güveni devralabilir. Aynı menüden yeniden kapatabilirsiniz.</string>
+    <string name="dcc_auto_confirm_ok">Bu nicke güven</string>
+    <string name="vm_dcc_auto_accept_on">%1$s kullanıcısının DCC dosyaları artık otomatik kabul ediliyor</string>
+    <string name="vm_dcc_auto_accept_off">%1$s kullanıcısının DCC dosyaları artık otomatik kabul edilmiyor</string>
+    <string name="vm_dcc_auto_accepted">%1$s kullanıcısından gelen %2$s otomatik kabul ediliyor</string>
+
+    <!-- Trusted senders screen (DCC auto-accept list). -->
+    <string name="dcc_trusted_title">Güvenilen gönderenler</string>
+    <string name="dcc_trusted_nick_label">Güvenilecek nick</string>
+    <string name="dcc_trusted_desc">Bu nicklerin gönderdiği dosyalar sorulmadan kabul edilir; böylece siz cihazın başında değilken de aktarımlar tamamlanabilir. Liste her ağ için ayrıdır ve büyük küçük harf ayrımı yapmaz.</string>
+    <string name="dcc_trusted_none">Henüz güvenilen gönderen yok.</string>
+    <string name="dcc_trusted_tip">İpucu: birine nick listesinden ya da sohbette adına dokunarak da güvenebilirsiniz.</string>
+    <string name="dcc_trusted_dcc_off">DCC şu anda kapalı, bu yüzden siz açana kadar buradakiler etkili olmaz.</string>
+    <string name="dcc_trusted_entry_none">Henüz kimseye güvenilmiyor</string>
 </resources>

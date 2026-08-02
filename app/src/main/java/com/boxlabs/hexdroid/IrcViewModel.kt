@@ -85,7 +85,7 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
-enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE, SCRIPTS }
+enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE, SCRIPTS, DCC_TRUSTED }
 
 /**
  * UI-level message model.
@@ -1275,7 +1275,17 @@ class IrcViewModel(
     /**
      * Returns true when the app holds ACCESS_LOCAL_NETWORK (required on Android 17+).
      * On earlier API levels the permission doesn't exist and this always returns true.
+     * True when accepting [offer] would be refused by the Android 17+ local-network gate.
+     *
+     * Active DCC connects to the sender's IP; passive DCC binds a local port, but the sender
+     * then connects back over the LAN. either way ACCESS_LOCAL_NETWORK is required for a
+     * LAN peer. Checked before auto-accepting as well as inside the accept path, so a
+     * blocked offer falls through to the normal prompt (with its notification) instead of
+     * failing quietly while nobody is watching the device.
      */
+    private fun dccBlockedByLanPermission(offer: DccOffer): Boolean =
+        !offer.isPassive && isLocalHost(offer.ip) && !hasLocalNetworkPermission()
+
     private fun hasLocalNetworkPermission(): Boolean {
         if (android.os.Build.VERSION.SDK_INT < 37) return true
         return android.content.pm.PackageManager.PERMISSION_GRANTED ==
@@ -6704,6 +6714,39 @@ fun startAddNetwork() {
         _state.value = st.copy(networks = next)
     }
 
+    /**
+     * True when [nick] is on this network's DCC auto-accept list.
+     */
+    private fun isDccAutoAccepted(netId: String, nick: String?): Boolean {
+        val n = nick?.trim().orEmpty()
+        if (n.isBlank()) return false
+        return _state.value.networks.firstOrNull { it.id == netId }
+            ?.dccAutoAcceptNicks.orEmpty()
+            .any { it.equals(n, ignoreCase = true) }
+    }
+
+    fun setDccAutoAccept(netId: String, nick: String, enabled: Boolean) {
+        val base = nick.trim().takeIf { it.isNotBlank() } ?: return
+        val st = _state.value
+        val net = st.networks.firstOrNull { it.id == netId } ?: return
+        val nextList = if (enabled) {
+            (net.dccAutoAcceptNicks + base)
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase() }
+        } else {
+            net.dccAutoAcceptNicks.filterNot { it.equals(base, ignoreCase = true) }
+        }
+        val updated = net.copy(dccAutoAcceptNicks = nextList)
+        updateNetworkInState(updated)
+        viewModelScope.launch { repo.upsertNetwork(updated) }
+        val sel = _state.value.selectedBuffer
+        val (selNet, _) = splitKey(sel)
+        val dest = if (sel.isNotBlank() && selNet == netId) sel else bufKey(netId, "*server*")
+        val msg = if (enabled) R.string.vm_dcc_auto_accept_on else R.string.vm_dcc_auto_accept_off
+        append(dest, from = null, text = "*** " + appContext.getString(msg, base), isLocal = true, doNotify = false)
+    }
+
     fun ignoreNick(netId: String, nick: String) {
         val base = canonicalIgnoreNick(nick) ?: return
         val st = _state.value
@@ -7790,6 +7833,21 @@ if (code == "442") {
 
                 val st = _state.value
                 _state.value = st.copy(dccOffers = st.dccOffers + offer0)
+
+                // Auto-accept: the user has explicitly trusted this nick on this network for
+                // unattended receiving.
+                if (st.settings.dccEnabled
+                    && isDccAutoAccepted(netId, offer0.from)
+                    && getPartialFor(offer0) == null
+                    && !dccBlockedByLanPermission(offer0)
+                ) {
+                    append(bufKey(netId, "*server*"), from = null,
+                        text = "*** " + appContext.getString(
+                            R.string.vm_dcc_auto_accepted, offer0.from, offer0.filename))
+                    acceptDcc(offer0)
+                    return
+                }
+
                 append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_dcc_incoming, offer0.from, offer0.filename))
                 if (st.settings.notificationsEnabled) {
                     notifier.notifyDccIncomingFile(netId, offer0.from, baseName)
@@ -9239,7 +9297,7 @@ if (code == "442") {
                         appContext.getString(R.string.vm_ev_message_deleted, ev.fromNick)
                     else
                         appContext.getString(R.string.vm_ev_message_deleted_reason, ev.fromNick, ev.reason)
-                    val newMsgs = buf.messages.set(idx, victim.copy(text = tombstone))
+                    val newMsgs = buf.messages.replacingAt(idx, victim.copy(text = tombstone))
                     _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(messages = newMsgs))) }
                 } else {
                     append(chanKey, from = null,
@@ -10523,10 +10581,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     private fun doAcceptDccCommon(offer: DccOffer, resumeFrom: PartialTransfer?) {
         val st = _state.value
 
-        // Android 17+: DCC connections to LAN peers require ACCESS_LOCAL_NETWORK.
-        // Active DCC connects to the sender's IP; passive DCC binds a local port (that's fine,
-        // but the sender then connects back to us over the LAN - still needs the permission).
-        if (!offer.isPassive && isLocalHost(offer.ip) && !hasLocalNetworkPermission()) {
+        if (dccBlockedByLanPermission(offer)) {
             append(bufKey(offer.netId.ifBlank { st.activeNetworkId ?: "" }, "*server*"),
                 from = null,
                 text = "*** " + appContext.getString(R.string.vm_dcc_lan_perm, offer.from),

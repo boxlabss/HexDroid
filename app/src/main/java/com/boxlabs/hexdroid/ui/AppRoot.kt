@@ -232,6 +232,9 @@ fun AppRoot(
                     AppScreen.SCRIPTS,
                     AppScreen.ABOUT -> vm.backToChat()
                     AppScreen.IGNORE -> vm.goTo(AppScreen.SETTINGS)
+                    // Mirror the top-bar arrow: Trusted Senders was opened from Transfers,
+                    // so system Back returns there rather than jumping to chat.
+                    AppScreen.DCC_TRUSTED -> vm.goTo(AppScreen.TRANSFERS)
                     AppScreen.NETWORKS -> vm.backToChat()
                     else -> vm.backToChat()
                 }
@@ -273,6 +276,7 @@ fun AppRoot(
                     onToggleChannelsOnly = vm::toggleChannelsOnly,
                     onWhois = vm::whois,
                     onIgnoreNick = vm::ignoreNick,
+                    onSetDccAutoAccept = vm::setDccAutoAccept,
                     onUnignoreNick = vm::unignoreNick,
                     onIgnoreNotifications = vm::ignoreNotifications,
                     onUnignoreNotifications = vm::unignoreNotifications,
@@ -406,6 +410,7 @@ fun AppRoot(
                 AppScreen.TRANSFERS -> TransfersScreen(
                     state = state,
                     onBack = vm::backToChat,
+                    onOpenTrusted = { vm.goTo(AppScreen.DCC_TRUSTED) },
                     onAccept = vm::acceptDcc,
                     onReject = vm::rejectDcc,
                     onAcceptChat = vm::acceptDccChat,
@@ -424,6 +429,12 @@ fun AppRoot(
 
                 AppScreen.ABOUT -> AboutScreen(
                     onBack = vm::backToChat
+                )
+
+                AppScreen.DCC_TRUSTED -> DccTrustedScreen(
+                    state = state,
+                    onBack = { vm.goTo(AppScreen.TRANSFERS) },
+                    onSetDccAutoAccept = vm::setDccAutoAccept,
                 )
             
                 AppScreen.IGNORE -> IgnoreListScreen(

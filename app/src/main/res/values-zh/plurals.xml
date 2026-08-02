@@ -1,0 +1,24 @@
+<resources>
+    <!-- Chinese has no grammatical plural: a single "other" form covers every count. -->
+    <plurals name="core_lusers_operators">
+        <item quantity="other">%1$d 位管理员在线</item>
+    </plurals>
+    <plurals name="core_lusers_channels">
+        <item quantity="other">已创建 %1$d 个频道</item>
+    </plurals>
+    <plurals name="core_lusers_unknown_conns">
+        <item quantity="other">%1$d 个未知连接</item>
+    </plurals>
+    <plurals name="chat_nicklist_users">
+        <item quantity="other">%1$d 位用户</item>
+    </plurals>
+    <plurals name="chat_unread_count">
+        <item quantity="other">%1$d 条未读</item>
+    </plurals>
+    <plurals name="transfers_active_count">
+        <item quantity="other">%1$d 项进行中</item>
+    </plurals>
+    <plurals name="dcc_trusted_entry_count">
+        <item quantity="other">已信任 %1$d 位</item>
+    </plurals>
+</resources>
