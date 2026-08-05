@@ -2184,7 +2184,7 @@ class IrcClient(val config: IrcConfig) {
 										// Build the reply at call time so it always reflects the
 										// installed app version - never stale from a saved config.
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.boxlabs.uk/\u0001")
+										sendRaw("NOTICE $safeSender :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.org\u0001")
 										send(IrcEvent.Status(tr(R.string.core_ctcp_version_sent, safeSender)))
 										return
 									}
@@ -2219,7 +2219,7 @@ class IrcClient(val config: IrcConfig) {
 									}
 									"SOURCE" -> {
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001SOURCE https://hexdroid.boxlabs.uk/\u0001")
+										sendRaw("NOTICE $safeSender :\u0001SOURCE https://hexdroid.org\u0001")
 										send(IrcEvent.Status(tr(R.string.core_ctcp_source_sent, safeSender)))
 										return
 									}

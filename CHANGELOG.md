@@ -1,7 +1,10 @@
 # Changelog
 
 All notable changes to HexDroid are documented here.
-## [1.6.10] - 2026-08-03
+## [1.7.1] - 2026-08-06
+- **Fix Android TV banner**
+
+## [1.7.0] - 2026-08-03
 - **IRCv3.x additions** Added several new IRCv3 capabilities: FILEHOST, network icons, metadata2, message deletion, extended-isupport, strict transport security and more.
 - **Expanded translations**
 - **Add auto accept file transfer option (nicklist)**
