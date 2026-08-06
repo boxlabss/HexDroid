@@ -1,1 +1,5 @@
 Fix Android TV banner
+Added several new IRCv3 capabilities including network icons, metadata2, message deletion
+Expanded translations
+Add auto accept file transfer option (nicklist)
+Fix focus related issues with Android TV
