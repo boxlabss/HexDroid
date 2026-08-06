@@ -289,7 +289,7 @@ data class UiSettings(
     val dccIncomingPortMax: Int = 5010,
     val dccDownloadFolderUri: String? = null,
 
-    val quitMessage: String = "HexDroid IRC - https://hexdroid.boxlabs.uk",
+    val quitMessage: String = "An IRC client for Android - https://hexdroid.org",
     val partMessage: String = "Leaving",
 
     val colorizeNicks: Boolean = true,
@@ -1975,6 +1975,7 @@ class IrcViewModel(
         }
         viewModelScope.launch {
             repo.migrateLegacySecretsIfNeeded()
+            repo.migrateLegacyQuitMessageIfNeeded()
             var prevLogFolderUri: String? = null
             repo.settingsFlow.collect { s ->
                 val st = _state.value

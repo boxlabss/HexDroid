@@ -31,6 +31,14 @@ private fun parseFontChoice(raw: String?, fallback: com.boxlabs.hexdroid.FontCho
 
 private val Context.dataStore by preferencesDataStore(name = "hexdroid_prefs")
 
+/**
+ * Update older defaulted quit messages
+ */
+private val LEGACY_DEFAULT_QUIT_MESSAGES = setOf(
+    "HexDroid IRC - https://hexdroid.boxlabs.uk",
+    "HexDroid IRC - https://hexdroid.boxlabs.uk/",
+)
+
 class SettingsRepository(private val ctx: Context) {
 
     val secretStore: SecretStore = SecretStore(ctx.applicationContext)
@@ -42,6 +50,7 @@ class SettingsRepository(private val ctx: Context) {
         val SECRETS_MIGRATED_V1 = booleanPreferencesKey("secrets_migrated_v1")
     
         val SECRETS_MIGRATED_V2 = booleanPreferencesKey("secrets_migrated_v2")
+        val QUIT_MSG_MIGRATED_V1 = booleanPreferencesKey("quit_msg_migrated_v1")
     }
 
     val settingsFlow: Flow<UiSettings> = ctx.dataStore.data.map { prefs ->
@@ -129,6 +138,31 @@ class SettingsRepository(private val ctx: Context) {
         if (!v2Done) prefs[Keys.SECRETS_MIGRATED_V2] = true
     }
 }
+
+    /**
+     * rewrite a defaulted quit message so new versions are updated to use hexdroid.org
+     */
+    suspend fun migrateLegacyQuitMessageIfNeeded() {
+        ctx.dataStore.edit { prefs ->
+            if (prefs[Keys.QUIT_MSG_MIGRATED_V1] == true) return@edit
+
+            val raw = prefs[Keys.SETTINGS_JSON]
+            if (!raw.isNullOrBlank()) {
+                runCatching {
+                    val o = JSONObject(raw)
+                    val stored = if (o.has("quitMessage")) o.optString("quitMessage", "") else null
+                    if (stored != null && stored in LEGACY_DEFAULT_QUIT_MESSAGES) {
+                        o.put("quitMessage", UiSettings().quitMessage)
+                        prefs[Keys.SETTINGS_JSON] = o.toString()
+                    }
+                }.onFailure { e ->
+                    android.util.Log.e("SettingsRepo", "Quit message migration failed, marking done", e)
+                }
+            }
+
+            prefs[Keys.QUIT_MSG_MIGRATED_V1] = true
+        }
+    }
 
 	suspend fun updateSettings(update: (UiSettings) -> UiSettings) {
         ctx.dataStore.edit { prefs ->
