@@ -311,7 +311,8 @@ Translations are managed in the string resources under `app/src/main/res/values-
 
 ---
 
-Full license text in [LICENSE](LICENSE).
+HexDroid is licensed under GNU GPL v3. Full license text in [LICENSE](LICENSE).
+
 ---
 
 <div align="center">
