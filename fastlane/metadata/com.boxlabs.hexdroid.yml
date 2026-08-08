@@ -1,0 +1,30 @@
+Categories:
+  - Internet
+  - Connectivity
+License: GPL-3.0-or-later
+AuthorName: boxlabs
+AuthorEmail: android@boxlabs.co.uk
+WebSite: https://hexdroid.org
+SourceCode: https://github.com/boxlabss/HexDroid
+IssueTracker: https://github.com/boxlabss/HexDroid/issues
+Changelog: https://github.com/boxlabss/HexDroid/blob/HEAD/CHANGELOG.md
+
+RepoType: git
+Repo: https://github.com/boxlabss/HexDroid.git
+
+Binaries: https://github.com/boxlabss/HexDroid/releases/download/v%v/hexdroid-v%v.apk
+
+AllowedAPKSigningKeys: FILL_IN
+
+Builds:
+  - versionName: 1.7.1
+    versionCode: FILL_IN
+    commit: f9502891cfe13ee5155cdde493c86accb3e4ca51
+    subdir: app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags ^v[0-9.]+$
+CurrentVersion: 1.7.1
+CurrentVersionCode: FILL_IN
