@@ -12,7 +12,7 @@
 
 **A fast, modern IRC client for Android.**
 
-[Google Play](https://play.google.com/store/apps/details?id=com.boxlabs.hexdroid) &nbsp;·&nbsp; [IzzyOnDroid](https://apt.izzysoft.de/packages/com.boxlabs.hexdroid) &nbsp;·&nbsp; [Direct Download](https://hexdroid.boxlabs.uk/releases/hexdroid-latest.apk) &nbsp;·&nbsp; [Documentation](https://hexdroid.boxlabs.uk/)
+[Google Play](https://play.google.com/store/apps/details?id=com.boxlabs.hexdroid) &nbsp;·&nbsp; [IzzyOnDroid](https://apt.izzysoft.de/packages/com.boxlabs.hexdroid) &nbsp;·&nbsp; [Direct Download](https://hexdroid.org/releases/hexdroid-latest.apk) &nbsp;·&nbsp; [Documentation](https://hexdroid.org/)
 
 </div>
 
@@ -49,162 +49,11 @@ HexDroid is a free and open source IRC client for Android. It provides a clean, 
 - Material Design 3 light, dark, and Matrix themes; adjustable fonts; 15 languages
 - Backup/restore: network profiles and settings exported as JSON
 
-### Secure Chat (End-to-End Encryption)
-
-HexDroid can encrypt message **content** end-to-end.
-**Three schemes**, selectable per target in the encryption dialog:
-
-| Scheme | Wire prefix | Indicator | Use it for |
-|---|---|---|---|
-| **AES-256-GCM** | `+AGM` | 🔒 | The modern default for pre-shared keys. Authenticated encryption, fresh random nonce per message, channel-bound against cross-channel replay. **Recommended for new conversations.** |
-| **Authenticated Group Exchange** | `AGE` | 🛡 | Signal-style PMs and sender keys for channels. Automatic authentication between users. |
-| **Blowfish (FiSH)** | `+OK` | 🐟 | interoperability with other clients that support FiSH. Reads both ECB and CBC FiSH formats, sends CBC. |
-
-**How `+AGM` and `+OK` work**
-
-- Keys are **pre-shared** you generate a key on one device and share it with your contact out of band (the in-app **Share** sheet, in person, over another secure messenger). There is no automatic key exchange, so you control exactly who can read the conversation.
-- Each key has a short **safety number** (e.g. `K4XR-T9BS`) shown on every device that holds it. Compare it with your contact over a trusted channel to confirm you have the same key and no one tampered with it in transit.
-- Encrypted messages show a padlock indicator; a lock badge appears in the input while you're encrypting. Anyone without the key sees only `+AGM <ciphertext>` (or `+OK ...`).
-
-**Key storage & portability**
-
-- Keys are stored on-device in `EncryptedSharedPreferences`, wrapped by the Android Keystore — the same protection used for SASL credentials. The `+AGE` device identity lives in the same store.
-- Keys are **excluded from backups** by design, so they never leave the device in a portable form. After a reinstall or device move you re-share `+AGM`/`+OK` keys with your contacts; `+AGE` mints a fresh identity that peers re-pin automatically.
-
-**Client interoperability**
-
-- `+AGM`: Supported clients have scripts in [aes-client-plugins](https://github.com/boxlabss/HexDroid/tree/main/aes-client-plugins).
-- `+AGE`: Currently only available for HexDroid for now.
-- `+OK`: `fishlim` plugins exist for most IRC clients.
-
-The full `+AGM` wire-format specification are published [here](https://github.com/boxlabss/HexDroid/blob/main/docs/agm-wire-format.md) in this repository so any client author can add `+AGM` support.
-
-**How `AGE` works**
-
-- No key sharing needed. Each device holds an Ed25519 identity; clients announce and pin each other's identities automatically (trust-on-first-use), communicating between HexDroid users without needing a decentralized key exchange: a Signal-style handshake with forward secrecy for PMs, and a group key sealed to each pinned member for channels.
-- Every identity has a fingerprint you can compare out of band to upgrade trust-on-first-use to verified.
-- The same layer powers encrypted multiplayer script games (see Scripting below): moves are signed and encrypted, and hidden information such as a player's poker cards is sealed to a single recipient.
-- The [wire format](https://github.com/boxlabss/HexDroid/blob/main/docs/age-wire-format.md) and [handshake](https://github.com/boxlabss/HexDroid/blob/main/docs/age-handshake-spec.md) specifications are published so any client author can implement `AGE`.
-
-### IRCv3
-
-HexDroid negotiates a comprehensive set of capabilities. All are enabled by default unless noted.
-
-<details>
-<summary><strong>Core message infrastructure</strong></summary>
-
-| Cap | Notes |
-|---|---|
-| `message-tags` | Base for all tag-based features |
-| `server-time` | Timestamps on every message, including history replay |
-| `echo-message` + `labeled-response` | Outbound message confirmation; deduplication via msgid |
-| `batch` | chathistory, event-playback, and labeled-response grouping |
-| `message-ids` | Unique msgid per message; prevents duplicates during chathistory overlap |
-| `standard-replies` | Structured FAIL/WARN/NOTE |
-| `utf8only` | Signals UTF-8 intent to server |
-| `draft/multiline` | When the server supports multiline for messages over 512 bytes |
-| `sts` | Strict Transport Security. A plaintext connection that is told to upgrade reconnects over TLS immediately; a TLS connection stores a per-host TLS-only policy that also disables the invalid-certificate override until it expires. Observed only, never requested. A stale policy can be cleared from network settings |
-| `draft/extended-isupport` | Fetches the `ISUPPORT` list before registration completes, so server limits and tokens are known before the first message is sent. Token withdrawals (`-KEY`) are honoured |
-
-</details>
-
-<details>
-<summary><strong>History &amp; read state</strong></summary>
-
-| Cap | Notes |
-|---|---|
-| `chathistory` / `draft/chathistory` | Replay on join; BEFORE paging on scroll-to-top; LATEST for unread catch-up. Request sizes respect the server's `CHATHISTORY` limit, and selectors fall back to a supported reference type per `MSGREFTYPES` |
-| `draft/event-playback` | JOIN/PART/MODE events included in history batches |
-| `draft/read-marker` / `soju.im/read` | Read pointer sync; drives the unread separator line |
-
-</details>
-
-<details>
-<summary><strong>Membership &amp; presence</strong></summary>
-
-| Cap | Notes |
-|---|---|
-| `away-notify` | `* nick is now away` / `* nick is back` in every shared channel; away users are dimmed in the member list; initial away state seeded from WHOX flags on join |
-| `account-notify` | Services login/logout notifications |
-| `extended-join` | JOIN line shows `[logged in as account]` for authenticated users |
-| `chghost` | Live ident/hostname changes reflected in nicklist |
-| `setname` | Receive realname changes; send your own with `/setname` |
-| `multi-prefix` | Full mode prefix stack in NAMES (e.g. `@+nick`) |
-| `userhost-in-names` | Full `nick!user@host` in NAMES replies (off by default) |
-| `invite-notify` | Notifies all channel members of `/invite` |
-| `monitor` / `draft/extended-monitor` | Nick watch list; MONONLINE/MONOFFLINE notifications |
-| WHOX (005 ISUPPORT) | `WHO %uhsnfar` on join seeds ident, host, account, and initial away state |
-
-</details>
-
-<details>
-<summary><strong>Messaging</strong></summary>
-
-| Cap | Notes |
-|---|---|
-| `account-tag` | Sender account exposed on every PRIVMSG/NOTICE |
-| `draft/typing` / `typing` | Composing indicators; sending opt-in (off by default), receiving opt-out |
-| `draft/message-reactions` | Emoji reactions via TAGMSG `+draft/react`; displayed as status lines. Removal sends `+draft/unreact` and the older `+draft/react-removed` |
-| `+draft/reply` / `+reply` | Reply-to msgid threading; forwarded on PRIVMSG and NOTICE |
-| `draft/message-redaction` | Message deletion. Long-press one of your own messages > **Delete message**, or `/redact <msgid>`. Incoming redactions leave a tombstone rather than a hole. Applied only when the server relays the `REDACT` back, so a rejected delete never desyncs your view |
-| `draft/oper-tag` | Messages from IRC operators are marked with a star before the nick |
-| `bot` mode / tag | Users flagged as bots (the `BOT` ISUPPORT mode letter in WHO/WHOX, or the `bot` message tag) are badged `[bot]` in the member list, on their messages, and in the nick tap sheet |
-| `+draft/channel-context` | A private message sent from a channel's context is annotated with that channel |
-| `draft/metadata-2` | User and channel metadata. Subscribes to `display-name`, `avatar`, `color`, and `status`; the display name appears beside the nick, a `color` tints the nick, and tapping a nick shows their avatar and status. A metadata editor (overflow menu, or `/metadata`) sets your own keys. Deferred syncs are retried automatically |
-| `draft/account-registration` | A guided Register account dialog (or `/register` and `/verify`) creates and confirms a services account without NickServ syntax; the prompts adapt to what the server requires, with an option to save the password for SASL auto-login |
-| `draft/relaymsg` | Relay bot messages attributed to the relayed nick (off by default) |
-| `pre-away` / `draft/pre-away` | Sends AWAY before 001 so the session starts marked away when an away message is configured |
-
-</details>
-
-<details>
-<summary><strong>Channel management &amp; bouncer / vendor caps</strong></summary>
-
-| Cap | Notes |
-|---|---|
-| `draft/channel-rename` | Buffer keys, nicklists, and selected buffer all updated on server-issued RENAME |
-| `soju.im/bouncer-networks` + `soju.im/bouncer-networks-notify` | Multi-upstream support via soju |
-| `soju.im/read` | soju read-marker protocol (parallel to `draft/read-marker`) |
-| `soju.im/no-implicit-names` / `draft/no-implicit-names` | Suppress auto-NAMES on JOIN (avoids flood on reconnect) |
-| `znc.in/server-time-iso` | Legacy ZNC < 1.7 timestamps |
-| `znc.in/playback` | ZNC *playback module for missed-message replay |
-| `soju.im/FILEHOST` / `draft/FILEHOST` | File uploads. An ISUPPORT token; when the server offers an endpoint an attach button appears in the input, and the returned URL is placed in your message ready to send |
-| `draft/icon` | Server-supplied icon (`ICON` / `draft/ICON` ISUPPORT token) shown next to the network name on the Networks screen, in the sidebar, and in the network switcher. Server-supplied images (network icons and metadata avatars) are only fetched when media previews are enabled, only over HTTPS, and never on a proxied profile. |
-
-</details>
-
-HexDroid also acts on a range of `ISUPPORT` tokens beyond the caps above: `CHATHISTORY` and `MSGREFTYPES` shape history requests; `TOPICLEN` / `AWAYLEN` / `QUITLEN` / `KICKLEN` trim over-long topic, away, quit, and kick text to the server's limit before sending; `CHANLIMIT` enriches the "too many channels" error; `KNOCK` enables `/knock`; and `BOT` identifies bot users.
-
-### Character Encoding
-
-Automatic detection starting from UTF-8.
-
-### DCC
-
-- DCC SEND and DCC CHAT with active, passive, and auto modes with IPv6 support
-- **Secure DCC** SSEND and SCHAT for TLS-encrypted file transfers and chat sessions
-- **RESUME** support resuming of "paused" file transfers
-- Configurable incoming port range and download folder
-- Rich transfer progress cards with one-tap accept from notification
-- Incoming DCC CHAT offers create a buffer immediately and deep-link from notification
-
-### Scripting (`.hex`)
-
-HexDroid ships a sandboxed scripting engine; **features ship as `.hex` scripts** that the interpreter inside the APK loads. Manage them from the chat overflow menu under **Scripts**.
-
-A script is a flat list of event handlers (`on <EVENT> { ... }`) and aliases that become slash-commands. Scripts can:
-
-- react to messages, joins, notices, signals, and timers
-- send messages and commands, and echo locally
-- draw **native UI** (buttons, cards, tables, layouts) rendered in Compose via a small view DSL
-- call HTTP APIs and parse JSON
-- use the `age.*` capabilities to build **end-to-end encrypted multiplayer games** on top of `+AGE`: signed and encrypted moves, host-authoritative state sync, and hidden information (like hole cards) sealed to a single player
-
-Every dispatch runs under instruction and time budgets, so a runaway script cannot hang the app.
-
-The full language reference: [docs/hex-scripting.md](https://github.com/boxlabss/HexDroid/blob/main/docs/hex-scripting.md).
-
 ---
+
+### Documentation
+
+Information about what HexDroid does, including what is available for IRCv3 supported servers, with scripting and troubleshooting guides are available at [hexdroid.org](https://hexdroid.org)
 
 ## Installation
 
@@ -230,7 +79,7 @@ The full language reference: [docs/hex-scripting.md](https://github.com/boxlabss
 
 **Direct APK**
 
-[hexdroid-latest.apk](https://hexdroid.boxlabs.uk/releases/hexdroid-latest.apk)
+[hexdroid-latest.apk](https://hexdroid.org/releases/hexdroid-latest.apk)
 
 </td>
 </tr>
@@ -248,12 +97,12 @@ cd hexdroid
 
 ## Quick Start
 
-1. Tap **Networks → +** and enter a server hostname and port (`6697` for TLS)
+1. Tap **Networks** and the **+ button** to enter a server hostname and port (`6697` for TLS)
 2. Set your nickname; optionally configure SASL credentials
 3. Save and tap **Connect**
 4. Use `/join #channel` or tap **Channel list** to browse
 
-**To encrypt a conversation:** open the channel or DM, tap the overflow menu (⋮) **Secure Chat**, generate a key, and share it with your contact. Import the same key on their device and confirm the safety numbers match. See the [encryption guide](https://hexdroid.boxlabs.uk/encryption.html) for step-by-step instructions.
+**To encrypt a conversation:** open the channel or DM, tap the overflow menu (⋮) **Secure Chat**, generate a key, and share it with your contact. Import the same key on their device and confirm the safety numbers match. See the [encryption guide](https://hexdroid.org/encryption.html) for step-by-step instructions.
 
 Full documentation at [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/).
 
@@ -286,7 +135,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 | Where | Link |
 |---|---|
-| Docs | [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/) |
 | Email | android@boxlabs.co.uk |
 | IRC | [ircs://irc.afternet.org:6697/HexDroid](ircs://irc.afternet.org:6697/HexDroid) |
 
@@ -305,13 +153,23 @@ Bug reports and pull requests are welcome. Please open an issue before submittin
 
 **Developers:**
 
-The HexChat companion plugin and the `+AGM` wire-format specification live under `/aes-client-plugins/hexchat` and `/aes-client-plugins/docs` respectively; client authors wanting to interoperate with HexDroid's encryption should start there.
+Plugins for E2E +AGM encryption are available for some desktop and a terminal client in `/aes-client-plugins`
+The docs for both +AGM and +AGE are in `/docs` and client authors wanting to interoperate with HexDroid's encryption should start there.
 
 Translations are managed in the string resources under `app/src/main/res/values-*/`. If your language is missing or incomplete, a PR updating the relevant `strings.xml` is very welcome.
 
 ---
 
-HexDroid is licensed under GNU GPL v3. Full license text in [LICENSE](LICENSE).
+## License
+
+```
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+```
+
+Full license text in [LICENSE](LICENSE).
 
 ---
 
