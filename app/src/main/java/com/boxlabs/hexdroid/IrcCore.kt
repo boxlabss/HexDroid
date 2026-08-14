@@ -1046,7 +1046,152 @@ data class Notice(
  * Note that [attrTokens] should be the message's params from index 2 onward, plus the
  * trailing field split on spaces. See the BOUNCER NETWORK dispatch site in [IrcClient]
  * for the assembly.
+ *
+ * Case-fold [s] under the IRC [caseMapping] advertised by ISUPPORT 005.
+ *
+ * Single implementation shared by IrcClient.casefold() and the ViewModel's casefoldText():
+ * rfc1459/strict-rfc1459: ASCII A-Z, plus the [{ ]} \| pairs; plain rfc1459 also equates ^ and ~.
+ * ascii: ASCII A-Z only.
+ * anything else (e.g. "BulgarianCyrillic+EnglishAlphabet"): full Unicode lowercasing plus rfc1459 pair
  */
+internal fun ircCasefold(s: String, caseMapping: String): String {
+    val cm = caseMapping.lowercase(Locale.ROOT)
+    val sb = StringBuilder(s.length)
+    for (ch0 in s) {
+        var ch = ch0
+        if (ch in 'A'..'Z') ch = (ch.code + 32).toChar()
+        when (cm) {
+            "rfc1459", "strict-rfc1459" -> {
+                ch = when (ch) {
+                    '[', '{' -> '{'
+                    ']', '}' -> '}'
+                    '\\', '|' -> '|'
+                    else -> ch
+                }
+                if (cm == "rfc1459" && (ch == '^' || ch == '~')) ch = '~'
+            }
+            "ascii" -> { /* ASCII A-Z already handled above */ }
+            else -> {
+                ch = ch.lowercaseChar()
+                ch = when (ch) {
+                    '[', '{' -> '{'
+                    ']', '}' -> '}'
+                    '\\', '|' -> '|'
+                    '^', '~' -> '~'
+                    else -> ch
+                }
+            }
+        }
+        sb.append(ch)
+    }
+    return sb.toString()
+}
+
+/** Parsed `draft/multiline=max-bytes=4096,max-lines=24` cap value. */
+internal data class MultilineLimits(val maxBytes: Int, val maxLines: Int)
+
+/**
+ * Parse the multiline cap value. A missing, zero or absurd value means "the server
+ * imposes no limit", in which case we still apply a sane one of our own so a hostile
+ * or buggy advertisement can't make us build a single batch out of a 50 MB paste.
+ */
+internal fun parseMultilineLimits(raw: String?): MultilineLimits {
+    var bytes = 0
+    var lines = 0
+    for (tok in (raw ?: "").split(',')) {
+        val k = tok.substringBefore('=').trim().lowercase(Locale.ROOT)
+        val v = tok.substringAfter('=', "").trim().toIntOrNull() ?: continue
+        when (k) {
+            "max-bytes" -> bytes = v
+            "max-lines" -> lines = v
+        }
+    }
+    return MultilineLimits(
+        maxBytes = if (bytes in 1..1_048_576) bytes else 4096,
+        maxLines = if (lines in 1..1000) lines else 24,
+    )
+}
+
+/** Split [text] into pieces of at most [maxBytes] UTF-8 bytes, never mid-codepoint. */
+internal fun splitByUtf8Bytes(text: String, maxBytes: Int): List<String> {
+    val bytes = text.toByteArray(Charsets.UTF_8)
+    if (bytes.size <= maxBytes) return listOf(text)
+    val out = mutableListOf<String>()
+    var off = 0
+    while (off < bytes.size) {
+        var len = minOf(maxBytes, bytes.size - off)
+        // Back off to a codepoint boundary: continuation bytes are 10xxxxxx.
+        while (len > 1 && off + len < bytes.size && (bytes[off + len].toInt() and 0xC0) == 0x80) len--
+        out += String(bytes, off, len, Charsets.UTF_8)
+        off += len
+    }
+    return out
+}
+
+/**
+ * Build the complete lines for sending [lines] to [target] as IRCv3 multiline
+ * BATCHes: `BATCH +id <type> <target>`, one tagged PRIVMSG per inner line, `BATCH -id`.
+ *
+ * An input line too long for one PRIVMSG is split across several inner lines carrying
+ * `+draft/multiline-concat`, which tells the receiver to rejoin them with no newline
+ * A long paste survives the round trip with its original line breaks and nothing
+ * else. When the whole message exceeds one batch's max-lines/max-bytes budget we
+ * emit consecutive batches rather than truncating; [openTags] (the label and
+ * any reply tag) go on the first batch only, since the label correlates one echo.
+ */
+internal fun buildMultilineWireLines(
+    target: String,
+    lines: List<String>,
+    limits: MultilineLimits,
+    perLineBytes: Int,
+    batchType: String,
+    openTags: List<String>,
+    nextBatchId: () -> String,
+): List<String> {
+    if (lines.isEmpty()) return emptyList()
+
+    // Expand input lines into (payload, isContinuationOfPreviousLine) pairs.
+    val inner = mutableListOf<Pair<String, Boolean>>()
+    for (raw in lines) {
+        val line = raw.replace("\r", "").replace("\n", "")
+        if (line.isEmpty()) { inner += "" to false; continue }
+        var first = true
+        for (piece in splitByUtf8Bytes(line, perLineBytes)) {
+            inner += piece to !first
+            first = false
+        }
+    }
+
+    val out = mutableListOf<String>()
+    var i = 0
+    var firstBatch = true
+    while (i < inner.size) {
+        var bytes = 0
+        var end = i
+        while (end < inner.size && end - i < limits.maxLines) {
+            val b = inner[end].first.toByteArray(Charsets.UTF_8).size
+            if (end > i && bytes + b > limits.maxBytes) break
+            bytes += b
+            end++
+        }
+        if (end == i) end = i + 1  // never stall on a single over-budget line
+
+        val batchId = nextBatchId()
+        val tag = if (firstBatch && openTags.isNotEmpty())
+            openTags.joinToString(";", prefix = "@", postfix = " ") else ""
+        out += "${tag}BATCH +$batchId $batchType $target"
+        for (j in i until end) {
+            val (payload, concat) = inner[j]
+            val concatTag = if (concat) ";+draft/multiline-concat" else ""
+            out += "@batch=$batchId$concatTag PRIVMSG $target :$payload"
+        }
+        out += "BATCH -$batchId"
+        firstBatch = false
+        i = end
+    }
+    return out
+}
+
 internal fun parseBouncerNetworkAttrs(
     networkId: String,
     attrTokens: List<String>
@@ -1663,14 +1808,18 @@ class IrcClient(val config: IrcConfig) {
     // is the simplest fix; the lifetime is identical (one IrcClient -> one events()
     // call). They get reset implicitly on each new IrcClient instance.
 
-    /** Channels we've requested CHATHISTORY for in this session, to avoid re-fetching on rejoin. */
+    /**
+     * Channels we've requested CHATHISTORY for in this session, to avoid re-fetching on
+     * rejoin. Keyed by [casefold]
+     */
     private val historyRequested = mutableSetOf<String>()
 
     /** Per-buffer "history expected until" timestamp, anything older than this is treated as
-     *  history rather than live, so we don't re-notify for already-seen messages. */
+     *  history rather than live, so we don't re-notify for already-seen messages.
+     *  Keyed by [casefold] - see [historyRequested] for why lowercase() is not enough. */
     private val historyExpectUntil = mutableMapOf<String, Long>()
 
-    /** znc.in/playback last-seen timestamps. Key = lowercase buffer name. Value = epoch seconds. */
+    /** znc.in/playback last-seen timestamps. Key = [casefold]ed buffer name. Value = epoch seconds. */
     private val zncLastSeen = mutableMapOf<String, Long>()
 
     /** Open IRCv3 znc.in/playback batch IDs — messages tagged with these are historical. */
@@ -1712,7 +1861,7 @@ class IrcClient(val config: IrcConfig) {
      *  currently expecting history for that target and the message is older than ~now. */
     private fun isHeuristicHistory(target: String?, timeMs: Long?, nowMs: Long): Boolean {
         if (target.isNullOrBlank() || timeMs == null) return false
-        val until = historyExpectUntil[target.lowercase()] ?: 0L
+        val until = historyExpectUntil[casefold(target)] ?: 0L
         if (until < nowMs) return false
         return timeMs < (nowMs - 15_000L)
     }
@@ -2070,7 +2219,7 @@ class IrcClient(val config: IrcConfig) {
 							if (parts.size >= 2 && parts[0].equals("TIMESTAMP", ignoreCase = true)) {
 								val bufName = parts[1]
 								val epochSecs = parts.getOrNull(2)?.toLongOrNull()
-								if (epochSecs != null) zncLastSeen[bufName.lowercase()] = epochSecs
+								if (epochSecs != null) zncLastSeen[casefold(bufName)] = epochSecs
 								return  // Internal plumbing only — never shown.
 							}
 							// Non-TIMESTAMP: fall through.
@@ -2523,12 +2672,12 @@ class IrcClient(val config: IrcConfig) {
 								&& config.capPrefs.draftChathistory
 								&& hasChathistoryCap()
 								&& !chanHist
-								&& historyRequested.add(chan.lowercase())
+								&& historyRequested.add(casefold(chan))
 							) {
 								val lim = clampHistoryLimit(config.historyLimit.coerceIn(0, 500))
 								if (lim > 0) {
 									sendRaw("${labelTag()}CHATHISTORY LATEST $chan * $lim")
-									historyExpectUntil[chan.lowercase()] = nowMs + 7_000L
+									historyExpectUntil[casefold(chan)] = nowMs + 7_000L
 								}
 							}
 
@@ -2544,10 +2693,10 @@ class IrcClient(val config: IrcConfig) {
 								&& irc.hasCap("znc.in/playback")
 								&& !chanHist
 							) {
-								val lastSeen = zncLastSeen[chan.lowercase()] ?: 0L
+								val lastSeen = zncLastSeen[casefold(chan)] ?: 0L
 								val nowSecs = nowMs / 1000L
 								sendRaw("PRIVMSG *playback :PLAY $chan $lastSeen $nowSecs")
-								historyExpectUntil[chan.lowercase()] = nowMs + 15_000L
+								historyExpectUntil[casefold(chan)] = nowMs + 15_000L
 							}
 
 							// WHOX: on joining a channel, query the full user/host/account info
@@ -3029,67 +3178,7 @@ class IrcClient(val config: IrcConfig) {
 				}
     }
 
-    private fun casefold(s: String): String {
-        val cm = caseMapping.lowercase(Locale.ROOT)
-        val sb = StringBuilder(s.length)
-
-        for (ch0 in s) {
-            var ch = ch0
-
-            // Standard ASCII case folding (always applied for all modes)
-            if (ch in 'A'..'Z') ch = (ch.code + 32).toChar()
-
-            // Non-ASCII case folding based on server-advertised CASEMAPPING.
-            //
-            // rfc1459 / strict-rfc1459:
-            //   Map the four extended ASCII pairs used in old European IRC nicks.
-            //   rfc1459 additionally equates ^ and ~ (the "tilde" pair).
-            //
-            // ascii:
-            //   Only ASCII A-Z folding; all other chars are left as-is.
-            //
-            // Non-standard caseMapping values (e.g. "BulgarianCyrillic+EnglishAlphabet"):
-            //   Use Char.lowercaseChar() for full Unicode lowercasing, then apply the
-            //   standard RFC1459 special-char pairs on top.  This is correct for any
-            //   Cyrillic-based network and is a safe fallback for any other unknown mapping.
-            //
-            // Unknown / unrecognised:
-            //   Fall back to rfc1459-like behaviour (the most common default on IRC).
-            when (cm) {
-                "rfc1459", "strict-rfc1459" -> {
-                    ch = when (ch) {
-                        '[', '{' -> '{'
-                        ']', '}' -> '}'
-                        '\\', '|' -> '|'
-                        else -> ch
-                    }
-                    if (cm == "rfc1459") {
-                        if (ch == '^' || ch == '~') ch = '~'
-                    }
-                }
-
-                "ascii" -> { /* ASCII-only: A-Z already handled above */ }
-
-                else -> {
-                    // Full Unicode lowercasing covers Cyrillic, Greek, and any other script
-                    // advertised via a non-standard CASEMAPPING token.
-                    ch = ch.lowercaseChar()
-                    // Also apply RFC1459 special-char pairs, which many non-ASCII IRC
-                    // networks still use in nick/channel names alongside Cyrillic.
-                    ch = when (ch) {
-                        '[', '{' -> '{'
-                        ']', '}' -> '}'
-                        '\\', '|' -> '|'
-                        '^', '~' -> '~'
-                        else -> ch
-                    }
-                }
-            }
-
-            sb.append(ch)
-        }
-        return sb.toString()
-    }
+    private fun casefold(s: String): String = ircCasefold(s, caseMapping)
 
     private fun nickEquals(a: String?, b: String?): Boolean {
         if (a == null || b == null) return false
@@ -3331,6 +3420,65 @@ class IrcClient(val config: IrcConfig) {
             return null
         }
         sendRaw("${tag}PRIVMSG $target :$payload")
+        return label
+    }
+
+    /**
+     * True when [target] can currently take an IRCv3 multiline BATCH: the cap pair is
+     * negotiated and nothing is encrypting this conversation.
+     *
+     * E2E is excluded deliberately. Each inner line would be a separate ciphertext, so
+     * the receiver would have to decrypt-then-join, and any client that joins first
+     * (which is what the multiline spec tells it to do) renders a wall of base64. Keyed
+     * targets keep the existing one-PRIVMSG-per-chunk path.
+     */
+    fun multilineSendAvailable(target: String): Boolean {
+        if (!hasCap("batch")) return false
+        if (!hasCap("draft/multiline") && !hasCap("multiline")) return false
+        if (ageEnabledForTarget?.invoke(target) == true) return false
+        val codec = e2eCodec ?: return true
+        // encryptOutgoing returns the argument identity-unchanged when no key is set.
+        val probe = "\u0000probe"
+        return codec.encryptOutgoing(target, probe, currentNick) === probe
+    }
+
+    /**
+     * Send [lines] to [target] as one logical message using an IRCv3 multiline BATCH.
+     *
+     * Returns null when the caps aren't there or the target is encrypted; the caller
+     * then sends line-by-line. Otherwise returns the labeled-response `label` attached
+     * to the first BATCH open (when echo-message + labeled-response are both
+     * negotiated, else null) so the caller can correlate its optimistic local echo with
+     * the server's echo, exactly as [privmsg] does for a single line.
+     */
+    suspend fun privmsgMultiline(target: String, lines: List<String>, replyToMsgId: String? = null): String? {
+        if (lines.isEmpty()) return null
+        if (!multilineSendAvailable(target)) return null
+
+        var label: String? = null
+        val openTags = buildList {
+            if (hasCap("echo-message") && hasCap("labeled-response")) {
+                label = nextLabel()
+                add("label=$label")
+            }
+            if (replyToMsgId != null && hasCap("message-tags")) {
+                add("+draft/reply=$replyToMsgId")
+                add("+reply=$replyToMsgId")
+            }
+        }
+
+        val wire = buildMultilineWireLines(
+            target = target,
+            lines = lines,
+            limits = parseMultilineLimits(capValue("draft/multiline") ?: capValue("multiline")),
+            // Budget for one inner line's payload: the server's line limit less the worst
+            // plausible ":nick!user@host PRIVMSG <target> :" prefix and the @batch tag.
+            perLineBytes = ((serverLinelen ?: 512) - 100 - target.length - 24).coerceAtLeast(64),
+            batchType = if (hasCap("draft/multiline")) "draft/multiline" else "multiline",
+            openTags = openTags,
+            nextBatchId = { "hm${labelCounter.incrementAndGet()}" },
+        )
+        for (line in wire) sendRaw(line)
         return label
     }
 

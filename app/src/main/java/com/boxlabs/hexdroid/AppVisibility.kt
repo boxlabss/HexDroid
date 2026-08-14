@@ -48,4 +48,31 @@ object AppVisibility {
      */
     @Volatile
     var isActivityStarted: Boolean = false
+
+    /**
+     * Deadline (SystemClock.elapsedRealtime) until which we may start a
+     * foreground service even with no Activity started. (when start on boot is enabled)
+     *
+     * Android 12+ blocks background FGS starts, but grants a short exemption to a few
+     * broadcast receivers, ACTION_BOOT_COMPLETED among them. [BootReceiver] opens a
+     * window here so the connection layer's normal start path can foreground the
+     * KeepAliveService during that grace period instead of falling back to a plain
+     * notification and letting the process be reaped.
+     *
+     * If the window has closed by the time connections come up, the fallback is a notification.
+     */
+    @Volatile
+    var fgsStartExemptUntilElapsedMs: Long = 0L
+
+    /** Open the exemption window for [durationMs] from now. */
+    fun grantForegroundServiceStartWindow(durationMs: Long = 60_000L) {
+        fgsStartExemptUntilElapsedMs = android.os.SystemClock.elapsedRealtime() + durationMs
+    }
+
+    /**
+     * True when ContextCompat.startForegroundService() is expected to be permitted:
+     * an Activity is started, or we are inside a broadcast-granted exemption window.
+     */
+    fun canStartForegroundService(): Boolean =
+        isActivityStarted || android.os.SystemClock.elapsedRealtime() < fgsStartExemptUntilElapsedMs
 }

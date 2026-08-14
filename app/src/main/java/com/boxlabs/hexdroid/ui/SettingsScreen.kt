@@ -856,6 +856,31 @@ fun SettingsScreen(
                 }
             }
 
+            item {
+                // Only meaningful with keep-alive on: without the foreground service a
+                // boot-time connection is killed almost immediately, so the toggle is
+                // disabled (and forced off) rather than doing nothing.
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(stringResource(R.string.setting_connect_on_boot), modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = s.connectOnBoot && s.keepAliveInBackground,
+                            enabled = s.keepAliveInBackground,
+                            onCheckedChange = { onUpdate { copy(connectOnBoot = !connectOnBoot) } },
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.setting_connect_on_boot_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
             item { SettingToggle(stringResource(R.string.setting_auto_reconnect), s.autoReconnectEnabled) { onUpdate { copy(autoReconnectEnabled = !autoReconnectEnabled) } } }
 
             item {

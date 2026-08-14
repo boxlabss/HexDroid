@@ -257,6 +257,11 @@ data class UiSettings(
     val notifyOnPrivateMessages: Boolean = true,
     val showConnectionStatusNotification: Boolean = true,
     val keepAliveInBackground: Boolean = true,
+    /**
+     * Reconnect the networks marked auto-connect after the device reboots, without the
+     * user opening the app. Off by default.
+     */
+    val connectOnBoot: Boolean = false,
     val autoReconnectEnabled: Boolean = true,
     val autoReconnectDelaySec: Int = 10,
     val autoConnectOnStartup: Boolean = false,
@@ -1629,17 +1634,20 @@ class IrcViewModel(
     private val recentOwnNicks: MutableMap<String, MutableMap<String, Long>> =
         java.util.concurrent.ConcurrentHashMap()
 
+    // Keyed by casefoldText, not lowercase(): a nick like "foo[bar]" that the server
+    // echoes back as "foo{bar}" on an rfc1459 network is the same nick, and a raw
+    // lowercase key would fail the self-send dedup and duplicate the local echo.
     private fun recordOwnNick(netId: String, nick: String?) {
         if (nick.isNullOrBlank()) return
         val now = System.currentTimeMillis()
         val m = recentOwnNicks.getOrPut(netId) { java.util.concurrent.ConcurrentHashMap() }
-        m[nick.lowercase()] = now
+        m[casefoldText(netId, nick)] = now
         if (m.size > 16) m.entries.removeAll { now - it.value > SELF_SEND_RETAIN_MS }
     }
 
     private fun isRecentOwnNick(netId: String, nick: String?): Boolean {
         if (nick == null) return false
-        val t = recentOwnNicks[netId]?.get(nick.lowercase()) ?: return false
+        val t = recentOwnNicks[netId]?.get(casefoldText(netId, nick)) ?: return false
         return System.currentTimeMillis() - t <= SELF_SEND_RETAIN_MS
     }
 
@@ -6395,8 +6403,20 @@ fun startAddNetwork() {
             // The IRC protocol limit is typically 512 bytes (including CRLF), but many
             // servers support more via ISUPPORT LINELEN.
 
-            // Replace newlines with spaces to create one continuous message
-            val fullMessage = trimmed.replace('\n', ' ').replace('\r', ' ').replace("  ", " ").trim()
+            // Keep the user's line structure. A paste of code or ASCII art used to be
+            // flattened here into a single space-joined line (and the old
+            // .replace("  ", " ") collapsed only one pass of doubled spaces, so runs of
+            // 3+ survived half-collapsed anyway). The regular-send path below now sends
+            // one PRIVMSG per line, or a single multiline BATCH where the server
+            // supports it. Exceptions: DCC CHAT +AGE still use the flattened form.
+            val messageLines = trimmed
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .split('\n')
+                .dropLastWhile { it.isBlank() }
+            val fullMessage = messageLines.joinToString(" ") { it.trim() }
+                .replace(Regex("\\s{2,}"), " ")
+                .trim()
 
             if (fullMessage.isEmpty()) return@launch
 
@@ -6523,15 +6543,32 @@ fun startAddNetwork() {
                 typingLastKey = null
             }
 
-            // Split message if it exceeds max length
-            val chunks = splitMessageByLength(fullMessage, maxMsgLen)
+            // Multi-line input over a server that speaks IRCv3 multiline: one BATCH, so
+            // the far side renders it as the single logical message the user typed
+            // instead of N unrelated lines interleaved with other people's chatter.
+            // multilineSendAvailable() returns false for encrypted targets, which fall
+            // through to the per-line path below.
+            if (messageLines.size > 1 && c.multilineSendAvailable(bufferName)) {
+                // Null here only means "no label was attached" (labeled-response or
+                // echo-message not negotiated); availability was already checked.
+                val batchLabel = c.privmsgMultiline(bufferName, messageLines)
+                val joined = messageLines.joinToString("\n")
+                append(currentKey, from = myNick, text = joined, isLocal = true, encryption = sendEncryption)
+                recordLocalSend(netId, currentKey, joined, isAction = false)
+                recordSentLabel(netId, batchLabel)
+                return@launch
+            }
 
-            for (chunk in chunks) {
-                if (chunk.isEmpty()) continue
-                val chunkLabel = c.privmsg(bufferName, chunk)
-                append(currentKey, from = myNick, text = chunk, isLocal = true, encryption = sendEncryption)
-                recordLocalSend(netId, currentKey, chunk, isAction = false)
-                recordSentLabel(netId, chunkLabel)
+            // One PRIVMSG per input line, each split again if it exceeds the wire limit.
+            for (line in messageLines) {
+                if (line.isBlank()) continue
+                for (chunk in splitMessageByLength(line, maxMsgLen)) {
+                    if (chunk.isEmpty()) continue
+                    val chunkLabel = c.privmsg(bufferName, chunk)
+                    append(currentKey, from = myNick, text = chunk, isLocal = true, encryption = sendEncryption)
+                    recordLocalSend(netId, currentKey, chunk, isAction = false)
+                    recordSentLabel(netId, chunkLabel)
+                }
             }
         }
     }
@@ -10219,48 +10256,12 @@ if (code == "442") {
 /**
  * Casefold [s] using the CASEMAPPING advertised by the given network's ISUPPORT 005.
  *
- * Mirrors IrcClient.casefold() exactly so that buffer-key comparisons in the ViewModel
- * are consistent with the comparisons IrcCore makes when routing incoming messages.
- *
- * rfc1459 / strict-rfc1459 - map the four extended ASCII special-char pairs.
- * ascii                     - ASCII A-Z only.
- * anything else             - full Unicode lowercase + RFC1459 special-char pairs.
- *   (Covers "BulgarianCyrillic+EnglishAlphabet" and any other non-standard token.)
+ * Delegates to [ircCasefold], the same function IrcCore folds with when it routes
+ * incoming messages, so a buffer key computed here can never disagree with one
+ * computed there. Defaults to rfc1459 before 005 arrives, as most ircds do.
  */
-private fun casefoldText(netId: String, s: String): String {
-    val cm = (runtimes[netId]?.support?.caseMapping ?: "rfc1459").lowercase(Locale.ROOT)
-    val sb = StringBuilder(s.length)
-    for (ch0 in s) {
-        var ch = ch0
-        if (ch in 'A'..'Z') ch = (ch.code + 32).toChar()
-        when (cm) {
-            "rfc1459", "strict-rfc1459" -> {
-                ch = when (ch) {
-                    '[', '{' -> '{'
-                    ']', '}' -> '}'
-                    '\\', '|' -> '|'
-                    else -> ch
-                }
-                if (cm == "rfc1459") {
-                    if (ch == '^' || ch == '~') ch = '~'
-                }
-            }
-            "ascii" -> { /* ASCII A-Z already handled */ }
-            else -> {
-                ch = ch.lowercaseChar()
-                ch = when (ch) {
-                    '[', '{' -> '{'
-                    ']', '}' -> '}'
-                    '\\', '|' -> '|'
-                    '^', '~' -> '~'
-                    else -> ch
-                }
-            }
-        }
-        sb.append(ch)
-    }
-    return sb.toString()
-}
+private fun casefoldText(netId: String, s: String): String =
+    ircCasefold(s, runtimes[netId]?.support?.caseMapping ?: "rfc1459")
 
 private fun prefixModes(netId: String): String = runtimes[netId]?.support?.prefixModes ?: "qaohv"
 private fun prefixSymbols(netId: String): String = runtimes[netId]?.support?.prefixSymbols ?: "~&@%+"
@@ -10468,7 +10469,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 runCatching {
                     if (KeepAliveService.isRunning) {
                         appContext.startService(i)
-                    } else if (AppVisibility.isActivityStarted) {
+                    } else if (AppVisibility.canStartForegroundService()) {
                         ContextCompat.startForegroundService(appContext, i)
                     } else {
                         notifier.showConnection(netIdForIntent, labelWanted, statusTxt)
@@ -10527,7 +10528,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
             runCatching {
                 if (KeepAliveService.isRunning) {
                     appContext.startService(i)
-                } else if (AppVisibility.isActivityStarted) {
+                } else if (AppVisibility.canStartForegroundService()) {
                     ContextCompat.startForegroundService(appContext, i)
                 } else {
                     // Background-start of a foreground service may be blocked on Android 12+.

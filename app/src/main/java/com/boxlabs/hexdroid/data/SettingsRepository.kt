@@ -298,6 +298,7 @@ class SettingsRepository(private val ctx: Context) {
                 notifyOnPrivateMessages = o.optBoolean("notifyOnPrivateMessages", true),
                 showConnectionStatusNotification = o.optBoolean("showConnectionStatusNotification", true),
                 keepAliveInBackground = o.optBoolean("keepAliveInBackground", true),
+                connectOnBoot = o.optBoolean("connectOnBoot", false),
                 autoReconnectEnabled = o.optBoolean("autoReconnectEnabled", true),
                 autoReconnectDelaySec = o.optInt("autoReconnectDelaySec", 10),
                 autoConnectOnStartup = o.optBoolean("autoConnectOnStartup", false),
@@ -398,6 +399,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("notifyOnPrivateMessages", s.notifyOnPrivateMessages)
         o.put("showConnectionStatusNotification", s.showConnectionStatusNotification)
         o.put("keepAliveInBackground", s.keepAliveInBackground)
+        o.put("connectOnBoot", s.connectOnBoot)
         o.put("autoReconnectEnabled", s.autoReconnectEnabled)
         o.put("autoReconnectDelaySec", s.autoReconnectDelaySec)
         o.put("autoConnectOnStartup", s.autoConnectOnStartup)

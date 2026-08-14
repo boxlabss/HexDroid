@@ -41,6 +41,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" tools:targetApi="34" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!--
+    Needed for the opt-in "Reconnect after device restart" setting. Without it a reboot
+    silently ends an "Always connected" session until the user next opens the app.
+    BootReceiver checks the setting before doing anything, so the permission is inert
+    for users who leave it off.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".HexDroidApp"
         android:label="HexDroid IRC"
@@ -78,6 +86,27 @@
                 <receiver
                     android:name=".NotificationReplyReceiver"
                     android:exported="false" />
+
+                <!--
+                exported="true" is required: BOOT_COMPLETED is delivered by the system,
+                which is an external caller. The receiver acts only on the actions listed
+                here and reads no data from the intent, so there is nothing for another
+                app to inject.
+                -->
+                <receiver
+                    android:name=".BootReceiver"
+                    android:enabled="true"
+                    android:exported="true"
+                    android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+                    <intent-filter>
+                        <action android:name="android.intent.action.BOOT_COMPLETED" />
+                        <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                        <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                    </intent-filter>
+                    <intent-filter>
+                        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                    </intent-filter>
+                </receiver>
 
                 <activity
                     android:name=".MainActivity"

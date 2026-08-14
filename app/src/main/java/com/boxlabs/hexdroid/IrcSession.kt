@@ -18,8 +18,8 @@
 
 package com.boxlabs.hexdroid
 
-import android.util.Base64
 import java.security.SecureRandom
+import java.util.Locale
 
 /**
  * Literal default value of [IrcConfig.username] when a new profile is created with no
@@ -30,6 +30,17 @@ import java.security.SecureRandom
  * data/SettingsRepository.kt (every NetworkProfile() constructor call site).
  */
 private const val DEFAULT_USERNAME = "hexdroid"
+
+/**
+ * Base64 backed by java.util.Base64 rather than android.util.Base64.
+ *
+ * The decoder is the MIME decoder, matching android.util.Base64.DEFAULT's tolerance of
+ * line breaks and other non-alphabet characters that some servers emit.
+ */
+internal object B64 {
+    fun encode(bytes: ByteArray): String = java.util.Base64.getEncoder().encodeToString(bytes)
+    fun decode(s: String): ByteArray = java.util.Base64.getMimeDecoder().decode(s)
+}
 
 sealed class IrcAction {
     data class Send(val line: String) : IrcAction()
@@ -68,6 +79,13 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     private val wantSasl = config.sasl is SaslConfig.Enabled
     private var saslInProgress = false
     private var saslDone = false
+
+    /**
+     * The mechanism this exchange is actually using. Normally the configured one, but
+     * [chooseMechanism] may substitute when the server's advertised list (the value of
+     * the `sasl` cap) does not include it. Null until SASL starts.
+     */
+    private var activeMechanism: SaslMechanism? = null
     /**
      * True once we've emitted [IrcAction.EmitAuthFailed] for this session. Bouncers (notably
      * soju forwarding upstream-IRC SASL outcomes after MOTD) can deliver a 90x SASL-fail
@@ -286,23 +304,36 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             }
 
             if (wantSasl && enabledCaps.contains("sasl") && !saslInProgress && !saslDone) {
+                // IRCv3.2 servers advertise their mechanism list as the cap value
+                // (sasl=PLAIN,EXTERNAL,SCRAM-SHA-256). Consult it before sending
+                // AUTHENTICATE rather than discovering the mismatch from a 908 several
+                // round-trips later, and with a much less useful message.
+                val chosen = chooseMechanism(out)
+                if (chosen == null) {
+                    saslAbort(out)
+                    return out
+                }
+                activeMechanism = chosen
                 saslInProgress = true
                 out += IrcAction.EmitStatus(tr(R.string.session_starting_sasl))
-                out += IrcAction.Send(startSasl())
+                out += IrcAction.Send(startSasl(chosen))
                 return out
             }
 
-            if (!capEnded && pendingCapReqs == 0 && (!wantSasl || saslDone || !enabledCaps.contains("sasl"))) {
-                capEnded = true
-                out += IrcAction.Send("CAP END")
-            }
+            maybeCapEnd(out)
             return out
         }
 
         if (m.command == "CAP" && m.params.getOrNull(1) == "NAK") {
             out += IrcAction.EmitError(tr(R.string.session_cap_nak, m.allParams.getOrNull(2) ?: ""))
             if (pendingCapReqs > 0) pendingCapReqs--
-            if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
+            // NB: must not end negotiation while an AUTHENTICATE exchange is in flight.
+            // buildCapReqChunks() splits the request across several lines; an ACK on the
+            // chunk carrying "sasl" starts SASL, and a NAK on a later chunk would
+            // otherwise send CAP END mid-authentication, which the server reads as an
+            // abort and completes registration unauthenticated. The remaining CAP END
+            // is emitted by the 903/904-908 handlers once SASL settles.
+            maybeCapEnd(out)
             return out
         }
 
@@ -310,7 +341,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             "903" -> {
                 saslDone = true; saslInProgress = false
                 out += IrcAction.EmitStatus(tr(R.string.session_sasl_success))
-                if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
+                maybeCapEnd(out)
                 return out
             }
             "904", "905", "906", "907" -> {
@@ -336,7 +367,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         if (reason.isNotBlank()) "SASL: $reason" else "SASL authentication failed"
                     )
                 }
-                if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
+                maybeCapEnd(out)
                 return out
             }
             // 908: server does not support our mechanism; it advertises alternatives.
@@ -352,7 +383,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     else
                         "SASL: mechanism not supported by server"
                 )
-                if (!capEnded && pendingCapReqs == 0) { capEnded = true; out += IrcAction.Send("CAP END") }
+                maybeCapEnd(out)
                 return out
             }
         }
@@ -546,13 +577,60 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         return lines
     }
 
-    private fun startSasl(): String {
-        val s = config.sasl as SaslConfig.Enabled
-        return when (s.mechanism) {
-            SaslMechanism.PLAIN -> "AUTHENTICATE PLAIN"
-            SaslMechanism.EXTERNAL -> "AUTHENTICATE EXTERNAL"
-            SaslMechanism.SCRAM_SHA_256 -> "AUTHENTICATE SCRAM-SHA-256"
+    private fun startSasl(mechanism: SaslMechanism): String = "AUTHENTICATE " + wireName(mechanism)
+
+    private fun wireName(mechanism: SaslMechanism): String = when (mechanism) {
+        SaslMechanism.PLAIN -> "PLAIN"
+        SaslMechanism.EXTERNAL -> "EXTERNAL"
+        SaslMechanism.SCRAM_SHA_256 -> "SCRAM-SHA-256"
+    }
+
+    /**
+     * Decide which mechanism to authenticate with, given the server's advertised list.
+     *
+     * Returns null when nothing usable is available, having emitted an error naming what
+     * the server does offer; the caller aborts SASL so registration continues instead of
+     * stalling. Appends any status/error lines to [out].
+     *
+     * Rules, in order:
+     *  - No list advertised (IRCv3.1-era `sasl` with no value): use the configured
+     *    mechanism and let the server answer. We can't do better than guessing.
+     *  - Configured mechanism is advertised: use it.
+     *  - PLAIN configured, SCRAM-SHA-256 offered: silently upgrade to TLS.
+     *  - EXTERNAL is never substituted in either direction: it authenticates with a client
+     *    certificate, so swapping to or from it changes the identity being asserted.
+     */
+    private fun chooseMechanism(out: MutableList<IrcAction>): SaslMechanism? {
+        val configured = (config.sasl as SaslConfig.Enabled).mechanism
+        val advertised = capValues["sasl"]
+            ?.split(',')
+            ?.map { it.trim().uppercase(Locale.ROOT) }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
+
+        if (advertised.isEmpty()) return configured
+        if (advertised.contains(wireName(configured))) return configured
+
+        val offered = advertised.joinToString(", ")
+
+        if (configured == SaslMechanism.PLAIN && advertised.contains("SCRAM-SHA-256")) {
+            out += IrcAction.EmitStatus(tr(R.string.session_sasl_mech_upgraded, offered))
+            return SaslMechanism.SCRAM_SHA_256
         }
+
+        if (configured == SaslMechanism.SCRAM_SHA_256 && advertised.contains("PLAIN")) {
+            if (!config.useTls) {
+                out += IrcAction.EmitError(tr(R.string.session_sasl_mech_no_downgrade_cleartext, offered))
+                return null
+            }
+            out += IrcAction.EmitError(tr(R.string.session_sasl_mech_downgraded, offered))
+            return SaslMechanism.PLAIN
+        }
+
+        out += IrcAction.EmitError(
+            tr(R.string.session_sasl_mech_unavailable, wireName(configured), offered)
+        )
+        return null
     }
 
     /**
@@ -589,7 +667,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         val out = mutableListOf<IrcAction>()
         val s = config.sasl as? SaslConfig.Enabled ?: return out
 
-        when (s.mechanism) {
+        // activeMechanism, not s.mechanism: chooseMechanism() may have substituted one
+        // the server actually supports, and the rest of the exchange has to follow it.
+        when (activeMechanism ?: s.mechanism) {
             SaslMechanism.PLAIN -> when (serverPayload) {
                 "+" -> {
                     if (!config.useTls) {
@@ -641,9 +721,19 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         ?: config.username.takeIf { it.isNotBlank() && it != DEFAULT_USERNAME }
                         ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
-                    val pass = s.password
-                    val msg = "\u0000$authcid\u0000$pass"
-                    val b64 = Base64.encodeToString(msg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    // RFC 4616: PLAIN carries SASLprep'd values, same as SCRAM. Without
+                    // this a non-ASCII password whose keyboard emitted NFD authenticates
+                    // against an NFKC-normalised server verifier and fails with a bare 904.
+                    val prepped = try {
+                        SaslPrep.prepare(authcid) to SaslPrep.prepare(s.password)
+                    } catch (e: SaslPrepException) {
+                        out += IrcAction.EmitError(tr(R.string.session_sasl_prep_failed, e.message ?: ""))
+                        out += IrcAction.Send("AUTHENTICATE *")
+                        saslAbort(out)
+                        return out
+                    }
+                    val msg = "\u0000${prepped.first}\u0000${prepped.second}"
+                    val b64 = B64.encode(msg.toByteArray(Charsets.UTF_8))
                     out += chunkAuthenticate(b64)
                 }
                 "*" -> {
@@ -708,9 +798,19 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         ?: config.nick
                     val authcid = config.effectiveAuthIdentity(baseAuthcid)
                     val clientNonce = randomNonce()
-                    scram = ScramSha256Client(authcid, pass, clientNonce)
+                    // SASLprep runs in the client's constructor and rejects prohibited
+                    // codepoints; abort cleanly rather than letting the exception escape
+                    // into the read loop and kill the connection.
+                    scram = try {
+                        ScramSha256Client(authcid, pass, clientNonce)
+                    } catch (e: SaslPrepException) {
+                        out += IrcAction.EmitError(tr(R.string.session_sasl_prep_failed, e.message ?: ""))
+                        out += IrcAction.Send("AUTHENTICATE *")
+                        saslAbort(out)
+                        return out
+                    }
                     val first = scram!!.clientFirstMessage()
-                    val b64 = Base64.encodeToString(first.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    val b64 = B64.encode(first.toByteArray(Charsets.UTF_8))
                     out += chunkAuthenticate(b64)
                     return out
                 }
@@ -719,7 +819,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 val fullB64 = consumeSaslServerB64Chunk(serverPayload) ?: return out
 
                 val decoded = try {
-                    String(Base64.decode(fullB64, Base64.DEFAULT), Charsets.UTF_8)
+                    String(B64.decode(fullB64), Charsets.UTF_8)
                 } catch (_: Throwable) {
                     out += IrcAction.EmitError(tr(R.string.session_sasl_decode_fail))
                     out += IrcAction.Send("AUTHENTICATE *")
@@ -748,7 +848,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 }
                 when (next) {
                     is ScramNext.SendClientFinal -> {
-                        val b64 = Base64.encodeToString(next.clientFinal.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                        val b64 = B64.encode(next.clientFinal.toByteArray(Charsets.UTF_8))
                         out += chunkAuthenticate(b64)
                     }
                     is ScramNext.Done -> if (next.verified) {
@@ -773,6 +873,26 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     }
 
     /**
+     * Emit `CAP END` if - and only if - negotiation is genuinely finished: every
+     * `CAP REQ` chunk has been answered AND no SASL exchange is still running.
+     *
+     * Every path that wants to close negotiation goes through here so the SASL guard
+     * cannot be forgotten on one of them. It was forgotten on `CAP NAK`: with a cap
+     * list long enough for [buildCapReqChunks] to split it, an ACK on the chunk
+     * carrying `sasl` starts the exchange and a NAK on a later chunk ended
+     * negotiation mid-AUTHENTICATE, which servers read as an abort - the connection
+     * then registers unauthenticated with no visible error.
+     */
+    private fun maybeCapEnd(out: MutableList<IrcAction>) {
+        if (capEnded) return
+        if (pendingCapReqs > 0) return
+        if (saslInProgress) return
+        if (wantSasl && !saslDone && enabledCaps.contains("sasl")) return
+        capEnded = true
+        out += IrcAction.Send("CAP END")
+    }
+
+    /**
      * Mark SASL as done (failed) and send CAP END if we haven't already.
      * Call this whenever an unexpected condition aborts the exchange mid-flight
      * so the connection is never left stalled waiting for a 903/904 that won't come.
@@ -782,10 +902,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         saslInProgress = false
         scram = null
         saslIncomingB64 = null
-        if (!capEnded && pendingCapReqs == 0) {
-            capEnded = true
-            out += IrcAction.Send("CAP END")
-        }
+        maybeCapEnd(out)
     }
 
     private fun chunkAuthenticate(b64: String): List<IrcAction> {
@@ -803,6 +920,6 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     private fun randomNonce(): String {
         val bytes = ByteArray(18)
         rng.nextBytes(bytes)
-        return Base64.encodeToString(bytes, Base64.NO_WRAP).replace("=", "")
+        return B64.encode(bytes).replace("=", "")
     }
 }

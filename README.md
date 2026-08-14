@@ -92,7 +92,6 @@ git clone https://github.com/boxlabss/hexdroid.git
 cd hexdroid
 ./gradlew assembleRelease
 ```
-
 ---
 
 ## Quick Start
@@ -102,26 +101,13 @@ cd hexdroid
 3. Save and tap **Connect**
 4. Use `/join #channel` or tap **Channel list** to browse
 
-**To encrypt a conversation:** open the channel or DM, tap the overflow menu (⋮) **Secure Chat**, generate a key, and share it with your contact. Import the same key on their device and confirm the safety numbers match. See the [encryption guide](https://hexdroid.org/encryption.html) for step-by-step instructions.
-
-Full documentation at [hexdroid.boxlabs.uk](https://hexdroid.boxlabs.uk/).
-
----
-
-## Reproducible Builds
-
-The Play Store and IzzyOnDroid releases are [reproducibly buildable](https://reproducible-builds.org/). The `RB Status` badge above links to the verification record. To verify locally:
-
-```bash
-./gradlew assembleRelease
-# Compare the output APK against the downloaded release APK
-```
+**To encrypt a conversation:** open the channel or DM, tap the overflow menu (⋮) **Secure Chat**, generate a key, and share it with your contact. Import the same key on their device and confirm the safety numbers match. See the [encryption guide](https://hexdroid.org/encryption) for step-by-step instructions.
 
 ---
 
 ## Privacy
 
-No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app. End-to-end encryption keys never leave the device. See the full [privacy policy](https://hexdroid.boxlabs.uk/privacy).
+No ads, analytics, crash reporters, or third-party SDKs. The app communicates only with the IRC servers you configure. All data is stored locally and deleted with the app. End-to-end encryption keys never leave the device. See the full [privacy policy](https://hexdroid.org/privacy).
 
 ---
 
@@ -157,6 +143,32 @@ Plugins for E2E +AGM encryption are available for some desktop and a terminal cl
 The docs for both +AGM and +AGE are in `/docs` and client authors wanting to interoperate with HexDroid's encryption should start there.
 
 Translations are managed in the string resources under `app/src/main/res/values-*/`. If your language is missing or incomplete, a PR updating the relevant `strings.xml` is very welcome.
+
+---
+
+## Reproducible Builds
+
+The Play Store and IzzyOnDroid releases are [reproducibly buildable](https://reproducible-builds.org/). The `RB Status` badge above links to the verification record.
+
+To verify locally:
+
+```bash
+# 1. Build from a clean checkout. No KEYSTORE_* variables set.
+./gradlew clean assembleRelease
+#    -> app/build/outputs/apk/release/app-release-unsigned.apk
+
+# 2. Fetch the published APK you want to check against.
+curl -LO https://hexdroid.org/releases/hexdroid-latest.apk
+
+# 3. Compare. apksigcopier's "compare" does this properly: it copies the signature across and diffs everything else.
+pip install apksigcopier
+apksigcopier compare hexdroid-latest.apk --unsigned \
+    app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
+A clean run prints nothing and exits 0. For a byte-level look at any difference, `diffoscope` over the two APKs is the usual next step.
+
+Building a signed release requires all four of `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. Setting only some of them fails the build. Automated or scripted release builds should pass `-PrequireSigning=true`, which fails the build if nothing will sign the output, so a misconfigured runner cannot quietly produce an unsigned APK.
 
 ---
 

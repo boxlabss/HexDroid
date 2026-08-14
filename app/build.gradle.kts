@@ -13,14 +13,76 @@ android {
         versionName = "1.7.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    // Release signing
+    //
+    // Reproducible-build verifiers (rbtlog, IzzyOnDroid, anyone following the README)
+    // build from a clean checkout with no signing environment. They must get an
+    // UNSIGNED release APK: the verifier supplies the signature from the published
+    // artifact itself (apksigcopier) and compares the payload.
+    //
+    // What must never happen is a fall back to the debug signing config.
+    //
+    // Behaviour:
+    //   - all four env vars set and the keystore exists -> sign with it
+    //   - none set                                      -> build unsigned, say so
+    //   - some set                                      -> fail, don't guess
+    //   - -PrequireSigning=true                         -> fail if nothing will sign
+    //     (for automated or scripted builds, where nobody reads the log)
+    val keystorePath = providers.environmentVariable("KEYSTORE_FILE").orNull?.takeIf { it.isNotBlank() }
+    val keystorePassword = providers.environmentVariable("KEYSTORE_PASSWORD").orNull?.takeIf { it.isNotBlank() }
+    val keystoreAlias = providers.environmentVariable("KEY_ALIAS").orNull?.takeIf { it.isNotBlank() }
+    val keystoreKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull?.takeIf { it.isNotBlank() }
+    val requireSigning = providers.gradleProperty("requireSigning").orNull?.toBoolean() ?: false
+    val injectedSigning = providers
+    .gradleProperty("android.injected.signing.store.file").orNull
+    ?.isNotBlank() == true
+
+    val signingVarsPresent = listOf(
+        "KEYSTORE_FILE" to keystorePath,
+        "KEYSTORE_PASSWORD" to keystorePassword,
+        "KEY_ALIAS" to keystoreAlias,
+        "KEY_PASSWORD" to keystoreKeyPassword,
+    )
+    val signingVarsMissing = signingVarsPresent.filter { it.second == null }.map { it.first }
+    val signingRequested = signingVarsMissing.size < signingVarsPresent.size
+
+    if (signingRequested && signingVarsMissing.isNotEmpty()) {
+        // A partially configured environment is always a mistake
+        throw GradleException(
+            "Release signing is partially configured. Missing: ${signingVarsMissing.joinToString(", ")}. " +
+            "Set all of KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD, or none of them " +
+            "to build unsigned."
+        )
+    }
+    if (signingRequested && !file(keystorePath!!).exists()) {
+        throw GradleException("KEYSTORE_FILE is set to '$keystorePath' but no such file exists.")
+    }
+    if (requireSigning && !signingRequested && !injectedSigning) {
+        throw GradleException(
+            "-PrequireSigning=true was passed but no signing environment is configured. " +
+            "Set KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD, or build " +
+            "through Android Studio's signing wizard."
+        )
+    }
+
+    // Record the mode in the build log so a verifier's transcript says which one ran,
+    // and so "why won't this install" answers itself.
+    logger.lifecycle(
+        when {
+            signingRequested -> "HexDroid: release will be signed with the configured keystore."
+            injectedSigning -> "HexDroid: release will be signed with the injected (IDE wizard) keystore."
+            else -> "HexDroid: release will be UNSIGNED (no signing environment set). " +
+                "Use apksigcopier to attach the published signature when verifying."
+        }
+    )
+
     signingConfigs {
-        create("release") {
-            val ksFile = System.getenv("KEYSTORE_FILE")
-            if (ksFile != null && file(ksFile).exists()) {
-                storeFile = file(ksFile)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
+        if (signingRequested) {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = keystoreAlias
+                keyPassword = keystoreKeyPassword
             }
         }
     }
@@ -33,14 +95,11 @@ android {
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                          "proguard-rules.pro"
             )
-            val ksFile = System.getenv("KEYSTORE_FILE")
-            signingConfig = if (ksFile != null && file(ksFile).exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // Explicitly null when unsigned. Never the debug config - see the note above
+            // the signingConfigs block.
+            signingConfig = if (signingRequested) signingConfigs.getByName("release") else null
         }
     }
     compileOptions {

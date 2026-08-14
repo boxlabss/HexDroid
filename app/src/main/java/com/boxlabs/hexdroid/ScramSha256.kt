@@ -18,12 +18,9 @@
 
 package com.boxlabs.hexdroid
 
-import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import javax.crypto.Mac
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.experimental.xor
 
@@ -39,10 +36,17 @@ sealed class ScramNext {
 }
 
 class ScramSha256Client(
-    private val username: String,
-    private val password: String,
+    username: String,
+    password: String,
     private val clientNonce: String
 ) {
+    // RFC 5802 s5.1: both the authcid and the password are SASLprep'd before use.
+    // The server derived its stored verifier from the prepared password, so skipping
+    // this makes every non-ASCII password fail with an unexplainable 904.
+    // Throws SaslPrepException on a prohibited codepoint; the caller aborts SASL.
+    private val username: String = SaslPrep.prepare(username)
+    private val password: String = SaslPrep.prepare(password)
+
     private val gs2Header = "n,,"
     private val clientFirstBare = "n=${saslName(username)},r=$clientNonce"
     private val clientFirst = gs2Header + clientFirstBare
@@ -68,27 +72,32 @@ class ScramSha256Client(
             // Accepting fewer would reduce the PBKDF2 security margin to near-zero.
             if (iter < SCRAM_MIN_ITERATIONS) return ScramNext.Done(false)
 
-            if (!nonce.startsWith(clientNonce)) return ScramNext.Done(false)
+            // The server nonce is our nonce plus the server's own appended randomness.
+            // A server that echoes ours back unchanged has contributed no entropy, which
+            // RFC 5802 s5.1 forbids ("the server MUST append its own nonce").
+            if (!nonce.startsWith(clientNonce) || nonce.length <= clientNonce.length) {
+                return ScramNext.Done(false)
+            }
 
-            val salt = Base64.decode(saltB64, Base64.DEFAULT)
+            val salt = B64.decode(saltB64)
             val saltedPassword = hi(password, salt, iter)
 
             val clientKey = hmac(saltedPassword, "Client Key".toByteArray(StandardCharsets.UTF_8))
             val storedKey = sha256(clientKey)
 
             val cbindInput = gs2Header.toByteArray(StandardCharsets.UTF_8)
-            val cbind = Base64.encodeToString(cbindInput, Base64.NO_WRAP)
+            val cbind = B64.encode(cbindInput)
 
             val clientFinalWithoutProof = "c=$cbind,r=$nonce"
             val authMessage = clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
 
             val clientSignature = hmac(storedKey, authMessage.toByteArray(StandardCharsets.UTF_8))
             val proof = xorBytes(clientKey, clientSignature)
-            val proofB64 = Base64.encodeToString(proof, Base64.NO_WRAP)
+            val proofB64 = B64.encode(proof)
 
             val serverKey = hmac(saltedPassword, "Server Key".toByteArray(StandardCharsets.UTF_8))
             val serverSig = hmac(serverKey, authMessage.toByteArray(StandardCharsets.UTF_8))
-            expectedServerSigB64 = Base64.encodeToString(serverSig, Base64.NO_WRAP)
+            expectedServerSigB64 = B64.encode(serverSig)
 
             return ScramNext.SendClientFinal(clientFinalWithoutProof + ",p=$proofB64")
         }
@@ -126,16 +135,36 @@ class ScramSha256Client(
     private fun saslName(name: String): String =
         name.replace("=", "=3D").replace(",", "=2C")
 
+    /**
+     * PBKDF2-HMAC-SHA256, computed directly over the UTF-8 bytes of the password.
+     *
+     * NOT PBEKeySpec + SecretKeyFactory: PBEKeySpec takes a CharArray and leaves the
+     * char-to-byte conversion to the provider. Providers disagree - some use UTF-8,
+     * the PKCS#5 lineage uses only the low byte of each char - so a password with any
+     * character above U+007F derives a different key depending on which provider the
+     * device happens to ship. RFC 5802 defines Hi() over the UTF-8 encoding of the
+     * SASLprep'd password, so we encode it ourselves and the result is identical on
+     * every device.
+     *
+     * dkLen is one hash block (32 bytes), so the outer PBKDF2 loop runs exactly once.
+     */
     private fun hi(password: String, salt: ByteArray, iterations: Int): ByteArray {
-        // Always clear the PBEKeySpec password array after derivation to
-        // minimise how long the plaintext password lives on the heap.
-        val spec = PBEKeySpec(password.toCharArray(), salt, iterations, 256)
-        return try {
-            val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            skf.generateSecret(spec).encoded
-        } finally {
-            spec.clearPassword()
+        val pw = password.toByteArray(StandardCharsets.UTF_8)
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(pw, "HmacSHA256"))
+
+        // U1 = HMAC(pw, salt || INT(1))
+        mac.update(salt)
+        mac.update(byteArrayOf(0, 0, 0, 1))
+        var u = mac.doFinal()
+        val out = u.copyOf()
+
+        for (i in 2..iterations) {
+            u = mac.doFinal(u)
+            for (j in out.indices) out[j] = out[j] xor u[j]
         }
+        java.util.Arrays.fill(pw, 0)
+        return out
     }
 
     private fun hmac(key: ByteArray, data: ByteArray): ByteArray {
