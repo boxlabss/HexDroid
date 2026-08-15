@@ -819,6 +819,25 @@ fun SettingsScreen(
             }
 
             item {
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.settings_raw_log), style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.settings_raw_log_desc), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(
+                            checked = s.rawLog,
+                            onCheckedChange = { want -> onUpdate { copy(rawLog = want) } },
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                        )
+                    }
+                }
+            }
+
+            item {
                 Text(stringResource(R.string.setting_quit_message), style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = s.quitMessage,
@@ -844,7 +863,14 @@ fun SettingsScreen(
                     s.keepAliveInBackground
                 ) {
                     val newValue = !s.keepAliveInBackground
-                    onUpdate { copy(keepAliveInBackground = newValue) }
+                    // connectOnBoot is inert without the foreground service, so clear it here
+                    // rather than leaving a stored true behind a disabled switch.
+                    onUpdate {
+                        copy(
+                            keepAliveInBackground = newValue,
+                            connectOnBoot = if (newValue) connectOnBoot else false,
+                        )
+                    }
 
                     // When enabling, guide user to disable battery optimizations (user-driven, Play-safe)
                     if (newValue && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -868,9 +894,13 @@ fun SettingsScreen(
                     ) {
                         Text(stringResource(R.string.setting_connect_on_boot), modifier = Modifier.weight(1f))
                         Switch(
-                            checked = s.connectOnBoot && s.keepAliveInBackground,
+                            // Store what the switch shows. Deriving `checked` from
+                            // keepAliveInBackground while toggling only connectOnBoot let the
+                            // stored value stay true behind an unchecked switch, then snap back
+                            // on when keep-alive was re-enabled.
+                            checked = s.connectOnBoot,
                             enabled = s.keepAliveInBackground,
-                            onCheckedChange = { onUpdate { copy(connectOnBoot = !connectOnBoot) } },
+                            onCheckedChange = { want -> onUpdate { copy(connectOnBoot = want) } },
                             modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
                         )
                     }

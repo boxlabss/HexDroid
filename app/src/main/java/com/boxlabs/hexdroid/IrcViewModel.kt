@@ -127,6 +127,18 @@ data class UiMessage(
      * never mistaken for a delivered message, the exact "looks sent but wasn't" trap this guards against.
      */
     val pending: Boolean = false,
+    /**
+     * True when the server rejected the send after we had already echoed it locally (currently
+     * only a FAIL BATCH MULTILINE_*). The UI dims the line and captions it so a message that
+     * never reached the channel is not left looking delivered.
+     */
+    val failed: Boolean = false,
+    /**
+     * True when the message arrived as (or was sent as) a single draft/multiline BATCH.
+     * Only these fold behind "show more": a long MOTD or ASCII art is naturally multi-line
+     * and folding it would hide content the sender laid out deliberately.
+     */
+    val multiline: Boolean = false,
     /** draft/oper-tag: the sender was marked as an IRC operator; rendered as a star before the nick. */
     val fromOper: Boolean = false,
     /** Bot Mode `bot` tag: the sender is a bot; rendered as a badge before the nick. */
@@ -285,6 +297,8 @@ data class UiSettings(
 
     val ircHistoryLimit: Int = 50,
     val ircHistoryCountsAsUnread: Boolean = false,
+    /** Log every protocol line to a per-network Raw buffer. Credentials are redacted. */
+    val rawLog: Boolean = false,
     val ircHistoryTriggersNotifications: Boolean = false,
 
     val dccEnabled: Boolean = false,
@@ -1620,6 +1634,15 @@ class IrcViewModel(
         }
     }
 
+    /** Pseudo-buffer holding the raw protocol log, alongside the existing "*server*". */
+    private val RAW_BUFFER = "*raw*"
+
+    /**
+     * True for buffers that exist only locally and are not a valid target.
+     */
+    private fun isPseudoBuffer(bufferName: String): Boolean =
+        bufferName == "*server*" || bufferName == RAW_BUFFER
+
     private fun bufKey(netId: String, bufferName: String): String = "$netId::$bufferName"
 
     /**
@@ -2023,6 +2046,9 @@ class IrcViewModel(
                     }
                 )
                 if (s.loggingEnabled) logs.purgeOlderThan(s.retentionDays, s.logFolderUri)
+                // Applies live: flipping the switch starts or stops logging on connections
+                // that are already up, which is the point of a debugging toggle.
+                runtimes.values.forEach { it.client.rawLogEnabled = s.rawLog }
                 maybeAutoConnect()
                 maybeRestoreDesiredConnections()
             }
@@ -2555,7 +2581,7 @@ class IrcViewModel(
         val mrNet = markReadNet; val mrName = markReadName; val mrTs = markReadTs
         // MARKREAD targets must be a real channel or query; the server buffer ("*server*")
         // is not a valid target and draws FAIL MARKREAD INVALID_PARAMS.
-        if (mrNet != null && mrName != null && mrName != "*server*" && mrTs != null) {
+        if (mrNet != null && mrName != null && !isPseudoBuffer(mrName) && mrTs != null) {
             val rt = runtimes[mrNet]
             if (rt != null) {
                 viewModelScope.launch { runCatching { rt.client.sendRaw("MARKREAD $mrName timestamp=$mrTs") } }
@@ -2578,7 +2604,7 @@ class IrcViewModel(
         _state.value = st.copy(buffers = st.buffers + (key to buf.copy(lastReadTimestamp = ts)))
         val (netId, bufferName) = splitKey(key)
         val rt = runtimes[netId] ?: return
-        if (rt.client.hasCap("draft/read-marker") && bufferName != "*server*") {
+        if (rt.client.hasCap("draft/read-marker") && !isPseudoBuffer(bufferName)) {
             viewModelScope.launch { rt.client.sendRaw("MARKREAD $bufferName timestamp=$ts") }
         }
     }
@@ -3235,7 +3261,7 @@ fun startAddNetwork() {
     private fun broadcastConnStatusToOtherBuffers(netId: String, text: String, from: String?) {
         val keys = _state.value.buffers.keys.filter { key ->
             val (kNetId, kBufName) = splitKey(key)
-            kNetId == netId && kBufName != "*server*" && !isDccChatBufferName(kBufName)
+            kNetId == netId && !isPseudoBuffer(kBufName) && !isDccChatBufferName(kBufName)
         }
         for (key in keys) {
             append(
@@ -3800,9 +3826,6 @@ fun startAddNetwork() {
         ageEnabledPrefs.edit().putBoolean(ageKey(networkId, target), true).apply()
         ageP?.let { runCatching { ageIdentityStore.loadOrCreate(it) } }   // ensure we have an identity to announce
         val bridge = ageBridgeFor(networkId)
-        android.util.Log.d("AGEDBG", "enableAge net=$networkId target=$target isChan=${isChannelTarget(target)} " +
-            "bridge=${if (bridge == null) "NULL" else "ok"} runtime=${if (runtimes[networkId] == null) "NULL" else "ok"} " +
-            "runtimeKeys=${runtimes.keys}")
         if (isChannelTarget(target)) bridge?.enableChat(target)  // channels: announce + hostless key agreement
         else {
             bridge?.enablePm(target)                             // 1:1 PM: announce + X3DH handshake
@@ -4146,7 +4169,7 @@ fun startAddNetwork() {
                     onPmFlushed = { peer -> markAgePmDelivered(net, peer) },
                     saveOutbox = { blob -> runCatching { repo.secretStore.setAgePmOutbox(net, blob.toByteArray(Charsets.UTF_8)) } },
                     loadOutbox = { runCatching { repo.secretStore.getAgePmOutbox(net)?.toString(Charsets.UTF_8) }.getOrNull() },
-                    debug = { msg -> android.util.Log.d("AGEDBG", "pm[$net] $msg") },
+                    debug = { },
                     onPmState = { peer, state, detail ->
                         val line = when (state) {
                             "NEGOTIATING" -> "*** " + appContext.getString(R.string.vm_age_negotiating, peer)
@@ -4249,15 +4272,12 @@ fun startAddNetwork() {
     fun scriptSendRaw(network: String?, line: String) {
         val net = network ?: _state.value.activeNetworkId
         if (net == null) {
-            android.util.Log.w("AGEDBG", "scriptSendRaw DROP no-net: network=$network active=${_state.value.activeNetworkId} line=${line.take(48)}")
             return
         }
         val rt = runtimes[net]
         if (rt == null) {
-            android.util.Log.w("AGEDBG", "scriptSendRaw DROP no-runtime: net=$net runtimeKeys=${runtimes.keys} line=${line.take(48)}")
             return
         }
-        android.util.Log.d("AGEDBG", "scriptSendRaw OK net=$net line=${line.take(64)}")
         viewModelScope.launch { runCatching { rt.client.sendRaw(line) } }
     }
     fun scriptNick(network: String?): String? {
@@ -4727,6 +4747,9 @@ fun startAddNetwork() {
         }.getOrNull()
 
         val client = IrcClient(cfg.copy(pinnedNetwork = chosenNetwork))
+        // Set before the connect coroutine starts so the handshake itself is logged, which
+        // is where most of the interesting protocol traffic lives.
+        client.rawLogEnabled = _state.value.settings.rawLog
         // Wire localized status text into the protocol engine (and its session).
         client.strings = { id, args -> appContext.getString(id, *args) }
         client.plurals = { id, qty, args -> appContext.resources.getQuantityString(id, qty, *args) }
@@ -5391,7 +5414,7 @@ fun startAddNetwork() {
             if (buf != null) {
                 _state.value = st.copy(buffers = st.buffers + (bufferKey to buf.copy(lastReadTimestamp = timestamp)))
             }
-            if (rt.client.hasCap("draft/read-marker") && bufferName != "*server*") {
+            if (rt.client.hasCap("draft/read-marker") && !isPseudoBuffer(bufferName)) {
                 viewModelScope.launch { rt.client.sendRaw("MARKREAD $bufferName timestamp=$timestamp") }
             }
         } else {
@@ -5506,10 +5529,9 @@ fun startAddNetwork() {
         val rt = runtimes[netId] ?: return
         if (!rt.client.hasCap("draft/typing") && !rt.client.hasCap("typing")
             && !rt.client.hasCap("message-tags")) return
-        if (bufferName == "*server*") return
-        // DCC chat buffers are peer-to-peer and don't speak IRC - sending a TAGMSG with
-        // a DCC buffer name as the target routes it to the IRC server, which bounces it
-        // back as ERR_NOSUCHNICK. Skip silently.
+        // DCC: A pseudo-buffer name is not a nick or a channel, so a typing TAGMSG addressed to it comes straight back as 401.
+        // Also bounces back as ERR_NOSUCHNICK. Skip silently.
+        if (isPseudoBuffer(bufferName)) return
         if (isDccChatBufferName(bufferName)) return
 
         typingDoneJob?.cancel()
@@ -5893,7 +5915,7 @@ fun startAddNetwork() {
                         val line = withContext(Dispatchers.Default) { buildSysInfoLine() }
                         val fromNick = st.connections[netId]?.myNick ?: st.myNick
                         // If we're in a channel/query and connected, send it as a normal message.
-                        if (bufferName != "*server*" && c != null) {
+                        if (!isPseudoBuffer(bufferName) && c != null) {
                             val siLabel = c.privmsg(bufferName, line)
                             val enc = e2eKeyStore.get(netId, bufferName)?.scheme
                             append(currentKey, from = fromNick, text = line, isLocal = true, encryption = enc)
@@ -6413,6 +6435,7 @@ fun startAddNetwork() {
                 .replace("\r\n", "\n")
                 .replace('\r', '\n')
                 .split('\n')
+                .dropWhile { it.isBlank() }
                 .dropLastWhile { it.isBlank() }
             val fullMessage = messageLines.joinToString(" ") { it.trim() }
                 .replace(Regex("\\s{2,}"), " ")
@@ -6549,14 +6572,17 @@ fun startAddNetwork() {
             // multilineSendAvailable() returns false for encrypted targets, which fall
             // through to the per-line path below.
             if (messageLines.size > 1 && c.multilineSendAvailable(bufferName)) {
-                // Null here only means "no label was attached" (labeled-response or
-                // echo-message not negotiated); availability was already checked.
-                val batchLabel = c.privmsgMultiline(bufferName, messageLines)
-                val joined = messageLines.joinToString("\n")
-                append(currentKey, from = myNick, text = joined, isLocal = true, encryption = sendEncryption)
-                recordLocalSend(netId, currentKey, joined, isAction = false)
-                recordSentLabel(netId, batchLabel)
-                return@launch
+                // Null means nothing was sent (no usable content); fall through to the
+                // per-line path. Otherwise one label per batch, all of which need
+                // recording or the echoes of batches 2..n show up as duplicates.
+                val batchLabels = c.privmsgMultiline(bufferName, messageLines)
+                if (batchLabels != null) {
+                    val joined = messageLines.joinToString("\n")
+                    append(currentKey, from = myNick, text = joined, isLocal = true, encryption = sendEncryption, multiline = true)
+                    recordLocalSend(netId, currentKey, joined, isAction = false)
+                    batchLabels.forEach { recordSentLabel(netId, it) }
+                    return@launch
+                }
             }
 
             // One PRIVMSG per input line, each split again if it exceeds the wire limit.
@@ -6899,7 +6925,7 @@ fun startAddNetwork() {
                 val chantypes = runtimes[netId]?.support?.chantypes ?: "#&+!"
                 val pmKeys = _state.value.buffers.keys.filter { k ->
                     val (nid, bn) = splitKey(k)
-                    nid == netId && bn != "*server*" && (bn.firstOrNull() !in chantypes.toSet())
+                    nid == netId && !isPseudoBuffer(bn) && (bn.firstOrNull() !in chantypes.toSet())
                 }
                 for (k in pmKeys) chathistoryMarkerArmedUntilMs[k] = armDeadline
                 if (chathistoryMarkerArmedUntilMs.size > 64) {
@@ -7129,6 +7155,34 @@ fun startAddNetwork() {
                 }
 
                 if (desiredConnected.contains(netId)) scheduleAutoReconnect(netId)
+            }
+            is IrcEvent.RawLine -> {
+                append(
+                    bufKey(netId, RAW_BUFFER),
+                    from = null,
+                    text = (if (ev.outgoing) ">> " else "<< ") + ev.line,
+                    isLocal = true,
+                    doNotify = false,
+                )
+            }
+            is IrcEvent.MultilineSendFailed -> {
+                val key = ev.target?.let { bufKey(netId, it) }
+                if (key != null) {
+                    _state.update { st ->
+                        val buf = st.buffers[key] ?: return@update st
+                        val me = st.connections[netId]?.myNick ?: st.myNick
+                        val idx = buf.messages.indexOfLast { it.from == me && !it.failed }
+                        if (idx < 0) return@update st
+                        val updated = buf.messages.replacingAt(idx, buf.messages[idx].copy(failed = true))
+                        st.copy(buffers = st.buffers + (key to buf.copy(messages = updated)))
+                    }
+                }
+                append(
+                    key ?: bufKey(netId, "*server*"),
+                    from = null,
+                    doNotify = false,
+                    text = "*** " + appContext.getString(R.string.vm_multiline_rejected, ev.code, ev.reason),
+                )
             }
             is IrcEvent.Error -> {
                 val msg = ev.message
@@ -8138,6 +8192,7 @@ if (code == "442") {
                     encryption = ev.encryption,
                     fromOper = ev.fromOper,
                     fromBot = ev.fromBot,
+                    multiline = ev.multiline,
                 )
             }
             is IrcEvent.Notice -> {
@@ -8401,8 +8456,13 @@ if (code == "442") {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
 
-                if (!st0.settings.hideJoinPartQuit) {
-                    val myNick = st0.connections[netId]?.myNick ?: st0.myNick
+                val myNickJ = st0.connections[netId]?.myNick ?: st0.myNick
+                val isSelfJoin = casefoldText(netId, ev.nick) == casefoldText(netId, myNickJ)
+
+                // With draft/event-playback, CHATHISTORY replays our own JOIN straight back
+                // at us, so "Now talking on #chan" printed once live and again from history.
+                if (!st0.settings.hideJoinPartQuit && !(ev.isHistory && isSelfJoin)) {
+                    val myNick = myNickJ
                     val msg = if (ev.nick.equals(myNick, ignoreCase = true)) {
                         "* " + appContext.getString(R.string.vm_ev_now_talking, ev.channel)
                     } else {
@@ -8480,7 +8540,10 @@ if (code == "442") {
 
                     // On self-join, request a fresh NAMES snapshot so the nicklist includes users who were already in the channel.
                     // Don't print it to the buffer (this is an automatic refresh, not an explicit /names).
-                    if (isMe) {
+                    // Live joins only: a CHATHISTORY replay containing our own JOIN would
+                    // otherwise fire a redundant NAMES per replayed event, right after the
+                    // 366 we already received from the live join.
+                    if (isMe && !ev.isHistory) {
                         val rt = runtimes[netId]
                         val keyFold = namesKeyFold(ev.channel)
                         if (rt != null && !rt.namesRequests.containsKey(keyFold)) {
@@ -9798,6 +9861,7 @@ if (code == "442") {
         timeMs: Long? = null,
         doNotify: Boolean = true,
         isMotd: Boolean = false,
+        multiline: Boolean = false,
         /**
          * True for genuine server/connection error lines (from = "ERROR"). When set, the
          * notification (if any) is routed through NotificationHelper.notifyError and gated
@@ -9841,6 +9905,7 @@ if (code == "442") {
             text = text,
             isAction = isAction,
             isMotd = isMotd,
+            multiline = multiline,
             msgId = msgId,
             replyToMsgId = replyToMsgId,
             encryption = encryption,

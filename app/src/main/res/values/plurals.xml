@@ -29,6 +29,12 @@
         <item quantity="other">%1$d users</item>
     </plurals>
 
+    <!-- "show more" fold on long (multiline) messages -->
+    <plurals name="chat_show_more">
+        <item quantity="one">Show %1$d more line</item>
+        <item quantity="other">Show %1$d more lines</item>
+    </plurals>
+
     <!-- Jump-to-unread chip -->
     <plurals name="chat_unread_count">
         <item quantity="one">%1$d unread</item>

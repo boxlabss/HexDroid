@@ -1531,6 +1531,9 @@ fun ChatScreen(
     var copyRangeMode by remember { mutableStateOf(false) }
     /** IDs of messages checked in copy-range mode. */
     var selectedMsgIds by remember { mutableStateOf(emptySet<Long>()) }
+    // Ids of long messages the user has expanded. Hoisted rather than held inside the row
+    // so the choice survives the row being recycled out of the LazyColumn and back.
+    var expandedMsgIds by remember { mutableStateOf(emptySet<Long>()) }
 
     var showChanOps by remember { mutableStateOf(false) }
     var showIrcOpTools by remember { mutableStateOf(false) }
@@ -3237,6 +3240,14 @@ fun ChatScreen(
                                 findOverlay.run { matchIds.getOrNull(currentIndex) } == m.id,
                             findHighlight = if (isFindMatch) findOverlay.query else null,
                             isSelectedForCopy = m.id in selectedMsgIds,
+                            isExpanded = m.id in expandedMsgIds,
+                            onToggleExpanded = {
+                                expandedMsgIds = if (m.id in expandedMsgIds) {
+                                    expandedMsgIds - m.id
+                                } else {
+                                    expandedMsgIds + m.id
+                                }
+                            },
                             copyRangeMode = copyRangeMode,
                             selBufName = selBufName,
                             messages = messages,
@@ -6067,6 +6078,9 @@ private fun SingleMessageItem(
     isFindCurrent: Boolean,
     findHighlight: String?,
     isSelectedForCopy: Boolean,
+    /** True when the user has tapped "show more" on this message. */
+    isExpanded: Boolean,
+    onToggleExpanded: () -> Unit,
     copyRangeMode: Boolean,
     selBufName: String,
     messages: List<UiMessage>,
@@ -6150,11 +6164,31 @@ private fun SingleMessageItem(
         )
     } ?: emptyMap()
 
+    // Collapse multiline messages to the first COLLAPSE_LINES and offer to expand.
+    val bodyLineCount = remember(m.text) { m.text.count { it == '\n' } + 1 }
+    val collapsible = m.multiline && bodyLineCount > COLLAPSE_LINES
+    val hiddenLines = bodyLineCount - COLLAPSE_LINES
+    val bodyText = remember(m.text, collapsible, isExpanded) {
+        if (collapsible && !isExpanded) {
+            m.text.lineSequence().take(COLLAPSE_LINES).joinToString("\n")
+        } else {
+            m.text
+        }
+    }
+
     androidx.compose.foundation.layout.Column(
         // Held +AGE echoes are dimmed until the bridge flushes them to the wire (m.pending), so an
         // optimistic echo reads clearly as "not yet delivered" rather than as a sent message.
-        modifier = Modifier.fillMaxWidth().alpha(if (m.pending) 0.5f else 1f)
+        // m.failed is the same idea after the fact: the server rejected the send.
+        modifier = Modifier.fillMaxWidth().alpha(if (m.pending || m.failed) 0.5f else 1f)
     ) {
+        if (m.failed) {
+            Text(
+                stringResource(R.string.chat_not_delivered),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         if (m.replyToMsgId != null) {
             val replyDisplayIdx = msgStrToDisplayIdx[m.replyToMsgId] ?: -1
             ReplyQuote(
@@ -6253,7 +6287,7 @@ private fun SingleMessageItem(
             if (fromNick == null) {
                 if (m.isMotd && selBufName == "*server*") {
                     MotdLine(
-                        text = m.text,
+                        text = bodyText,
                         fontSizeSp = motdFontSizeSp,
                         style = motdStyle,
                         mircColorsEnabled = mircColorsEnabled,
@@ -6271,7 +6305,7 @@ private fun SingleMessageItem(
                     else
                         androidx.compose.ui.graphics.Color.Black
                     IrcLinkifiedText(
-                        text = ts + m.text,
+                        text = ts + bodyText,
                         mircColorsEnabled = mircColorsEnabled,
                         ansiColorsEnabled = ansiColorsEnabled,
                         linkStyle = linkStyle,
@@ -6286,7 +6320,7 @@ private fun SingleMessageItem(
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
                 val botPrefix = stringResource(R.string.chat_bot_prefix)
-                val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
+                val annotated = remember(ts, fromDisplay, fromBase, bodyText, colorizeNicks,
                     mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
@@ -6304,7 +6338,7 @@ private fun SingleMessageItem(
                             withStyle(SpanStyle(color = Color.Gray)) { append(" ($displayName)") }
                         }
                         append(" ")
-                        appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
+                        appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
                 AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = encInline)
@@ -6312,7 +6346,7 @@ private fun SingleMessageItem(
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
                 val botPrefix = stringResource(R.string.chat_bot_prefix)
-                val annotated = remember(ts, fromDisplay, fromBase, m.text, colorizeNicks,
+                val annotated = remember(ts, fromDisplay, fromBase, bodyText, colorizeNicks,
                     mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
@@ -6330,14 +6364,32 @@ private fun SingleMessageItem(
                             withStyle(SpanStyle(color = Color.Gray)) { append(" ($displayName)") }
                         }
                         append("> ")
-                        appendIrcStyledLinkified(m.text, linkStyle, mircColorsEnabled, ansiColorsEnabled)
+                        appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
                 AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = encInline)
             }
         } // end Box
 
+        if (collapsible) {
+            Text(
+                text = if (isExpanded) {
+                    stringResource(R.string.chat_show_less)
+                } else {
+                    pluralStringResource(R.plurals.chat_show_more, hiddenLines, hiddenLines)
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .focusHighlight()
+                    .clickable(enabled = !copyRangeMode, onClick = onToggleExpanded)
+                    .padding(top = 2.dp, bottom = 2.dp),
+            )
+        }
+
         if (imagePreviewsEnabled) {
+            // m.text, not bodyText: a link below the fold is still worth previewing, and
+            // the preview list must not shuffle when the user expands the message.
             val msgUrls = remember(m.id) {
                 urlRegex.findAll(m.text).map { it.value }.take(3).toList()
             }
@@ -6350,6 +6402,9 @@ private fun SingleMessageItem(
         }
     } // end Column
 }
+
+/** Messages longer than this many lines collapse behind a "show more" toggle. */
+private const val COLLAPSE_LINES = 8
 
 private const val ANN_URL = "URL"
 private const val ANN_CHAN = "CHAN"

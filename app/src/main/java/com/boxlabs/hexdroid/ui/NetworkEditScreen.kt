@@ -192,7 +192,6 @@ fun NetworkEditScreen(
     var capExtendedJoin by remember(n0.id) { mutableStateOf(n0.caps.extendedJoin) }
     var capInviteNotify by remember(n0.id) { mutableStateOf(n0.caps.inviteNotify) }
     var capMultiPrefix by remember(n0.id) { mutableStateOf(n0.caps.multiPrefix) }
-    var capSasl by remember(n0.id) { mutableStateOf(n0.caps.sasl) }
     var capSetname by remember(n0.id) { mutableStateOf(n0.caps.setname) }
     var capUserhostInNames by remember(n0.id) { mutableStateOf(n0.caps.userhostInNames) }
     var capDraftRelaymsg by remember(n0.id) { mutableStateOf(n0.caps.draftRelaymsg) }
@@ -288,7 +287,6 @@ fun NetworkEditScreen(
                             extendedJoin = capExtendedJoin,
                             inviteNotify = capInviteNotify,
                             multiPrefix = capMultiPrefix,
-                            sasl = capSasl,
                             setname = capSetname,
                             userhostInNames = capUserhostInNames,
                             draftRelaymsg = capDraftRelaymsg,
@@ -1362,19 +1360,19 @@ fun NetworkEditScreen(
 
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-                        CapSwitch("draft/chathistory", capDraftHistory) { capDraftHistory = it }
+                        CapSwitch("draft/chathistory", capDraftHistory, alias = "chathistory") { capDraftHistory = it }
                         CapSwitch("draft/event-playback", capDraftPlayback) { capDraftPlayback = it }
                         CapSwitch("draft/relaymsg", capDraftRelaymsg) { capDraftRelaymsg = it }
                         CapSwitch("draft/read-marker", capDraftReadMarker) { capDraftReadMarker = it }
-                        CapSwitch("draft/multiline", capMultiline) { capMultiline = it }
+                        CapSwitch("draft/multiline", capMultiline, alias = "multiline") { capMultiline = it }
                         CapSwitch("draft/channel-rename", capChannelRename) { capChannelRename = it }
-                        CapSwitch("draft/extended-monitor", capExtendedMonitor) { capExtendedMonitor = it }
+                        CapSwitch("draft/extended-monitor", capExtendedMonitor, alias = "extended-monitor") { capExtendedMonitor = it }
                         CapSwitch("draft/message-reactions", capMessageReactions) { capMessageReactions = it }
-                        CapSwitch("draft/message-redaction", capMessageRedaction) { capMessageRedaction = it }
+                        CapSwitch("draft/message-redaction", capMessageRedaction, alias = "message-redaction") { capMessageRedaction = it }
                         CapSwitch("draft/account-registration", capAccountRegistration) { capAccountRegistration = it }
                         CapSwitch("draft/extended-isupport", capExtendedIsupport) { capExtendedIsupport = it }
                         CapSwitch("draft/metadata-2", capMetadata2) { capMetadata2 = it }
-                        CapSwitch("draft/no-implicit-names", capNoImplicitNames) { capNoImplicitNames = it }
+                        CapSwitch("draft/no-implicit-names", capNoImplicitNames, alias = "no-implicit-names") { capNoImplicitNames = it }
                         CapSwitch("soju.im/FILEHOST uploads", capFilehostUploads) { capFilehostUploads = it }
 
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -1382,8 +1380,8 @@ fun NetworkEditScreen(
                         CapSwitch("monitor", capMonitor) { capMonitor = it }
                         CapSwitch("account-tag", capAccountTag) { capAccountTag = it }
                         CapSwitch("typing", capTypingIndicator) { capTypingIndicator = it }
-                        CapSwitch("standard-replies", capStandardReplies) { capStandardReplies = it }
-                        CapSwitch("pre-away", capPreAway) { capPreAway = it }
+                        CapSwitch("standard-replies", capStandardReplies, alias = "draft/standard-replies") { capStandardReplies = it }
+                        CapSwitch("pre-away", capPreAway, alias = "draft/pre-away") { capPreAway = it }
                         CapSwitch("message-ids", capMessageIds) { capMessageIds = it }
                         CapSwitch("WHOX (005)", capWhox) { capWhox = it }
 
@@ -1418,6 +1416,7 @@ fun NetworkEditScreen(
 private fun CapSwitch(
     label: String,
     checked: Boolean,
+    alias: String? = null,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
@@ -1425,7 +1424,16 @@ private fun CapSwitch(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label)
+        Column(Modifier.weight(1f)) {
+            Text(label)
+            if (alias != null) {
+                Text(
+                    stringResource(R.string.network_edit_cap_also, alias),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         Switch(checked = checked, onCheckedChange = onCheckedChange, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
     }
 }

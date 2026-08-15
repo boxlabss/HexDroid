@@ -319,6 +319,7 @@ class SettingsRepository(private val ctx: Context) {
 
                 ircHistoryLimit = o.optInt("ircHistoryLimit", 50),
                 ircHistoryCountsAsUnread = o.optBoolean("ircHistoryCountsAsUnread", false),
+                rawLog = o.optBoolean("rawLog", false),
                 ircHistoryTriggersNotifications = o.optBoolean("ircHistoryTriggersNotifications", false),
 
                 dccEnabled = o.optBoolean("dccEnabled", UiSettings().dccEnabled),
@@ -416,6 +417,7 @@ class SettingsRepository(private val ctx: Context) {
 
         o.put("ircHistoryLimit", s.ircHistoryLimit)
         o.put("ircHistoryCountsAsUnread", s.ircHistoryCountsAsUnread)
+        o.put("rawLog", s.rawLog)
         o.put("ircHistoryTriggersNotifications", s.ircHistoryTriggersNotifications)
 
         o.put("dccEnabled", s.dccEnabled)
@@ -495,7 +497,6 @@ class SettingsRepository(private val ctx: Context) {
                         extendedJoin = o.optBoolean("cap_extendedJoin", true),
                         inviteNotify = o.optBoolean("cap_inviteNotify", true),
                         multiPrefix = o.optBoolean("cap_multiPrefix", true),
-                        sasl = o.optBoolean("cap_sasl", true),
                         setname = o.optBoolean("cap_setname", false),
                         userhostInNames = o.optBoolean("cap_userhostInNames", false),
                         draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
@@ -642,7 +643,6 @@ class SettingsRepository(private val ctx: Context) {
             o.put("cap_extendedJoin", n.caps.extendedJoin)
             o.put("cap_inviteNotify", n.caps.inviteNotify)
             o.put("cap_multiPrefix", n.caps.multiPrefix)
-            o.put("cap_sasl", n.caps.sasl)
             o.put("cap_setname", n.caps.setname)
             o.put("cap_userhostInNames", n.caps.userhostInNames)
             o.put("cap_draftRelaymsg", n.caps.draftRelaymsg)

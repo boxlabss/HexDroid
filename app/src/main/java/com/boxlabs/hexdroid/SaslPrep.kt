@@ -61,8 +61,13 @@ object SaslPrep {
         val mapped = buildString(s.length) {
             for (c in s) {
                 when {
-                    isNonAsciiSpace(c) -> append(' ')
+                    // B.1 first: U+200B is listed in BOTH B.1 and C.1.2, and the order
+                    // decides whether it becomes a space or vanishes. Server-side
+                    // stringprep implementations (PostgreSQL's SASLprep, the common Java
+                    // ones) apply B.1 first, so a password containing a zero-width space
+                    // must be prepared the same way or the derived key won't match.
                     isMappedToNothing(c) -> Unit
+                    isNonAsciiSpace(c) -> append(' ')
                     else -> append(c)
                 }
             }
@@ -92,10 +97,14 @@ object SaslPrep {
         return true
     }
 
-    /** RFC 3454 table C.1.2, non-ASCII space characters. */
+    /**
+     * RFC 3454 table C.1.2, non-ASCII space characters. U+200B is in the table but is
+     * handled by [isMappedToNothing] first (see the mapping step), so the range stops
+     * at U+200A here to keep the two tables from disagreeing.
+     */
     private fun isNonAsciiSpace(c: Char): Boolean = when (c) {
         '\u00A0', '\u1680', '\u202F', '\u205F', '\u3000' -> true
-        in '\u2000'..'\u200B' -> true
+        in '\u2000'..'\u200A' -> true
         else -> false
     }
 
@@ -114,9 +123,11 @@ object SaslPrep {
     private fun prohibitedReason(cp: Int): String? = when {
         cp < 0x20 || cp == 0x7F -> "control character"
         cp in 0x0080..0x009F -> "control character"
-        cp == 0x06DD || cp == 0x070F || cp == 0x180E || cp == 0x200C || cp == 0x200D ||
-            cp == 0x2028 || cp == 0x2029 || cp == 0xFEFF -> "control character"
-        cp in 0x2060..0x2063 -> "control character"
+        // NB: 200C/200D/2060/FEFF are B.1 "mapped to nothing" and are removed by step 1,
+        // so they are not repeated here as prohibited output.
+        cp == 0x06DD || cp == 0x070F || cp == 0x180E ||
+            cp == 0x2028 || cp == 0x2029 -> "control character"
+        cp in 0x2061..0x2063 -> "control character"
         cp in 0x206A..0x206F -> "control character"
         cp in 0xFFF9..0xFFFC -> "control character"
         cp in 0x1D173..0x1D17A -> "control character"

@@ -80,7 +80,6 @@ data class CapPrefs(
     val extendedJoin: Boolean = true,
     val inviteNotify: Boolean = true,
     val multiPrefix: Boolean = true,
-    val sasl: Boolean = true,
     val setname: Boolean = false,
     val userhostInNames: Boolean = false,
     val draftRelaymsg: Boolean = false,
@@ -151,8 +150,8 @@ data class CapPrefs(
      * concatenated body. `+draft/multiline-concat` tag on a line means "no newline before
      * me" - used for messages split mid-paragraph by the sender's flood control.
      *
-     * Send-side is NOT implemented: this client doesn't currently send multiline batches.
-     * Outbound long messages still split into multiple lines on the wire as before.
+     * Send side builds the same batches for multi-line input (see [buildMultilineWireLines]);
+     * single long lines still split into separate PRIVMSGs as before.
      */
     val multiline: Boolean = true,
     /** draft/message-redaction: negotiate the cap and offer "Delete message" for own messages. */
@@ -501,6 +500,14 @@ sealed class IrcEvent {
      */
     data class Error(val message: String, val transient: Boolean? = null) : IrcEvent()
 
+    /**
+     * The server rejected an outbound multiline BATCH (FAIL BATCH MULTILINE_*). The batch
+     * never reached the channel, so the optimistic local echo has to be marked undelivered.
+     * [target] is best-effort: the FAIL carries no batch id, so it is the target of the
+     * most recent multiline send on this connection.
+     */
+    data class MultilineSendFailed(val target: String?, val code: String, val reason: String) : IrcEvent()
+
     // get latency from PING/PONG (milliseconds)
     data class LagUpdated(val lagMs: Long?) : IrcEvent()
 
@@ -508,6 +515,9 @@ sealed class IrcEvent {
     data class ServerLine(val line: String) : IrcEvent()
 
     // server output (MOTD/WHOIS/etc)
+    /** One line of raw protocol traffic, emitted only while the raw log is enabled. */
+    data class RawLine(val outgoing: Boolean, val line: String) : IrcEvent()
+
     data class ServerText(
         val text: String,
         val code: String? = null,
@@ -643,6 +653,13 @@ sealed class IrcEvent {
         val text: String,
         val isPrivate: Boolean,
         val isAction: Boolean = false,
+        /**
+         * True when this was assembled from a draft/multiline BATCH, i.e. the sender meant
+         * it as ONE message with embedded newlines. The UI folds long ones behind a "show
+         * more"; a MOTD, an ASCII-art paste sent as separate PRIVMSGs, or any other
+         * naturally multi-line rendering is not this and must not be folded.
+         */
+        val multiline: Boolean = false,
         val timeMs: Long? = null,
         val isHistory: Boolean = false,
         /** draft/oper-tag: true when the server marked the sender as an IRC operator. */
@@ -1112,6 +1129,54 @@ internal fun parseMultilineLimits(raw: String?): MultilineLimits {
     )
 }
 
+/**
+ * Strip credentials from a raw protocol line before it is shown or copied.
+ */
+internal fun redactRawLine(line: String): String {
+    // Tags are never secret and can contain spaces in values, so split them off first.
+    val tagPrefix: String
+    val rest: String
+    if (line.startsWith("@")) {
+        val sp = line.indexOf(' ')
+        if (sp < 0) return line
+        tagPrefix = line.substring(0, sp + 1)
+        rest = line.substring(sp + 1)
+    } else {
+        tagPrefix = ""
+        rest = line
+    }
+    val body = if (rest.startsWith(":")) rest.substringAfter(' ', "") else rest
+    val leader = if (rest.startsWith(":")) rest.substring(0, rest.length - body.length) else ""
+    val verb = body.substringBefore(' ').uppercase(Locale.ROOT)
+    val args = body.substringAfter(' ', "")
+
+    fun hide(keep: String) = tagPrefix + leader + verb + (if (keep.isEmpty()) "" else " $keep") + " <hidden>"
+
+    return when {
+        // PASS <password>, and the bouncer form PASS <user>/<network>:<password>.
+        verb == "PASS" -> hide("")
+        // AUTHENTICATE <base64>. "+" and "*" are protocol markers and the first line is
+        // the mechanism name, all of which are worth seeing; only the payload is secret.
+        verb == "AUTHENTICATE" && args.isNotBlank() && args != "+" && args != "*" &&
+            !(args.length <= 20 && args.all { it.isDigit() || it in 'A'..'Z' || it == '-' }) -> hide("")
+        // OPER <name> <password>.
+        verb == "OPER" -> hide(args.substringBefore(' '))
+        // Services logins sent as a normal message: PRIVMSG NickServ :IDENTIFY <pw>.
+        verb == "PRIVMSG" || verb == "NOTICE" -> {
+            val target = args.substringBefore(' ')
+            val text = args.substringAfter(' ', "").removePrefix(":")
+            val svc = target.substringBefore('@').lowercase(Locale.ROOT)
+            val isService = svc in setOf("nickserv", "chanserv", "authserv", "hostserv", "ns", "x")
+            val cmd = text.substringBefore(' ').uppercase(Locale.ROOT)
+            val secretCmd = cmd in setOf("IDENTIFY", "REGISTER", "SETPASS", "SET", "GHOST", "RECOVER", "RELEASE", "LOGIN", "AUTH")
+            if (isService && secretCmd) "$tagPrefix$leader$verb $target :$cmd <hidden>" else line
+        }
+        // draft/account-registration.
+        verb == "REGISTER" || verb == "VERIFY" -> hide(args.substringBefore(' '))
+        else -> line
+    }
+}
+
 /** Split [text] into pieces of at most [maxBytes] UTF-8 bytes, never mid-codepoint. */
 internal fun splitByUtf8Bytes(text: String, maxBytes: Int): List<String> {
     val bytes = text.toByteArray(Charsets.UTF_8)
@@ -1145,8 +1210,9 @@ internal fun buildMultilineWireLines(
     limits: MultilineLimits,
     perLineBytes: Int,
     batchType: String,
-    openTags: List<String>,
+    concatTag: String,
     nextBatchId: () -> String,
+    openTagsFor: () -> List<String>,
 ): List<String> {
     if (lines.isEmpty()) return emptyList()
 
@@ -1162,9 +1228,14 @@ internal fun buildMultilineWireLines(
         }
     }
 
+    // Spec: a message may not consist entirely of blank lines, and no line feed is
+    // appended after the last line, so leading/trailing blanks carry nothing.
+    while (inner.isNotEmpty() && inner.first().first.isEmpty()) inner.removeAt(0)
+    while (inner.isNotEmpty() && inner.last().first.isEmpty()) inner.removeAt(inner.size - 1)
+    if (inner.isEmpty()) return emptyList()
+
     val out = mutableListOf<String>()
     var i = 0
-    var firstBatch = true
     while (i < inner.size) {
         var bytes = 0
         var end = i
@@ -1174,19 +1245,29 @@ internal fun buildMultilineWireLines(
             bytes += b
             end++
         }
+        // Never cut inside a split line: the first message of a batch cannot carry the
+        // concat tag, so the remainder would arrive as a separate message.
+        if (end < inner.size && inner[end].second) {
+            var back = end
+            while (back > i && inner[back].second) back--
+            if (back > i) end = back
+        }
         if (end == i) end = i + 1  // never stall on a single over-budget line
+        // Never emit a batch that is entirely blank lines.
+        while (end < inner.size && (i until end).all { inner[it].first.isEmpty() }) end++
 
         val batchId = nextBatchId()
-        val tag = if (firstBatch && openTags.isNotEmpty())
-            openTags.joinToString(";", prefix = "@", postfix = " ") else ""
+        val tags = openTagsFor()
+        val tag = if (tags.isEmpty()) "" else tags.joinToString(";", prefix = "@", postfix = " ")
         out += "${tag}BATCH +$batchId $batchType $target"
         for (j in i until end) {
             val (payload, concat) = inner[j]
-            val concatTag = if (concat) ";+draft/multiline-concat" else ""
-            out += "@batch=$batchId$concatTag PRIVMSG $target :$payload"
+            // j > i: an unavoidable mid-run cut (a single line longer than max-lines
+            // pieces) drops the tag rather than emitting an invalid leading concat.
+            val concatPart = if (concat && j > i) ";$concatTag" else ""
+            out += "@batch=$batchId$concatPart PRIVMSG $target :$payload"
         }
         out += "BATCH -$batchId"
-        firstBatch = false
         i = end
     }
     return out
@@ -1349,8 +1430,33 @@ class IrcClient(val config: IrcConfig) {
     /** Resolve a localized plural resource for [quantity], with optional format args. */
     internal fun trPlural(id: Int, quantity: Int, vararg args: Any?): String =
         plurals?.invoke(id, quantity, args) ?: ""
+    /**
+     * Raw protocol logging. Off by default and flipped at runtime by the user.
+     */
+    @Volatile var rawLogEnabled = false
+
+
+    /** Latched when the server refuses nick changes outright (Ergo strict nick-reservation). */
+    @Volatile private var nickChangeRefused = false
     private val parser = IrcParser()
-    private val outbound = Channel<String>(capacity = 300)
+    /**
+     * One atomic unit of outbound traffic: the writer emits every line back-to-back with
+     * nothing else interleaved. Ordinary sends are one-line units; a multiline BATCH is one
+     * unit, because a server that sees any other command between BATCH + and BATCH - answers
+     * FAIL BATCH MULTILINE_INVALID, then FAIL BATCH INVALID_PARAMS when the close arrives
+     * for a batch it already tore down.
+     *
+     * [paced] false skips the flood delay for this unit. Multiline batches set it because
+     * servers advertising the cap suspend their own flood penalty for the duration of a
+     * batch (Ergo does so explicitly). Pacing them is not merely unnecessary, it is ruinous:
+     * a five-paragraph paste is ~16 lines and ~2200 characters, which under the per-line and
+     * per-character penalties below works out to nearly a minute of delay before the first
+     * byte goes out.
+     */
+    private data class OutboundUnit(val lines: List<String>, val paced: Boolean = true)
+
+    /** Outbound queue. */
+    private val outbound = Channel<OutboundUnit>(capacity = 300)
 
     /**
      * Immediately discard already-queued outbound lines matching [pred] so a closed game's paced-out
@@ -1363,12 +1469,14 @@ class IrcClient(val config: IrcConfig) {
      * harmless for teardown traffic.
      */
     fun purgeOutbound(pred: (String) -> Boolean) {
-        val survivors = ArrayList<String>()
+        val survivors = ArrayList<OutboundUnit>()
         while (true) {
-            val l = outbound.tryReceive().getOrNull() ?: break
-            if (!pred(l)) survivors.add(l)
+            val unit = outbound.tryReceive().getOrNull() ?: break
+            // Drop a unit only if every line in it matches; a batch is all-or-nothing,
+            // since a half-dropped batch is exactly the corruption this queue prevents.
+            if (!unit.lines.all(pred)) survivors.add(unit)
         }
-        for (l in survivors) outbound.trySend(l)
+        for (unit in survivors) outbound.trySend(unit)
     }
 
     // Outbound flood pacing (applied in the writer loop). IRC servers charge a per-line penalty of
@@ -1854,8 +1962,33 @@ class IrcClient(val config: IrcConfig) {
         val openSenderPrefix: String?,  // From BATCH +<id> command, may be null
         val innerSenderPrefix: String? = null,  // From first inner PRIVMSG/NOTICE; preferred over BATCH prefix
         val parts: MutableList<Pair<String, Boolean>> = mutableListOf(),
+        var bytes: Int = 0,
+        var truncated: Boolean = false,
     )
     private val openMultilineBatches = mutableMapOf<String, MultilineBatchState>()
+
+    /** Hard ceilings on inbound batch state; a server that never closes a batch can't grow us without bound. */
+    private val multilineMaxParts = 8192
+    private val multilineMaxBytes = 1 shl 20
+    private val multilineMaxOpenBatches = 64
+
+    /** Accept the tag with or without the client-only '+' and with or without the draft/ prefix. */
+    private fun hasConcatTag(tags: Map<String, String?>): Boolean =
+        tags.keys.any {
+            val k = it.removePrefix("+")
+            k == "draft/multiline-concat" || k == "multiline-concat"
+        }
+
+    /** Append one inner line, enforcing the ceilings above. Silently stops once the batch is full. */
+    private fun appendMultilinePart(state: MultilineBatchState, text: String, concat: Boolean) {
+        if (state.truncated) return
+        if (state.parts.size >= multilineMaxParts || state.bytes + text.length > multilineMaxBytes) {
+            state.truncated = true
+            return
+        }
+        state.bytes += text.length
+        state.parts.add(text to concat)
+    }
 
     /** Heuristic: a message in [target] with [timeMs] should be treated as history if we're
      *  currently expecting history for that target and the message is older than ~now. */
@@ -2201,10 +2334,9 @@ class IrcClient(val config: IrcConfig) {
 											innerSenderPrefix = msg.prefix,
 										)
 								}
-								val concat = msg.tags.containsKey("+draft/multiline-concat") ||
-								             msg.tags.containsKey("draft/multiline-concat")
-								openMultilineBatches[multilineBatchIdPm]
-									?.parts?.add(textRaw to concat)
+								openMultilineBatches[multilineBatchIdPm]?.let {
+									appendMultilinePart(it, textRaw, hasConcatTag(msg.tags))
+								}
 								return  // Don't emit individually - flushed on BATCH -<id>.
 							}
 						}
@@ -2506,10 +2638,9 @@ class IrcClient(val config: IrcConfig) {
 											innerSenderPrefix = msg.prefix,
 										)
 								}
-								val concat = msg.tags.containsKey("+draft/multiline-concat") ||
-								             msg.tags.containsKey("draft/multiline-concat")
-								openMultilineBatches[multilineBatchIdN]
-									?.parts?.add(text to concat)
+								openMultilineBatches[multilineBatchIdN]?.let {
+									appendMultilinePart(it, text, hasConcatTag(msg.tags))
+								}
 								return
 							}
 						}
@@ -3162,6 +3293,16 @@ class IrcClient(val config: IrcConfig) {
 						} else ""
 						if (msg.command == "FAIL") send(IrcEvent.Error(srText + srHint))
 						else send(IrcEvent.ServerText(srText, code = msg.command))
+						// A rejected multiline BATCH means the message never landed. Attribute it to
+						// the most recent multiline target (the FAIL carries no batch id) so the
+						// optimistic echo can be un-marked rather than left looking delivered.
+						if (msg.command == "FAIL" && srCmd.equals("BATCH", true) &&
+							srCode.uppercase(Locale.ROOT).startsWith("MULTILINE_")
+						) {
+							val recent = lastMultilineSend
+								?.takeIf { System.currentTimeMillis() - it.second < 60_000L }
+							send(IrcEvent.MultilineSendFailed(recent?.first, srCode, srDesc))
+						}
 						// Feed account-registration failures to the guided dialog too, so it
 						// can show the error inline instead of only in the server buffer.
 						if (msg.command == "FAIL" && (srCmd == "REGISTER" || srCmd == "VERIFY")) {
@@ -3256,7 +3397,7 @@ class IrcClient(val config: IrcConfig) {
 		// socket would never close — surfaces as the UI freezing on "Disconnecting…" until
 		// the OS kills the app. Dropping the QUIT silently is acceptable: the server will
 		// see a TCP close shortly and disconnect us anyway, just without a custom reason.
-		runCatching { outbound.trySend("QUIT :${clampLen(reason, "QUITLEN")}") }
+		runCatching { outbound.trySend(OutboundUnit(listOf("QUIT :${clampLen(reason, "QUITLEN")}"))) }
 
 		delay(250)
 
@@ -3292,16 +3433,35 @@ class IrcClient(val config: IrcConfig) {
             // ClosedSendChannelException (surfaced in crash reports as obfuscated k7.m).
             // If the channel is closed or full, the line is silently dropped - this is
             // safe because the connection is already gone or saturated.
-            val result = outbound.trySend(sanitized)
-            if (sanitized.contains("AGE ")) {
-                android.util.Log.d("AGEDBG", "IrcCore.sendRaw AGE success=${result.isSuccess} closed=${result.isClosed} line=${sanitized.take(64)}")
-            }
-            if (result.isFailure && !result.isClosed) {
-                // Channel is full (capacity=300) but still open - fall back to a
-                // suspending send so legitimate bursts are not silently discarded.
-                // This path is rare; the capacity guard above handles the common cases.
-                runCatching { outbound.send(sanitized) }
-            }
+            enqueue(OutboundUnit(listOf(sanitized)))
+        }
+    }
+
+    /**
+     * Send [lines] as one atomic unit: no pacing delay between them and no other command
+     * interleaved. Used for multiline BATCHes. Servers that support multiline suspend their
+     * own flood penalty for the duration of the batch (Ergo does), so skipping our pacing
+     * inside the unit does not risk an excess-flood kill.
+     */
+    suspend fun sendRawAtomic(lines: List<String>) {
+        val sanitized = lines
+            .map { it.replace("\r", "").replace("\n", " ").trim() }
+            .filter { it.isNotEmpty() }
+        if (sanitized.isNotEmpty()) enqueue(OutboundUnit(sanitized, paced = false))
+    }
+
+    private suspend fun enqueue(unit: OutboundUnit) {
+        // Use trySend so that calling sendRaw on a disconnecting/reconnecting client
+        // (whose outbound Channel may have been closed by forceClose()) never throws
+        // ClosedSendChannelException (surfaced in crash reports as obfuscated k7.m).
+        // If the channel is closed or full, the line is silently dropped - this is
+        // safe because the connection is already gone or saturated.
+        val result = outbound.trySend(unit)
+        if (result.isFailure && !result.isClosed) {
+            // Channel is full (capacity=300) but still open - fall back to a
+            // suspending send so legitimate bursts are not silently discarded.
+            // This path is rare; the capacity guard above handles the common cases.
+            runCatching { outbound.send(unit) }
         }
     }
 
@@ -3432,6 +3592,9 @@ class IrcClient(val config: IrcConfig) {
      * (which is what the multiline spec tells it to do) renders a wall of base64. Keyed
      * targets keep the existing one-PRIVMSG-per-chunk path.
      */
+    /** Target + time of the last multiline BATCH we sent, for attributing a FAIL BATCH MULTILINE_*. */
+    @Volatile private var lastMultilineSend: Pair<String, Long>? = null
+
     fun multilineSendAvailable(target: String): Boolean {
         if (!hasCap("batch")) return false
         if (!hasCap("draft/multiline") && !hasCap("multiline")) return false
@@ -3445,41 +3608,59 @@ class IrcClient(val config: IrcConfig) {
     /**
      * Send [lines] to [target] as one logical message using an IRCv3 multiline BATCH.
      *
-     * Returns null when the caps aren't there or the target is encrypted; the caller
-     * then sends line-by-line. Otherwise returns the labeled-response `label` attached
-     * to the first BATCH open (when echo-message + labeled-response are both
-     * negotiated, else null) so the caller can correlate its optimistic local echo with
-     * the server's echo, exactly as [privmsg] does for a single line.
+     * Returns null when the caps aren't there, the target is encrypted, or there was no
+     * sendable content; the caller then sends line-by-line. Otherwise returns one
+     * labeled-response `label` per emitted batch (empty when echo-message +
+     * labeled-response aren't both negotiated) so the caller can correlate its
+     * optimistic local echo with the server's echoes, as [privmsg] does for one line.
      */
-    suspend fun privmsgMultiline(target: String, lines: List<String>, replyToMsgId: String? = null): String? {
+    suspend fun privmsgMultiline(target: String, lines: List<String>, replyToMsgId: String? = null): List<String>? {
         if (lines.isEmpty()) return null
         if (!multilineSendAvailable(target)) return null
 
-        var label: String? = null
-        val openTags = buildList {
-            if (hasCap("echo-message") && hasCap("labeled-response")) {
-                label = nextLabel()
-                add("label=$label")
-            }
-            if (replyToMsgId != null && hasCap("message-tags")) {
-                add("+draft/reply=$replyToMsgId")
-                add("+reply=$replyToMsgId")
-            }
-        }
+        // NOT a client-only tag: no leading '+'. The spec's own example sends
+        // "@batch=123;draft/multiline-concat PRIVMSG ...", and Ergo answers a '+'-prefixed
+        // form with FAIL BATCH MULTILINE_INVALID. The name still tracks the batch/cap name.
+        val draft = hasCap("draft/multiline")
+        val batchType = if (draft) "draft/multiline" else "multiline"
+        val concatTag = if (draft) "draft/multiline-concat" else "multiline-concat"
+
+        val labelled = hasCap("echo-message") && hasCap("labeled-response")
+        val labels = mutableListOf<String>()
+
+        // "@batch=<id>;<concatTag> PRIVMSG <target> :" plus CRLF.
+        val lineOverhead = 18 + concatTag.length + 10 + target.length + 4
 
         val wire = buildMultilineWireLines(
             target = target,
             lines = lines,
             limits = parseMultilineLimits(capValue("draft/multiline") ?: capValue("multiline")),
             // Budget for one inner line's payload: the server's line limit less the worst
-            // plausible ":nick!user@host PRIVMSG <target> :" prefix and the @batch tag.
-            perLineBytes = ((serverLinelen ?: 512) - 100 - target.length - 24).coerceAtLeast(64),
-            batchType = if (hasCap("draft/multiline")) "draft/multiline" else "multiline",
-            openTags = openTags,
+            // plausible ":nick!user@host " relay prefix and our own framing.
+            perLineBytes = ((serverLinelen ?: 512) - 100 - lineOverhead).coerceAtLeast(64),
+            batchType = batchType,
+            concatTag = concatTag,
             nextBatchId = { "hm${labelCounter.incrementAndGet()}" },
+            // Called once per batch. Each batch is a separate labeled response, so each
+            // needs its own label or the echoes of batches 2..n can't be correlated.
+            openTagsFor = {
+                buildList {
+                    if (labelled) {
+                        val l = nextLabel()
+                        labels += l
+                        add("label=$l")
+                    }
+                    if (replyToMsgId != null && hasCap("message-tags")) {
+                        add("+draft/reply=$replyToMsgId")
+                        add("+reply=$replyToMsgId")
+                    }
+                }
+            },
         )
-        for (line in wire) sendRaw(line)
-        return label
+        if (wire.isEmpty()) return null
+        lastMultilineSend = target to System.currentTimeMillis()
+        sendRawAtomic(wire)
+        return labels
     }
 
     /**
@@ -4388,6 +4569,9 @@ class IrcClient(val config: IrcConfig) {
         }
 
         suspend fun writeLine(line: String) = withContext(Dispatchers.IO) {
+            // Raw log, outgoing. Hooked here rather than in sendRaw so lines that bypass
+            // the outbound queue (registration, PONG, the nick-reclaim retries) are logged
+            if (rawLogEnabled) trySend(IrcEvent.RawLine(true, redactRawLine(line)))
             // IRCv3 utf8only: when the server has negotiated this cap, all messages MUST
             // be UTF-8. Override the per-connection encoding so legacy windows-1251 /
             // ISO-8859-x configs don't accidentally send non-UTF-8 bytes on a strict server.
@@ -4420,15 +4604,25 @@ class IrcClient(val config: IrcConfig) {
             // is "paid"; when it runs more than floodBurstMs ahead of now we wait for it to catch up.
             var floodClock = System.currentTimeMillis()
             try {
-                for (line in outbound) {
+                for (unit in outbound) {
                     if (registered) {
                         val now = System.currentTimeMillis()
                         if (floodClock < now) floodClock = now
-                        floodClock += floodPenaltyMs + line.length * floodPerCharMs
-                        val ahead = floodClock - now - floodBurstMs
-                        if (ahead > 0) delay(ahead)
+                        if (unit.paced) {
+                            // Charge the whole unit up front, then write its lines
+                            // back-to-back. Pacing between them would let other queued
+                            // commands interleave, which is fatal inside a BATCH.
+                            val chars = unit.lines.sumOf { it.length }
+                            floodClock += floodPenaltyMs * unit.lines.size + chars * floodPerCharMs
+                            val ahead = floodClock - now - floodBurstMs
+                            if (ahead > 0) delay(ahead)
+                        } else {
+                            // Charge one line's base penalty so an unpaced burst still costs
+                            // something against later traffic, but never delay this unit.
+                            floodClock += floodPenaltyMs
+                        }
                     }
-                    writeLine(line)
+                    for (line in unit.lines) writeLine(line)
                 }
             } catch (t: Throwable) {
                 // If writes start failing (common during network handovers or SSL close),
@@ -4587,6 +4781,9 @@ fun listModeHandlers(
 // mobile/Wi-Fi reconnect; try once, then retry QUIETLY in the background until it
 // frees, the user takes manual control, or we hit the give-up window.
 suspend fun runNickReclaim() {
+	// Set once the server tells us a nick change can never succeed on this connection
+	// (account-locked nick). Cleared only by a reconnect, which rebuilds the client.
+	if (nickChangeRefused) return
 	val target = config.nick
 	val fallback = currentNick   // the nick the server registered us with
 	// Let SASL/services nick-reclaim and a fast ghost ping-timeout settle first.
@@ -4601,6 +4798,7 @@ suspend fun runNickReclaim() {
 		send(IrcEvent.ServerText("*** " + tr(R.string.core_regaining_nick, target), code = "NICK"))
 		runCatching { writeLine("NICK $target") }
 		delay(ConnectionConstants.NICK_RECLAIM_RESPONSE_GRACE_MS)
+		if (nickChangeRefused) return
 		if (nickEquals(currentNick, target)) {
 			send(IrcEvent.ServerText("*** " + tr(R.string.core_regained_nick, target), code = "NICK"))
 			return
@@ -4615,7 +4813,7 @@ suspend fun runNickReclaim() {
 			val deadline = System.currentTimeMillis() + ConnectionConstants.NICK_RECLAIM_TOTAL_WINDOW_MS
 			while (System.currentTimeMillis() < deadline) {
 				delay(ConnectionConstants.NICK_RECLAIM_RETRY_INTERVAL_MS)
-				if (userClosing) return
+				if (userClosing || nickChangeRefused) return
 					if (nickEquals(currentNick, target)) {
 						send(IrcEvent.ServerText("*** " + tr(R.string.core_regained_nick, target), code = "NICK"))
 						return
@@ -5138,6 +5336,9 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				val prevEncoding = lineReader.encoding
 				val line = withContext(Dispatchers.IO) { lineReader.readLine() } ?: break
 
+				// Raw log, incoming. Before parsing, so a line we fail to parse is still visible.
+				if (rawLogEnabled && line.isNotEmpty()) send(IrcEvent.RawLine(false, redactRawLine(line)))
+
 				// Any successful read proves the link is alive, stamp it before parsing so
 				// every kind of inbound line (PONG with or without our token, server PING,
 				// PRIVMSG, even a truncated oversize line) refreshes liveness. The ping
@@ -5214,6 +5415,21 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					continue
 				}
 
+				// A hard refusal of a nick change. Some IRCd's answer /NICK with 400 ERR_UNKNOWNERROR
+				// "NICK :You must use your account name as your nickname" when nick-reservation
+				// is strict; other ircds use 447 ERR_CANTCHANGENICK. Retrying can never succeed
+				if ((msg.command == "400" && msg.params.getOrNull(1).equals("NICK", true)) ||
+					msg.command == "447"
+				) {
+					val already = nickChangeRefused
+					nickChangeRefused = true
+					if (!already) {
+						val why = msg.trailing ?: msg.params.lastOrNull() ?: ""
+						send(IrcEvent.Error(tr(R.string.core_nick_change_refused, why)))
+					}
+					continue
+				}
+
 				if (msg.command == "433") {
 					// Ignore 433 after successful registration — Ergo (and other servers with
 					// SASL nick-reclaim) may send queued 433s for nicks tried pre-SASL after
@@ -5260,14 +5476,25 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 				// BATCH tracking (used for draft/chathistory, draft/event-playback, labeled-response).
 				if (msg.command == "BATCH") {
-					val idToken = msg.params.getOrNull(0) ?: continue
+					// allParams, not params: any of these three can arrive as the trailing
+					// parameter and mean exactly the same thing.
+					val idToken = msg.allParams.getOrNull(0) ?: continue
 					if (idToken.startsWith("+")) {
 						val id = idToken.drop(1)
-						val type = msg.params.getOrNull(1) ?: ""
+						val type = msg.allParams.getOrNull(1) ?: ""
 						if (type.contains("chathistory", ignoreCase = true) ||
 							type.contains("event-playback", ignoreCase = true) ||
 							type.contains("playback", ignoreCase = true)
 						) {
+							openPlaybackBatches.add(id)
+						}
+						// Batches nest, and playback-ness is inherited. A multiline message
+						// replayed through CHATHISTORY arrives as BATCH +inner draft/multiline
+						// carrying @batch=<outer>, and its inner lines reference the INNER id.
+						// isPlaybackHistory is a flat lookup, so without this the replay is
+						// classified as live and shows up as a new message.
+						val parentBatch = msg.tags["batch"]
+						if (parentBatch != null && openPlaybackBatches.contains(parentBatch)) {
 							openPlaybackBatches.add(id)
 						}
 						// netsplit/netjoin: track so we can collapse the JOIN/QUIT flood.
@@ -5282,8 +5509,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						if (type.equals("draft/multiline", ignoreCase = true) ||
 							type.equals("multiline", ignoreCase = true)
 						) {
-							val target = msg.params.getOrNull(2) ?: ""
-							if (target.isNotBlank()) {
+							val target = msg.allParams.getOrNull(2) ?: ""
+							if (target.isNotBlank() && openMultilineBatches.size < multilineMaxOpenBatches) {
 								openMultilineBatches[id] = MultilineBatchState(
 									target = target,
 									command = "PRIVMSG",  // overwritten on first inner line
@@ -5352,6 +5579,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 										text = joined,
 										isPrivate = !isChan,
 										isAction = false,  // multiline never carries CTCP wrapping
+										multiline = true,
 										timeMs = tagsTime,
 										isHistory = isHistMl,
 										msgId = msgid,

@@ -409,13 +409,13 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         if (config.capPrefs.messageTags) req += "message-tags"
         if (config.capPrefs.serverTime) req += "server-time"
         if (config.capPrefs.echoMessage) req += "echo-message"
-        if (config.capPrefs.labeledResponse) req += "labeled-response"
+        if (config.capPrefs.labeledResponse && config.capPrefs.batch) req += "labeled-response"
         if (config.capPrefs.batch) req += "batch"
         if (config.capPrefs.utf8Only) req += "utf8only"
 
         // History / playback: request both the graduated cap and the legacy draft/ alias so we
         // interoperate with older (draft/chathistory) and modern (chathistory) servers.
-        if (config.capPrefs.draftChathistory) {
+        if (config.capPrefs.draftChathistory && config.capPrefs.batch) {
             req += "draft/chathistory"
             req += "chathistory"         // graduated (Ergo 2.11+, soju 0.7+)
         }
@@ -436,7 +436,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
         if (config.capPrefs.setname) req += "setname"
 
         // SASL (only if configured)
-        if (config.capPrefs.sasl && wantSasl) req += "sasl"
+        if (wantSasl) req += "sasl"
 
         // Optional / draft
         if (config.capPrefs.draftRelaymsg) req += "draft/relaymsg"
@@ -513,12 +513,6 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             req += "no-implicit-names"       // graduated: registry lists the bare name
         }
 
-        // multiline: receive messages longer than 512 bytes / containing line breaks
-        // as a single grouped BATCH. Request both the draft and the (forward-compat)
-        // graduated name. Per the spec, software implementing the work-in-progress
-        // version MUST use the draft/ prefix; the graduated name will be used once
-        // the spec finalizes. Requesting both means the cap negotiates against
-        // whichever form the server advertises today.
         // draft/metadata-2: user/channel key-value metadata (display names, avatars).
         // The spec REQUIRES the batch capability, and forbids requesting metadata-notify
         // alongside it (hexdroid never requests the deprecated metadata-notify at all).
@@ -540,7 +534,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             req += "message-redaction"       // forward-compat with eventual ratification
         }
 
-        if (config.capPrefs.multiline) {
+        // multiline: receive messages longer than 512 bytes/containing line breaks as a single grouped BATCH.
+        if (config.capPrefs.multiline && config.capPrefs.batch) {
             req += "draft/multiline"
             req += "multiline"
         }
@@ -766,10 +761,10 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
                     // Pre-flight: refuse to start the exchange at all if we have no password.
-                    // ScramSha256Client.hi() ultimately calls PBEKeySpec(password.toCharArray(),
-                    // ...) which throws IllegalArgumentException("Password empty") on an empty
-                    // char array. That exception propagates out of onServerMessage() at the
-                    // bottom of this when-branch and crashes the connection coroutine.
+                    // ScramSha256Client.hi() derives PBKDF2 by hand over the UTF-8 bytes and
+                    // keys an HmacSHA256 Mac with them; SecretKeySpec rejects a zero-length key
+                    // with IllegalArgumentException. That would propagate out of
+                    // onServerMessage() and kill the connection coroutine.
                     //
                     // The empty-password case is real: after a backup-restore on a fresh
                     // install, the SecretStore is empty (secrets are device-keystore-encrypted

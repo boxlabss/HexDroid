@@ -5,8 +5,9 @@ All notable changes to HexDroid are documented here.
 Fix CAP NAK sending CAP END without checking saslInProgress
 Fix SCRAM-SHA-256 skipping SASLprep/PRECIS on the password
 Fix casemapping for channels like #foo[bar]
-Implement send side draft/multiline
-Include a new start on boot option for "Keep connection alive"
+Implement send side draft/multiline, with "show more" for large paragraphs
+Include a new start on reboot option for "Keep connection alive"
+Include an option to add raw logging for debugging. Keeps credentials removed.
 
 ## [1.7.1] - 2026-08-06
 - **Fix Android TV banner**

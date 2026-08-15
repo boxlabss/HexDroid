@@ -245,6 +245,13 @@
     <string name="lang_zh" translatable="false">中文</string>
 
     <string name="network_edit_advanced_caps">Advanced IRCv3 caps</string>
+    <string name="core_nick_change_refused">The server will not let you change nick: %1$s</string>
+    <string name="settings_raw_log">Raw protocol log</string>
+    <string name="settings_raw_log_desc">Show every line sent and received in a Raw buffer per network. Passwords are hidden. For debugging.</string>
+    <string name="chat_show_less">Show less</string>
+    <string name="chat_not_delivered">Not delivered</string>
+    <string name="vm_multiline_rejected">The server rejected the message (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">also requests %1$s</string>
     <string name="network_edit_caps_hint">Basic IRCv3 features enabled by default. Switch on to see advanced options.</string>
     <string name="network_edit_bouncer_caps">Bouncer caps</string>
 
