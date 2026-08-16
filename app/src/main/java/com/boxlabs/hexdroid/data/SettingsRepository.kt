@@ -272,6 +272,20 @@ class SettingsRepository(private val ctx: Context) {
                 chatFontStyle = runCatching {
                     ChatFontStyle.valueOf(o.optString("chatFontStyle", ChatFontStyle.REGULAR.name))
                 }.getOrDefault(ChatFontStyle.REGULAR),
+                // chatLineSpacing changed meaning in 1.7.3: it used to be a leading
+                // multiplier (1.0/1.2/1.45), it is now an inter-message gap as a fraction
+                // of the font size (0.0/0.15/0.45). Anything >= 1.0 is a stored value from
+                // the old scheme, so map it across instead of reading it as a huge gap.
+                chatLineSpacing = o.optDouble("chatLineSpacing", 0.15).toFloat().let { v ->
+                    when {
+                        v < 1.0f -> v
+                        v < 1.1f -> 0.0f
+                        v < 1.33f -> 0.15f
+                        else -> 0.45f
+                    }
+                },
+                chatFontLineHeight = o.optDouble("chatFontLineHeight", 1.15).toFloat(),
+                nicklistFontOffset = o.optInt("nicklistFontOffset", 0),
                 customFontPath = o.optString("customFontPath", "").takeIf { it.isNotBlank() },
                 customChatFontPath = o.optString("customChatFontPath", "").takeIf { it.isNotBlank() },
 
@@ -282,7 +296,7 @@ class SettingsRepository(private val ctx: Context) {
                 defaultShowBufferList = o.optBoolean("defaultShowBufferList", true),
 
                 bufferPaneFracLandscape = o.optDouble("bufferPaneFracLandscape", 0.22).toFloat(),
-                nickPaneFracLandscape = o.optDouble("nickPaneFracLandscape", 0.18).toFloat(),
+                nickPaneFracLandscape = o.optDouble("nickPaneFracLandscape", 0.05).toFloat(),
 
                 hideJoinPartQuit = o.optBoolean("hideJoinPartQuit", false),
                 colorChannelEvents = o.optBoolean("colorChannelEvents", true),
@@ -344,7 +358,7 @@ class SettingsRepository(private val ctx: Context) {
                 welcomeCompleted = o.optBoolean("welcomeCompleted", false),
                 appLanguage = o.optString("appLanguage", "").takeIf { it.isNotBlank() },
                 portraitNicklistOverlay = o.optBoolean("portraitNicklistOverlay", true),
-                portraitNickPaneFrac = o.optDouble("portraitNickPaneFrac", 0.35).toFloat(),
+                portraitNickPaneFrac = o.optDouble("portraitNickPaneFrac", 0.20).toFloat(),
                 sendTypingIndicator = o.optBoolean("sendTypingIndicator", false),
                 receiveTypingIndicator = o.optBoolean("receiveTypingIndicator", true),
                 imagePreviewsEnabled = o.optBoolean("imagePreviewsEnabled", false),
@@ -376,6 +390,9 @@ class SettingsRepository(private val ctx: Context) {
         o.put("fontChoice", s.fontChoice.name)
         o.put("chatFontChoice", s.chatFontChoice.name)
         o.put("chatFontStyle", s.chatFontStyle.name)
+        o.put("chatLineSpacing", s.chatLineSpacing.toDouble())
+        o.put("chatFontLineHeight", s.chatFontLineHeight.toDouble())
+        o.put("nicklistFontOffset", s.nicklistFontOffset)
         o.put("customFontPath", s.customFontPath ?: "")
         o.put("customChatFontPath", s.customChatFontPath ?: "")
 

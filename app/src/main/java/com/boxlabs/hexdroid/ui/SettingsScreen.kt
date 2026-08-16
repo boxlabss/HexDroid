@@ -558,6 +558,78 @@ fun SettingsScreen(
                 }
             }
 
+            item {
+                // Gap between messages. Glyph size is the font-size slider above and the
+                // leading within a message is the control below, so all three are
+                // independent of each other.
+                val spacingSteps = listOf(
+                    0.0f to R.string.setting_line_spacing_tight,
+                    0.15f to R.string.setting_line_spacing_normal,
+                    0.45f to R.string.setting_line_spacing_relaxed,
+                )
+                SpacingStepRow(
+                    label = stringResource(R.string.setting_line_spacing_label),
+                    desc = stringResource(R.string.setting_line_spacing_desc),
+                    steps = spacingSteps,
+                    current = s.chatLineSpacing,
+                    onSelect = { value -> onUpdate { copy(chatLineSpacing = value) } },
+                )
+            }
+
+            item {
+                // Leading within one message. Applied with Trim.None in ChatScreen so the
+                // row pitch is identical across JetBrains Mono, Inter, Open Sans and any
+                // custom font, instead of following each font's own vertical metrics.
+                val lineHeightSteps = listOf(
+                    1.0f to R.string.setting_line_spacing_tight,
+                    1.15f to R.string.setting_line_spacing_normal,
+                    1.35f to R.string.setting_line_spacing_relaxed,
+                )
+                SpacingStepRow(
+                    label = stringResource(R.string.setting_font_line_height_label),
+                    desc = stringResource(R.string.setting_font_line_height_desc),
+                    steps = lineHeightSteps,
+                    current = s.chatFontLineHeight,
+                    onSelect = { value -> onUpdate { copy(chatFontLineHeight = value) } },
+                )
+            }
+
+            item {
+                // Offset, not an absolute size: the nicklist font is derived from the
+                // pane width so dragging it wider still enlarges the text. This shifts
+                // that whole ramp up or down.
+                Column(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.setting_nicklist_font_label),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = { onUpdate { copy(nicklistFontOffset = nicklistFontOffset - 1) } },
+                            enabled = s.nicklistFontOffset > -3,
+                            modifier = Modifier.widthIn(min = 40.dp)
+                        ) { Text("\u2212") }
+                        Text(
+                            if (s.nicklistFontOffset > 0) "+${s.nicklistFontOffset}" else "${s.nicklistFontOffset}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+                        OutlinedButton(
+                            onClick = { onUpdate { copy(nicklistFontOffset = nicklistFontOffset + 1) } },
+                            enabled = s.nicklistFontOffset < 4,
+                            modifier = Modifier.widthIn(min = 40.dp)
+                        ) { Text("+") }
+                    }
+                    Text(
+                        stringResource(R.string.setting_nicklist_font_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+            }
+
             item { HorizontalDivider() }
             item { SectionTitle(stringResource(R.string.section_media_previews)) }
 
@@ -1503,6 +1575,50 @@ private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIn
             DropdownMenuItem(text = { Text(stringResource(R.string.vibration_low)) }, onClick = { onPick(VibrateIntensity.LOW); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.vibration_medium)) }, onClick = { onPick(VibrateIntensity.MEDIUM); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.vibration_high)) }, onClick = { onPick(VibrateIntensity.HIGH); expanded = false })
+        }
+    }
+}
+
+/**
+ * Three-way Tight / Normal / Relaxed selector, shared by the chat line spacing and font
+ * line height settings. [steps] pairs each stored value with its label resource, and
+ * [current] is matched against those values with a tolerance so a float round-trip
+ * through JSON still highlights the right button.
+ */
+@Composable
+private fun SpacingStepRow(
+    label: String,
+    desc: String,
+    steps: List<Pair<Float, Int>>,
+    current: Float,
+    onSelect: (Float) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.titleSmall)
+        Text(
+            desc,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            steps.forEach { (value, labelRes) ->
+                val selected = kotlin.math.abs(current - value) < 0.02f
+                if (selected) {
+                    Button(
+                        onClick = { onSelect(value) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text(stringResource(labelRes), style = MaterialTheme.typography.labelLarge) }
+                } else {
+                    OutlinedButton(
+                        onClick = { onSelect(value) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text(stringResource(labelRes), style = MaterialTheme.typography.labelLarge) }
+                }
+            }
         }
     }
 }

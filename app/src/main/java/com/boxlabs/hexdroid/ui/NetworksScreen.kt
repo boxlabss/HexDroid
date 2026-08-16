@@ -23,13 +23,17 @@ import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
@@ -47,6 +51,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SnackbarDuration
@@ -63,6 +69,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
@@ -76,6 +83,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.BouncerKind
 import com.boxlabs.hexdroid.BouncerUpstreamInfo
@@ -83,6 +92,47 @@ import com.boxlabs.hexdroid.UiState
 import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.data.NetworkProfile
+
+/** Green status dot */
+private val CONNECTED_DOT = Color(0xFF4CAF50)
+
+/**
+ * Label plus a scaled-down Switch, for putting two toggles on one row.
+ */
+@Composable
+private fun CompactSwitch(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .focusHighlight(RoundedCornerShape(8.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(start = 4.dp)
+            .heightIn(min = 32.dp)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier
+                .graphicsLayer { scaleX = 0.8f; scaleY = 0.8f }
+        )
+    }
+}
 
 @Composable
 fun NetworksScreen(
@@ -162,11 +212,19 @@ fun NetworksScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onAdd,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier
                     .tourTarget(TourTarget.NETWORKS_ADD_FAB)
                     .focusHighlight(RoundedCornerShape(16.dp))
                     .then(if (sortedNetworks.isEmpty()) Modifier.tvInitialFocus() else Modifier)
-            ) { Text("+") }
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = stringResource(R.string.networks_add),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
@@ -201,6 +259,29 @@ fun NetworksScreen(
                 .padding(padding)
                 .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
+            if (sortedNetworks.isEmpty()) {
+                // Previously an empty screen with an unlabelled "+" in the corner.
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        stringResource(R.string.networks_empty_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.networks_empty_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -263,8 +344,8 @@ fun NetworksScreen(
                         onClick = { onSelect(n.id) }
                     ) {
                             Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 // Title row: name + favourite star + selected badge + drag handle
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -317,11 +398,47 @@ fun NetworksScreen(
                                             )
                                         }
                                     }
-                                    Text(
-                                        n.name,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    // Name and live status stacked in one block
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 6.dp)
+                                    ) {
+                                        Text(
+                                            n.name,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (isConnecting) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(10.dp),
+                                                    strokeWidth = 1.5.dp
+                                                )
+                                            } else {
+                                                Box(
+                                                    Modifier
+                                                        .size(8.dp)
+                                                        .background(
+                                                            color = if (isConn) CONNECTED_DOT
+                                                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                                            shape = RoundedCornerShape(50)
+                                                        )
+                                                )
+                                            }
+                                            Text(
+                                                status,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
                                     if (n.id == active) Badge { Text(stringResource(R.string.networks_selected)) }
 
                                     // Drag handle with long-press detection
@@ -388,78 +505,95 @@ fun NetworksScreen(
                                     }
                                 }
 
+                                // Host, TLS and nick on one muted line
                                 Text(
-                                    "${n.host}:${n.port}  •  TLS ${if (n.useTls) "on" else "off"}",
-                                    style = MaterialTheme.typography.bodySmall
+                                    "${n.host}:${n.port}  •  TLS ${if (n.useTls) "on" else "off"}  •  " +
+                                        "${n.nick}${n.altNick?.let { " / $it" } ?: ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                Text(
-                                    "Nick: ${n.nick}${n.altNick?.let { " (alt: $it)" } ?: ""}",
-                                    style = MaterialTheme.typography.bodySmall
+
+                                // One row per toggle
+                                CompactSwitch(
+                                    label = stringResource(R.string.networks_auto_connect),
+                                    checked = n.autoConnect,
+                                    onCheckedChange = { onSetAutoConnect(n.id, it) },
+                                    modifier = Modifier.fillMaxWidth()
                                 )
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        stringResource(R.string.networks_auto_connect),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Switch(
-                                        checked = n.autoConnect,
-                                        onCheckedChange = { onSetAutoConnect(n.id, it) },
-                                        modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp))
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        stringResource(R.string.network_show_in_switcher_label),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Switch(
-                                        checked = n.showInSidebar,
-                                        onCheckedChange = { onSetShowInSidebar(n.id, it) },
-                                        modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp))
-                                    )
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    if (isConnecting) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(18.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Text(if (isConn) "●" else "○")
-                                    }
-                                    Text(status, style = MaterialTheme.typography.bodySmall)
-                                }
+                                CompactSwitch(
+                                    label = stringResource(R.string.network_show_in_switcher_label),
+                                    checked = n.showInSidebar,
+                                    onCheckedChange = { onSetShowInSidebar(n.id, it) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
 
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    OutlinedButton(onClick = { onEdit(n.id) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.networks_edit)) }
-                                    OutlinedButton(onClick = { onDelete(n.id) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.delete)) }
-                                    Spacer(Modifier.weight(1f))
-
                                     val connectMod = (if (n.id == active) {
                                         Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON)
-                                    } else Modifier).focusHighlight(RoundedCornerShape(50))
+                                    } else Modifier)
+                                        .weight(1f)
+                                        .focusHighlight(RoundedCornerShape(50))
 
                                     if (isConn || isConnecting) {
-                                        Button(
+                                        FilledTonalButton(
                                             onClick = { onSelect(n.id); onDisconnect(n.id) },
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                             modifier = connectMod
-                                        ) { Text(stringResource(R.string.networks_disconnect)) }
+                                        ) {
+                                            Text(
+                                                stringResource(R.string.networks_disconnect),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
                                     } else {
                                         Button(
                                             onClick = { onSelect(n.id); onConnect(n.id) },
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                             modifier = connectMod
-                                        ) { Text(stringResource(R.string.networks_connect)) }
+                                        ) {
+                                            Text(
+                                                stringResource(R.string.networks_connect),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { onEdit(n.id) },
+                                        contentPadding = PaddingValues(0.dp),
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .focusHighlight(RoundedCornerShape(50))
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = stringResource(R.string.networks_edit),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onDelete(n.id) },
+                                        contentPadding = PaddingValues(0.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error
+                                        ),
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .focusHighlight(RoundedCornerShape(50))
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = stringResource(R.string.delete),
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
                                 }
                             }
@@ -504,14 +638,6 @@ fun NetworksScreen(
                             }
                         )
                     }
-            }
-
-            if (active != null) {
-                val c = state.connections[active]
-                val label = state.networks.firstOrNull { it.id == active }?.name ?: stringResource(R.string.networks_active_fallback)
-                val status = c?.status ?: state.status
-                Spacer(Modifier.height(8.dp))
-                Text("$label: $status", style = MaterialTheme.typography.bodySmall)
             }
         }
     }

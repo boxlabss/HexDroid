@@ -170,6 +170,8 @@
     <string name="networks_disconnect">Disconnect</string>
     <string name="networks_edit">Edit</string>
     <string name="networks_add">Add network</string>
+    <string name="networks_empty_title">No networks yet</string>
+    <string name="networks_empty_body">Add a network to get started. AfterNET is a good first stop if you are not sure.</string>
     <string name="networks_auto_connect">Auto-connect</string>
     <string name="network_edit_title">Edit network</string>
     <string name="network_add_title">Add network</string>
@@ -538,6 +540,15 @@
     <string name="setting_ui_font">UI font</string>
     <string name="setting_chat_font">Chat font</string>
     <string name="setting_font_size_label">Font size</string>
+    <string name="setting_line_spacing_label">Chat line spacing</string>
+    <string name="setting_line_spacing_desc">Space between one message and the next. Text size is unchanged.</string>
+    <string name="setting_font_line_height_label">Font line height</string>
+    <string name="setting_font_line_height_desc">Space between the wrapped lines within a single message. Text size is unchanged.</string>
+    <string name="setting_line_spacing_tight">Tight</string>
+    <string name="setting_line_spacing_normal">Normal</string>
+    <string name="setting_line_spacing_relaxed">Relaxed</string>
+    <string name="setting_nicklist_font_label">Nicklist text size</string>
+    <string name="setting_nicklist_font_desc">Adjusts the nicklist on top of its width. Widening the pane still enlarges the text.</string>
     <string name="setting_log_internal">Internal storage</string>
     <string name="setting_log_custom">Custom folder selected</string>
     <string name="setting_dcc_downloads_default">Downloads (default)</string>
@@ -661,11 +672,34 @@
     <string name="list_loading">Loading… (%1$d)</string>
     <string name="list_join_button">Join</string>
     <!-- AboutScreen -->
-    <string name="about_tagline">IRC Client for Android</string>
+    <string name="about_tagline">An IRC Client for Android</string>
     <string name="about_support_title">Documentation &amp; Support</string>
     <string name="about_support_desc">Visit the website for guides, FAQs, and to report issues.</string>
     <string name="about_credits_title">Contribs</string>
     <string name="about_credits_contribute">Want to contribute?</string>
+    <string name="about_doc_getting_started">Getting Started</string>
+    <string name="about_doc_getting_started_desc">Connect in three steps, then set up accounts and bouncers.</string>
+    <string name="about_doc_features">Features</string>
+    <string name="about_doc_features_desc">What HexDroid does and what it is like to use.</string>
+    <string name="about_doc_reference">Reference</string>
+    <string name="about_doc_reference_desc">Every IRCv3 capability and every setting, in full.</string>
+    <string name="about_doc_commands">Commands</string>
+    <string name="about_doc_commands_desc">All slash commands with syntax, examples and notes.</string>
+    <string name="about_doc_scripting">Scripting</string>
+    <string name="about_doc_scripting_desc">Write and load scripts to extend the client.</string>
+    <string name="about_doc_encryption">Encryption</string>
+    <string name="about_doc_encryption_desc">How end-to-end encrypted channels and queries work.</string>
+    <string name="about_doc_troubleshooting">Troubleshooting</string>
+    <string name="about_doc_troubleshooting_desc">Connection, TLS, notifications, DCC, and battery fixes.</string>
+    <string name="about_doc_changelog">Changelog</string>
+    <string name="about_doc_changelog_desc">Release notes, new features, bug fixes and security updates.</string>
+    <string name="about_help_title">Need help?</string>
+    <string name="about_join_support_channel">Join the support channel</string>
+    <string name="about_report_issue">Report an issue</string>
+    <string name="about_report_issue_desc">Bugs and feature requests on GitHub.</string>
+    <string name="about_privacy_policy">Privacy policy</string>
+    <string name="about_privacy_policy_desc">What the app stores, and what it never sends.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">Use SDCC (TLS encryption)</string>

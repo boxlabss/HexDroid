@@ -20,7 +20,6 @@ package com.boxlabs.hexdroid.ui
 
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -41,15 +40,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -61,6 +59,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -93,7 +92,6 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -102,13 +100,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.boxlabs.hexdroid.BuildConfig
 import com.boxlabs.hexdroid.R
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -116,6 +114,21 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 import android.graphics.Color as AColor
+
+/** Theme colour */
+private val SITE_BG = Color(0xFF0F1216)
+private val CARD_BG = Color(0xFF171B21)
+
+/** Keeps the column readable on tablets and in landscape instead of running edge to edge. */
+private val CONTENT_MAX_WIDTH = 420.dp
+
+/*
+ * Fixed links shared with hexdroid.org
+ *
+ */
+private const val SUPPORT_IRC_URL = "ircs://irc.afternet.org:6697/HexDroid"
+private const val SUPPORT_CHANNEL_LABEL = "#HexDroid on irc.afternet.org"
+private const val WEBSITE_LABEL = "hexdroid.org"
 
 /*
  *  CONTRIBUTORS
@@ -148,11 +161,9 @@ private val CREDITS: List<CreditGroup> = listOf(
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
-    val website = "https://hexdroid.boxlabs.uk"
+    val website = "https://hexdroid.org"
     val sourceUrl = "https://github.com/boxlabss/HexDroid"
     val scroll = rememberScrollState()
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     Scaffold(
         topBar = {
@@ -160,194 +171,159 @@ fun AboutScreen(onBack: () -> Unit) {
                 title = { Text(stringResource(R.string.about_title)) },
                 navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF111111)
+                    containerColor = SITE_BG
                 )
             )
         }
     ) { padding ->
-        if (isLandscape) {
-            // Landscape: side-by-side layout
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF111111))
-                    .padding(padding)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Flask on the left
-                FlaskHero(
-                    modifier = Modifier
-                        .weight(0.45f)
-                        .fillMaxHeight()
-                        .padding(vertical = 8.dp),
-                    logoSize = 100.dp,
-                    flaskSize = 90.dp
-                )
-
-                // Info on the right (scrollable)
-                Column(
-                    modifier = Modifier
-                        .weight(0.55f)
-                        .fillMaxHeight()
-                        .verticalScroll(scroll)
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    AboutContent(ctx, website, sourceUrl)
-                }
-            }
-        } else {
-            // Portrait: stacked layout (scrollable)
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF111111))
-                    .padding(padding)
-                    .verticalScroll(scroll)
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                FlaskHero(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(280.dp)
-                )
-
-                AboutContent(ctx, website, sourceUrl)
-            }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SITE_BG)
+                .padding(padding)
+                .verticalScroll(scroll)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            AboutContent(ctx, website, sourceUrl)
         }
     }
 }
 
 @Composable
-private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
-    // Cyan accent shared with the flask hero so the whole screen reads as one piece.
-    val accent = Color(0xFF00B4F4)
-
-    // Tagline with a soft white→cyan gradient fill.
-    Text(
-        text = stringResource(R.string.about_tagline),
-        textAlign = TextAlign.Center,
-        style = MaterialTheme.typography.headlineSmall.copy(
-            fontWeight = FontWeight.Bold,
-            brush = Brush.linearGradient(
-                listOf(Color.White, accent.copy(alpha = 0.85f))
-            )
-        )
-    )
-
-    // Version "pill".
+private fun AboutHeader(accent: Color) {
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(accent.copy(alpha = 0.12f))
-            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(50))
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-    ) {
-        Text(
-            "Version ${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = Color.White.copy(alpha = 0.9f)
-        )
-    }
-
-    // Glass support card: soft radial glow behind, gradient hairline border,
-    // an accent strip down the leading edge, and a gradient primary button.
-    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = 400.dp)
+            .widthIn(max = CONTENT_MAX_WIDTH),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .clip(RoundedCornerShape(24.dp))
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(accent.copy(alpha = 0.10f), Color.Transparent),
-                        radius = 600f
-                    )
-                )
+        Image(
+            painter = painterResource(R.drawable.hexdroid_logo),
+            contentDescription = stringResource(R.string.about_logo_desc),
+            modifier = Modifier.size(64.dp)
         )
-        Card(
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                stringResource(R.string.app_name),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+            )
+            Text(
+                stringResource(R.string.about_tagline),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.55f),
+            )
+            Text(
+                "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = accent.copy(alpha = 0.9f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxlabsSignature() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            "A free (and ad-free) app by",
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White.copy(alpha = 0.4f),
+        )
+        FlaskHero(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        listOf(accent.copy(alpha = 0.45f), Color.White.copy(alpha = 0.06f))
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                ),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
-        ) {
-            Row(Modifier.height(IntrinsicSize.Min)) {
-                Box(
-                    Modifier
-                        .width(4.dp)
-                        .fillMaxHeight()
-                        .background(
-                            Brush.verticalGradient(listOf(accent, accent.copy(alpha = 0.25f)))
-                        )
-                )
-                Column(
-                    Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        stringResource(R.string.about_support_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                    Text(
-                        stringResource(R.string.about_support_desc),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(accent, hueRotate(accent, -18f))
-                                )
-                            )
-                            .focusHighlight()
-                            .clickable {
-                                runCatching {
-                                    ctx.startActivity(
-                                        Intent(Intent.ACTION_VIEW, website.toUri())
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            stringResource(R.string.about_open_website),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF06121A)
-                        )
-                    }
-                }
-            }
+                .height(104.dp),
+            logoSize = null,
+            flaskSize = 76.dp,
+        )
+    }
+}
+
+@Composable
+private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
+    // Cyan accent, used only for links, the version line and the flask
+    val accent = Color(0xFF00B4F4)
+
+    AboutHeader(accent)
+
+    // Documentation
+    AboutCard(accent, stringResource(R.string.about_support_title)) {
+        Text(
+            stringResource(R.string.about_support_desc),
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.7f)
+        )
+        PrimaryButton(
+            label = stringResource(R.string.about_open_website),
+            accent = accent,
+        ) { openUrl(ctx, website) }
+
+        val docs = listOf(
+            Triple(R.string.about_doc_getting_started, R.string.about_doc_getting_started_desc, "$website/getting-started"),
+            Triple(R.string.about_doc_features, R.string.about_doc_features_desc, "$website/features"),
+            Triple(R.string.about_doc_reference, R.string.about_doc_reference_desc, "$website/reference"),
+            Triple(R.string.about_doc_commands, R.string.about_doc_commands_desc, "$website/commands"),
+            Triple(R.string.about_doc_scripting, R.string.about_doc_scripting_desc, "$website/scripting"),
+            Triple(R.string.about_doc_encryption, R.string.about_doc_encryption_desc, "$website/encryption"),
+            Triple(R.string.about_doc_troubleshooting, R.string.about_doc_troubleshooting_desc, "$website/troubleshooting"),
+            Triple(R.string.about_doc_changelog, R.string.about_doc_changelog_desc, "$sourceUrl/blob/main/CHANGELOG.md"),
+        )
+        docs.forEach { (titleRes, descRes, url) ->
+            HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+            LinkRow(
+                title = stringResource(titleRes),
+                subtitle = stringResource(descRes),
+                accent = accent,
+            ) { openUrl(ctx, url) }
         }
+    }
+
+    // Support
+    AboutCard(accent, stringResource(R.string.about_help_title)) {
+        PrimaryButton(
+            label = stringResource(R.string.about_join_support_channel),
+            accent = accent,
+        ) { openUrl(ctx, SUPPORT_IRC_URL) }
+        Text(
+            SUPPORT_CHANNEL_LABEL,
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White.copy(alpha = 0.45f),
+        )
+        HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+        LinkRow(
+            title = stringResource(R.string.about_report_issue),
+            subtitle = stringResource(R.string.about_report_issue_desc),
+            accent = accent,
+        ) { openUrl(ctx, "$sourceUrl/issues") }
+        HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+        LinkRow(
+            title = stringResource(R.string.about_privacy_policy),
+            subtitle = stringResource(R.string.about_privacy_policy_desc),
+            accent = accent,
+        ) { openUrl(ctx, "$website/privacy") }
     }
 
     CreditsCard(ctx, accent, sourceUrl)
 
     Spacer(Modifier.height(2.dp))
 
+    // Footer
+    Text(
+        stringResource(R.string.about_footer_stack),
+        style = MaterialTheme.typography.bodySmall,
+        color = Color.White.copy(alpha = 0.45f),
+        textAlign = TextAlign.Center,
+    )
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -356,27 +332,148 @@ private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
             "GPLv3",
             style = MaterialTheme.typography.bodySmall,
             color = Color.White.copy(alpha = 0.45f),
-            textAlign = TextAlign.Center
         )
-        Text(
-            "·",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.3f)
-        )
+        Text("·", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.3f))
         Text(
             "GitHub",
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             color = accent.copy(alpha = 0.85f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.focusHighlight().clickable {
-                runCatching {
-                    ctx.startActivity(
-                        Intent(Intent.ACTION_VIEW, sourceUrl.toUri())
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }
+            modifier = Modifier.focusHighlight().clickable { openUrl(ctx, sourceUrl) }
+        )
+        Text("·", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.3f))
+        Text(
+            WEBSITE_LABEL,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = accent.copy(alpha = 0.85f),
+            modifier = Modifier.focusHighlight().clickable { openUrl(ctx, website) }
+        )
+    }
+    Spacer(Modifier.height(4.dp))
+
+    BoxlabsSignature()
+}
+
+/** ACTION_VIEW in a new task, swallowing the "no activity found" case. */
+private fun openUrl(ctx: Context, url: String) {
+    runCatching {
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+/**
+ * Section container.
+ */
+@Composable
+private fun AboutCard(
+    accent: Color,
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = CONTENT_MAX_WIDTH)
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(18.dp)),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = CARD_BG)
+    ) {
+        Column(
+            Modifier
+                .padding(18.dp)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Leadinng dot
+                Box(
+                    Modifier
+                        .width(4.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(accent.copy(alpha = 0.8f))
+                )
+                Text(
+                    title.uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.sp,
+                    color = Color.White.copy(alpha = 0.62f),
+                    modifier = Modifier.padding(start = 8.dp)
+                )
             }
+            content()
+        }
+    }
+}
+
+/**
+ * Flat accent-tinted action
+ */
+@Composable
+private fun PrimaryButton(
+    label: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.12f))
+            .border(1.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(12.dp))
+            .focusHighlight(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = accent,
+        )
+    }
+}
+
+/** Title + description row */
+@Composable
+private fun LinkRow(
+    title: String,
+    subtitle: String,
+    accent: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .focusHighlight(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.92f)
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.5f)
+            )
+        }
+        Text(
+            "›",
+            style = MaterialTheme.typography.titleMedium,
+            color = accent.copy(alpha = 0.7f),
+            modifier = Modifier.padding(start = 8.dp)
         )
     }
 }
@@ -386,82 +483,31 @@ private fun AboutContent(ctx: Context, website: String, sourceUrl: String) {
 private fun CreditsCard(ctx: Context, accent: Color, repoUrl: String) {
     val groups = remember { CREDITS.filter { it.members.isNotEmpty() } }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = 400.dp)
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        listOf(accent.copy(alpha = 0.45f), Color.White.copy(alpha = 0.06f))
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                ),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
-        ) {
-            Row(Modifier.height(IntrinsicSize.Min)) {
-                Box(
-                    Modifier
-                        .width(4.dp)
-                        .fillMaxHeight()
-                        .background(
-                            Brush.verticalGradient(listOf(accent, accent.copy(alpha = 0.25f)))
-                        )
+    AboutCard(accent, stringResource(R.string.about_credits_title)) {
+        groups.forEach { group ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    group.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.5f)
                 )
-                Column(
-                    Modifier
-                        .padding(20.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        stringResource(R.string.about_credits_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-
-                    // Each non-empty group: an accent label + a wrapping flow of name chips,
-                    // so any number of contributors stays tidy and never overflows.
-                    groups.forEach { group ->
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                group.title.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = accent.copy(alpha = 0.85f)
-                            )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                group.members.forEach { CreditChip(ctx, it, accent) }
-                            }
-                        }
-                    }
-
-                    Text(
-                        stringResource(R.string.about_credits_contribute),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                        color = accent.copy(alpha = 0.85f),
-                        modifier = Modifier.focusHighlight().clickable {
-                            runCatching {
-                                ctx.startActivity(
-                                    Intent(Intent.ACTION_VIEW, repoUrl.toUri())
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            }
-                        }
-                    )
+                    group.members.forEach { CreditChip(ctx, it, accent) }
                 }
             }
         }
+
+        Text(
+            stringResource(R.string.about_credits_contribute),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = accent.copy(alpha = 0.85f),
+            modifier = Modifier.focusHighlight().clickable { openUrl(ctx, repoUrl) }
+        )
     }
 }
 
@@ -472,8 +518,12 @@ private fun CreditChip(ctx: Context, credit: Credit, accent: Color) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .background(accent.copy(alpha = 0.10f))
-            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(50))
+            .background(if (hasLink) accent.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.05f))
+            .border(
+                1.dp,
+                if (hasLink) accent.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.10f),
+                RoundedCornerShape(50)
+            )
             .then(
                 if (hasLink) Modifier.focusHighlight(RoundedCornerShape(50)).clickable {
                     runCatching {
@@ -508,7 +558,8 @@ private fun CreditChip(ctx: Context, credit: Credit, accent: Color) {
 @Composable
 private fun FlaskHero(
     modifier: Modifier = Modifier,
-    logoSize: Dp = 140.dp,
+    /** Null draws the flask on its own, for use as a signature rather than a hero. */
+    logoSize: Dp? = 140.dp,
     flaskSize: Dp = 110.dp,
 ) {
     val ctx = LocalContext.current
@@ -591,7 +642,8 @@ private fun FlaskHero(
         val wPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val hPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
 
-        val logoSizePx = with(density) { logoSize.toPx() }
+        val hasLogo = logoSize != null
+        val logoSizePx = with(density) { (logoSize ?: 0.dp).toPx() }
         val flaskSizePx = with(density) { flaskSize.toPx() }
         val topPad = with(density) { 8.dp.toPx() }
         val bottomPad = with(density) { 8.dp.toPx() }
@@ -715,7 +767,9 @@ private fun FlaskHero(
 
                         // Respawn conditions
                         val distToLogo = sqrt((b.x - logoCenter.x).pow(2) + (b.y - logoCenter.y).pow(2))
-                        if (distToLogo < logoSizePx * 0.25f || b.y < -50f || b.y > hPx + 50f) {
+                        val absorbedByLogo = hasLogo && distToLogo < logoSizePx * 0.25f
+                        val escapedTop = !hasLogo && b.y < 0f
+                        if (absorbedByLogo || escapedTop || b.y < -50f || b.y > hPx + 50f) {
                             resetBubble(b)
                         }
                     }
@@ -746,6 +800,13 @@ private fun FlaskHero(
 
             // Calculate bubble alpha based on distance to logo
             fun bubbleAlpha(center: Offset, baseAlpha: Float): Float {
+                // No logo to fade against, so bubbles simply thin out as they near the
+                // top of the box. Guards the divide below, which is zero-width at
+                // logoSizePx == 0.
+                if (!hasLogo) {
+                    val topFade = (center.y / (hPx * 0.45f)).coerceIn(0f, 1f)
+                    return baseAlpha * topFade
+                }
                 val distToLogo = sqrt((center.x - logoCenter.x).pow(2) + (center.y - logoCenter.y).pow(2))
                 val fadeStart = logoSizePx * 0.7f
                 val fadeEnd = logoSizePx * 0.3f
@@ -806,43 +867,24 @@ private fun FlaskHero(
                 )
             }
 
-            // Subtle glow/mist between flask and logo
-            val mistBrush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    accent.copy(alpha = 0.04f),
-                    accent.copy(alpha = 0.02f),
-                    Color.Transparent
-                ),
-                startY = logoRect.bottom,
-                endY = flaskRect.top
-            )
-            drawRect(
-                brush = mistBrush,
-                topLeft = Offset(0f, logoRect.bottom),
-                size = androidx.compose.ui.geometry.Size(wPx, max(0f, flaskRect.top - logoRect.bottom))
-            )
+            // The mist gradient that used to fill the gap between logo and flask is gone.
+            // It was a full-width rect, so it was never bounded by the flask it was meant
+            // to be rising from, and with the mark now sitting in the flask there is
+            // nothing above it for the haze to sell.
         }
 
-        // Logo overlay
+        // Logo overlay. The byline moved out to the caller so the flask can stand alone.
         Box(modifier = Modifier.fillMaxSize()) {
-            Image(
-                painter = painterResource(R.drawable.hexdroid_logo),
-                contentDescription = stringResource(R.string.about_logo_desc),
-                modifier = Modifier
-                    .size(logoSize)
-                    .align(Alignment.TopCenter)
-                    .padding(top = 2.dp)
-            )
-            Text(
-                "HexDroid - A free (and ad-free) app by",
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = flaskSize + 8.dp),
-                style = MaterialTheme.typography.titleSmall,
-                color = Color.White.copy(alpha = 0.85f),
-                fontWeight = FontWeight.Medium
-            )
+            if (logoSize != null) {
+                Image(
+                    painter = painterResource(R.drawable.hexdroid_logo),
+                    contentDescription = stringResource(R.string.about_logo_desc),
+                    modifier = Modifier
+                        .size(logoSize)
+                        .align(Alignment.TopCenter)
+                        .padding(top = 2.dp)
+                )
+            }
 
             ImprovedFlask(
                 modifier = Modifier

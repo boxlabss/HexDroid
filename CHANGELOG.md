@@ -1,13 +1,15 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
-## [TBA]
-Fix CAP NAK sending CAP END without checking saslInProgress
-Fix SCRAM-SHA-256 skipping SASLprep/PRECIS on the password
-Fix casemapping for channels like #foo[bar]
-Implement send side draft/multiline, with "show more" for large paragraphs
-Include a new start on reboot option for "Keep connection alive"
-Include an option to add raw logging for debugging. Keeps credentials removed.
+## [1.7.2] - 2026-08-16
+- **Fix CAP NAK sending CAP END without checking saslInProgress**
+- **Fix SCRAM-SHA-256 skipping SASLprep/PRECIS on the password**
+- **Fix casemapping for channels like #foo[bar]**
+- **Implement send side draft/multiline, with "show more" for large paragraphs**
+- **Include a new reconnect on reboot option for "Keep the connection alive"**
+- **Include an option to add raw logging for debugging. Keeps credentials removed.**
+- **Include options to change chat spacing and font line height.**
+- **Fix bug with channel op UI mode selector. Some UI improvements.**
 
 ## [1.7.1] - 2026-08-06
 - **Fix Android TV banner**

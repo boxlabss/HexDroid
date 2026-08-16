@@ -573,7 +573,17 @@ sealed class IrcEvent {
     data class JoinError(val channel: String, val message: String, val code: String) : IrcEvent()
 
     // Channel modes as reported by RPL_CHANNELMODEIS (324)
-    data class ChannelModeIs(val channel: String, val modes: String, val code: String = "324") : IrcEvent()
+    /**
+     * RPL_CHANNELMODEIS. [modes] keeps its parameters ("+ntl 59"). [silent] is set when the
+     * query came from the UI rather than the user, in which case the modes are stored but
+     * no line is printed.
+     */
+    data class ChannelModeIs(
+        val channel: String,
+        val modes: String,
+        val code: String = "324",
+        val silent: Boolean = false,
+    ) : IrcEvent()
 
     // Channel ban list entry (RPL_BANLIST / 367)
     data class BanListItem(
@@ -761,7 +771,18 @@ data class Notice(
         val realname: String? = null
     ) : IrcEvent()
     data class Parted(val channel: String, val nick: String, val userHost: String? = null, val reason: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
-    data class Quit(val nick: String, val userHost: String? = null, val reason: String?, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
+    /**
+     * [historyChannel] is set only for a QUIT replayed inside a CHATHISTORY batch, naming the
+     * channel that batch was for.
+     */
+    data class Quit(
+        val nick: String,
+        val userHost: String? = null,
+        val reason: String?,
+        val timeMs: Long? = null,
+        val isHistory: Boolean = false,
+        val historyChannel: String? = null,
+    ) : IrcEvent()
 
     data class Kicked(
         val channel: String,
@@ -1177,6 +1198,9 @@ internal fun redactRawLine(line: String): String {
     }
 }
 
+/** How long a UI-issued MODE query stays marked silent, for servers that omit 329. */
+private const val SILENT_MODE_QUERY_TTL_MS = 15_000L
+
 /** Split [text] into pieces of at most [maxBytes] UTF-8 bytes, never mid-codepoint. */
 internal fun splitByUtf8Bytes(text: String, maxBytes: Int): List<String> {
     val bytes = text.toByteArray(Charsets.UTF_8)
@@ -1431,13 +1455,41 @@ class IrcClient(val config: IrcConfig) {
     internal fun trPlural(id: Int, quantity: Int, vararg args: Any?): String =
         plurals?.invoke(id, quantity, args) ?: ""
     /**
-     * Raw protocol logging. Off by default and flipped at runtime by the user.
+     * Raw protocol logging. Off by default and flipped at runtime by the user, so the
+     * hot path costs one volatile read per line when it is off.
      */
     @Volatile var rawLogEnabled = false
 
 
     /** Latched when the server refuses nick changes outright (Ergo strict nick-reservation). */
     @Volatile private var nickChangeRefused = false
+    /**
+     * Channels whose pending MODE query was issued by the UI rather than typed by the user.
+     */
+    private val silentModeQueries = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Mark the next MODE reply for [channel] as UI-driven, so nothing about it is printed. */
+    fun markSilentModeQuery(channel: String) {
+        silentModeQueries[casefold(channel)] = System.currentTimeMillis() + SILENT_MODE_QUERY_TTL_MS
+    }
+
+    /**
+     * A MODE query is answered by 324 AND 329, so the marker must survive the first of the
+     * pair: [consume] is false for 324 and true for 329, which terminates the exchange.
+     * The TTL covers servers that never send 329, so a marker can't leak into a later
+     * user-typed /mode.
+     */
+    private fun isSilentModeQuery(channel: String, consume: Boolean): Boolean {
+        val fold = casefold(channel)
+        val expiry = silentModeQueries[fold] ?: return false
+        if (System.currentTimeMillis() > expiry) {
+            silentModeQueries.remove(fold)
+            return false
+        }
+        if (consume) silentModeQueries.remove(fold)
+        return true
+    }
+
     private val parser = IrcParser()
     /**
      * One atomic unit of outbound traffic: the writer emits every line back-to-back with
@@ -1932,6 +1984,18 @@ class IrcClient(val config: IrcConfig) {
 
     /** Open IRCv3 znc.in/playback batch IDs — messages tagged with these are historical. */
     private val openPlaybackBatches = mutableSetOf<String>()
+
+    /**
+     * Target channel of each open playback batch. A replayed QUIT carries no channel of its
+     * own (QUIT never does), and the live path infers the affected channels from the current
+     * nicklist, which is meaningless for someone who left before the replay. The CHATHISTORY
+     * batch it arrives in names the channel, so record it and hand it to the event.
+     */
+    private val playbackBatchTargets = mutableMapOf<String, String>()
+
+    /** Channel of the innermost open playback batch this message belongs to, if any. */
+    private fun playbackChannelFor(tags: Map<String, String?>): String? =
+        tags["batch"]?.let { playbackBatchTargets[it] }
 
     /** Open netsplit/netjoin batch IDs → "netsplit" / "netjoin". */
     private val openNetsplitBatches = mutableMapOf<String, String>()
@@ -2933,7 +2997,7 @@ class IrcClient(val config: IrcConfig) {
 						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
 							?.takeIf { it.isNotBlank() }
 						val reason = msg.trailing
-						send(IrcEvent.Quit(nick = nick, userHost = userHost, reason = reason, timeMs = serverTimeMs, isHistory = playbackHistory))
+						send(IrcEvent.Quit(nick = nick, userHost = userHost, reason = reason, timeMs = serverTimeMs, isHistory = playbackHistory, historyChannel = playbackChannelFor(msg.tags)))
 					}
 
 
@@ -4724,6 +4788,7 @@ class IrcClient(val config: IrcConfig) {
         historyExpectUntil.clear()
         zncLastSeen.clear()
         openPlaybackBatches.clear()
+        playbackBatchTargets.clear()
         openNetsplitBatches.clear()
         netsplitBuffer.clear()
         monitorListBuffer.clear()
@@ -5079,7 +5144,12 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         // RPL_CHANNELMODEIS: <me> <#chan> <modes> [mode params...]
         val chan = msg.params.getOrNull(1) ?: return@handler
         val modes = (msg.params.drop(2) + listOfNotNull(msg.trailing)).joinToString(" ").trim()
-        if (modes.isNotBlank()) send(IrcEvent.ChannelModeIs(chan, modes, code = msg.command))
+        if (modes.isNotBlank()) {
+            send(IrcEvent.ChannelModeIs(
+                chan, modes, code = msg.command,
+                silent = isSilentModeQuery(chan, consume = false),
+            ))
+        }
     },
     "900" to handler@{ msg, _, _, _ ->
         // RPL_LOGGEDIN: <nick> <mask> <account> :You are now logged in as <account>.
@@ -5487,6 +5557,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 							type.contains("playback", ignoreCase = true)
 						) {
 							openPlaybackBatches.add(id)
+							msg.allParams.getOrNull(2)?.takeIf { isChannelName(it) }
+								?.let { playbackBatchTargets[id] = it }
 						}
 						// Batches nest, and playback-ness is inherited. A multiline message
 						// replayed through CHATHISTORY arrives as BATCH +inner draft/multiline
@@ -5496,6 +5568,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val parentBatch = msg.tags["batch"]
 						if (parentBatch != null && openPlaybackBatches.contains(parentBatch)) {
 							openPlaybackBatches.add(id)
+							playbackBatchTargets[parentBatch]?.let { playbackBatchTargets[id] = it }
 						}
 						// netsplit/netjoin: track so we can collapse the JOIN/QUIT flood.
 						if (type.equals("netsplit", ignoreCase = true) || type.equals("netjoin", ignoreCase = true)) {
@@ -5529,6 +5602,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					} else if (idToken.startsWith("-")) {
 						val id = idToken.drop(1)
 						openPlaybackBatches.remove(id)
+						playbackBatchTargets.remove(id)
 						// Flush a closing multiline batch as a single ChatMessage / Notice
 						// event with the joined body. Per spec: lines without
 						// +draft/multiline-concat get a "\n" separator; lines WITH it get
@@ -5616,7 +5690,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				val isHistory = playbackHistory || isHeuristicHistory(null, serverTimeMs, nowMs) // Target will be set per-event
 
 				// server numerics (MOTD/WHOIS/errors/etc)
-				val numericText = formatNumeric(msg)
+				var numericText = formatNumeric(msg)
 
 				// 464 ERR_PASSWDMISMATCH: server-PASS rejected. Emit a typed AuthFailed
 				// event so the viewmodel can halt auto-reconnect — without this, the
@@ -5665,14 +5739,30 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					"728","729", // +q (quiet) list
 					"471","472","473","474","475","476","477"
 				)
+				// 329 RPL_CREATIONTIME follows every MODE <channel> query, including the one the
+				// channel-ops drawer fires on open. Drop it for those, and otherwise route it to
+				// the channel it describes rather than the status buffer.
+				var modeNumericBuffer: String? = null
+				if (msg.command == "329" || msg.command == "324") {
+					val chan = msg.allParams.getOrNull(1)
+					if (chan != null) {
+						// 329 is the last of the pair, so only it clears the marker.
+						if (isSilentModeQuery(chan, consume = msg.command == "329")) {
+							numericText = null
+						} else {
+							modeNumericBuffer = chan
+						}
+					}
+				}
 				if (numericText != null && msg.command !in specialNumericCodes) {
-					send(IrcEvent.ServerText(numericText, code = msg.command, bufferName = whoisTargetBuffer))
+					send(IrcEvent.ServerText(numericText, code = msg.command, bufferName = modeNumericBuffer ?: whoisTargetBuffer))
 				} else if (msg.command.length == 3 && msg.command.all { it.isDigit() }
 					&& msg.command !in setOf(
 						"001",
 						"315",
 						"321","322","323",
-						"324",
+						// 324/329 are the MODE-query pair.
+						"324","329",
 						"332","333",
 						"353","354","366",
 						"367","368",

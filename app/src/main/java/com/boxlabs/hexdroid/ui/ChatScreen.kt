@@ -131,6 +131,7 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Badge
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -200,10 +201,13 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -213,6 +217,7 @@ import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -226,6 +231,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -1125,6 +1131,8 @@ fun ChatScreen(
     onIgnoreNotifications: (String, String) -> Unit,
     onUnignoreNotifications: (String, String) -> Unit,
     onRefreshNicklist: () -> Unit,
+    /** Silent MODE refresh for the ops drawer; does not echo numerics to any buffer. */
+    onRefreshChannelModes: () -> Unit,
     /** Called when user taps "DCC Send File" in nick actions. Opens file picker then calls /dcc send. */
     onDccSendFile: ((targetNick: String) -> Unit)? = null,
     /** Called when user taps "DCC Chat" in nick actions. */
@@ -2253,14 +2261,18 @@ fun ChatScreen(
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun NicklistContent(mod: Modifier = Modifier, nickPaneDp: Dp = Dp.Unspecified) {
-        // Font size is simply paneWidth / 9, clamped to 10–18 sp.
-        // This gives a strong, proportional change across the full drag range:
-        //   70 dp  → 10 sp (portrait narrow)
-        //  130 dp  → 14 sp (landscape min)
-        //  180 dp  → 16 sp
-        //  280 dp  → 18 sp (landscape max)
-        val nickFontSp = if (nickPaneDp == Dp.Unspecified) 14f
-                         else (nickPaneDp.value / 9f).coerceIn(10f, 18f)
+        // Linear ramp from 10 sp at the narrowest pane (70 dp) to 20 sp at the widest (280 dp)
+        //   70 dp  → 10.0 sp (portrait narrowest)
+        //  110 dp  → 11.9 sp (landscape min)
+        //  180 dp  → 15.2 sp
+        //  280 dp  → 20.0 sp (landscape max)
+        // The user offset shifts the whole ramp rather than replacing it, so widening
+        // the pane still enlarges the text at any offset.
+        val nickFontOffset = state.settings.nicklistFontOffset.coerceIn(-3, 4).toFloat()
+        val nickFontSp = (
+            if (nickPaneDp == Dp.Unspecified) 14f
+            else (10f + (nickPaneDp.value - 70f) * (10f / 210f)).coerceIn(10f, 20f)
+        ).plus(nickFontOffset).coerceAtLeast(8f)
         Column(mod.padding(horizontal = 6.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Text(
                 text = pluralStringResource(R.plurals.chat_nicklist_users, nicklist.size, nicklist.size),
@@ -2303,11 +2315,18 @@ fun ChatScreen(
                                 onClick = { openNickActions(n) },
                                 onLongClick = { openNickActions(n) },
                             )
-                            .padding(vertical = 2.dp)
+                            // Scales with the nick font. A fixed 2.dp looked proportionally
+                            // huge once the font shrank to its 10sp minimum.
+                            .padding(vertical = (nickFontSp * 0.08f).dp)
                     ) {
                         // draft/metadata-2 avatar: a small circle before the nick that scales
                         // with the nick font, so it grows when the member pane is widened.
                         // Gated by the metadataAvatars map (previews on, https, unproxied).
+                        // A row without an avatar reserves the same width when ANY nick in
+                        // the channel has one, so the nicks stay left-aligned with each other
+                        // instead of stepping in and out as avatars load.
+                        val avatarSize = (nickFontSp + 4f).dp
+                        val avatarGap = (nickFontSp * 0.3f).dp
                         if (nickAvatar != null) {
                             var avatarBmp by remember(nickAvatar) { mutableStateOf(RemoteImage.cached(nickAvatar)) }
                             LaunchedEffect(nickAvatar) { if (avatarBmp == null) avatarBmp = RemoteImage.fetch(nickAvatar) }
@@ -2317,12 +2336,14 @@ fun ChatScreen(
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
-                                        .padding(end = 5.dp)
-                                        .size((nickFontSp + 4f).dp)
+                                        .padding(end = avatarGap)
+                                        .size(avatarSize)
                                         .clip(CircleShape)
                                         .alpha(if (isAway) 0.6f else 1f),
                                 )
-                            }
+                            } ?: Spacer(Modifier.width(avatarSize + avatarGap))
+                        } else if (metadataAvatars.isNotEmpty()) {
+                            Spacer(Modifier.width(avatarSize + avatarGap))
                         }
                         Text(
                             n,
@@ -2332,6 +2353,7 @@ fun ChatScreen(
                                     ?: NickColors.colorForNick(cleaned.lowercase(), bgLum)
                             else Color.Unspecified,
                             fontSize = nickFontSp.sp,
+                            lineHeight = (nickFontSp * 1.15f).sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             // Fade an away nick a touch further, on top of the row tint.
@@ -2344,6 +2366,9 @@ fun ChatScreen(
                                 " ($nickDisplayName)",
                                 color = Color.Gray,
                                 fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp,
+                                // Same reason as the nick above: an unset lineHeight here
+                                // would set the row's height on its own.
+                                lineHeight = ((nickFontSp - 2f).coerceAtLeast(8f) * 1.15f).sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -2631,6 +2656,8 @@ fun ChatScreen(
     val density = LocalDensity.current
 
     val uriHandler = LocalUriHandler.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val (baseWeight, baseStyle) = when (state.settings.chatFontStyle) {
         ChatFontStyle.REGULAR -> FontWeight.Normal to FontStyle.Normal
         ChatFontStyle.BOLD -> FontWeight.Bold to FontStyle.Normal
@@ -2641,8 +2668,23 @@ fun ChatScreen(
     val chatTextStyle = MaterialTheme.typography.bodyMedium.copy(
         fontFamily = fontFamilyForChoice(state.settings.chatFontChoice, state.settings.customChatFontPath),
         fontWeight = baseWeight,
-        fontStyle = baseStyle
+        fontStyle = baseStyle,
+        // Font line height: the leading between the wrapped lines of ONE message.
+        lineHeight = MaterialTheme.typography.bodyMedium.fontSize *
+            state.settings.chatFontLineHeight.coerceIn(0.9f, 2.0f),
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+        lineHeightStyle = LineHeightStyle(
+            alignment = LineHeightStyle.Alignment.Center,
+            trim = LineHeightStyle.Trim.None,
+        ),
     )
+
+    // Chat line spacing: the gap between one message and the next, and nothing else.
+    // Stored as a fraction of the font size so the steps scale with the font size slider.
+    val chatItemGap = with(density) {
+        MaterialTheme.typography.bodyMedium.fontSize.toDp() *
+            state.settings.chatLineSpacing.coerceIn(0f, 1.5f)
+    }
 
     val linkStyle = SpanStyle(
         color = MaterialTheme.colorScheme.primary,
@@ -2666,6 +2708,12 @@ fun ChatScreen(
     }
 
     val topBarTitle = if (selBufName == "*server*") selNetName else "$selNetName:$selBufName"
+
+    // Show the channel's modes next to the name. Rendered
+    // as a subtitle under the title rather than appended to it.
+    val topBarSubtitle = if (isChannel && selBufName != "*server*") {
+        state.buffers[selected]?.modeDisplay?.takeIf { it.isNotBlank() }
+    } else null
 
     val topBar: @Composable () -> Unit = {
         val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -2734,13 +2782,26 @@ fun ChatScreen(
                         ) { Text("☰") }
                     }
 
-                    Text(
-                        text = topBarTitle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = titleStyle,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = topBarTitle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // Line height tightened to its own font size: the default leading
+                            // would push the two-line stack past the fixed bar height at
+                            // larger system font scales.
+                            style = titleStyle.copy(lineHeight = titleStyle.fontSize * 1.1f),
+                        )
+                        if (topBarSubtitle != null) {
+                            Text(
+                                text = "Modes: $topBarSubtitle",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelSmall.copy(lineHeight = 12.sp),
+                                color = LocalContentColor.current.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
 
                     // Colour/formatting picker button. No background: the sweep gradient
                     // is painted onto the FormatColorText glyph itself (SrcAtop over an
@@ -2896,16 +2957,81 @@ fun ChatScreen(
                             expanded = overflowExpanded,
                             onDismissRequest = { overflowExpanded = false }
                         ) {
-                            // Compact menu
+                            // The menu
+                            data class MenuEntry(
+                                val label: String,
+                                val enabled: Boolean = true,
+                                val onClick: () -> Unit,
+                            )
+
+                            val entries = buildList {
+                                add(MenuEntry(stringResource(R.string.menu_channel_list)) { overflowExpanded = false; onOpenList() })
+                                add(MenuEntry(stringResource(R.string.menu_file_transfers)) { overflowExpanded = false; onOpenTransfers() })
+                                // Encryption is only meaningful for channel/query buffers, not the
+                                // *server*/*status* tab. selNetId can be blank if no networks exist
+                                // yet; viewModel can be null in preview/test.
+                                if (viewModel != null &&
+                                    selNetId.isNotBlank() &&
+                                    selBufName.isNotBlank() &&
+                                    selBufName != "*server*" &&
+                                    selBufName != "*status*"
+                                ) {
+                                    add(MenuEntry("Secure Chat") { overflowExpanded = false; showEncryptionDialog = true })
+                                }
+                                // draft/metadata-2 editor and draft/account-registration dialog,
+                                // shown only when the connected server negotiated the cap.
+                                if (viewModel != null && selNetId.isNotBlank() &&
+                                    viewModel.serverSupportsMetadata(selNetId)) {
+                                    add(MenuEntry(stringResource(R.string.menu_edit_metadata)) {
+                                        overflowExpanded = false; showMetadataEditor = true
+                                    })
+                                }
+                                if (viewModel != null && selNetId.isNotBlank() &&
+                                    viewModel.serverSupportsAccountReg(selNetId) &&
+                                    state.connections[selNetId]?.myAccount == null) {
+                                    add(MenuEntry(stringResource(R.string.menu_register_account)) {
+                                        overflowExpanded = false; showRegistration = true
+                                    })
+                                }
+                                add(MenuEntry(stringResource(R.string.menu_settings)) { overflowExpanded = false; onOpenSettings() })
+                                add(MenuEntry("Scripts") { overflowExpanded = false; onOpenScripts() })
+                                add(MenuEntry(stringResource(R.string.menu_networks)) { overflowExpanded = false; onOpenNetworks() })
+                                if (isIrcOper) {
+                                    add(MenuEntry(stringResource(R.string.menu_ircop_tools)) { overflowExpanded = false; showIrcOpTools = true })
+                                }
+                                add(MenuEntry(stringResource(R.string.menu_about)) { overflowExpanded = false; onAbout() })
+                                add(MenuEntry(
+                                    stringResource(R.string.menu_reconnect),
+                                    enabled = state.networks.isNotEmpty() && !state.connecting
+                                ) { overflowExpanded = false; onReconnect() })
+                                add(MenuEntry(stringResource(R.string.menu_disconnect)) { overflowExpanded = false; onDisconnect() })
+                                add(MenuEntry(stringResource(R.string.menu_exit)) { overflowExpanded = false; onExit() })
+                            }
+                            // Dividers sit before Reconnect and before Exit, i.e. after
+                            // About (size-4) and after Disconnect (size-2).
+                            val dividerAfter = setOf(entries.size - 4, entries.size - 2)
+
+                            // Budget: screen height less the top bar the menu hangs from,
+                            // the system bars, the menu's own 8dp top/bottom padding, and
+                            // the two dividers.
+                            val menuBudgetDp = (cfg.screenHeightDp - 96 - 16 - 2).toFloat()
+                            val rowHeightDp = (menuBudgetDp / entries.size.coerceAtLeast(1))
+                                .coerceAtMost(34f)
+                                .coerceAtLeast(28f)
+                                .dp
+                            // Padding tracks the row height so the label stays centred and
+                            // the text never touches the divider above it.
+                            val rowPadV = ((rowHeightDp.value - 20f) / 2f).coerceIn(2f, 7f).dp
+
                             @Composable
                             fun MenuRow(label: String, enabled: Boolean = true, onClick: () -> Unit) {
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
-                                        .heightIn(min = 40.dp)
+                                        .heightIn(min = rowHeightDp)
                                         .focusHighlight()
                                         .clickable(enabled = enabled, onClick = onClick)
-                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        .padding(horizontal = 16.dp, vertical = rowPadV),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
                                     Text(
@@ -2917,49 +3043,10 @@ fun ChatScreen(
                                 }
                             }
 
-                            MenuRow(stringResource(R.string.menu_channel_list)) { overflowExpanded = false; onOpenList() }
-                            MenuRow(stringResource(R.string.menu_file_transfers)) { overflowExpanded = false; onOpenTransfers() }
-                            // Encryption is only meaningful for channel/query buffers, not the
-                            // *server*/*status* tab. selNetId can be blank if no networks exist
-                            // yet; viewModel can be null in preview/test.
-                            if (viewModel != null &&
-                                selNetId.isNotBlank() &&
-                                selBufName.isNotBlank() &&
-                                selBufName != "*server*" &&
-                                selBufName != "*status*"
-                            ) {
-                                MenuRow("Secure Chat") { overflowExpanded = false; showEncryptionDialog = true }
+                            entries.forEachIndexed { idx, e ->
+                                MenuRow(e.label, enabled = e.enabled, onClick = e.onClick)
+                                if (idx in dividerAfter) HorizontalDivider()
                             }
-                            // draft/metadata-2 editor and draft/account-registration dialog,
-                            // shown only when the connected server negotiated the cap.
-                            if (viewModel != null && selNetId.isNotBlank() &&
-                                viewModel.serverSupportsMetadata(selNetId)) {
-                                MenuRow(stringResource(R.string.menu_edit_metadata)) {
-                                    overflowExpanded = false; showMetadataEditor = true
-                                }
-                            }
-                            if (viewModel != null && selNetId.isNotBlank() &&
-                                viewModel.serverSupportsAccountReg(selNetId) &&
-                                state.connections[selNetId]?.myAccount == null) {
-                                MenuRow(stringResource(R.string.menu_register_account)) {
-                                    overflowExpanded = false; showRegistration = true
-                                }
-                            }
-                            MenuRow(stringResource(R.string.menu_settings)) { overflowExpanded = false; onOpenSettings() }
-                            MenuRow("Scripts") { overflowExpanded = false; onOpenScripts() }
-                            MenuRow(stringResource(R.string.menu_networks)) { overflowExpanded = false; onOpenNetworks() }
-                            if (isIrcOper) {
-                                MenuRow(stringResource(R.string.menu_ircop_tools)) { overflowExpanded = false; showIrcOpTools = true }
-                            }
-                            MenuRow(stringResource(R.string.menu_about)) { overflowExpanded = false; onAbout() }
-                            HorizontalDivider()
-                            MenuRow(
-                                stringResource(R.string.menu_reconnect),
-                                enabled = state.networks.isNotEmpty() && !state.connecting
-                            ) { overflowExpanded = false; onReconnect() }
-                            MenuRow(stringResource(R.string.menu_disconnect)) { overflowExpanded = false; onDisconnect() }
-                            HorizontalDivider()
-                            MenuRow(stringResource(R.string.menu_exit)) { overflowExpanded = false; onExit() }
                         }
                     }
                 }
@@ -3026,6 +3113,28 @@ fun ChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    // Tap anywhere in the chat to close the soft keyboard.
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial
+                            )
+                            var dragged = false
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!dragged &&
+                                    change.positionChange().getDistance() > viewConfiguration.touchSlop
+                                ) dragged = true
+                                if (!change.pressed) break
+                            }
+                            if (!dragged) {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }
+                        }
+                    }
             ) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 // Compute a single shared font size for all MOTD lines so that every line
@@ -3258,6 +3367,7 @@ fun ChatScreen(
                             msgIdToText = msgIdToTextHoisted,
                             scope = scope,
                             chatTextStyle = chatTextStyle,
+                            itemGap = chatItemGap,
                             motdStyle = motdStyle,
                             motdFontSizeSp = motdFontSizeSp,
                             linkStyle = linkStyle,
@@ -3887,7 +3997,14 @@ fun ChatScreen(
                     fontWeight = if (boldActive) FontWeight.Bold else chatTextStyle.fontWeight,
                     fontStyle = if (italicActive) FontStyle.Italic else FontStyle.Normal,
                     textDecoration = if (underlineActive) TextDecoration.Underline else TextDecoration.None,
-                    background = selectedBgColor?.let { mircColor(it) } ?: Color.Unspecified
+                    background = selectedBgColor?.let { mircColor(it) } ?: Color.Unspecified,
+                    // Chat line spacing applies to the backlog, not the composer.
+                    // Trim.Both here clamps back to the font's own metrics, so the input
+                    // box is the same height on Tight, Normal and Relaxed.
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim = LineHeightStyle.Trim.Both,
+                    ),
                 )
 
 				val interactionSource = remember { MutableInteractionSource() }
@@ -4170,23 +4287,29 @@ fun ChatScreen(
             val screenW = cfg.screenWidthDp.dp
             val screenWpx = with(density) { screenW.toPx().coerceAtLeast(1f) }
 
-            // Persisted fractions (updated on drag end).
-            var bufferFrac by remember(state.settings.bufferPaneFracLandscape) {
-                mutableFloatStateOf(state.settings.bufferPaneFracLandscape)
-            }
-            var nickFrac by remember(state.settings.nickPaneFracLandscape) {
-                mutableFloatStateOf(state.settings.nickPaneFracLandscape)
-            }
-
             val minBufferDp = 130.dp
             val maxBufferDp = 320.dp
-            val minNickDp = 130.dp
+            val minNickDp = 110.dp
             val maxNickDp = 280.dp
 
             val minBufferFrac = (minBufferDp.value / screenWdp).coerceIn(0.10f, 0.60f)
             val maxBufferFrac = (maxBufferDp.value / screenWdp).coerceIn(0.10f, 0.60f)
             val minNickFrac = (minNickDp.value / screenWdp).coerceIn(0.08f, 0.55f)
             val maxNickFrac = (maxNickDp.value / screenWdp).coerceIn(0.08f, 0.55f)
+
+            // Persisted fractions (updated on drag end). Clamped on the way in: the
+            // default sits below minNickFrac on purpose (so the pane opens at its
+            // narrowest on any screen)
+            var bufferFrac by remember(state.settings.bufferPaneFracLandscape, screenWdp) {
+                mutableFloatStateOf(
+                    state.settings.bufferPaneFracLandscape.coerceIn(minBufferFrac, maxBufferFrac)
+                )
+            }
+            var nickFrac by remember(state.settings.nickPaneFracLandscape, screenWdp) {
+                mutableFloatStateOf(
+                    state.settings.nickPaneFracLandscape.coerceIn(minNickFrac, maxNickFrac)
+                )
+            }
 
             // Subtle "hint" pulse to make split handles discoverable.
             var showResizeHint by remember { mutableStateOf(false) }
@@ -4359,9 +4482,9 @@ fun ChatScreen(
     }
 
     if (showChanOps && isChannel) {
-        // Refresh the channel's modes on open so the toggles reflect the live server state
+        // Refresh the channel's modes on open so the toggles reflect the live server state.
         LaunchedEffect(showChanOps, selBufName) {
-            if (selBufName.isNotBlank() && selBufName != "*server*") onSend("/mode $selBufName")
+            if (selBufName.isNotBlank() && selBufName != "*server*") onRefreshChannelModes()
         }
         // windowInsets = WindowInsets(0) so we control insets ourselves.
         // imePadding() goes on the OUTER container, not inside the scroll — this prevents
@@ -6093,6 +6216,8 @@ private fun SingleMessageItem(
     msgIdToText: Map<String, Pair<String?, String>>,
     scope: CoroutineScope,
     chatTextStyle: androidx.compose.ui.text.TextStyle,
+    /** Space above this message, from the chat line spacing setting. 0.dp on Tight. */
+    itemGap: androidx.compose.ui.unit.Dp = 0.dp,
     motdStyle: androidx.compose.ui.text.TextStyle,
     motdFontSizeSp: Float,
     linkStyle: SpanStyle,
@@ -6180,7 +6305,12 @@ private fun SingleMessageItem(
         // Held +AGE echoes are dimmed until the bridge flushes them to the wire (m.pending), so an
         // optimistic echo reads clearly as "not yet delivered" rather than as a sent message.
         // m.failed is the same idea after the fact: the server rejected the send.
-        modifier = Modifier.fillMaxWidth().alpha(if (m.pending || m.failed) 0.5f else 1f)
+        modifier = Modifier
+            .fillMaxWidth()
+            // Chat line spacing. MOTD lines opt out: the server banner is a character
+            // grid, and spacing its rows apart shears the art.
+            .padding(top = if (m.isMotd) 0.dp else itemGap)
+            .alpha(if (m.pending || m.failed) 0.5f else 1f)
     ) {
         if (m.failed) {
             Text(

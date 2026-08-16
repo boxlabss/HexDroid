@@ -1,0 +1,1 @@
+Implement send side draft/multiline, New settings added to change chat spacing and font line height. Added an option to enable a raw buffer. Bug fixes and UI improvements.

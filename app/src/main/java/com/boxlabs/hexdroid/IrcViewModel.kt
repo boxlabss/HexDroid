@@ -150,8 +150,14 @@ data class UiBuffer(
     val unread: Int = 0,
     val highlights: Int = 0,
     val topic: String? = null,
-    /** Channel mode string from 324 RPL_CHANNELMODEIS, e.g. "+nst" */
+    /** Channel mode LETTERS only, from 324 or a live delta, e.g. "+nst". Drives the ops toggles. */
     val modeString: String? = null,
+    /**
+     * Same modes but with their parameters, e.g. "+ntl 59", for the title bar. Kept apart
+     * from [modeString] because the toggles want letters and only 324 is authoritative
+     * about parameter values.
+     */
+    val modeDisplay: String? = null,
     /**
      * ISO 8601 timestamp of the last message the user has read, as confirmed by the server
      * via MARKREAD (draft/read-marker). Used to draw an unread separator in the chat view.
@@ -231,6 +237,26 @@ data class UiSettings(
     val customChatFontPath: String? = null,
 
     val chatFontStyle: ChatFontStyle = ChatFontStyle.REGULAR,
+
+    /**
+     * Space BETWEEN messages, as a fraction of the chat font size.
+     * Tight 0.0, Normal 0.15, Relaxed 0.45. Does not affect the leading inside a
+     * single wrapped message: that is [chatFontLineHeight].
+     */
+    val chatLineSpacing: Float = 0.15f,
+
+    /**
+     * Leading INSIDE one message, as a multiple of the chat font size, applied with
+     * LineHeightStyle.Trim.None so the row pitch is the same for every font rather
+     * than following each font's own ascent and descent.
+     * Tight 1.0, Normal 1.15, Relaxed 1.35.
+     */
+    val chatFontLineHeight: Float = 1.15f,
+
+    /**
+     * Sp added to (or taken off) the nicklist's width-derived font size.
+     */
+    val nicklistFontOffset: Int = 0,
     val showTopicBar: Boolean = true,
     val hideMotdOnConnect: Boolean = false,
     val hideJoinPartQuit: Boolean = false,
@@ -259,7 +285,9 @@ data class UiSettings(
 
     // Landscape split-pane fractions, updated by draggable handles.
     val bufferPaneFracLandscape: Float = 0.22f,
-    val nickPaneFracLandscape: Float = 0.18f,
+    // Below the enforced minimum on purpose: the pane opens at its narrowest
+    // on every screen width, and ChatScreen clamps this into range on read.
+    val nickPaneFracLandscape: Float = 0.05f,
 
     val highlightOnNick: Boolean = true,
     val extraHighlightWords: List<String> = emptyList(),
@@ -331,7 +359,8 @@ data class UiSettings(
     val welcomeCompleted: Boolean = false,
     val appLanguage: String? = null,
     val portraitNicklistOverlay: Boolean = true,
-    val portraitNickPaneFrac: Float = 0.35f,
+    // Same intent as nickPaneFracLandscape: start at the narrowest allowed.
+    val portraitNickPaneFrac: Float = 0.20f,
 
     /** Broadcast typing status to others (draft/typing CAP). Off by default for privacy. */
     val sendTypingIndicator: Boolean = false,
@@ -2621,6 +2650,25 @@ class IrcViewModel(
         viewModelScope.launch { runCatching { repo.updateSettings { it.copy(defaultShowNickList = _state.value.showNickList) } } }
     }
 
+	/**
+	 * Re-query the selected channel's modes so the ops drawer shows live server state.
+	 * Marked silent first: this is a UI refresh, not something the user asked to see, so
+	 * the 324/329 replies update state without printing anything.
+	 */
+	fun refreshChannelModesForSelectedBuffer() {
+		val st = _state.value
+		val key = st.selectedBuffer
+		if (key.isBlank()) return
+		val (netId, rawBuf) = splitKey(key)
+		if (netId.isBlank()) return
+		val buf = stripStatusMsgPrefix(netId, rawBuf)
+		if (!isChannelOnNet(netId, buf)) return
+		if (st.connections[netId]?.connected != true) return
+		val rt = runtimes[netId] ?: return
+		rt.client.markSilentModeQuery(buf)
+		viewModelScope.launch { runCatching { rt.client.sendRaw("MODE $buf") } }
+	}
+
 	fun refreshNicklistForSelectedBuffer(force: Boolean = false) {
 		val st = _state.value
 		val key = st.selectedBuffer
@@ -2946,8 +2994,9 @@ fun startAddNetwork() {
                 plaintextWarningNetworkId = null
             )
             // User explicitly opted to connect insecurely; treat as manual retry and
-            // clear the auth block.
-            connectNetwork(netId, force = true, clearAuthBlock = true)
+            // clear the auth block. This path is only reachable from the Connect button,
+            // so it opens the server buffer for the same reason that does.
+            connectNetwork(netId, force = true, clearAuthBlock = true, openServerBuffer = true)
         }
     }
 
@@ -4539,7 +4588,20 @@ fun startAddNetwork() {
      *     clearing authBlockedReconnect, and the network callback fires roughly every
      *     Doze cycle.
      */
-    fun connectNetwork(netId: String, force: Boolean = false, clearAuthBlock: Boolean = false) {
+    /**
+     * @param openServerBuffer when true, switch to this network's server buffer and the
+     * chat screen once the connection attempt has actually been started. Set by the
+     * Connect button on the Networks screen, which otherwise kicks off a connection and
+     * leaves the user staring at the network list with no indication anything happened.
+     * Deliberately not set on the automated paths (auto-connect, reconnect, resume),
+     * which must never yank the user out of the buffer they are reading.
+     */
+    fun connectNetwork(
+        netId: String,
+        force: Boolean = false,
+        clearAuthBlock: Boolean = false,
+        openServerBuffer: Boolean = false,
+    ) {
         if (clearAuthBlock) authBlockedReconnect.remove(netId)
         viewModelScope.launch {
             // Ensure flap state is loaded from DataStore before checking it.
@@ -4547,6 +4609,7 @@ fun startAddNetwork() {
             // the race where a connect is requested before the init coroutine completes.
             ensureFlapPausedLoaded()
             ensureStsPoliciesLoaded()
+            var started = false
             withNetLock(netId) {
                 // Same gate as scheduleAutoReconnect's entry: if the network is auth-
                 // blocked and the caller didn't explicitly clear the block (i.e. this
@@ -4557,6 +4620,15 @@ fun startAddNetwork() {
                 // network connectivity flapped.
                 if (!clearAuthBlock && netId in authBlockedReconnect) return@withNetLock
                 connectNetworkInternal(netId, force)
+                started = true
+            }
+            if (openServerBuffer && started) {
+                // connectNetworkInternal bails out and raises a dialog for a plaintext
+                // host or a missing local-network permission.
+                val st = _state.value
+                if (st.plaintextWarningNetworkId == null && st.localNetworkWarningNetworkId == null) {
+                    openBuffer(bufKey(netId, "*server*"))
+                }
             }
         }
     }
@@ -7402,13 +7474,23 @@ if (code == "442") {
             is IrcEvent.ChannelModeIs -> {
                 val st = _state.value
                 val chanKey = resolveBufferKey(netId, ev.channel)
-                val dest = if (st.buffers.containsKey(chanKey)) chanKey else bufKey(netId, "*server*")
-                append(dest, from = null, text = "* " + appContext.getString(R.string.vm_mode_change, ev.channel, ev.modes), doNotify = false)
-                // Store mode string so Channel Tools can show/toggle modes
+                // ev.silent: the ops drawer refreshes modes when it opens, and printing that
+                // reply left a "* Mode #chan +nt" line behind on every open.
+                if (!ev.silent) {
+                    val dest = if (st.buffers.containsKey(chanKey)) chanKey else bufKey(netId, "*server*")
+                    append(dest, from = null, text = "* " + appContext.getString(R.string.vm_mode_change, ev.channel, ev.modes), doNotify = false)
+                }
+                // Store mode string so Channel Tools can show/toggle modes, and the title bar
+                // can render the parameterised form.
                 val buf = st.buffers[chanKey]
                 if (buf != null) {
                     val modeOnly = ev.modes.split(" ").firstOrNull() ?: ev.modes
-                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(modeString = modeOnly))) }
+                    _state.update {
+                        it.copy(buffers = it.buffers + (chanKey to buf.copy(
+                            modeString = modeOnly,
+                            modeDisplay = ev.modes.trim().ifBlank { null },
+                        )))
+                    }
                 }
             }
 
@@ -8551,6 +8633,12 @@ if (code == "442") {
                             viewModelScope.launch { runCatching { rt.client.sendRaw("NAMES ${ev.channel}") } }
                         }
 
+                        // Ask for the channel's modes so the title bar can show them
+                        rt?.let { r ->
+                            r.client.markSilentModeQuery(ev.channel)
+                            viewModelScope.launch { runCatching { r.client.sendRaw("MODE ${ev.channel}") } }
+                        }
+
                         // Track for reconnect rejoin if not already covered by autoJoin.
                         // Skip history/playback - we only care about live self-joins.
                         if (!ev.isHistory && rt != null) {
@@ -8772,7 +8860,15 @@ if (code == "442") {
                 // the parting user was never in. If we have no evidence they shared a
                 // channel with us, we have nothing meaningful to show, so the message is
                 // dropped entirely (matches how HexChat / Konversation behave).
-                val targets = affected
+                // A replayed QUIT is for someone who already left, so they are not in any
+                // current nicklist and `affected` is empty: the line would silently vanish,
+                // except in the accidental case where they quit, rejoined, and quit again.
+                // The CHATHISTORY batch names the channel it replayed, so use that.
+                val targets = when {
+                    affected.isNotEmpty() -> affected
+                    ev.historyChannel != null -> listOf(resolveBufferKey(netId, ev.historyChannel))
+                    else -> emptyList()
+                }
                 if (!st0.settings.hideJoinPartQuit) {
                     val host = ev.userHost ?: "*!*@*"
                     val msg = "* " + appContext.getString(R.string.vm_ev_has_quit, ev.nick, host) + (reason?.let { " [$it]" } ?: "")
@@ -9439,8 +9535,37 @@ if (code == "442") {
                     }
                 }
                 val merged = if (letters.isEmpty()) "" else "+" + letters.joinToString("")
+
+                // modeDisplay carries parameters, and this event doesn't. A change to a
+                // parameterised mode (type B/C: keys, limits) makes the stored parameters
+                // wrong, so re-query rather than guess. Type-D changes can't invalidate the
+                // parameter tail, so reuse it and just swap the letters.
+                val paramModes = support?.chanModes?.split(",")?.let {
+                    (it.getOrNull(1).orEmpty() + it.getOrNull(2).orEmpty()).toSet()
+                } ?: setOf('k', 'l')
+                val touchesParams = ev.modes.any { it in paramModes }
+                if (touchesParams) {
+                    // Deliberately NOT a re-query on every delta: a channel handing out
+                    // +o/-o would then issue a MODE per change and queue behind flood pacing.
+                    runtimes[netId]?.let { rt ->
+                        rt.client.markSilentModeQuery(ev.channel)
+                        viewModelScope.launch { runCatching { rt.client.sendRaw("MODE ${ev.channel}") } }
+                    }
+                }
                 if (merged != current) {
-                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(modeString = merged))) }
+                    val tail = buf.modeDisplay?.substringAfter(' ', "").orEmpty()
+                    val nextDisplay = when {
+                        merged.isEmpty() -> null
+                        touchesParams -> buf.modeDisplay   // stale until the re-query lands
+                        tail.isBlank() -> merged
+                        else -> "$merged $tail"
+                    }
+                    _state.update {
+                        it.copy(buffers = it.buffers + (chanKey to buf.copy(
+                            modeString = merged,
+                            modeDisplay = nextDisplay,
+                        )))
+                    }
                 }
             }
 
@@ -9538,10 +9663,19 @@ if (code == "442") {
                 return@launch
             }
 
-            val now = System.currentTimeMillis()
-            val start = now - (lines.size.toLong() * 1000L)
+            // A line whose timestamp doesn't parse used to fall back to a now-anchored ramp
+            // (now - n + idx seconds). The display sorts by timeMs, so those landed in the
+            // middle of the current session instead of above it, and the ones nearest the end
+            // were then discarded by the "older than first live" filter below. Instead, carry
+            // the last real timestamp forward, so an unparseable line stays next to the line
+            // it actually followed in the log. Lines before ANY parseable timestamp inherit
+            // the first one found, which keeps them at the top where they belong.
+            val stamps = lines.map { parseLogLineTimeMs(it) }
+            val firstReal = stamps.firstOrNull { it != null }
+            var carried = firstReal ?: (System.currentTimeMillis() - lines.size.toLong() * 1000L)
+            val resolved = stamps.map { st -> st?.also { carried = it } ?: carried }
             val loaded = lines.mapIndexedNotNull { idx, line ->
-                parseLogLineToUiMessage(line, fallbackTimeMs = start + idx * 1000L)
+                parseLogLineToUiMessage(line, fallbackTimeMs = resolved[idx])
             }
             if (loaded.isEmpty()) return@launch
 
@@ -9708,6 +9842,19 @@ if (code == "442") {
                 )
             )
         }
+    }
+
+    /** Timestamp of a log line, or null when the line carries no parseable one. */
+    private fun parseLogLineTimeMs(line: String): Long? {
+        val parts = line.trimEnd().split('\t', limit = 2)
+        if (parts.size != 2) return null
+        return runCatching {
+            LocalDateTime
+                .parse(parts[0], logTimeFormatter)
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        }.getOrNull()
     }
 
     private fun parseLogLineToUiMessage(line: String, fallbackTimeMs: Long): UiMessage? {
@@ -9932,9 +10079,14 @@ if (code == "442") {
         // Live messages register a fingerprint too. They effectively never collide because the
         // local-now `ts` has millisecond resolution and human typing can't produce two messages
         // in the same millisecond.
-        val historyFingerprint: String? = if (from != null) {
-            "$ts|$from|${text.hashCode()}"
-        } else null
+        //
+        // System lines (from == null) are fingerprinted too. draft/event-playback replays
+        // JOIN/PART/QUIT through CHATHISTORY, and those render as system lines, so gating
+        // this on `from != null` left every replayed join/part/quit with nothing to match
+        // against and the user saw each one twice. The set is per-buffer
+        // (UiBuffer.seenHistoryFingerprints), so a QUIT fanned out to several channels at
+        // once still appears in all of them.
+        val historyFingerprint: String? = "$ts|${from ?: "*"}|${text.hashCode()}"
 
         // Self-echo replay dedup. The fingerprint above keys on the timestamp, which
         // works for replay-vs-replay (both carry the server `time=`) but NOT for
@@ -10039,7 +10191,7 @@ if (code == "442") {
             val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000)
             // Splice in the chathistory marker (if any) before the new live message, in a
             // single state update. The marker is a system line (from = null) and does not
-            // affect dedup — its from is null so historyFingerprint isn't computed for it.
+            // affect dedup — it is inserted directly rather than going through this path.
             val toAppend: List<UiMessage> = if (markerToEmit != null) listOf(markerToEmit, msg) else listOf(msg)
             // addAll on a PersistentList is O(log n) with structural sharing rather than the
             // O(n) copy that `list + list` performed. The trim still drops from the front to

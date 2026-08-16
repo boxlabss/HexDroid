@@ -281,6 +281,7 @@ fun AppRoot(
                     onIgnoreNotifications = vm::ignoreNotifications,
                     onUnignoreNotifications = vm::unignoreNotifications,
 					onRefreshNicklist = vm::refreshNicklistForSelectedBuffer,
+					onRefreshChannelModes = vm::refreshChannelModesForSelectedBuffer,
                     onDccSendFile = { nick ->
                         dccPendingNick = nick
                         dccFilePicker.launch(arrayOf("*/*"))
@@ -321,7 +322,7 @@ fun AppRoot(
                     onDelete = vm::deleteNetwork,
                     onSetAutoConnect = vm::setNetworkAutoConnect,
                     onSetShowInSidebar = vm::setNetworkShowInSidebar,
-                    onConnect = vm::connectNetwork,
+                    onConnect = { netId -> vm.connectNetwork(netId, openServerBuffer = true) },
                     onDisconnect = vm::disconnectNetwork,
                     onAllowPlaintextConnect = vm::allowPlaintextAndConnect,
                     onDismissPlaintextWarning = vm::dismissPlaintextWarning,
