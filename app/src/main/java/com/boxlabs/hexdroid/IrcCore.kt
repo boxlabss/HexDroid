@@ -1975,6 +1975,12 @@ class IrcClient(val config: IrcConfig) {
      */
     private val historyRequested = mutableSetOf<String>()
 
+    /**
+     * Channels we've explicitly requested NAMES for in this session (soju.im/no-implicit-names
+     * / draft/no-implicit-names), to avoid re-fetching on rejoin. Keyed by [casefold].
+     */
+    private val namesRequested = mutableSetOf<String>()
+
     /** Per-buffer "history expected until" timestamp, anything older than this is treated as
      *  history rather than live, so we don't re-notify for already-seen messages.
      *  Keyed by [casefold] - see [historyRequested] for why lowercase() is not enough. */
@@ -2864,6 +2870,21 @@ class IrcClient(val config: IrcConfig) {
 							if (nickEquals(nick, currentNick) && !chanHist) {
 								val fold = casefold(chan)
 								joinedChannelCases[fold] = chan
+							}
+
+							// soju.im/no-implicit-names / draft/no-implicit-names: the server won't
+							// send an automatic 353/366 NAMES list on JOIN when this cap is negotiated
+							// (it's requested by default for bouncer connections, see IrcSession's CAP
+							// REQ list). Without an explicit request the nicklist stays empty except
+							// for our own self-JOIN. Skip when chanHist is true for the same reason as
+							// the CHATHISTORY/playback requests below: a JOIN arriving as part of
+							// buffer playback is our prior session, not the current one.
+							if (nickEquals(nick, currentNick)
+								&& !chanHist
+								&& (hasCap("soju.im/no-implicit-names") || hasCap("draft/no-implicit-names"))
+								&& namesRequested.add(casefold(chan))
+							) {
+								sendRaw("NAMES $chan")
 							}
 
 							// IRCv3 chathistory: request recent messages when we (re)join.
