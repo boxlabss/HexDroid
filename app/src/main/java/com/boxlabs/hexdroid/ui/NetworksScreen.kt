@@ -22,82 +22,120 @@ package com.boxlabs.hexdroid.ui
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.foundation.Image
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.boxlabs.hexdroid.BouncerKind
 import com.boxlabs.hexdroid.BouncerUpstreamInfo
-import com.boxlabs.hexdroid.UiState
-import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
+import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.data.NetworkProfile
+import kotlinx.coroutines.delay
 
 /** Green status dot */
 private val CONNECTED_DOT = Color(0xFF4CAF50)
 
 /**
- * Label plus a scaled-down Switch, for putting two toggles on one row.
+ * Label plus a switch, used for the per-network toggles in the detail pane.
+ */
+@Composable
+private fun DetailSwitch(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .focusHighlight(shape)
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 4.dp)
+            .heightIn(min = 44.dp)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        )
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * Label plus a scaled-down switch, for the per-network toggles on a list row.
  */
 @Composable
 private fun CompactSwitch(
@@ -106,14 +144,15 @@ private fun CompactSwitch(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val shape = RoundedCornerShape(8.dp)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .focusHighlight(RoundedCornerShape(8.dp))
+            .clip(shape)
+            .focusHighlight(shape)
             .clickable { onCheckedChange(!checked) }
             .padding(start = 4.dp)
-            .heightIn(min = 32.dp)
+            .heightIn(min = 36.dp)
     ) {
         Text(
             label,
@@ -128,9 +167,348 @@ private fun CompactSwitch(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            modifier = Modifier
-                .graphicsLayer { scaleX = 0.8f; scaleY = 0.8f }
+            modifier = Modifier.graphicsLayer { scaleX = 0.8f; scaleY = 0.8f }
         )
+    }
+}
+
+/**
+ * Status dot, or a spinner while a connection attempt is in flight.
+ */
+@Composable
+private fun StatusDot(connected: Boolean, connecting: Boolean) {
+    if (connecting) {
+        CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp)
+    } else {
+        Box(
+            Modifier
+                .size(8.dp)
+                .background(
+                    color = if (connected) CONNECTED_DOT
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(50)
+                )
+        )
+    }
+}
+
+/**
+ * Small outlined label used for the auto-connect and favourite markers on a list row.
+ */
+@Composable
+private fun MetaTag(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(6.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+        )
+    }
+}
+
+@Composable
+private fun NetworkRow(
+    profile: NetworkProfile,
+    connected: Boolean,
+    connecting: Boolean,
+    status: String,
+    isSelected: Boolean,
+    iconUrl: String?,
+    onClick: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onSetAutoConnect: (Boolean) -> Unit,
+    onSetShowInSidebar: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    connectModifier: Modifier = Modifier,
+    showControls: Boolean = true,
+    dragHandle: (@Composable () -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    val bg = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+    val fg = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+
+    Surface(color = bg, contentColor = fg, shape = shape, modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(bottom = if (showControls) 8.dp else 0.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(shape)
+                        .focusHighlight(shape)
+                        .clickable(onClick = onClick)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    StatusDot(connected = connected, connecting = connecting)
+
+                    // ICON / draft/ICON ISUPPORT token: server-advertised icon (ICON=<url>,
+                    // optional literal {size} template). Gated on the global image-previews
+                    // opt-in, https only, and never fetched for proxied profiles - the fetch
+                    // would bypass the SOCKS proxy and leak the user's IP, same fail-closed
+                    // rule as filehost uploads.
+                    if (iconUrl != null) {
+                        var iconBmp by remember(iconUrl) { mutableStateOf(RemoteImage.cached(iconUrl)) }
+                        LaunchedEffect(iconUrl) {
+                            if (iconBmp == null) iconBmp = RemoteImage.fetch(iconUrl)
+                        }
+                        iconBmp?.let { bmp ->
+                            Image(bitmap = bmp, contentDescription = null, modifier = Modifier.size(20.dp))
+                        }
+                    }
+
+                    Column(Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (profile.isFavourite) {
+                                Icon(
+                                    Icons.Filled.Star,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                            Text(
+                                profile.name,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
+                        Text(
+                            "${profile.host}:${profile.port}  •  $status",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!profile.useTls) {
+                            Spacer(Modifier.height(4.dp))
+                            MetaTag(stringResource(R.string.networks_tag_no_tls))
+                        }
+                    }
+                    // Nothing else on the row hints that the name opens anything, and
+                    // edit, delete and reorder all live behind it.
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = stringResource(R.string.networks_open_details),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                if (dragHandle != null) dragHandle()
+            }
+
+            if (showControls) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (connected || connecting) {
+                        FilledTonalButton(
+                            onClick = onDisconnect,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = connectModifier.focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.networks_disconnect), maxLines = 1) }
+                    } else {
+                        Button(
+                            onClick = onConnect,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = connectModifier.focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.networks_connect), maxLines = 1) }
+                    }
+
+                    Column(Modifier.weight(1f)) {
+                        CompactSwitch(
+                            label = stringResource(R.string.networks_auto_connect),
+                            checked = profile.autoConnect,
+                            onCheckedChange = onSetAutoConnect,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        CompactSwitch(
+                            label = stringResource(R.string.network_show_in_switcher_label),
+                            checked = profile.showInSidebar,
+                            onCheckedChange = onSetShowInSidebar,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Everything you can do to one network: connect, edit, reorder, delete and the
+ * per-network toggles. Shown in the right pane on TV and tablets, and in a bottom
+ * sheet on phones, so the list itself stays a plain scrollable column of names.
+ */
+@Composable
+private fun NetworkDetailPane(
+    state: UiState,
+    profile: NetworkProfile,
+    orderedIds: List<String>,
+    onSelect: (String) -> Unit,
+    onEdit: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onConnect: (String) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onSetAutoConnect: (String, Boolean) -> Unit,
+    onSetShowInSidebar: (String, Boolean) -> Unit,
+    onToggleFavourite: (String) -> Unit,
+    onReorder: (Int, Int) -> Unit,
+    onRefreshBouncerNetworks: (String) -> Unit,
+    onCloneBouncerNetwork: (String, String) -> Unit,
+    onActionTaken: () -> Unit,
+    modifier: Modifier = Modifier,
+    connectModifier: Modifier = Modifier,
+) {
+    val conn = state.connections[profile.id]
+    val isConn = conn?.connected == true
+    val isConnecting = conn?.connecting == true
+    val status = conn?.status ?: stringResource(R.string.networks_disconnect)
+    val index = orderedIds.indexOf(profile.id)
+
+    // Bouncer discovery only applies to a live root bouncer profile: an imported
+    // per-upstream clone binds to one upstream and never sees the discovery list.
+    val showBouncer = (profile.bouncerKind == BouncerKind.SOJU || profile.bouncerKind == BouncerKind.ZNC) &&
+        profile.bouncerNetworkName.isNullOrBlank() &&
+        isConn
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(profile.name, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatusDot(connected = isConn, connecting = isConnecting)
+            Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        Text(
+            "${profile.host}:${profile.port}  •  TLS ${if (profile.useTls) "on" else "off"}  •  " +
+                "${profile.nick}${profile.altNick?.let { " / $it" } ?: ""}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        val connectMod = connectModifier
+            .fillMaxWidth()
+            .focusHighlight(RoundedCornerShape(50))
+
+        if (isConn || isConnecting) {
+            FilledTonalButton(
+                onClick = { onSelect(profile.id); onDisconnect(profile.id); onActionTaken() },
+                modifier = connectMod,
+            ) { Text(stringResource(R.string.networks_disconnect)) }
+        } else {
+            Button(
+                onClick = { onSelect(profile.id); onConnect(profile.id); onActionTaken() },
+                modifier = connectMod,
+            ) { Text(stringResource(R.string.networks_connect)) }
+        }
+
+        OutlinedButton(
+            onClick = { onEdit(profile.id); onActionTaken() },
+            modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50)),
+        ) {
+            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.networks_edit))
+        }
+
+        HorizontalDivider()
+
+        // A switch rather than a button: the button label ran to "Remove from
+        // favourites", which had nowhere to go on a phone and clipped mid-word.
+        DetailSwitch(
+            label = stringResource(R.string.networks_favourite),
+            checked = profile.isFavourite,
+            onCheckedChange = { onToggleFavourite(profile.id) },
+        )
+        DetailSwitch(
+            label = stringResource(R.string.networks_auto_connect),
+            checked = profile.autoConnect,
+            onCheckedChange = { onSetAutoConnect(profile.id, it) },
+        )
+        DetailSwitch(
+            label = stringResource(R.string.network_show_in_switcher_label),
+            checked = profile.showInSidebar,
+            onCheckedChange = { onSetShowInSidebar(profile.id, it) },
+        )
+
+        HorizontalDivider()
+
+        // Reorder without dragging, which is the only way to do it from a remote.
+        Text(stringResource(R.string.networks_order), style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { if (index > 0) onReorder(index, index - 1) },
+                enabled = index > 0,
+                modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+            ) {
+                Icon(Icons.Default.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.networks_move_up))
+            }
+            OutlinedButton(
+                onClick = { if (index >= 0 && index < orderedIds.lastIndex) onReorder(index, index + 1) },
+                enabled = index >= 0 && index < orderedIds.lastIndex,
+                modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+            ) {
+                Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.networks_move_down))
+            }
+        }
+
+        if (showBouncer) {
+            HorizontalDivider()
+            BouncerNetworksSection(
+                parentNetworkName = profile.name,
+                parentHost = profile.host,
+                parentPort = profile.port,
+                parentKind = profile.bouncerKind,
+                upstreams = state.bouncerNetworks[profile.id] ?: emptyMap(),
+                existingProfiles = state.networks,
+                onRefresh = { onRefreshBouncerNetworks(profile.id) },
+                onClone = { upstreamName -> onCloneBouncerNetwork(profile.id, upstreamName) },
+            )
+        }
+
+        HorizontalDivider()
+
+        OutlinedButton(
+            onClick = { onDelete(profile.id); onActionTaken() },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50)),
+        ) {
+            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.delete))
+        }
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -164,11 +542,63 @@ fun NetworksScreen(
 ) {
     val active = state.activeNetworkId
 
+    val listState = rememberLazyListState()
+    // Rows are keyed by network id, so the key is the entry id the drag engine needs.
+    val reorder = rememberGroupReorderState(listState) { key -> key as? String }
+
     // Sort: favourites first, then by sortOrder, then alphabetically
-    val sortedNetworks = state.networks
+    val naturalNetworks = state.networks
         .sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+    val naturalIds = naturalNetworks.map { it.id }
+
+    // While a drag is in progress the list follows the preview order instead of the
+    // stored one, so the row under the finger is the only thing that moves with it.
+    val sortedNetworks = remember(naturalNetworks, reorder.previewOrder) {
+        val preview = reorder.previewOrder
+        if (preview == null) {
+            naturalNetworks
+        } else {
+            val byId = naturalNetworks.associateBy { it.id }
+            preview.mapNotNull { byId[it] } + naturalNetworks.filter { it.id !in preview }
+        }
+    }
+    val orderedIds = sortedNetworks.map { it.id }
+
+    // Values the drag gesture reads. The gesture modifier outlives a recomposition, so
+    // it must not capture the lists directly or it would act on a stale order.
+    val currentOrder by rememberUpdatedState(orderedIds)
+    val currentNaturalIds by rememberUpdatedState(naturalIds)
+    val favouriteById by rememberUpdatedState(state.networks.associate { it.id to it.isFavourite })
+
+    // Hold the dropped order on screen until the saved order matches it, otherwise the
+    // list flicks back to the old positions for the frame before the save lands.
+    LaunchedEffect(naturalIds, reorder.previewOrder, reorder.draggedId) {
+        if (reorder.draggedId != null) return@LaunchedEffect
+        val preview = reorder.previewOrder ?: return@LaunchedEffect
+        if (naturalIds == preview) {
+            reorder.clearPreview()
+        } else {
+            delay(1000)
+            reorder.clearPreview()
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Two panes on TV and tablets: names on the left, everything you can do to the
+    // highlighted network on the right. Phones keep a plain list and open the same
+    // detail content as a sheet.
+    val railLayout = useSideRailNav()
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var sheetId by rememberSaveable { mutableStateOf<String?>(null) }
+    val sheetState = rememberModalBottomSheetState()
+
+    val detailProfile = sortedNetworks.firstOrNull { it.id == selectedId }
+        ?: sortedNetworks.firstOrNull { it.id == active }
+        ?: sortedNetworks.firstOrNull()
+    val sheetProfile = sortedNetworks.firstOrNull { it.id == sheetId }
+
+    BackHandler(enabled = sheetId != null) { sheetId = null }
 
     // Surface bouncer-clone results as a snackbar. The viewmodel sets
     // bouncerCloneMessage on success / failure / "already imported"; we show it
@@ -179,11 +609,6 @@ fun NetworksScreen(
     //
     // The clear is in `finally` so it runs even when the effect is cancelled
     // mid-display by navigation away or by a fresh message replacing the key.
-    // Without that, navigating off NetworksScreen while a snackbar is up would
-    // leave state.bouncerCloneMessage non-null, and the snackbar would re-appear
-    // every time the user returned to the screen until the next clone message
-    // happened to land. onDismissBouncerCloneMessage() ultimately calls a
-    // non-suspending _state.update, so finally is safe to run during cancellation.
     LaunchedEffect(state.bouncerCloneMessage) {
         val msg = state.bouncerCloneMessage ?: return@LaunchedEffect
         try {
@@ -228,15 +653,6 @@ fun NetworksScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        val listState = rememberLazyListState()
-
-        // Drag state keyed by netId - avoids index/favourites mapping issues
-        var dragFromId  by remember { mutableStateOf<String?>(null) }
-        var dragToId    by remember { mutableStateOf<String?>(null) }
-        var dragOffsetY by remember { mutableFloatStateOf(0f) }
-        val naturalTops = remember { mutableMapOf<String, Float>() }  // netId -> natural top Y (not updated during drag)
-        val itemHeights = remember { mutableMapOf<String, Float>() }  // netId -> height
-
         // Tour: scroll AfterNET into view when highlighted
         LaunchedEffect(tourActive, tourTarget, state.networks) {
             if (!tourActive) return@LaunchedEffect
@@ -249,396 +665,247 @@ fun NetworksScreen(
                 }
                 if (idx >= 0) {
                     runCatching { listState.animateScrollToItem(idx) }
+                    // The connect button lives in the detail pane, so the tour step
+                    // only has a target once that network is the selected one.
+                    selectedId = sortedNetworks[idx].id
                 }
             }
         }
 
-        Column(
+        Row(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            if (sortedNetworks.isEmpty()) {
-                // Previously an empty screen with an unlabelled "+" in the corner.
-                Column(
+            Column(
+                Modifier
+                    .then(if (railLayout) Modifier.width(360.dp) else Modifier.weight(1f))
+                    .fillMaxHeight()
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+            ) {
+                if (sortedNetworks.isEmpty()) {
+                    // Previously an empty screen with an unlabelled "+" in the corner.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            stringResource(R.string.networks_empty_title),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            stringResource(R.string.networks_empty_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+
+                if (railLayout && sortedNetworks.isNotEmpty()) {
+                    // A remote can reach the FAB, but a labelled button at the top of
+                    // the list is the first thing a D-pad lands on.
+                    OutlinedButton(
+                        onClick = onAdd,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .focusHighlight(RoundedCornerShape(50)),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.networks_add))
+                    }
+                }
+
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(top = 2.dp, bottom = 96.dp)
                 ) {
-                    Text(
-                        stringResource(R.string.networks_empty_title),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        stringResource(R.string.networks_empty_body),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
+                    itemsIndexed(sortedNetworks, key = { _, n -> n.id }) { idx, n ->
+                        val conn = state.connections[n.id]
+                        val isConn = conn?.connected == true
+                        val isConnecting = conn?.connecting == true
+                        val status = conn?.status ?: stringResource(R.string.networks_disconnect)
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(top = 2.dp, bottom = 96.dp)
-            ) {
-                itemsIndexed(sortedNetworks, key = { _, n -> n.id }) { idx, n ->
-                    val conn = state.connections[n.id]
-                    val isConn = conn?.connected == true
-                    val isConnecting = conn?.connecting == true
-                    val status = conn?.status ?: stringResource(R.string.networks_disconnect)
+                        val isAfterNet = n.id.equals("AfterNET", ignoreCase = true) ||
+                                         n.name.equals("AfterNET", ignoreCase = true)
 
-                    val isAfterNet = n.id.equals("AfterNET", ignoreCase = true) ||
-                                     n.name.equals("AfterNET", ignoreCase = true)
+                        val isDragging = reorder.isDragging(n.id)
 
-                    val isDragging = dragFromId == n.id
-                    val draggedHeight = itemHeights[dragFromId] ?: 200f
-                    val fromIdx = sortedNetworks.indexOfFirst { it.id == dragFromId }
-                    val toIdx   = sortedNetworks.indexOfFirst { it.id == dragToId }
-                    val targetRawOffset: Float = when {
-                        isDragging -> dragOffsetY
-                        dragFromId != null && n.id != dragFromId -> when {
-                            fromIdx < toIdx && idx > fromIdx && idx <= toIdx -> -draggedHeight
-                            fromIdx > toIdx && idx < fromIdx && idx >= toIdx ->  draggedHeight
-                            else -> 0f
-                        }
-                        else -> 0f
-                    }
-                    val animatedOffset by animateFloatAsState(
-                        targetValue = targetRawOffset,
-                        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-                        label = "drag_offset_${n.id}"
-                    )
-                    val visualOffset = if (isDragging) dragOffsetY else animatedOffset
-
-                    val cardMod = (if (isAfterNet) {
-                        Modifier.fillMaxWidth().tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    })
-                        .focusHighlight(RoundedCornerShape(12.dp))
-                        .then(if (idx == 0) Modifier.tvInitialFocus() else Modifier)
-
-                    Box(
-                        modifier = Modifier
-                            .graphicsLayer { translationY = visualOffset }
-                            .onGloballyPositioned { coords ->
-                                if (dragFromId == null) {
-                                    naturalTops[n.id] = coords.positionInParent().y
-                                }
-                                itemHeights[n.id] = coords.size.height.toFloat()
+                        val iconUrl = state.connections[n.id]?.networkIconUrl
+                            ?.replace("{size}", "64")
+                            ?.takeIf {
+                                it.startsWith("https://") &&
+                                    state.settings.imagePreviewsEnabled &&
+                                    n.proxyType == com.boxlabs.hexdroid.connection.ProxyType.NONE
                             }
-                            .zIndex(if (isDragging) 1f else 0f)
-                    ) {
-                    Card(
-                        modifier = cardMod
-                            .then(if (isDragging) Modifier.shadow(8.dp) else Modifier),
-                        onClick = { onSelect(n.id) }
-                    ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                // Title row: name + favourite star + selected badge + drag handle
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    // Favourite toggle
-                                    IconButton(
-                                        onClick = { onToggleFavourite(n.id) },
-                                        modifier = Modifier.size(32.dp).focusHighlight()
-                                    ) {
-                                        if (n.isFavourite) {
-                                            Icon(
-                                                Icons.Filled.Star,
-                                                contentDescription = stringResource(R.string.networks_remove_favourite),
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        } else {
-                                            Icon(
-                                                Icons.Outlined.StarOutline,
-                                                contentDescription = stringResource(R.string.networks_add_favourite),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
 
-                                    // ICON / draft/ICON ISUPPORT token: server-advertised icon (ICON=<url>,
-                                    // optional literal {size} template). Gated on the global image-previews
-                                    // opt-in, https only, and never fetched for proxied profiles - the fetch
-                                    // would bypass the SOCKS proxy and leak the user's IP, same fail-closed
-                                    // rule as filehost uploads.
-                                    val iconUrl = state.connections[n.id]?.networkIconUrl
-                                        ?.replace("{size}", "64")
-                                        ?.takeIf {
-                                            it.startsWith("https://") &&
-                                                state.settings.imagePreviewsEnabled &&
-                                                n.proxyType == com.boxlabs.hexdroid.connection.ProxyType.NONE
-                                        }
-                                    if (iconUrl != null) {
-                                        var iconBmp by remember(iconUrl) {
-                                            mutableStateOf(RemoteImage.cached(iconUrl))
-                                        }
-                                        LaunchedEffect(iconUrl) {
-                                            if (iconBmp == null) iconBmp = RemoteImage.fetch(iconUrl)
-                                        }
-                                        iconBmp?.let { bmp ->
-                                            Image(
-                                                bitmap = bmp,
-                                                contentDescription = null,
-                                                modifier = Modifier.padding(end = 6.dp).size(20.dp)
-                                            )
-                                        }
-                                    }
-                                    // Name and live status stacked in one block
-                                    Column(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(end = 6.dp)
-                                    ) {
-                                        Text(
-                                            n.name,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            if (isConnecting) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(10.dp),
-                                                    strokeWidth = 1.5.dp
-                                                )
-                                            } else {
-                                                Box(
-                                                    Modifier
-                                                        .size(8.dp)
-                                                        .background(
-                                                            color = if (isConn) CONNECTED_DOT
-                                                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                                                            shape = RoundedCornerShape(50)
-                                                        )
-                                                )
-                                            }
-                                            Text(
-                                                status,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    }
-                                    if (n.id == active) Badge { Text(stringResource(R.string.networks_selected)) }
-
-                                    // Drag handle with long-press detection
+                        Box(
+                            modifier = Modifier
+                                // The dragged row is placed by the finger, so it opts out
+                                // of the item animation the other rows use to slide aside.
+                                .then(if (isDragging) Modifier else Modifier.animateItem())
+                                .graphicsLayer { translationY = if (isDragging) reorder.translation else 0f }
+                                .zIndex(if (isDragging) 1f else 0f)
+                        ) {
+                            NetworkRow(
+                                profile = n,
+                                connected = isConn,
+                                connecting = isConnecting,
+                                status = status,
+                                isSelected = railLayout && n.id == detailProfile?.id,
+                                iconUrl = iconUrl,
+                                onClick = {
+                                    selectedId = n.id
+                                    if (!railLayout) sheetId = n.id
+                                },
+                                onConnect = { onSelect(n.id); onConnect(n.id) },
+                                onDisconnect = { onSelect(n.id); onDisconnect(n.id) },
+                                onSetAutoConnect = { onSetAutoConnect(n.id, it) },
+                                onSetShowInSidebar = { onSetShowInSidebar(n.id, it) },
+                                showControls = !railLayout,
+                                // Beside a detail pane the connect button lives there, so
+                                // the tour target follows it rather than being claimed twice.
+                                connectModifier = if (!railLayout && n.id == active) {
+                                    Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON)
+                                } else {
+                                    Modifier
+                                },
+                                modifier = (if (isAfterNet) {
+                                    Modifier.tourTarget(TourTarget.NETWORKS_AFTERNET_ITEM)
+                                } else {
+                                    Modifier
+                                })
+                                    .then(if (idx == 0) Modifier.tvInitialFocus() else Modifier)
+                                    .then(if (isDragging) Modifier.shadow(8.dp) else Modifier),
+                                // Touch reorder lives on its own handle so the row body
+                                // stays a single focus stop for a remote. The detail
+                                // pane's move buttons are the D-pad equivalent.
+                                dragHandle = if (railLayout) null else ({
                                     Box(
                                         modifier = Modifier
-                                            .size(32.dp)
-                                            .dpadReorder(
-                                                onMoveUp = {
-                                                    val i = sortedNetworks.indexOfFirst { it.id == n.id }
-                                                    if (i > 0) onReorder(i, i - 1)
-                                                },
-                                                onMoveDown = {
-                                                    val i = sortedNetworks.indexOfFirst { it.id == n.id }
-                                                    if (i >= 0 && i < sortedNetworks.lastIndex) onReorder(i, i + 1)
-                                                },
-                                            )
+                                            .size(40.dp)
                                             .pointerInput(n.id) {
+                                                var accumulated = 0f
                                                 detectDragGesturesAfterLongPress(
                                                     onDragStart = {
-                                                        dragFromId  = n.id
-                                                        dragToId    = n.id
-                                                        dragOffsetY = 0f
+                                                        accumulated = 0f
+                                                        reorder.start(n.id, currentOrder)
                                                     },
                                                     onDrag = { change, dragAmount ->
                                                         change.consume()
-                                                        dragOffsetY += dragAmount.y
-                                                        val fromNatural = naturalTops[dragFromId] ?: 0f
-                                                        val draggedH    = itemHeights[dragFromId] ?: 200f
-                                                        val curCentreY  = fromNatural + draggedH / 2f + dragOffsetY
-                                                        val snap = naturalTops.entries
-                                                            .minByOrNull { (id, top) ->
-                                                                val h = itemHeights[id] ?: draggedH
-                                                                kotlin.math.abs((top + h / 2f) - curCentreY)
-                                                            }?.key
-                                                        if (snap != null) dragToId = snap
+                                                        accumulated += dragAmount.y
+                                                        reorder.drag(accumulated) { movedId, otherId ->
+                                                            // Favourites always sort above the
+                                                            // rest, so a drag across that line
+                                                            // would be undone by the next sort.
+                                                            favouriteById[movedId] == favouriteById[otherId]
+                                                        }
                                                     },
                                                     onDragEnd = {
-                                                        val from = dragFromId
-                                                        val to   = dragToId
-                                                        if (from != null && to != null && from != to) {
-                                                            val fromIdx = sortedNetworks.indexOfFirst { it.id == from }
-                                                            val toIdx   = sortedNetworks.indexOfFirst { it.id == to }
-                                                            if (fromIdx >= 0 && toIdx >= 0) onReorder(fromIdx, toIdx)
+                                                        val dropped = reorder.end()
+                                                        if (dropped != null) {
+                                                            reorderIndices(currentNaturalIds, dropped, n.id)
+                                                                ?.let { (from, to) -> onReorder(from, to) }
                                                         }
-                                                        dragFromId  = null
-                                                        dragToId    = null
-                                                        dragOffsetY = 0f
                                                     },
-                                                    onDragCancel = {
-                                                        dragFromId  = null
-                                                        dragToId    = null
-                                                        dragOffsetY = 0f
-                                                    }
+                                                    onDragCancel = { reorder.cancel() },
                                                 )
                                             },
-                                        contentAlignment = Alignment.Center
+                                        contentAlignment = Alignment.Center,
                                     ) {
                                         Icon(
                                             Icons.Default.DragHandle,
                                             contentDescription = stringResource(R.string.networks_drag_reorder),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(20.dp),
                                         )
                                     }
-                                }
-
-                                // Host, TLS and nick on one muted line
-                                Text(
-                                    "${n.host}:${n.port}  •  TLS ${if (n.useTls) "on" else "off"}  •  " +
-                                        "${n.nick}${n.altNick?.let { " / $it" } ?: ""}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-
-                                // One row per toggle
-                                CompactSwitch(
-                                    label = stringResource(R.string.networks_auto_connect),
-                                    checked = n.autoConnect,
-                                    onCheckedChange = { onSetAutoConnect(n.id, it) },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                CompactSwitch(
-                                    label = stringResource(R.string.network_show_in_switcher_label),
-                                    checked = n.showInSidebar,
-                                    onCheckedChange = { onSetShowInSidebar(n.id, it) },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    val connectMod = (if (n.id == active) {
-                                        Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON)
-                                    } else Modifier)
-                                        .weight(1f)
-                                        .focusHighlight(RoundedCornerShape(50))
-
-                                    if (isConn || isConnecting) {
-                                        FilledTonalButton(
-                                            onClick = { onSelect(n.id); onDisconnect(n.id) },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                            modifier = connectMod
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.networks_disconnect),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    } else {
-                                        Button(
-                                            onClick = { onSelect(n.id); onConnect(n.id) },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                            modifier = connectMod
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.networks_connect),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    }
-
-                                    OutlinedButton(
-                                        onClick = { onEdit(n.id) },
-                                        contentPadding = PaddingValues(0.dp),
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .focusHighlight(RoundedCornerShape(50))
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Edit,
-                                            contentDescription = stringResource(R.string.networks_edit),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    OutlinedButton(
-                                        onClick = { onDelete(n.id) },
-                                        contentPadding = PaddingValues(0.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.error
-                                        ),
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .focusHighlight(RoundedCornerShape(50))
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Delete,
-                                            contentDescription = stringResource(R.string.delete),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
+                                }),
+                            )
                         }
                     }
-                    }
+                }
+            }
 
-                    // Bouncer multinetwork (soju + ZNC) sections.
-                    //
-                    // We render one section per LIVE *root* bouncer-profile connection. A
-                    // "root" connection is one that talks to the bouncer without binding to
-                    // a specific upstream — i.e. bouncerNetworkName is empty/null. Those are
-                    // the ones that see the global BOUNCER NETWORK / ListNetworks output.
-                    //
-                    // Imported per-upstream clones (e.g. parent="Bouncer" + clone="Bouncer –
-                    // libera") are themselves bouncerKind=ZNC/SOJU, but they bind directly to
-                    // one upstream via bouncerNetworkName, so they receive their own upstream's
-                    // traffic — not the discovery list. Showing a "Bouncer networks" section
-                    // for them duplicates the parent's section with the same content.
-                    //
-                    // Eligibility:
-                    //  - bouncerKind ∈ {SOJU, ZNC} (the kinds that expose a discoverable list)
-                    //  - bouncerNetworkName blank/null (the root, not an imported clone)
-                    //  - connection is currently registered (without a live connection there's
-                    //    no current upstream list; cached entries were cleared on disconnect).
-                    val bouncerConnections = state.networks.filter { profile ->
-                        (profile.bouncerKind == BouncerKind.SOJU || profile.bouncerKind == BouncerKind.ZNC) &&
-                            profile.bouncerNetworkName.isNullOrBlank() &&
-                            state.connections[profile.id]?.connected == true
-                    }
-                    items(bouncerConnections, key = { "bouncer-section:${it.id}" }) { profile ->
-                        BouncerNetworksSection(
-                            parentNetworkName = profile.name,
-                            parentHost = profile.host,
-                            parentPort = profile.port,
-                            parentKind = profile.bouncerKind,
-                            upstreams = state.bouncerNetworks[profile.id] ?: emptyMap(),
-                            existingProfiles = state.networks,
-                            onRefresh = { onRefreshBouncerNetworks(profile.id) },
-                            onClone = { upstreamName ->
-                                onCloneBouncerNetwork(profile.id, upstreamName)
-                            }
+            if (railLayout) {
+                VerticalDivider()
+                if (detailProfile != null) {
+                    NetworkDetailPane(
+                        state = state,
+                        profile = detailProfile,
+                        orderedIds = orderedIds,
+                        onSelect = onSelect,
+                        onEdit = onEdit,
+                        onDelete = onDelete,
+                        onConnect = onConnect,
+                        onDisconnect = onDisconnect,
+                        onSetAutoConnect = onSetAutoConnect,
+                        onSetShowInSidebar = onSetShowInSidebar,
+                        onToggleFavourite = onToggleFavourite,
+                        onReorder = onReorder,
+                        onRefreshBouncerNetworks = onRefreshBouncerNetworks,
+                        onCloneBouncerNetwork = onCloneBouncerNetwork,
+                        onActionTaken = { },
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        connectModifier = if (detailProfile.id == active) {
+                            Modifier.tourTarget(TourTarget.NETWORKS_CONNECT_BUTTON)
+                        } else {
+                            Modifier
+                        },
+                    )
+                } else {
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(R.string.networks_empty_detail),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                }
             }
+        }
+    }
+
+    if (!railLayout && sheetProfile != null) {
+        ModalBottomSheet(
+            onDismissRequest = { sheetId = null },
+            sheetState = sheetState,
+            contentWindowInsets = { WindowInsets(0) },
+        ) {
+            NetworkDetailPane(
+                state = state,
+                profile = sheetProfile,
+                orderedIds = orderedIds,
+                onSelect = onSelect,
+                onEdit = onEdit,
+                onDelete = onDelete,
+                onConnect = onConnect,
+                onDisconnect = onDisconnect,
+                onSetAutoConnect = onSetAutoConnect,
+                onSetShowInSidebar = onSetShowInSidebar,
+                onToggleFavourite = onToggleFavourite,
+                onReorder = onReorder,
+                onRefreshBouncerNetworks = onRefreshBouncerNetworks,
+                onCloneBouncerNetwork = onCloneBouncerNetwork,
+                onActionTaken = { sheetId = null },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding(),
+            )
         }
     }
 
@@ -658,7 +925,7 @@ fun NetworksScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { onAllowPlaintextConnect(warnNetId) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
+                TextButton(onClick = { onAllowPlaintextConnect(warnNetId) }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.networks_allow_connect))
                 }
             },
@@ -682,7 +949,7 @@ fun NetworksScreen(
             title = { Text(stringResource(R.string.networks_local_title)) },
             text = { Text(stringResource(R.string.networks_local_body, hostPort)) },
             confirmButton = {
-                TextButton(onClick = { onRequestLocalNetworkPermission(localWarnNetId) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
+                TextButton(onClick = { onRequestLocalNetworkPermission(localWarnNetId) }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.networks_local_grant))
                 }
             },
