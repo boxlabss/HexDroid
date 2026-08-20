@@ -1082,8 +1082,9 @@ data class Notice(
  *    preferable to losing the whole state transition.
  *
  * Note that [attrTokens] should be the message's params from index 2 onward, plus the
- * trailing field split on spaces. See the BOUNCER NETWORK dispatch site in [IrcClient]
- * for the assembly.
+ * trailing field, each split on ';' (soju packs all attrs into one semicolon-joined
+ * field, not separate space-delimited params). See the BOUNCER NETWORK dispatch site
+ * in [IrcClient] for the assembly.
  *
  * Case-fold [s] under the IRC [caseMapping] advertised by ISUPPORT 005.
  *
@@ -3299,10 +3300,15 @@ class IrcClient(val config: IrcConfig) {
 						when (subCmd) {
 							"NETWORK" -> {
 								// BOUNCER NETWORK <id> <attrs> | BOUNCER NETWORK <id> *
+								// Per the soju.im/bouncer-networks spec, <attrs> is a single field of
+								// semicolon-separated key=value pairs (message-tag escaping rules apply
+								// to each value) - NOT space-separated tokens. A raw ';' is always a real
+								// delimiter here (a literal semicolon inside a value is escaped as `\:`,
+								// never as `\;`), so splitting on it needs no escape-awareness.
 								// Parsing extracted to top-level [parseBouncerNetworkAttrs] for unit testability.
 								val networkId = msg.params.getOrNull(1) ?: return
-								val attrTokens = msg.params.drop(2) +
-									listOfNotNull(msg.trailing).flatMap { it.split(' ') }
+								val attrTokens = (msg.params.drop(2) + listOfNotNull(msg.trailing))
+									.flatMap { it.split(';') }
 								send(parseBouncerNetworkAttrs(networkId, attrTokens))
 							}
 							// BOUNCER ADDNETWORK / DELNETWORK / CHANGENETWORK: soju bouncer management commands.
