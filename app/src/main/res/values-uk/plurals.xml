@@ -23,6 +23,12 @@
         <item quantity="many">%1$d користувачів</item>
         <item quantity="other">%1$d користувача</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="one">Показати ще %1$d рядок</item>
+        <item quantity="few">Показати ще %1$d рядки</item>
+        <item quantity="many">Показати ще %1$d рядків</item>
+        <item quantity="other">Показати ще %1$d рядка</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="one">%1$d непрочитане</item>
         <item quantity="few">%1$d непрочитані</item>

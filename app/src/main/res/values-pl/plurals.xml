@@ -24,6 +24,12 @@
         <item quantity="many">%1$d użytkowników</item>
         <item quantity="other">%1$d użytkownika</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="one">Pokaż jeszcze %1$d wiersz</item>
+        <item quantity="few">Pokaż jeszcze %1$d wiersze</item>
+        <item quantity="many">Pokaż jeszcze %1$d wierszy</item>
+        <item quantity="other">Pokaż jeszcze %1$d wiersza</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="one">%1$d nieprzeczytana</item>
         <item quantity="few">%1$d nieprzeczytane</item>

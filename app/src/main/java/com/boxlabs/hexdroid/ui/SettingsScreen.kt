@@ -89,15 +89,39 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.font.FontFamily
 import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.FontChoice
+import com.boxlabs.hexdroid.NickStyle
 import com.boxlabs.hexdroid.R
+import com.boxlabs.hexdroid.TimestampStyle
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.VibrateIntensity
 import com.boxlabs.hexdroid.data.ThemeMode
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.vector.ImageVector
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -169,10 +193,10 @@ private fun NickColourPickerDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            Button(onClick = { onConfirm(picked) }) { Text(stringResource(R.string.ok)) }
+            Button(onClick = { onConfirm(picked) }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ok)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+            TextButton(onClick = onDismiss, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(android.R.string.cancel)) }
         },
         title = { Text(stringResource(R.string.setting_own_nick_colour_title)) },
         text = {
@@ -278,6 +302,80 @@ private fun NickColourPickerDialog(
     )
 }
 
+/**
+ * One page of the settings screen. Order here is the order shown in the rail and hub.
+ */
+enum class SettingsCategory(
+    val titleRes: Int,
+    val summaryRes: Int,
+    val icon: ImageVector,
+) {
+    APPEARANCE(R.string.section_appearance, R.string.settings_cat_appearance_desc, Icons.Filled.Palette),
+    CHAT(R.string.settings_cat_chat, R.string.settings_cat_chat_desc, Icons.AutoMirrored.Filled.Chat),
+    MEDIA(R.string.section_media_previews, R.string.settings_cat_media_desc, Icons.Filled.Image),
+    ALIASES(R.string.settings_custom_aliases, R.string.settings_cat_aliases_desc, Icons.Filled.Terminal),
+    HIGHLIGHTS(R.string.section_highlights, R.string.settings_cat_highlights_desc, Icons.Filled.AlternateEmail),
+    IRC(R.string.section_irc, R.string.settings_cat_irc_desc, Icons.Filled.Dns),
+    NOTIFICATIONS(R.string.section_notifications, R.string.settings_cat_notifications_desc, Icons.Filled.Notifications),
+    LOGGING(R.string.section_logging, R.string.settings_cat_logging_desc, Icons.AutoMirrored.Filled.Article),
+    PRIVACY(R.string.section_privacy, R.string.settings_cat_privacy_desc, Icons.Filled.Lock),
+    HISTORY(R.string.section_ircv3_history, R.string.settings_cat_history_desc, Icons.Filled.History),
+    TRANSFERS(R.string.section_file_transfers, R.string.settings_cat_transfers_desc, Icons.Filled.SwapVert),
+    BACKUP(R.string.section_backup_restore, R.string.settings_cat_backup_desc, Icons.Filled.Backup),
+}
+
+/**
+ * Category list for the settings screen. Shown as a rail beside the content pane on
+ * TV and tablets, and as the top level page on phones.
+ */
+@Composable
+private fun SettingsNavPanel(
+    current: SettingsCategory?,
+    rail: Boolean,
+    onSelect: (SettingsCategory) -> Unit,
+    onRunTour: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SectionRail(
+        entries = SettingsCategory.values().toList(),
+        selected = current,
+        label = { stringResource(it.titleRes) },
+        summary = if (rail) null else ({ stringResource(it.summaryRes) }),
+        icon = { it.icon },
+        entryModifier = {
+            if (it == SettingsCategory.APPEARANCE) {
+                Modifier.tourTarget(TourTarget.SETTINGS_APPEARANCE_SECTION)
+            } else {
+                Modifier
+            }
+        },
+        onSelect = onSelect,
+        modifier = modifier,
+        header = {
+            Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.setting_intro_tour), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            stringResource(R.string.setting_intro_tour_desc),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onRunTour,
+                        modifier = Modifier
+                            .tourTarget(TourTarget.SETTINGS_RUN_TOUR)
+                            .focusHighlight(RoundedCornerShape(50))
+                    ) { Text(stringResource(R.string.run)) }
+                }
+            }
+        },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -370,65 +468,83 @@ fun SettingsScreen(
 
     val listState = rememberLazyListState()
 
+    // Two level navigation: a rail beside the content on TV and tablets, a hub page
+    // that opens one category at a time on phones.
+    val railLayout = useSideRailNav()
+    var picked by rememberSaveable { mutableStateOf<SettingsCategory?>(null) }
+    val current = if (railLayout) (picked ?: SettingsCategory.APPEARANCE) else picked
+
+    // On phones, back leaves the open category before it leaves the screen.
+    BackHandler(enabled = !railLayout && picked != null) { picked = null }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
-                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
+                title = {
+                    Text(
+                        if (!railLayout && current != null) stringResource(current.titleRes)
+                        else stringResource(R.string.settings_title)
+                    )
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = { if (!railLayout && picked != null) picked = null else onBack() },
+                        modifier = Modifier.focusHighlight()
+                    ) { Text("←") }
+                },
                 actions = { IconButton(onClick = onOpenNetworks, modifier = Modifier.focusHighlight()) { Text("🌐") } }
             )
         }
     ) { padding ->
 
-        // Tour: scroll so the highlighted element is actually on-screen.
+        // Tour: both settings steps point at the category panel, so make sure it is
+        // the visible pane before the overlay measures its target.
         LaunchedEffect(tourActive, tourTarget) {
             if (!tourActive) return@LaunchedEffect
             when (tourTarget) {
-                TourTarget.SETTINGS_APPEARANCE_SECTION -> {
-                    // Second item after the "Intro tour" card.
-                    try { listState.animateScrollToItem(1) } catch (_: Throwable) { }
-                }
-                TourTarget.SETTINGS_RUN_TOUR -> {
-                    try { listState.animateScrollToItem(0) } catch (_: Throwable) { }
-                }
+                TourTarget.SETTINGS_APPEARANCE_SECTION,
+                TourTarget.SETTINGS_RUN_TOUR -> if (!railLayout) picked = null
                 else -> Unit
             }
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
+        // Reset the scroll position when the open category changes, otherwise a short
+        // page opens scrolled past its own content.
+        LaunchedEffect(current) {
+            runCatching { listState.scrollToItem(0) }
+        }
+
+        Row(
+            Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (railLayout || current == null) {
+                SettingsNavPanel(
+                    current = current,
+                    rail = railLayout,
+                    onSelect = { picked = it },
+                    onRunTour = onRunTour,
+                    modifier = if (railLayout) {
+                        Modifier.width(RAIL_WIDTH).fillMaxHeight()
+                    } else {
+                        Modifier.fillMaxSize()
+                    },
+                )
+                if (railLayout) VerticalDivider()
+            }
+
+            if (current != null) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
 
 ) {
-    item {
-        Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.setting_intro_tour), style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        stringResource(R.string.setting_intro_tour_desc),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                OutlinedButton(
-                    onClick = onRunTour,
-                    modifier = Modifier.tourTarget(TourTarget.SETTINGS_RUN_TOUR)
-                ) { Text(stringResource(R.string.run)) }
-            }
-        }
-    }
-
-    item { SectionTitle(stringResource(R.string.section_appearance), modifier = Modifier.tourTarget(TourTarget.SETTINGS_APPEARANCE_SECTION)) }
-
+            if (current == SettingsCategory.APPEARANCE) {
             item {
                 LanguagePicker(
                     currentCode = s.appLanguage,
@@ -520,7 +636,7 @@ fun SettingsScreen(
                         OutlinedButton(
                             onClick = { if (currentIdx > 0) onUpdate { copy(fontScale = fontSteps[currentIdx - 1]) } },
                             enabled = currentIdx > 0,
-                            modifier = Modifier.widthIn(min = 40.dp)
+                            modifier = Modifier.widthIn(min = 40.dp).focusHighlight(RoundedCornerShape(50))
                         ) { Text("−") }
                         Text(
                             "${(s.fontScale * 100).toInt()}%",
@@ -530,7 +646,7 @@ fun SettingsScreen(
                         OutlinedButton(
                             onClick = { if (currentIdx < fontSteps.lastIndex) onUpdate { copy(fontScale = fontSteps[currentIdx + 1]) } },
                             enabled = currentIdx < fontSteps.lastIndex,
-                            modifier = Modifier.widthIn(min = 40.dp)
+                            modifier = Modifier.widthIn(min = 40.dp).focusHighlight(RoundedCornerShape(50))
                         ) { Text("+") }
                     }
                     Slider(
@@ -548,7 +664,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         OutlinedButton(
                             onClick = { onUpdate { copy(fontScale = 1.0f) } },
-                            enabled = s.fontScale != 1.0f,
+                            enabled = s.fontScale != 1.0f, modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                         ) {
                             Text(stringResource(R.string.settings_reset_100), style = MaterialTheme.typography.labelSmall)
                         }
@@ -608,7 +724,7 @@ fun SettingsScreen(
                         OutlinedButton(
                             onClick = { onUpdate { copy(nicklistFontOffset = nicklistFontOffset - 1) } },
                             enabled = s.nicklistFontOffset > -3,
-                            modifier = Modifier.widthIn(min = 40.dp)
+                            modifier = Modifier.widthIn(min = 40.dp).focusHighlight(RoundedCornerShape(50))
                         ) { Text("\u2212") }
                         Text(
                             if (s.nicklistFontOffset > 0) "+${s.nicklistFontOffset}" else "${s.nicklistFontOffset}",
@@ -618,7 +734,7 @@ fun SettingsScreen(
                         OutlinedButton(
                             onClick = { onUpdate { copy(nicklistFontOffset = nicklistFontOffset + 1) } },
                             enabled = s.nicklistFontOffset < 4,
-                            modifier = Modifier.widthIn(min = 40.dp)
+                            modifier = Modifier.widthIn(min = 40.dp).focusHighlight(RoundedCornerShape(50))
                         ) { Text("+") }
                     }
                     Text(
@@ -630,8 +746,9 @@ fun SettingsScreen(
                 }
             }
 
-            item { HorizontalDivider() }
-            item { SectionTitle(stringResource(R.string.section_media_previews)) }
+            }
+
+            if (current == SettingsCategory.MEDIA) {
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -653,8 +770,9 @@ fun SettingsScreen(
                 }
             }
 
-            item { HorizontalDivider() }
-            item { SectionTitle(stringResource(R.string.section_ui)) }
+            }
+
+            if (current == SettingsCategory.CHAT) {
             item {
                 SettingToggle(stringResource(R.string.setting_colorise_nicks), s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
             }
@@ -709,11 +827,11 @@ fun SettingsScreen(
                                     .focusHighlight(CircleShape)
                                     .clickable { showPicker = true }
                             )
-                            TextButton(onClick = { onUpdate { copy(ownNickColorInt = null) } }) {
+                            TextButton(onClick = { onUpdate { copy(ownNickColorInt = null) } }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                 Text(stringResource(R.string.setting_own_nick_colour_reset))
                             }
                         } else {
-                            OutlinedButton(onClick = { showPicker = true }) {
+                            OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                 Text(stringResource(R.string.setting_own_nick_colour_pick))
                             }
                         }
@@ -743,6 +861,71 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+            item { TimestampStylePicker(s.timestampStyle) { v -> onUpdate { copy(timestampStyle = v) } } }
+            item {
+                var showPicker by remember { mutableStateOf(false) }
+                val tsColor = s.timestampColorInt?.let { Color(it) }
+
+                if (showPicker) {
+                    NickColourPickerDialog(
+                        initial = tsColor ?: Color(0xFF_9E9E9E.toInt()),
+                        onDismiss = { showPicker = false },
+                        onConfirm = { picked ->
+                            onUpdate { copy(timestampColorInt = picked.toArgb()) }
+                            showPicker = false
+                        },
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.setting_timestamp_colour))
+                        Text(
+                            if (tsColor == null) stringResource(R.string.setting_timestamp_colour_default)
+                            else stringResource(R.string.setting_own_nick_colour_custom),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (tsColor != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(tsColor)
+                                    .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                    .focusHighlight(CircleShape)
+                                    .clickable { showPicker = true }
+                            )
+                            TextButton(onClick = { onUpdate { copy(timestampColorInt = null) } }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
+                                Text(stringResource(R.string.setting_own_nick_colour_reset))
+                            }
+                        } else {
+                            OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
+                                Text(stringResource(R.string.setting_own_nick_colour_pick))
+                            }
+                        }
+                    }
+                }
+            }
+            item { NickStylePicker(s.nickStyle) { v -> onUpdate { copy(nickStyle = v) } } }
+            item {
+                ChatFormatPreview(
+                    timestampStyle = s.timestampStyle,
+                    timestampColor = s.timestampColorInt?.let { Color(it) },
+                    nickStyle = s.nickStyle,
+                )
+            }
             item { SettingToggle(stringResource(R.string.setting_hide_motd), s.hideMotdOnConnect) { onUpdate { copy(hideMotdOnConnect = !hideMotdOnConnect) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_joinpartquit), s.hideJoinPartQuit) { onUpdate { copy(hideJoinPartQuit = !hideJoinPartQuit) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_away_notify), s.hideAwayNotify) { onUpdate { copy(hideAwayNotify = !hideAwayNotify) } } }
@@ -751,8 +934,22 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_show_buffers_default), s.defaultShowBufferList) { onUpdate { copy(defaultShowBufferList = !defaultShowBufferList) } } }
             item { SettingToggle(stringResource(R.string.setting_show_nicklist_default), s.defaultShowNickList) { onUpdate { copy(defaultShowNickList = !defaultShowNickList) } } }
 
-            item { HorizontalDivider() }
-            item { SectionTitle(stringResource(R.string.settings_custom_aliases)) }
+            item { SectionTitle(stringResource(R.string.section_portrait)) }
+            item {
+                Column {
+                    SettingToggle(stringResource(R.string.setting_portrait_nicklist_overlay), s.portraitNicklistOverlay) {
+                        onUpdate { copy(portraitNicklistOverlay = !portraitNicklistOverlay) }
+                    }
+                    Text(
+                        stringResource(R.string.setting_portrait_nicklist_overlay_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
+                    )
+                }
+            }
+            }
+
+            if (current == SettingsCategory.ALIASES) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     Text(
@@ -781,7 +978,7 @@ fun SettingsScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                TextButton(onClick = { onUpdate { copy(commandAliases = commandAliases - name) } }) {
+                                TextButton(onClick = { onUpdate { copy(commandAliases = commandAliases - name) } }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                     Text(stringResource(R.string.remove))
                                 }
                             }
@@ -816,28 +1013,14 @@ fun SettingsScreen(
                             newName = ""
                             newExpansion = ""
                         },
-                        enabled = valid,
+                        enabled = valid, modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                     ) { Text(stringResource(R.string.settings_add_alias)) }
                 }
             }
 
-            item { SectionTitle(stringResource(R.string.section_portrait)) }
-            item {
-                Column {
-                    SettingToggle(stringResource(R.string.setting_portrait_nicklist_overlay), s.portraitNicklistOverlay) {
-                        onUpdate { copy(portraitNicklistOverlay = !portraitNicklistOverlay) }
-                    }
-                    Text(
-                        stringResource(R.string.setting_portrait_nicklist_overlay_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
-                    )
-                }
             }
 
-            item { HorizontalDivider() }
-
-            item { SectionTitle(stringResource(R.string.section_highlights)) }
+            if (current == SettingsCategory.HIGHLIGHTS) {
 
             item { SettingToggle(stringResource(R.string.setting_highlight_on_nick), s.highlightOnNick) { onUpdate { copy(highlightOnNick = !highlightOnNick) } } }
 
@@ -856,9 +1039,9 @@ fun SettingsScreen(
                 )
             }
 
-            item { HorizontalDivider() }
+            }
 
-            item { SectionTitle(stringResource(R.string.section_irc)) }
+            if (current == SettingsCategory.IRC) {
 
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -870,7 +1053,7 @@ fun SettingsScreen(
                             Text(stringResource(R.string.setting_ignore_list), style = MaterialTheme.typography.titleSmall)
                             Text(stringResource(R.string.setting_ignore_list_desc), style = MaterialTheme.typography.bodySmall)
                         }
-                        OutlinedButton(onClick = onOpenIgnoreList) { Text(stringResource(R.string.manage)) }
+                        OutlinedButton(onClick = onOpenIgnoreList, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.manage)) }
                     }
                 }
             }
@@ -885,7 +1068,7 @@ fun SettingsScreen(
                             Text(stringResource(R.string.settings_scripts), style = MaterialTheme.typography.titleSmall)
                             Text(stringResource(R.string.settings_scripts_desc), style = MaterialTheme.typography.bodySmall)
                         }
-                        OutlinedButton(onClick = onOpenScripts) { Text(stringResource(R.string.manage)) }
+                        OutlinedButton(onClick = onOpenScripts, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.manage)) }
                     }
                 }
             }
@@ -980,6 +1163,27 @@ fun SettingsScreen(
                         stringResource(R.string.setting_connect_on_boot_desc),
                         style = MaterialTheme.typography.bodySmall,
                     )
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.setting_boot_wifi_only))
+                            Text(
+                                stringResource(R.string.setting_boot_wifi_only_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = s.connectOnBootWifiOnly,
+                            enabled = s.keepAliveInBackground && s.connectOnBoot,
+                            onCheckedChange = { want -> onUpdate { copy(connectOnBootWifiOnly = want) } },
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                        )
+                    }
                 }
             }
 
@@ -1016,9 +1220,9 @@ fun SettingsScreen(
                     )
                 }
             }
-            item { HorizontalDivider() }
+            }
 
-            item { SectionTitle(stringResource(R.string.section_notifications)) }
+            if (current == SettingsCategory.NOTIFICATIONS) {
 
             item { SettingToggle(stringResource(R.string.setting_enable_notifications), s.notificationsEnabled) { onUpdate { copy(notificationsEnabled = !notificationsEnabled) } } }
             item { SettingToggle(stringResource(R.string.setting_notify_highlights), s.notifyOnHighlights) { onUpdate { copy(notifyOnHighlights = !notifyOnHighlights) } } }
@@ -1033,9 +1237,9 @@ fun SettingsScreen(
                 }
             }
 
-            item { HorizontalDivider() }
+            }
 
-            item { SectionTitle(stringResource(R.string.section_logging)) }
+            if (current == SettingsCategory.LOGGING) {
 
             item { SettingToggle(stringResource(R.string.setting_enable_logging), s.loggingEnabled) { onUpdate { copy(loggingEnabled = !loggingEnabled) } } }
             item { SettingToggle(stringResource(R.string.setting_log_server), s.logServerBuffer) { onUpdate { copy(logServerBuffer = !logServerBuffer) } } }
@@ -1086,7 +1290,7 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { folderPicker.launch(null) }) { Text(stringResource(R.string.setting_choose_folder)) }
+                        Button(onClick = { folderPicker.launch(null) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.setting_choose_folder)) }
                         if (!s.logFolderUri.isNullOrBlank()) {
                             OutlinedButton(onClick = {
                                 runCatching {
@@ -1096,7 +1300,7 @@ fun SettingsScreen(
                                     )
                                 }
                                 onUpdate { copy(logFolderUri = null) }
-                            }) {
+                            }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                 Text(stringResource(R.string.reset))
                             }
                         }
@@ -1135,9 +1339,9 @@ fun SettingsScreen(
                 )
             }
 
-            item { HorizontalDivider() }
+            }
 
-            item { SectionTitle(stringResource(R.string.section_privacy)) }
+            if (current == SettingsCategory.PRIVACY) {
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -1157,9 +1361,9 @@ fun SettingsScreen(
                 }
             }
 
-            item { HorizontalDivider() }
+            }
 
-            item { SectionTitle(stringResource(R.string.section_ircv3_history)) }
+            if (current == SettingsCategory.HISTORY) {
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -1181,9 +1385,9 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_count_unread), s.ircHistoryCountsAsUnread) { onUpdate { copy(ircHistoryCountsAsUnread = !ircHistoryCountsAsUnread) } } }
             item { SettingToggle(stringResource(R.string.setting_trigger_notif), s.ircHistoryTriggersNotifications) { onUpdate { copy(ircHistoryTriggersNotifications = !ircHistoryTriggersNotifications) } } }
 
-            item { HorizontalDivider() }
+            }
 
-            item { SectionTitle(stringResource(R.string.section_file_transfers)) }
+            if (current == SettingsCategory.TRANSFERS) {
 
             item { SettingToggle(stringResource(R.string.setting_enable_dcc), s.dccEnabled) { onUpdate { copy(dccEnabled = !dccEnabled) } } }
 
@@ -1212,7 +1416,7 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { dccFolderPicker.launch(null) }) { Text(stringResource(R.string.setting_choose_folder)) }
+                        Button(onClick = { dccFolderPicker.launch(null) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.setting_choose_folder)) }
                         if (!s.dccDownloadFolderUri.isNullOrBlank()) {
                             OutlinedButton(onClick = {
                                 runCatching {
@@ -1222,7 +1426,7 @@ fun SettingsScreen(
                                     )
                                 }
                                 onUpdate { copy(dccDownloadFolderUri = null) }
-                            }) {
+                            }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                                 Text(stringResource(R.string.reset))
                             }
                         }
@@ -1254,11 +1458,9 @@ fun SettingsScreen(
                 )
             }
 
-            item { Spacer(Modifier.height(16.dp)) }
+            }
 
-            // ----- Backup & Restore -----
-            item { HorizontalDivider() }
-            item { SectionTitle(stringResource(R.string.section_backup_restore)) }
+            if (current == SettingsCategory.BACKUP) {
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -1268,12 +1470,12 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { exportBackupLauncher.launch(backupFileName) }) {
+                        Button(onClick = { exportBackupLauncher.launch(backupFileName) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                             Text(stringResource(R.string.settings_export_backup))
                         }
                         OutlinedButton(onClick = {
                             importBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-                        }) {
+                        }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                             Text(stringResource(R.string.settings_restore_backup))
                         }
                     }
@@ -1287,6 +1489,9 @@ fun SettingsScreen(
             }
 
             item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
+            }
         }
     }
     // Restore confirmation dialog
@@ -1307,7 +1512,7 @@ fun SettingsScreen(
                     showRestoreConfirmDialog = false
                     pendingRestoreUri?.let { uri -> onImportBackup(uri) }
                     pendingRestoreUri = null
-                }) {
+                }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.settings_restore_confirm_ok))
                 }
             },
@@ -1315,7 +1520,7 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     showRestoreConfirmDialog = false
                     pendingRestoreUri = null
-                }) {
+                }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.cancel))
                 }
             }
@@ -1339,7 +1544,7 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     showBackupResultDialog = false
                     onClearBackupMessage()
-                }) {
+                }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.settings_ok))
                 }
             }
@@ -1372,7 +1577,7 @@ fun SettingsScreen(
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                     )
-                }) {
+                }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.setting_open_app_settings))
                 }
             },
@@ -1385,10 +1590,10 @@ fun SettingsScreen(
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                         )
-                    }) {
+                    }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                         Text(stringResource(R.string.setting_battery_optimization))
                     }
-                    TextButton(onClick = { showBatteryHelpDialog = false }) {
+                    TextButton(onClick = { showBatteryHelpDialog = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                         Text(stringResource(R.string.not_now))
                     }
                 }
@@ -1419,6 +1624,10 @@ private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
             label = { Text(stringResource(R.string.welcome_language_label)) },
             modifier = Modifier
                 .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                // D-pad path: the anchor opens its menu from a tap detector, so a
+                // remote or keyboard select needs to toggle the menu explicitly.
+                .dpadActivate { expanded = !expanded }
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -1464,6 +1673,10 @@ private fun ThemePicker(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
             label = { Text(stringResource(R.string.theme_label)) },
             modifier = Modifier
                 .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                // D-pad path: the anchor opens its menu from a tap detector, so a
+                // remote or keyboard select needs to toggle the menu explicitly.
+                .dpadActivate { expanded = !expanded }
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -1501,6 +1714,10 @@ private fun FontPicker(
             label = { Text(fieldLabel) },
             modifier = Modifier
                 .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                // D-pad path: the anchor opens its menu from a tap detector, so a
+                // remote or keyboard select needs to toggle the menu explicitly.
+                .dpadActivate { expanded = !expanded }
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -1540,6 +1757,10 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
             label = { Text(stringResource(R.string.chat_font_style)) },
             modifier = Modifier
                 .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                // D-pad path: the anchor opens its menu from a tap detector, so a
+                // remote or keyboard select needs to toggle the menu explicitly.
+                .dpadActivate { expanded = !expanded }
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -1547,6 +1768,97 @@ private fun ChatFontStylePicker(current: ChatFontStyle, onPick: (ChatFontStyle) 
             DropdownMenuItem(text = { Text(stringResource(R.string.style_bold)) }, onClick = { onPick(ChatFontStyle.BOLD); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.style_italic)) }, onClick = { onPick(ChatFontStyle.ITALIC); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.style_bold_italic)) }, onClick = { onPick(ChatFontStyle.BOLD_ITALIC); expanded = false })
+        }
+    }
+}
+
+/** Sample of how a chat line will look with the chosen brackets and colour. */
+@Composable
+private fun ChatFormatPreview(
+    timestampStyle: TimestampStyle,
+    timestampColor: Color?,
+    nickStyle: NickStyle,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            buildAnnotatedString {
+                val ts = "${timestampStyle.open}12:34:56${timestampStyle.close} "
+                if (timestampColor != null) {
+                    withStyle(SpanStyle(color = timestampColor)) { append(ts) }
+                } else {
+                    append(ts)
+                }
+                append("${nickStyle.open}nick${nickStyle.close} ")
+                append(stringResource(R.string.setting_chat_format_sample))
+            },
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimestampStylePicker(current: TimestampStyle, onPick: (TimestampStyle) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    // Show the brackets themselves rather than naming them, since the name of a
+    // bracket is less recognisable than the bracket.
+    fun label(style: TimestampStyle): String =
+        if (style == TimestampStyle.NONE) "12:34:56" else "${style.open}12:34:56${style.close}"
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+        OutlinedTextField(
+            value = label(current),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(stringResource(R.string.setting_timestamp_style)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                .dpadActivate { expanded = !expanded }
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            TimestampStyle.values().forEach { style ->
+                DropdownMenuItem(
+                    text = { Text(label(style)) },
+                    onClick = { onPick(style); expanded = false },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NickStylePicker(current: NickStyle, onPick: (NickStyle) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    fun label(style: NickStyle): String = "${style.open}nick${style.close}"
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+        OutlinedTextField(
+            value = label(current),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(stringResource(R.string.setting_nick_style)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                .dpadActivate { expanded = !expanded }
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            NickStyle.values().forEach { style ->
+                DropdownMenuItem(
+                    text = { Text(label(style)) },
+                    onClick = { onPick(style); expanded = false },
+                )
+            }
         }
     }
 }
@@ -1569,6 +1881,10 @@ private fun VibrateIntensityPicker(current: VibrateIntensity, onPick: (VibrateIn
             label = { Text(stringResource(R.string.vibration_intensity)) },
             modifier = Modifier
                 .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(4.dp))
+                // D-pad path: the anchor opens its menu from a tap detector, so a
+                // remote or keyboard select needs to toggle the menu explicitly.
+                .dpadActivate { expanded = !expanded }
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -1610,12 +1926,12 @@ private fun SpacingStepRow(
                 if (selected) {
                     Button(
                         onClick = { onSelect(value) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(labelRes), style = MaterialTheme.typography.labelLarge) }
                 } else {
                     OutlinedButton(
                         onClick = { onSelect(value) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(labelRes), style = MaterialTheme.typography.labelLarge) }
                 }
             }

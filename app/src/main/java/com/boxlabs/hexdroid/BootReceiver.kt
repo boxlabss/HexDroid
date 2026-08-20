@@ -28,6 +28,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * Set by [BootReceiver] before the ViewModel is constructed, and read once by it.
+ *
+ * A separate object rather than a ViewModel field because the decision is made before
+ * the ViewModel exists, and it applies to the boot path only: a connect the user asks
+ * for, on mobile data, is a connect they meant.
+ */
+object BootConnectGate {
+    @Volatile
+    var waitForWifi: Boolean = false
+}
+
+/**
  * Brings "Always connected" back after a device restart when enabled.
  */
 class BootReceiver : BroadcastReceiver() {
@@ -66,6 +78,14 @@ class BootReceiver : BroadcastReceiver() {
                 val networks = app.repo.networksFlow.first()
                 if (networks.none { it.autoConnect }) return@launch
 
+                // Wi-Fi is usually still associating when BOOT_COMPLETED lands, so
+                // connecting straight away means connecting over mobile data. Arm the
+                // gate instead of waiting here: the ViewModel marks the profiles as
+                // wanted, which starts the keep-alive service inside the window this
+                // broadcast granted, and holds the connections until Wi-Fi arrives. The
+                // service keeps the process alive, so the wait has no deadline.
+                BootConnectGate.waitForWifi = settings.connectOnBootWifiOnly
+
                 // Constructing the ViewModel is what starts everything. It must happen on
                 // the main thread: its init builds Android objects (Handler, notification
                 // helpers) that expect a Looper.
@@ -77,4 +97,5 @@ class BootReceiver : BroadcastReceiver() {
             }
         }
     }
+
 }

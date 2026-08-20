@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">受信ポート最小値</string>
     <string name="setting_incoming_port_max">受信ポート最大値</string>
     <string name="setting_keep_alive">接続を維持</string>
+    <string name="setting_connect_on_boot">端末の再起動後に再接続</string>
+    <string name="setting_connect_on_boot_desc">端末の再起動後、アプリを開かずに自動接続に設定したネットワークへ再接続します。\"接続を維持\"が必要です。</string>
     <string name="setting_enable_dcc">DCCを有効化</string>
     <string name="setting_open_app_settings">アプリ設定を開く</string>
     <string name="setting_battery_optimization">バッテリー最適化リスト</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">チャットとメッセージ</string>
+    <string name="settings_cat_appearance_desc">言語、テーマ、フォント、文字サイズ</string>
+    <string name="settings_cat_chat_desc">色、タイムスタンプ、非表示イベント、サイドバー</string>
+    <string name="settings_cat_media_desc">画像プレビューと読み込むタイミング</string>
+    <string name="settings_cat_aliases_desc">自分のスラッシュコマンド</string>
+    <string name="settings_cat_highlights_desc">通知されるキーワード</string>
+    <string name="settings_cat_irc_desc">接続の動作、無視リスト、スクリプト</string>
+    <string name="settings_cat_notifications_desc">アラート、音、バイブレーション</string>
+    <string name="settings_cat_logging_desc">チャットログ、フォルダ、保存期間</string>
+    <string name="settings_cat_privacy_desc">入力中インジケーター</string>
+    <string name="settings_cat_history_desc">サーバー側履歴の再生</string>
+    <string name="settings_cat_transfers_desc">DCCの送受信とポート</string>
+    <string name="settings_cat_backup_desc">設定のエクスポートと復元</string>
 
     <!-- Theme picker -->
     <string name="theme_label">テーマ</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">切断</string>
     <string name="networks_edit">編集</string>
     <string name="networks_add">ネットワーク追加</string>
+    <string name="networks_empty_title">ネットワークがまだありません</string>
+    <string name="networks_empty_body">まずネットワークを追加してください。迷ったら AfterNET から始めるのがおすすめです。</string>
     <string name="networks_auto_connect">自動接続</string>
     <string name="network_edit_title">ネットワークを編集</string>
     <string name="network_add_title">ネットワークを追加</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">ツアーを再生</string>
     <string name="tour_replay_body">ウォークスルーは設定 → アプリ情報からいつでも再実行できます。「完了」をタップして終了します。</string>
 
-    <!-- About -->
-    <string name="about_title">このアプリについて</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">ファイル転送</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">無視リスト</string>
-
-    <!-- List -->
-    <string name="list_title">チャンネルリスト</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">高度なIRCv3キャップ</string>
+    <string name="core_nick_change_refused">サーバーがニックの変更を許可しません: %1$s</string>
+    <string name="settings_raw_log">生プロトコルログ</string>
+    <string name="settings_raw_log_desc">送受信したすべての行をネットワークごとの Raw バッファに表示します。パスワードは隠されます。デバッグ用です。</string>
+    <string name="chat_show_less">折りたたむ</string>
+    <string name="chat_not_delivered">未配信</string>
+    <string name="vm_multiline_rejected">サーバーがメッセージを拒否しました (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">%1$s も要求します</string>
     <string name="network_edit_caps_hint">基本的なIRCv3機能はデフォルトで有効です。高度なオプションを表示するにはオンにしてください。</string>
     <string name="network_edit_bouncer_caps">バウンサーキャップ（soju/pounce）</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">ファイル転送</string>
     <string name="transfers_enable_dcc">DCCを有効化</string>
     <string name="transfers_dcc_send_mode">DCC送信モード</string>
     <string name="transfers_send_file">ファイルを送信</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">アクティブな転送</string>
     <string name="transfers_no_transfers">転送中なし。</string>
     <string name="transfers_share_file">ファイルを共有</string>
+    <string name="transfers_share_open">共有 / ファイルを開く</string>
+    <string name="transfers_tab_active">実行中</string>
+    <string name="transfers_tab_offers">オファー</string>
+    <string name="transfers_tab_history">履歴</string>
+    <string name="transfers_tab_send">送信</string>
+    <string name="transfers_tab_settings">設定</string>
+    <string name="transfers_no_active">実行中の転送はありません。</string>
+    <string name="transfers_no_completed">完了したものはまだありません。</string>
+    <string name="transfers_clear_completed">すべて消去</string>
+    <string name="transfers_enable">有効にする</string>
+    <string name="transfers_to">宛先: %1$s</string>
+    <string name="transfers_send_file_section">ファイルを送信</string>
+    <string name="transfers_dcc_chat_section">DCC チャット</string>
+    <string name="transfers_dcc_disabled">DCCは現在無効になっています。ファイルの送受信を有効にするには、設定でオンにしてください。</string>
+    <string name="transfers_dcc_auto_desc">自動: Passive DCCを試し、応答がなければActiveにフォールバックします。</string>
+    <string name="transfers_dcc_active_desc">アクティブ: クラシックDCC SEND（受信者があなたに接続します）。</string>
+    <string name="transfers_dcc_passive_desc">パッシブ: 受信者にポートを開くよう求め、その後接続します。</string>
+    <string name="transfers_chat_offers_section">受信チャットオファー</string>
+    <string name="transfers_offers_section">受信オファー</string>
+    <string name="transfers_in_progress_section">転送中</string>
+    <string name="transfers_unknown_size">サイズ不明</string>
+    <string name="transfers_passive_port">パッシブ（ポート待機中）</string>
+    <string name="transfers_error">エラー: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">タップしてメンション</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">選択済み</string>
+    <string name="networks_favourite">お気に入り</string>
     <string name="networks_add_favourite">お気に入りに追加</string>
     <string name="networks_remove_favourite">お気に入りから削除</string>
     <string name="networks_drag_reorder">ドラッグして並べ替え</string>
@@ -367,10 +406,18 @@
     <string name="networks_insecure_body2">TLSなしで%1$sに接続するには、このネットワークの暗号化されていない接続を明示的に許可する必要があります。</string>
     <string name="networks_allow_connect">許可して接続</string>
     <string name="networks_reconnect">再接続</string>
+    <string name="networks_open_details">ネットワークの詳細を開く</string>
+    <string name="networks_tag_auto_connect">自動接続</string>
+    <string name="networks_tag_no_tls">TLSなし</string>
+    <string name="networks_order">並び順</string>
+    <string name="networks_move_up">上へ移動</string>
+    <string name="networks_move_down">下へ移動</string>
+    <string name="networks_empty_detail">ネットワークを選ぶと詳細が表示されます</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">チャンネル</string>
     <string name="list_search_hint">チャンネル / トピックを検索</string>
+    <string name="list_title">チャンネルリスト</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">現在のモードを取得</string>
@@ -434,26 +481,15 @@
     <string name="ircop_uptime">稼働時間</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">無視リスト</string>
     <string name="ignore_nick_label">無視するニック</string>
     <string name="ignore_no_nicks">無視されているニックはありません。</string>
     <string name="ignore_no_networks">ネットワークがまだ設定されていません。</string>
     <string name="ignore_add">追加</string>
     <string name="ignore_remove">削除</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">バックアップをエクスポート</string>
-    <string name="settings_restore_backup">バックアップを復元</string>
-    <string name="settings_restore_confirm_title">バックアップを復元しますか？</string>
-    <string name="settings_restore_confirm_ok">復元</string>
-    <string name="settings_ok">OK</string>
-    <string name="settings_system_default">システムデフォルト</string>
-    <string name="settings_matrix_theme">マトリックス</string>
-    <string name="settings_custom_font">カスタムフォントファイル…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">共有 / ファイルを開く</string>
-
     <!-- About screen -->
+    <string name="about_title">このアプリについて</string>
     <string name="about_open_website">ウェブサイトを開く</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@
     <string name="setting_ui_font">UIフォント</string>
     <string name="setting_chat_font">チャットフォント</string>
     <string name="setting_font_size_label">フォントサイズ</string>
+    <string name="setting_line_spacing_label">チャットの行間</string>
+    <string name="setting_line_spacing_desc">メッセージとメッセージの間隔です。文字サイズは変わりません。</string>
+    <string name="setting_font_line_height_label">フォントの行の高さ</string>
+    <string name="setting_font_line_height_desc">1つのメッセージ内で折り返された行の間隔です。文字サイズは変わりません。</string>
+    <string name="setting_line_spacing_tight">狭い</string>
+    <string name="setting_line_spacing_normal">標準</string>
+    <string name="setting_line_spacing_relaxed">広い</string>
+    <string name="setting_nicklist_font_label">ニックリストの文字サイズ</string>
+    <string name="setting_nicklist_font_desc">幅の調整に加えてニックリストを調整します。パネルを広げると文字も大きくなります。</string>
     <string name="setting_log_internal">内部ストレージ</string>
     <string name="setting_log_custom">カスタムフォルダが選択されました</string>
     <string name="setting_dcc_downloads_default">ダウンロード（デフォルト）</string>
@@ -550,19 +595,14 @@
     <string name="setting_previews_wifi_only">Wi-Fiのみ</string>
     <string name="setting_previews_wifi_only_desc">モバイルデータの消費を避けるため、Wi-Fi接続時のみプレビューを読み込みます。</string>
     <string name="theme_system_default">システムデフォルト</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">ファイルを送信</string>
-    <string name="transfers_dcc_chat_section">DCC チャット</string>
-    <string name="transfers_dcc_disabled">DCCは現在無効になっています。ファイルの送受信を有効にするには、設定でオンにしてください。</string>
-    <string name="transfers_dcc_auto_desc">自動: Passive DCCを試し、応答がなければActiveにフォールバックします。</string>
-    <string name="transfers_dcc_active_desc">アクティブ: クラシックDCC SEND（受信者があなたに接続します）。</string>
-    <string name="transfers_dcc_passive_desc">パッシブ: 受信者にポートを開くよう求め、その後接続します。</string>
-    <string name="transfers_chat_offers_section">受信チャットオファー</string>
-    <string name="transfers_offers_section">受信オファー</string>
-    <string name="transfers_in_progress_section">転送中</string>
-    <string name="transfers_unknown_size">サイズ不明</string>
-    <string name="transfers_passive_port">パッシブ（ポート待機中）</string>
-    <string name="transfers_error">エラー: %1$s</string>
+    <string name="settings_export_backup">バックアップをエクスポート</string>
+    <string name="settings_restore_backup">バックアップを復元</string>
+    <string name="settings_restore_confirm_title">バックアップを復元しますか？</string>
+    <string name="settings_restore_confirm_ok">復元</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">システムデフォルト</string>
+    <string name="settings_matrix_theme">マトリックス</string>
+    <string name="settings_custom_font">カスタムフォントファイル…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">トピック</string>
     <string name="chat_modes_panel">チャンネルモード</string>
@@ -657,6 +697,29 @@
     <string name="about_support_desc">ガイド、FAQ、問題の報告はウェブサイトをご覧ください。</string>
     <string name="about_credits_title">貢献者</string>
     <string name="about_credits_contribute">貢献しませんか？</string>
+    <string name="about_doc_getting_started">はじめに</string>
+    <string name="about_doc_getting_started_desc">3ステップで接続し、アカウントとバウンサーを設定します。</string>
+    <string name="about_doc_features">機能</string>
+    <string name="about_doc_features_desc">HexDroid でできることと使い心地。</string>
+    <string name="about_doc_reference">リファレンス</string>
+    <string name="about_doc_reference_desc">すべての IRCv3 機能とすべての設定を網羅。</string>
+    <string name="about_doc_commands">コマンド</string>
+    <string name="about_doc_commands_desc">すべてのスラッシュコマンドの構文、例、注意点。</string>
+    <string name="about_doc_scripting">スクリプト</string>
+    <string name="about_doc_scripting_desc">スクリプトを書いて読み込み、クライアントを拡張します。</string>
+    <string name="about_doc_encryption">暗号化</string>
+    <string name="about_doc_encryption_desc">エンドツーエンド暗号化されたチャンネルと個人チャットの仕組み。</string>
+    <string name="about_doc_troubleshooting">トラブルシューティング</string>
+    <string name="about_doc_troubleshooting_desc">接続、TLS、通知、DCC、バッテリーの対処法。</string>
+    <string name="about_doc_changelog">変更履歴</string>
+    <string name="about_doc_changelog_desc">リリースノート、新機能、バグ修正、セキュリティ更新。</string>
+    <string name="about_help_title">お困りですか？</string>
+    <string name="about_join_support_channel">サポートチャンネルに参加</string>
+    <string name="about_report_issue">問題を報告</string>
+    <string name="about_report_issue_desc">GitHub でのバグ報告と機能リクエスト。</string>
+    <string name="about_privacy_policy">プライバシーポリシー</string>
+    <string name="about_privacy_policy_desc">アプリが保存するものと、決して送信しないもの。</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">SDCC を使用（TLS 暗号化）</string>
@@ -817,6 +880,11 @@
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">SASL 認証に成功しました</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN を中止しました。暗号化されていない接続でパスワードは送信しません。TLS を有効にするか SCRAM-SHA-256 に切り替えてください。</string>
+    <string name="session_sasl_mech_upgraded">SASL: サーバーが PLAIN を提供していないため、代わりに SCRAM-SHA-256 を使用します (提供: %1$s)。</string>
+    <string name="session_sasl_mech_downgraded">SASL: サーバーが SCRAM-SHA-256 を提供していないため、PLAIN にフォールバックします (提供: %1$s)。パスワードは TLS 接続の内側でサーバーに送信されます。</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL を中止しました: サーバーは %1$s のみを提供しており、PLAIN にフォールバックすると暗号化されていない接続でパスワードが送信されます。このネットワークで TLS を有効にしてください。</string>
+    <string name="session_sasl_mech_unavailable">SASL を中止しました: サーバーは %1$s に対応していません。提供しているのは %2$s です。ネットワーク設定で SASL メカニズムを変更してください。</string>
+    <string name="session_sasl_prep_failed">SASL を中止しました: ユーザー名またはパスワードに、資格情報として使用できない文字が含まれています (%1$s)。ネットワーク設定で変更してください。</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN を中止しました。このプロファイルにパスワードが設定されていません。ネットワーク設定を開いて SASL パスワードを入力し直してください (セキュリティ上、パスワードはバックアップに含まれません)。</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN: サーバーが認証を中止しました</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN: 予期しないサーバーチャレンジ &quot;%1$s&quot;。中止します</string>
@@ -1053,10 +1121,7 @@
     <string name="settings_scripts">スクリプト</string>
     <string name="settings_scripts_desc">.hex スクリプトの読み込みと管理 (ゲーム、ツール、カスタムコマンド)。</string>
     <string name="net_this_network">このネットワーク</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">切断</string>
     <string name="core_disconnect_server_error">サーバーエラー: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS 証明書のフィンガープリントが変わりました</string>
@@ -1394,11 +1459,7 @@
     <string name="chat_font_preview">いろはにほへと ちりぬるを 我が世誰ぞ 常ならむ</string>
     <string name="chat_bot_prefix">"[bot] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">スクリプトのコマンド</string>
     <string name="cmd_me">CTCP ACTION を送ります (/me が手を振る)</string>
     <string name="cmd_msg">個人メッセージを送ります</string>
@@ -1646,4 +1707,15 @@
     <string name="dcc_trusted_tip">ヒント: ニック一覧から、またはチャットで名前をタップしても信頼できます。</string>
     <string name="dcc_trusted_dcc_off">現在 DCC はオフなので、有効にするまでここの設定は働きません。</string>
     <string name="dcc_trusted_entry_none">信頼した相手はまだいません</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">タイムスタンプの括弧</string>
+    <string name="setting_timestamp_colour">タイムスタンプの色</string>
+    <string name="setting_timestamp_colour_default">メッセージと同じ</string>
+    <string name="setting_nick_style">ニックの括弧</string>
+    <string name="setting_chat_format_sample">こんにちは世界</string>
+    <string name="setting_boot_wifi_only">Wi-Fiを待つ</string>
+    <string name="setting_boot_wifi_only_desc">起動時にモバイルデータで接続せず、Wi-Fi が利用可能になるまで接続を保留します。</string>
+    <string name="vm_status_waiting_wifi">Wi-Fiを待機中…</string>
+    <string name="vm_waiting_for_wifi">接続前に Wi-Fi を待っています。</string>
 </resources>

@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">수신 포트 최솟값</string>
     <string name="setting_incoming_port_max">수신 포트 최댓값</string>
     <string name="setting_keep_alive">연결 유지</string>
+    <string name="setting_connect_on_boot">기기 재시작 후 다시 연결</string>
+    <string name="setting_connect_on_boot_desc">기기가 재부팅된 뒤 앱을 열지 않고도 자동 연결로 표시된 네트워크에 다시 연결합니다. \"연결 유지\"가 필요합니다.</string>
     <string name="setting_enable_dcc">DCC 활성화</string>
     <string name="setting_open_app_settings">앱 설정 열기</string>
     <string name="setting_battery_optimization">배터리 최적화 목록</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">채팅 및 메시지</string>
+    <string name="settings_cat_appearance_desc">언어, 테마, 글꼴, 글자 크기</string>
+    <string name="settings_cat_chat_desc">색상, 타임스탬프, 숨긴 이벤트, 사이드바</string>
+    <string name="settings_cat_media_desc">이미지 미리보기와 불러올 시점</string>
+    <string name="settings_cat_aliases_desc">나만의 슬래시 명령어</string>
+    <string name="settings_cat_highlights_desc">나를 부르는 단어</string>
+    <string name="settings_cat_irc_desc">연결 동작, 무시 목록, 스크립트</string>
+    <string name="settings_cat_notifications_desc">알림, 소리, 진동</string>
+    <string name="settings_cat_logging_desc">채팅 로그, 폴더, 보관 기간</string>
+    <string name="settings_cat_privacy_desc">입력 중 표시</string>
+    <string name="settings_cat_history_desc">서버 측 기록 재생</string>
+    <string name="settings_cat_transfers_desc">DCC 보내기, 받기, 포트</string>
+    <string name="settings_cat_backup_desc">설정 내보내기 또는 복원</string>
 
     <!-- Theme picker -->
     <string name="theme_label">테마</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">연결 해제</string>
     <string name="networks_edit">편집</string>
     <string name="networks_add">네트워크 추가</string>
+    <string name="networks_empty_title">아직 네트워크가 없습니다</string>
+    <string name="networks_empty_body">네트워크를 추가해 시작하세요. 잘 모르겠다면 AfterNET이 좋은 출발점입니다.</string>
     <string name="networks_auto_connect">자동 연결</string>
     <string name="network_edit_title">네트워크 편집</string>
     <string name="network_add_title">네트워크 추가</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">이 투어 다시 보기</string>
     <string name="tour_replay_body">설정 → 정보에서 언제든지 워크스루를 다시 실행할 수 있습니다. 완료를 탭하여 종료하세요.</string>
 
-    <!-- About -->
-    <string name="about_title">정보</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">파일 전송</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">무시 목록</string>
-
-    <!-- List -->
-    <string name="list_title">채널 목록</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">고급 IRCv3 캡</string>
+    <string name="core_nick_change_refused">서버가 닉 변경을 허용하지 않습니다: %1$s</string>
+    <string name="settings_raw_log">원시 프로토콜 로그</string>
+    <string name="settings_raw_log_desc">네트워크마다 Raw 버퍼에 주고받은 모든 줄을 표시합니다. 비밀번호는 가려집니다. 디버깅용입니다.</string>
+    <string name="chat_show_less">간략히 보기</string>
+    <string name="chat_not_delivered">전달되지 않음</string>
+    <string name="vm_multiline_rejected">서버가 메시지를 거부했습니다 (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">%1$s도 함께 요청함</string>
     <string name="network_edit_caps_hint">기본 IRCv3 기능은 기본으로 활성화됩니다. 고급 옵션을 보려면 켜세요.</string>
     <string name="network_edit_bouncer_caps">바운서 캡 (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">파일 전송</string>
     <string name="transfers_enable_dcc">DCC 활성화</string>
     <string name="transfers_dcc_send_mode">DCC 전송 모드</string>
     <string name="transfers_send_file">파일 보내기</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">활성 전송</string>
     <string name="transfers_no_transfers">진행 중인 전송 없음.</string>
     <string name="transfers_share_file">파일 공유</string>
+    <string name="transfers_share_open">공유 / 파일 열기</string>
+    <string name="transfers_tab_active">진행 중</string>
+    <string name="transfers_tab_offers">제안</string>
+    <string name="transfers_tab_history">기록</string>
+    <string name="transfers_tab_send">보내기</string>
+    <string name="transfers_tab_settings">설정</string>
+    <string name="transfers_no_active">진행 중인 전송이 없습니다.</string>
+    <string name="transfers_no_completed">아직 완료된 항목이 없습니다.</string>
+    <string name="transfers_clear_completed">모두 지우기</string>
+    <string name="transfers_enable">사용</string>
+    <string name="transfers_to">받는 사람: %1$s</string>
+    <string name="transfers_send_file_section">파일 전송</string>
+    <string name="transfers_dcc_chat_section">DCC 채팅</string>
+    <string name="transfers_dcc_disabled">DCC가 현재 비활성화되어 있습니다. 파일을 보내거나 받으려면 활성화하세요.</string>
+    <string name="transfers_dcc_auto_desc">자동: 패시브 DCC 시도 후 응답 없으면 액티브로 폴백.</string>
+    <string name="transfers_dcc_active_desc">액티브: 클래식 DCC SEND (수신자가 당신에게 연결).</string>
+    <string name="transfers_dcc_passive_desc">패시브: 수신자에게 포트 열기 요청 후 연결.</string>
+    <string name="transfers_chat_offers_section">수신 채팅 제안</string>
+    <string name="transfers_offers_section">수신 제안</string>
+    <string name="transfers_in_progress_section">진행 중인 전송</string>
+    <string name="transfers_unknown_size">알 수 없는 크기</string>
+    <string name="transfers_passive_port">패시브 (포트 대기 중)</string>
+    <string name="transfers_error">오류: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">탭하여 언급</string>
@@ -337,7 +375,7 @@
     <string name="network_sasl_mechanism_label">메커니즘</string>
     <string name="network_sasl_username_label">사용자 이름 (authcid)</string>
     <string name="network_sasl_password_label">비밀번호</string>
-    <string name="network_sasl_recommended_for_bouncers">바운서에 권장 — 사용자 이름 필드를 비워두면 위의 "일반" 섹션의 바운서 사용자 이름이 사용됩니다.</string>
+    <string name="network_sasl_recommended_for_bouncers">바운서에 권장 — 사용자 이름 필드를 비워두면 위의 \"일반\" 섹션의 바운서 사용자 이름이 사용됩니다.</string>
     <string name="network_cert_format_label">인증서 형식</string>
     <string name="network_cert_format_pem">PEM (.pem)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">선택됨</string>
+    <string name="networks_favourite">즐겨찾기</string>
     <string name="networks_add_favourite">즐겨찾기에 추가</string>
     <string name="networks_remove_favourite">즐겨찾기에서 제거</string>
     <string name="networks_drag_reorder">드래그하여 순서 변경</string>
@@ -367,10 +406,18 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="networks_insecure_body2">TLS 없이 %1$s에 연결하려면 이 네트워크에 대해 암호화되지 않은 연결을 명시적으로 허용해야 합니다.</string>
     <string name="networks_allow_connect">허용 및 연결</string>
     <string name="networks_reconnect">재연결</string>
+    <string name="networks_open_details">네트워크 세부 정보 열기</string>
+    <string name="networks_tag_auto_connect">자동 연결</string>
+    <string name="networks_tag_no_tls">TLS 없음</string>
+    <string name="networks_order">순서</string>
+    <string name="networks_move_up">위로 이동</string>
+    <string name="networks_move_down">아래로 이동</string>
+    <string name="networks_empty_detail">네트워크를 선택하면 세부 정보가 표시됩니다</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">채널</string>
     <string name="list_search_hint">채널 / 주제 검색</string>
+    <string name="list_title">채널 목록</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">현재 모드 가져오기</string>
@@ -434,26 +481,15 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="ircop_uptime">가동 시간</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">무시 목록</string>
     <string name="ignore_nick_label">무시할 닉</string>
     <string name="ignore_no_nicks">무시된 닉이 없습니다.</string>
     <string name="ignore_no_networks">아직 네트워크가 설정되지 않았습니다.</string>
     <string name="ignore_add">추가</string>
     <string name="ignore_remove">제거</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">백업 내보내기</string>
-    <string name="settings_restore_backup">백업 복원</string>
-    <string name="settings_restore_confirm_title">백업을 복원하시겠습니까?</string>
-    <string name="settings_restore_confirm_ok">복원</string>
-    <string name="settings_ok">확인</string>
-    <string name="settings_system_default">시스템 기본값</string>
-    <string name="settings_matrix_theme">매트릭스</string>
-    <string name="settings_custom_font">사용자 정의 폰트 파일…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">공유 / 파일 열기</string>
-
     <!-- About screen -->
+    <string name="about_title">정보</string>
     <string name="about_open_website">웹사이트 열기</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="setting_ui_font">UI 글꼴</string>
     <string name="setting_chat_font">채팅 글꼴</string>
     <string name="setting_font_size_label">글꼴 크기</string>
+    <string name="setting_line_spacing_label">채팅 줄 간격</string>
+    <string name="setting_line_spacing_desc">메시지와 다음 메시지 사이의 간격입니다. 글자 크기는 바뀌지 않습니다.</string>
+    <string name="setting_font_line_height_label">글꼴 줄 높이</string>
+    <string name="setting_font_line_height_desc">한 메시지 안에서 줄바꿈된 줄 사이의 간격입니다. 글자 크기는 바뀌지 않습니다.</string>
+    <string name="setting_line_spacing_tight">좁게</string>
+    <string name="setting_line_spacing_normal">보통</string>
+    <string name="setting_line_spacing_relaxed">넓게</string>
+    <string name="setting_nicklist_font_label">닉 목록 글자 크기</string>
+    <string name="setting_nicklist_font_desc">너비와 별도로 닉 목록을 조정합니다. 패널을 넓히면 글자도 계속 커집니다.</string>
     <string name="setting_log_internal">내부 저장소</string>
     <string name="setting_log_custom">사용자 지정 폴더 선택됨</string>
     <string name="setting_dcc_downloads_default">다운로드 (기본값)</string>
@@ -550,19 +595,14 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="setting_previews_wifi_only">Wi-Fi만 사용</string>
     <string name="setting_previews_wifi_only_desc">모바일 데이터 사용을 방지하기 위해 Wi-Fi에 연결된 경우에만 미리보기를 불러옵니다.</string>
     <string name="theme_system_default">시스템 기본값</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">파일 전송</string>
-    <string name="transfers_dcc_chat_section">DCC 채팅</string>
-    <string name="transfers_dcc_disabled">DCC가 현재 비활성화되어 있습니다. 파일을 보내거나 받으려면 활성화하세요.</string>
-    <string name="transfers_dcc_auto_desc">자동: 패시브 DCC 시도 후 응답 없으면 액티브로 폴백.</string>
-    <string name="transfers_dcc_active_desc">액티브: 클래식 DCC SEND (수신자가 당신에게 연결).</string>
-    <string name="transfers_dcc_passive_desc">패시브: 수신자에게 포트 열기 요청 후 연결.</string>
-    <string name="transfers_chat_offers_section">수신 채팅 제안</string>
-    <string name="transfers_offers_section">수신 제안</string>
-    <string name="transfers_in_progress_section">진행 중인 전송</string>
-    <string name="transfers_unknown_size">알 수 없는 크기</string>
-    <string name="transfers_passive_port">패시브 (포트 대기 중)</string>
-    <string name="transfers_error">오류: %1$s</string>
+    <string name="settings_export_backup">백업 내보내기</string>
+    <string name="settings_restore_backup">백업 복원</string>
+    <string name="settings_restore_confirm_title">백업을 복원하시겠습니까?</string>
+    <string name="settings_restore_confirm_ok">복원</string>
+    <string name="settings_ok">확인</string>
+    <string name="settings_system_default">시스템 기본값</string>
+    <string name="settings_matrix_theme">매트릭스</string>
+    <string name="settings_custom_font">사용자 정의 폰트 파일…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">주제</string>
     <string name="chat_modes_panel">채널 모드</string>
@@ -657,6 +697,29 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="about_support_desc">가이드, FAQ 및 문제 신고를 위해 웹사이트를 방문하세요.</string>
     <string name="about_credits_title">기여자</string>
     <string name="about_credits_contribute">기여하고 싶으신가요?</string>
+    <string name="about_doc_getting_started">시작하기</string>
+    <string name="about_doc_getting_started_desc">세 단계로 연결한 뒤 계정과 바운서를 설정하세요.</string>
+    <string name="about_doc_features">기능</string>
+    <string name="about_doc_features_desc">HexDroid가 하는 일과 사용해 본 느낌.</string>
+    <string name="about_doc_reference">레퍼런스</string>
+    <string name="about_doc_reference_desc">모든 IRCv3 기능과 모든 설정을 빠짐없이.</string>
+    <string name="about_doc_commands">명령어</string>
+    <string name="about_doc_commands_desc">모든 슬래시 명령어의 문법, 예시, 참고 사항.</string>
+    <string name="about_doc_scripting">스크립팅</string>
+    <string name="about_doc_scripting_desc">스크립트를 작성하고 불러와 클라이언트를 확장하세요.</string>
+    <string name="about_doc_encryption">암호화</string>
+    <string name="about_doc_encryption_desc">종단 간 암호화된 채널과 개인 대화의 작동 방식.</string>
+    <string name="about_doc_troubleshooting">문제 해결</string>
+    <string name="about_doc_troubleshooting_desc">연결, TLS, 알림, DCC, 배터리 문제 해결.</string>
+    <string name="about_doc_changelog">변경 기록</string>
+    <string name="about_doc_changelog_desc">릴리스 노트, 새 기능, 버그 수정, 보안 업데이트.</string>
+    <string name="about_help_title">도움이 필요하신가요?</string>
+    <string name="about_join_support_channel">지원 채널 참여</string>
+    <string name="about_report_issue">문제 신고</string>
+    <string name="about_report_issue_desc">GitHub의 버그 및 기능 요청.</string>
+    <string name="about_privacy_policy">개인정보처리방침</string>
+    <string name="about_privacy_policy_desc">앱이 저장하는 것과 절대 보내지 않는 것.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">SDCC 사용 (TLS 암호화)</string>
@@ -817,6 +880,11 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">SASL 인증에 성공했습니다</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN 중단: 암호화되지 않은 연결로는 비밀번호를 보내지 않습니다. TLS를 켜거나 SCRAM-SHA-256으로 바꾸세요.</string>
+    <string name="session_sasl_mech_upgraded">SASL: 서버가 PLAIN을 제공하지 않아 대신 SCRAM-SHA-256을 사용합니다 (제공: %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL: 서버가 SCRAM-SHA-256을 제공하지 않아 PLAIN으로 대체합니다 (제공: %1$s). 비밀번호는 TLS 연결 안에서 서버로 전송됩니다.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL 중단: 서버가 %1$s만 제공하며, PLAIN으로 대체하면 암호화되지 않은 연결로 비밀번호가 전송됩니다. 이 네트워크에 TLS를 켜세요.</string>
+    <string name="session_sasl_mech_unavailable">SASL 중단: 서버가 %1$s을(를) 지원하지 않습니다. 제공하는 것: %2$s. 네트워크 설정에서 SASL 메커니즘을 변경하세요.</string>
+    <string name="session_sasl_prep_failed">SASL 중단: 사용자 이름 또는 비밀번호에 자격 증명에 사용할 수 없는 문자가 있습니다 (%1$s). 네트워크 설정에서 변경하세요.</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN 중단: 이 프로필에 비밀번호가 설정되어 있지 않습니다. 네트워크 설정을 열고 SASL 비밀번호를 다시 입력하세요 (보안상 비밀번호는 백업에 포함되지 않습니다).</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN: 서버가 인증을 중단했습니다</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN: 예기치 않은 서버 챌린지 &quot;%1$s&quot;, 중단합니다</string>
@@ -1053,10 +1121,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="settings_scripts">스크립트</string>
     <string name="settings_scripts_desc">.hex 스크립트를 불러오고 관리합니다 (게임, 도구, 사용자 명령).</string>
     <string name="net_this_network">이 네트워크</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">연결 끊김</string>
     <string name="core_disconnect_server_error">서버 오류: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS 인증서 지문이 변경되었습니다</string>
@@ -1394,11 +1459,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="chat_font_preview">다람쥐 헌 쳇바퀴에 타고파</string>
     <string name="chat_bot_prefix">"[봇] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">스크립트 명령</string>
     <string name="cmd_me">CTCP ACTION을 보냅니다 (/me 손을 흔든다)</string>
     <string name="cmd_msg">개인 메시지를 보냅니다</string>
@@ -1646,4 +1707,15 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="dcc_trusted_tip">팁: 닉 목록에서, 또는 대화에서 이름을 눌러서도 신뢰할 수 있습니다.</string>
     <string name="dcc_trusted_dcc_off">현재 DCC가 꺼져 있어, 켜기 전까지는 여기 설정이 적용되지 않습니다.</string>
     <string name="dcc_trusted_entry_none">아직 신뢰한 사람이 없습니다</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">타임스탬프 괄호</string>
+    <string name="setting_timestamp_colour">타임스탬프 색상</string>
+    <string name="setting_timestamp_colour_default">메시지와 동일</string>
+    <string name="setting_nick_style">닉 괄호</string>
+    <string name="setting_chat_format_sample">안녕 세상</string>
+    <string name="setting_boot_wifi_only">Wi-Fi 기다리기</string>
+    <string name="setting_boot_wifi_only_desc">부팅 시 모바일 데이터로 연결하는 대신 Wi-Fi가 준비될 때까지 연결을 미룹니다.</string>
+    <string name="vm_status_waiting_wifi">Wi-Fi 기다리는 중…</string>
+    <string name="vm_waiting_for_wifi">연결하기 전에 Wi-Fi를 기다리는 중입니다.</string>
 </resources>

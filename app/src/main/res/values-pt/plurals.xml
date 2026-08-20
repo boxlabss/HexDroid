@@ -19,6 +19,10 @@
         <item quantity="many">%1$d de utilizadores</item>
         <item quantity="other">%1$d utilizadores</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="one">Mostrar mais %1$d linha</item>
+        <item quantity="other">Mostrar mais %1$d linhas</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="one">%1$d não lida</item>
         <item quantity="many">%1$d de não lidas</item>

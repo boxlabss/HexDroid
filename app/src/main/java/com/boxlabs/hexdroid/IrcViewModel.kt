@@ -211,6 +211,26 @@ enum class FontChoice { OPEN_SANS, INTER, MONOSPACE, CUSTOM }
 /** Default style applied to chat text (buffer + input). IRC formatting codes can still override this per-span. */
 enum class ChatFontStyle { REGULAR, BOLD, ITALIC, BOLD_ITALIC }
 
+/** How a timestamp is wrapped in the chat: [12:34], (12:34), 12:34 and so on. */
+enum class TimestampStyle(val open: String, val close: String) {
+    SQUARE("[", "]"),
+    ROUND("(", ")"),
+    ANGLE("<", ">"),
+    CURLY("{", "}"),
+    DASH("", " -"),
+    NONE("", ""),
+}
+
+/** How a sender's nick is marked in the chat: <nick>, [nick], nick: and so on. */
+enum class NickStyle(val open: String, val close: String) {
+    ANGLE("<", ">"),
+    SQUARE("[", "]"),
+    ROUND("(", ")"),
+    CURLY("{", "}"),
+    COLON("", ":"),
+    NONE("", ""),
+}
+
 enum class VibrateIntensity { LOW, MEDIUM, HIGH }
 
 
@@ -230,6 +250,12 @@ data class UiSettings(
     val networkTabsAtBottom: Boolean = false,
     val showTimestamps: Boolean = true,
     val timestampFormat: String = "HH:mm:ss",
+    /** Brackets drawn around the timestamp. */
+    val timestampStyle: TimestampStyle = TimestampStyle.SQUARE,
+    /** ARGB colour for the timestamp, or null to use the message colour. */
+    val timestampColorInt: Int? = null,
+    /** Brackets drawn around the sender's nick. */
+    val nickStyle: NickStyle = NickStyle.ANGLE,
     val fontScale: Float = 1.0f,
     val fontChoice: FontChoice = FontChoice.OPEN_SANS,
     val chatFontChoice: FontChoice = FontChoice.MONOSPACE,
@@ -302,6 +328,11 @@ data class UiSettings(
      * user opening the app. Off by default.
      */
     val connectOnBoot: Boolean = false,
+    /**
+     * Hold the connect-on-boot fan-out until Wi-Fi is up, rather than connecting over
+     * whatever is available at boot, which is usually mobile data.
+     */
+    val connectOnBootWifiOnly: Boolean = false,
     val autoReconnectEnabled: Boolean = true,
     val autoReconnectDelaySec: Int = 10,
     val autoConnectOnStartup: Boolean = false,
@@ -1237,6 +1268,37 @@ class IrcViewModel(
     }
     private suspend inline fun <T> withNetLock(netId: String, crossinline block: suspend () -> T): T {
         return netLock(netId).withLock { block() }
+    }
+
+    /**
+     * True while a boot-time connect is holding out for Wi-Fi.
+     *
+     * Set by [BootReceiver] before the ViewModel is constructed, because the decision
+     * belongs to the boot path only: a connect the user asks for, on mobile data, is a
+     * connect they meant.
+     */
+    private var bootWifiWait = BootConnectGate.waitForWifi.also { BootConnectGate.waitForWifi = false }
+
+    /**
+     * True when the boot-time connect should hold. Latches off for good the moment the
+     * user opens the app, an unmetered network arrives, or the setting is turned off,
+     * so a later disconnect cannot re-arm the wait behind the user's back.
+     */
+    private fun waitingForWifi(): Boolean {
+        if (!bootWifiWait) return false
+        if (!_state.value.settings.connectOnBootWifiOnly) { bootWifiWait = false; return false }
+        // The user is looking at the app, so they can decide about mobile data themselves.
+        if (AppVisibility.isActivityStarted) { bootWifiWait = false; return false }
+        if (hasUnmeteredConnection()) { bootWifiWait = false; return false }
+        return true
+    }
+
+    /** True when the active network carries internet and is not metered. */
+    private fun hasUnmeteredConnection(): Boolean {
+        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
     private fun hasInternetConnection(): Boolean {
@@ -4763,6 +4825,21 @@ fun startAddNetwork() {
             return
         } else {
             noNetworkNotice.remove(netId)
+        }
+
+        // Connect on boot, waiting for Wi-Fi: mobile data is up but the user asked not to use it.
+        if (waitingForWifi()) {
+            if (!noNetworkNotice.contains(netId)) {
+                noNetworkNotice.add(netId)
+                append(serverKey, from = null,
+                    text = "*** " + appContext.getString(R.string.vm_waiting_for_wifi), doNotify = false)
+            }
+            setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_waiting_wifi), myNick = cfg.nick) }
+            if (_state.value.activeNetworkId == netId) updateConnectionNotification(appContext.getString(R.string.vm_status_waiting_wifi))
+            // Backstop for the case the NetworkCallback failed to register (some OEM
+            // ROMs), which would otherwise leave the wait with nothing to end it.
+            if (_state.value.settings.autoReconnectEnabled) scheduleAutoReconnect(netId)
+            return
         }
 
         val preservedListModes = conn?.listModes ?: NetConnState().listModes

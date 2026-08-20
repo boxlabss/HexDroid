@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">الحد الأدنى للمنفذ الوارد</string>
     <string name="setting_incoming_port_max">الحد الأقصى للمنفذ الوارد</string>
     <string name="setting_keep_alive">الحفاظ على الاتصال نشطًا</string>
+    <string name="setting_connect_on_boot">إعادة الاتصال بعد إعادة تشغيل الجهاز</string>
+    <string name="setting_connect_on_boot_desc">بعد إعادة تشغيل الجهاز، تُعاد الشبكات المحددة بالاتصال التلقائي دون فتح التطبيق. يتطلب \"الحفاظ على الاتصال نشطًا\".</string>
     <string name="setting_enable_dcc">تمكين DCC</string>
     <string name="setting_open_app_settings">فتح إعدادات التطبيق</string>
     <string name="setting_battery_optimization">قائمة تحسين البطارية</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">الدردشة والرسائل</string>
+    <string name="settings_cat_appearance_desc">اللغة والسمة والخطوط وحجم النص</string>
+    <string name="settings_cat_chat_desc">الألوان والأوقات والأحداث المخفية واللوحات الجانبية</string>
+    <string name="settings_cat_media_desc">معاينات الصور ووقت تحميلها</string>
+    <string name="settings_cat_aliases_desc">أوامرك الخاصة بالشرطة المائلة</string>
+    <string name="settings_cat_highlights_desc">الكلمات التي تنبّهك</string>
+    <string name="settings_cat_irc_desc">سلوك الاتصال وقائمة التجاهل والبرامج النصية</string>
+    <string name="settings_cat_notifications_desc">التنبيهات والصوت والاهتزاز</string>
+    <string name="settings_cat_logging_desc">سجلات الدردشة والمجلد ومدة الاحتفاظ</string>
+    <string name="settings_cat_privacy_desc">مؤشرات الكتابة</string>
+    <string name="settings_cat_history_desc">تشغيل السجل من الخادم</string>
+    <string name="settings_cat_transfers_desc">إرسال واستقبال DCC والمنافذ</string>
+    <string name="settings_cat_backup_desc">تصدير الإعدادات أو استعادتها</string>
 
     <!-- Theme picker -->
     <string name="theme_label">السمة</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">قطع الاتصال</string>
     <string name="networks_edit">تعديل</string>
     <string name="networks_add">إضافة شبكة</string>
+    <string name="networks_empty_title">لا توجد شبكات بعد</string>
+    <string name="networks_empty_body">أضف شبكة للبدء. إذا لم تكن متأكدًا، فإن AfterNET بداية جيدة.</string>
     <string name="networks_auto_connect">الاتصال التلقائي</string>
     <string name="network_edit_title">تعديل الشبكة</string>
     <string name="network_add_title">إضافة شبكة</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">إعادة تشغيل الجولة</string>
     <string name="tour_replay_body">يمكنك تشغيل الجولة التعريفية مجدداً في أي وقت من الإعدادات ← حول. اضغط تم للإنهاء.</string>
 
-    <!-- About -->
-    <string name="about_title">حول</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">عمليات النقل</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">قائمة التجاهل</string>
-
-    <!-- List -->
-    <string name="list_title">قائمة القنوات</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">إمكانيات IRCv3 المتقدمة</string>
+    <string name="core_nick_change_refused">الخادم لا يسمح بتغيير الاسم المستعار: %1$s</string>
+    <string name="settings_raw_log">سجل البروتوكول الخام</string>
+    <string name="settings_raw_log_desc">إظهار كل سطر مُرسل ومستلم في مخزن Raw لكل شبكة. تُخفى كلمات المرور. لأغراض تصحيح الأخطاء.</string>
+    <string name="chat_show_less">إظهار أقل</string>
+    <string name="chat_not_delivered">لم يُسلَّم</string>
+    <string name="vm_multiline_rejected">رفض الخادم الرسالة (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">ويطلب أيضًا %1$s</string>
     <string name="network_edit_caps_hint">ميزات IRCv3 الأساسية مفعلة افتراضياً. شغّل لرؤية الخيارات المتقدمة.</string>
     <string name="network_edit_bouncer_caps">إمكانيات الباونسر (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">عمليات النقل</string>
     <string name="transfers_enable_dcc">تمكين DCC</string>
     <string name="transfers_dcc_send_mode">وضع إرسال DCC</string>
     <string name="transfers_send_file">إرسال ملف</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">النقلات النشطة</string>
     <string name="transfers_no_transfers">لا توجد نقلات نشطة.</string>
     <string name="transfers_share_file">مشاركة الملف</string>
+    <string name="transfers_share_open">مشاركة / فتح الملف</string>
+    <string name="transfers_tab_active">النشطة</string>
+    <string name="transfers_tab_offers">العروض</string>
+    <string name="transfers_tab_history">السجل</string>
+    <string name="transfers_tab_send">إرسال</string>
+    <string name="transfers_tab_settings">الإعدادات</string>
+    <string name="transfers_no_active">لا توجد عمليات نقل جارية.</string>
+    <string name="transfers_no_completed">لم يكتمل شيء بعد.</string>
+    <string name="transfers_clear_completed">مسح الكل</string>
+    <string name="transfers_enable">تفعيل</string>
+    <string name="transfers_to">إلى %1$s</string>
+    <string name="transfers_send_file_section">إرسال ملف</string>
+    <string name="transfers_dcc_chat_section">DCC CHAT</string>
+    <string name="transfers_dcc_disabled">DCC معطل حاليًا. قم بتشغيله لإرسال/قبول الملفات.</string>
+    <string name="transfers_dcc_auto_desc">تلقائي: تجربة DCC السلبي أو الرجوع إلى النشط إذا لم يكن هناك رد.</string>
+    <string name="transfers_dcc_active_desc">نشط: DCC SEND الكلاسيكي (يتصل المستقبل بك).</string>
+    <string name="transfers_dcc_passive_desc">سلبي: اطلب من المستقبل فتح منفذ، ثم أنت تتصل به.</string>
+    <string name="transfers_chat_offers_section">عروض الدردشة الواردة</string>
+    <string name="transfers_offers_section">العروض الواردة</string>
+    <string name="transfers_in_progress_section">التحويلات</string>
+    <string name="transfers_unknown_size">حجم غير معروف</string>
+    <string name="transfers_passive_port">سلبي (انتظار المنفذ)</string>
+    <string name="transfers_error">خطأ: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">اضغط للإشارة</string>
@@ -337,7 +375,7 @@
     <string name="network_sasl_mechanism_label">الآلية</string>
     <string name="network_sasl_username_label">اسم المستخدم (authcid)</string>
     <string name="network_sasl_password_label">كلمة المرور</string>
-    <string name="network_sasl_recommended_for_bouncers">موصى به للـ bouncer — اترك حقل اسم المستخدم فارغاً لاستخدام اسم مستخدم الـ bouncer من قسم "عام" أعلاه.</string>
+    <string name="network_sasl_recommended_for_bouncers">موصى به للـ bouncer — اترك حقل اسم المستخدم فارغاً لاستخدام اسم مستخدم الـ bouncer من قسم \"عام\" أعلاه.</string>
     <string name="network_cert_format_label">تنسيق الشهادة</string>
     <string name="network_cert_format_pem">PEM (.pem)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">محدد</string>
+    <string name="networks_favourite">مفضّلة</string>
     <string name="networks_add_favourite">إضافة إلى المفضلة</string>
     <string name="networks_remove_favourite">إزالة من المفضلة</string>
     <string name="networks_drag_reorder">اسحب لإعادة الترتيب</string>
@@ -367,10 +406,18 @@
     <string name="networks_insecure_body2">للاتصال بـ %1$s بدون TLS، يجب السماح صراحةً بالاتصالات غير المشفرة لهذه الشبكة.</string>
     <string name="networks_allow_connect">سماح واتصال</string>
     <string name="networks_reconnect">إعادة الاتصال</string>
+    <string name="networks_open_details">فتح تفاصيل الشبكة</string>
+    <string name="networks_tag_auto_connect">الاتصال التلقائي</string>
+    <string name="networks_tag_no_tls">بدون TLS</string>
+    <string name="networks_order">الترتيب</string>
+    <string name="networks_move_up">تحريك لأعلى</string>
+    <string name="networks_move_down">تحريك لأسفل</string>
+    <string name="networks_empty_detail">اختر شبكة لعرض تفاصيلها</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">القنوات</string>
     <string name="list_search_hint">بحث في القنوات / الموضوع</string>
+    <string name="list_title">قائمة القنوات</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">جلب الأوضاع الحالية</string>
@@ -434,26 +481,15 @@
     <string name="ircop_uptime">وقت التشغيل</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">قائمة التجاهل</string>
     <string name="ignore_nick_label">Nick للتجاهل</string>
     <string name="ignore_no_nicks">لا يوجد نيكات مُتجاهلة.</string>
     <string name="ignore_no_networks">لم يتم تكوين شبكات بعد.</string>
     <string name="ignore_add">إضافة</string>
     <string name="ignore_remove">إزالة</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">تصدير النسخة الاحتياطية</string>
-    <string name="settings_restore_backup">استعادة النسخة الاحتياطية</string>
-    <string name="settings_restore_confirm_title">استعادة النسخة الاحتياطية؟</string>
-    <string name="settings_restore_confirm_ok">استعادة</string>
-    <string name="settings_ok">موافق</string>
-    <string name="settings_system_default">الافتراضي للنظام</string>
-    <string name="settings_matrix_theme">Matrix</string>
-    <string name="settings_custom_font">ملف خط مخصص…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">مشاركة / فتح الملف</string>
-
     <!-- About screen -->
+    <string name="about_title">حول</string>
     <string name="about_open_website">فتح الموقع</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@
     <string name="setting_ui_font">خط الواجهة</string>
     <string name="setting_chat_font">خط المحادثة</string>
     <string name="setting_font_size_label">حجم الخط</string>
+    <string name="setting_line_spacing_label">تباعد أسطر الدردشة</string>
+    <string name="setting_line_spacing_desc">المسافة بين رسالة وأخرى. حجم النص لا يتغير.</string>
+    <string name="setting_font_line_height_label">ارتفاع سطر الخط</string>
+    <string name="setting_font_line_height_desc">المسافة بين الأسطر الملتفة داخل الرسالة الواحدة. حجم النص لا يتغير.</string>
+    <string name="setting_line_spacing_tight">ضيّق</string>
+    <string name="setting_line_spacing_normal">عادي</string>
+    <string name="setting_line_spacing_relaxed">واسع</string>
+    <string name="setting_nicklist_font_label">حجم نص قائمة المستخدمين</string>
+    <string name="setting_nicklist_font_desc">يضبط قائمة المستخدمين إضافةً إلى عرضها. توسيع اللوحة يظل يكبّر النص.</string>
     <string name="setting_log_internal">التخزين الداخلي</string>
     <string name="setting_log_custom">تم اختيار مجلد مخصص</string>
     <string name="setting_dcc_downloads_default">التنزيلات (افتراضي)</string>
@@ -550,19 +595,14 @@
     <string name="setting_previews_wifi_only">Wi-Fi فقط</string>
     <string name="setting_previews_wifi_only_desc">تحميل المعاينات فقط عند الاتصال بشبكة Wi-Fi لتجنب استهلاك بيانات الهاتف.</string>
     <string name="theme_system_default">إعداد النظام الافتراضي</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">إرسال ملف</string>
-    <string name="transfers_dcc_chat_section">DCC CHAT</string>
-    <string name="transfers_dcc_disabled">DCC معطل حاليًا. قم بتشغيله لإرسال/قبول الملفات.</string>
-    <string name="transfers_dcc_auto_desc">تلقائي: تجربة DCC السلبي أو الرجوع إلى النشط إذا لم يكن هناك رد.</string>
-    <string name="transfers_dcc_active_desc">نشط: DCC SEND الكلاسيكي (يتصل المستقبل بك).</string>
-    <string name="transfers_dcc_passive_desc">سلبي: اطلب من المستقبل فتح منفذ، ثم أنت تتصل به.</string>
-    <string name="transfers_chat_offers_section">عروض الدردشة الواردة</string>
-    <string name="transfers_offers_section">العروض الواردة</string>
-    <string name="transfers_in_progress_section">التحويلات</string>
-    <string name="transfers_unknown_size">حجم غير معروف</string>
-    <string name="transfers_passive_port">سلبي (انتظار المنفذ)</string>
-    <string name="transfers_error">خطأ: %1$s</string>
+    <string name="settings_export_backup">تصدير النسخة الاحتياطية</string>
+    <string name="settings_restore_backup">استعادة النسخة الاحتياطية</string>
+    <string name="settings_restore_confirm_title">استعادة النسخة الاحتياطية؟</string>
+    <string name="settings_restore_confirm_ok">استعادة</string>
+    <string name="settings_ok">موافق</string>
+    <string name="settings_system_default">الافتراضي للنظام</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">ملف خط مخصص…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">الموضوع</string>
     <string name="chat_modes_panel">أوضاع القناة</string>
@@ -657,6 +697,29 @@
     <string name="about_support_desc">قم بزيارة الموقع للأدلة والأسئلة الشائعة والإبلاغ عن المشكلات.</string>
     <string name="about_credits_title">المساهمون</string>
     <string name="about_credits_contribute">هل تريد المساهمة؟</string>
+    <string name="about_doc_getting_started">البدء</string>
+    <string name="about_doc_getting_started_desc">اتصل في ثلاث خطوات، ثم اضبط الحسابات وخوادم البونسر.</string>
+    <string name="about_doc_features">الميزات</string>
+    <string name="about_doc_features_desc">ما يفعله HexDroid وكيف يبدو استخدامه.</string>
+    <string name="about_doc_reference">المرجع</string>
+    <string name="about_doc_reference_desc">كل قدرات IRCv3 وكل إعداد، بالكامل.</string>
+    <string name="about_doc_commands">الأوامر</string>
+    <string name="about_doc_commands_desc">جميع أوامر الشرطة المائلة مع الصياغة والأمثلة والملاحظات.</string>
+    <string name="about_doc_scripting">البرمجة النصية</string>
+    <string name="about_doc_scripting_desc">اكتب البرامج النصية وحمّلها لتوسيع العميل.</string>
+    <string name="about_doc_encryption">التشفير</string>
+    <string name="about_doc_encryption_desc">كيف تعمل القنوات والمحادثات الخاصة المشفّرة من طرف إلى طرف.</string>
+    <string name="about_doc_troubleshooting">استكشاف الأخطاء</string>
+    <string name="about_doc_troubleshooting_desc">حلول للاتصال وTLS والإشعارات وDCC والبطارية.</string>
+    <string name="about_doc_changelog">سجل التغييرات</string>
+    <string name="about_doc_changelog_desc">ملاحظات الإصدار والميزات الجديدة وإصلاحات الأخطاء وتحديثات الأمان.</string>
+    <string name="about_help_title">تحتاج مساعدة؟</string>
+    <string name="about_join_support_channel">الانضمام إلى قناة الدعم</string>
+    <string name="about_report_issue">الإبلاغ عن مشكلة</string>
+    <string name="about_report_issue_desc">الأخطاء وطلبات الميزات على GitHub.</string>
+    <string name="about_privacy_policy">سياسة الخصوصية</string>
+    <string name="about_privacy_policy_desc">ما يخزّنه التطبيق وما لا يرسله أبدًا.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">استخدام SDCC (تشفير TLS)</string>
@@ -817,6 +880,11 @@
     <string name="session_cap_nak">‏CAP NAK: %1$s</string>
     <string name="session_sasl_success">نجحت مصادقة SASL</string>
     <string name="session_sasl_plain_no_tls">أُلغي SASL PLAIN: لن تُرسل كلمة المرور عبر اتصال غير مشفّر. فعّل TLS أو انتقل إلى SCRAM-SHA-256.</string>
+    <string name="session_sasl_mech_upgraded">SASL: الخادم لا يوفّر PLAIN، سيُستخدم SCRAM-SHA-256 بدلاً منه (المتوفّر: %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL: الخادم لا يوفّر SCRAM-SHA-256، وسيُرجَع إلى PLAIN (المتوفّر: %1$s). تُرسل كلمة المرور إلى الخادم داخل اتصال TLS.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">تم إيقاف SASL: الخادم يوفّر %1$s فقط، والرجوع إلى PLAIN سيرسل كلمة مرورك عبر اتصال غير مشفّر. فعّل TLS لهذه الشبكة.</string>
+    <string name="session_sasl_mech_unavailable">تم إيقاف SASL: الخادم لا يدعم %1$s. وهو يوفّر: %2$s. غيّر آلية SASL في إعدادات الشبكة.</string>
+    <string name="session_sasl_prep_failed">تم إيقاف SASL: اسم المستخدم أو كلمة المرور يحتوي على حرف غير مسموح به في بيانات الاعتماد (%1$s). غيّره في إعدادات الشبكة.</string>
     <string name="session_sasl_plain_no_pw">أُلغي SASL PLAIN: لا توجد كلمة مرور محددة لهذا الملف الشخصي. افتح إعدادات الشبكة وأعد إدخال كلمة مرور SASL (كلمات المرور غير مضمّنة في النسخ الاحتياطية لأسباب أمنية).</string>
     <string name="session_sasl_plain_aborted">‏SASL PLAIN: أنهى الخادم المصادقة</string>
     <string name="session_sasl_plain_unexpected">‏SASL PLAIN: تحدٍّ غير متوقع من الخادم &quot;%1$s&quot;، جارٍ الإلغاء</string>
@@ -1053,10 +1121,7 @@
     <string name="settings_scripts">السكربتات</string>
     <string name="settings_scripts_desc">تحميل وإدارة سكربتات .hex (ألعاب وأدوات وأوامر مخصصة).</string>
     <string name="net_this_network">هذه الشبكة</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">غير متصل</string>
     <string name="core_disconnect_server_error">خطأ الخادم: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">تغيّرت بصمة شهادة TLS</string>
@@ -1394,11 +1459,7 @@
     <string name="chat_font_preview">نص حكيم له سر قاطع وذو شأن عظيم مكتوب على ثوب أخضر ومغلف بجلد أزرق</string>
     <string name="chat_bot_prefix">"[بوت] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">‏أمر من سكربت</string>
     <string name="cmd_me">يرسل CTCP ACTION (/me يلوّح)</string>
     <string name="cmd_msg">يرسل رسالة خاصة</string>
@@ -1646,4 +1707,15 @@
     <string name="dcc_trusted_tip">‏نصيحة: يمكنك أيضاً الوثوق بشخص من قائمة الأسماء، أو بالضغط على اسمه في الدردشة.</string>
     <string name="dcc_trusted_dcc_off">‏الـ DCC معطّل حالياً، لذا لن يسري أي مما هنا حتى تفعّله.</string>
     <string name="dcc_trusted_entry_none">‏لا أحد موثوق بعد</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">أقواس الوقت</string>
+    <string name="setting_timestamp_colour">لون الوقت</string>
+    <string name="setting_timestamp_colour_default">مثل الرسالة</string>
+    <string name="setting_nick_style">أقواس الاسم المستعار</string>
+    <string name="setting_chat_format_sample">مرحبا بالعالم</string>
+    <string name="setting_boot_wifi_only">انتظار Wi-Fi</string>
+    <string name="setting_boot_wifi_only_desc">تأجيل الاتصال عند الإقلاع حتى يتوفّر Wi-Fi، بدلاً من الاتصال عبر بيانات الجوال.</string>
+    <string name="vm_status_waiting_wifi">في انتظار Wi-Fi…</string>
+    <string name="vm_waiting_for_wifi">في انتظار Wi-Fi قبل الاتصال.</string>
 </resources>

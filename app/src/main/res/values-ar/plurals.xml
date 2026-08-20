@@ -35,6 +35,14 @@
         <item quantity="many">%1$d مستخدماً</item>
         <item quantity="other">%1$d مستخدم</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="zero">عرض %1$d سطر إضافي</item>
+        <item quantity="one">عرض %1$d سطر إضافي</item>
+        <item quantity="two">عرض %1$d سطرين إضافيين</item>
+        <item quantity="few">عرض %1$d أسطر إضافية</item>
+        <item quantity="many">عرض %1$d سطرًا إضافيًا</item>
+        <item quantity="other">عرض %1$d سطر إضافي</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="zero">%1$d غير مقروءة</item>
         <item quantity="one">رسالة واحدة غير مقروءة</item>

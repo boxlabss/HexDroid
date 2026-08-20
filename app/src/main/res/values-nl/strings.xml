@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">Min. inkomende poort</string>
     <string name="setting_incoming_port_max">Max. inkomende poort</string>
     <string name="setting_keep_alive">Verbinding actief houden</string>
+    <string name="setting_connect_on_boot">Opnieuw verbinden na herstart</string>
+    <string name="setting_connect_on_boot_desc">Nadat het apparaat opnieuw is opgestart, worden de netwerken met automatisch verbinden hersteld zonder de app te openen. Vereist \"Verbinding actief houden\".</string>
     <string name="setting_enable_dcc">DCC inschakelen</string>
     <string name="setting_open_app_settings">App-instellingen openen</string>
     <string name="setting_battery_optimization">Batterijoptimalisatielijst</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">Chat &amp; berichten</string>
+    <string name="settings_cat_appearance_desc">Taal, thema, lettertypen, tekstgrootte</string>
+    <string name="settings_cat_chat_desc">Kleuren, tijdstempels, verborgen gebeurtenissen, zijpanelen</string>
+    <string name="settings_cat_media_desc">Afbeeldingsvoorbeelden en wanneer ze laden</string>
+    <string name="settings_cat_aliases_desc">Je eigen slash-commando\'s</string>
+    <string name="settings_cat_highlights_desc">Woorden die je attenderen</string>
+    <string name="settings_cat_irc_desc">Verbindingsgedrag, negeerlijst, scripts</string>
+    <string name="settings_cat_notifications_desc">Meldingen, geluid en trillen</string>
+    <string name="settings_cat_logging_desc">Chatlogboeken, map en bewaartermijn</string>
+    <string name="settings_cat_privacy_desc">Typindicatoren</string>
+    <string name="settings_cat_history_desc">Geschiedenisweergave vanaf de server</string>
+    <string name="settings_cat_transfers_desc">DCC verzenden, ontvangen en poorten</string>
+    <string name="settings_cat_backup_desc">Instellingen exporteren of herstellen</string>
 
     <!-- Theme picker -->
     <string name="theme_label">Thema</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">Verbreken</string>
     <string name="networks_edit">Bewerken</string>
     <string name="networks_add">Netwerk toevoegen</string>
+    <string name="networks_empty_title">Nog geen netwerken</string>
+    <string name="networks_empty_body">Voeg een netwerk toe om te beginnen. AfterNET is een goed begin als je twijfelt.</string>
     <string name="networks_auto_connect">Automatisch verbinden</string>
     <string name="network_edit_title">Netwerk bewerken</string>
     <string name="network_add_title">Netwerk toevoegen</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">Tour opnieuw afspelen</string>
     <string name="tour_replay_body">Je kunt de rondleiding altijd opnieuw starten via Instellingen → Over. Tik op Klaar om te eindigen.</string>
 
-    <!-- About -->
-    <string name="about_title">Over</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">Bestandsoverdrachten</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">Negeerlijst</string>
-
-    <!-- List -->
-    <string name="list_title">Kanalenlijst</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">Geavanceerde IRCv3-caps</string>
+    <string name="core_nick_change_refused">De server staat het wijzigen van je nick niet toe: %1$s</string>
+    <string name="settings_raw_log">Ruw protocollogboek</string>
+    <string name="settings_raw_log_desc">Toont elke verzonden en ontvangen regel in een Raw-buffer per netwerk. Wachtwoorden worden verborgen. Voor foutopsporing.</string>
+    <string name="chat_show_less">Minder tonen</string>
+    <string name="chat_not_delivered">Niet afgeleverd</string>
+    <string name="vm_multiline_rejected">De server heeft het bericht geweigerd (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">vraagt ook %1$s aan</string>
     <string name="network_edit_caps_hint">Basis IRCv3-functies standaard ingeschakeld. Schakel in voor geavanceerde opties.</string>
     <string name="network_edit_bouncer_caps">Bouncer-caps (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">Bestandsoverdrachten</string>
     <string name="transfers_enable_dcc">DCC inschakelen</string>
     <string name="transfers_dcc_send_mode">DCC-verzendmodus</string>
     <string name="transfers_send_file">Bestand verzenden</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">Actieve overdrachten</string>
     <string name="transfers_no_transfers">Geen actieve overdrachten.</string>
     <string name="transfers_share_file">Bestand delen</string>
+    <string name="transfers_share_open">Delen / Bestand openen</string>
+    <string name="transfers_tab_active">Actief</string>
+    <string name="transfers_tab_offers">Aanbiedingen</string>
+    <string name="transfers_tab_history">Geschiedenis</string>
+    <string name="transfers_tab_send">Verzenden</string>
+    <string name="transfers_tab_settings">Instellingen</string>
+    <string name="transfers_no_active">Geen lopende overdrachten.</string>
+    <string name="transfers_no_completed">Nog niets voltooid.</string>
+    <string name="transfers_clear_completed">Alles wissen</string>
+    <string name="transfers_enable">Inschakelen</string>
+    <string name="transfers_to">naar %1$s</string>
+    <string name="transfers_send_file_section">Bestand verzenden</string>
+    <string name="transfers_dcc_chat_section">DCC CHAT</string>
+    <string name="transfers_dcc_disabled">DCC is momenteel uitgeschakeld. Zet het aan om bestanden te verzenden/accepteren.</string>
+    <string name="transfers_dcc_auto_desc">Auto: probeer passieve DCC of val terug op actief als er geen reactie is.</string>
+    <string name="transfers_dcc_active_desc">Actief: klassieke DCC SEND (de ontvanger maakt verbinding met jou).</string>
+    <string name="transfers_dcc_passive_desc">Passief: vraag de ontvanger een poort te openen, dan verbindt u.</string>
+    <string name="transfers_chat_offers_section">Inkomende chatverzoeken</string>
+    <string name="transfers_offers_section">Inkomende aanbiedingen</string>
+    <string name="transfers_in_progress_section">Overdrachten</string>
+    <string name="transfers_unknown_size">onbekende grootte</string>
+    <string name="transfers_passive_port">passief (wachten op poort)</string>
+    <string name="transfers_error">Fout: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">Tik om te vermelden</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">Geselecteerd</string>
+    <string name="networks_favourite">Favoriet</string>
     <string name="networks_add_favourite">Aan favorieten toevoegen</string>
     <string name="networks_remove_favourite">Uit favorieten verwijderen</string>
     <string name="networks_drag_reorder">Slepen om te herordenen</string>
@@ -367,10 +406,18 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="networks_insecure_body2">Om verbinding te maken met %1$s zonder TLS, moet u onversleutelde verbindingen expliciet toestaan voor dit netwerk.</string>
     <string name="networks_allow_connect">Toestaan en verbinden</string>
     <string name="networks_reconnect">Opnieuw verbinden</string>
+    <string name="networks_open_details">Netwerkdetails openen</string>
+    <string name="networks_tag_auto_connect">Automatisch verbinden</string>
+    <string name="networks_tag_no_tls">Geen TLS</string>
+    <string name="networks_order">Volgorde</string>
+    <string name="networks_move_up">Omhoog</string>
+    <string name="networks_move_down">Omlaag</string>
+    <string name="networks_empty_detail">Kies een netwerk om de details te zien</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">Kanalen</string>
     <string name="list_search_hint">Kanalen / onderwerp zoeken</string>
+    <string name="list_title">Kanalenlijst</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">Huidige modi ophalen</string>
@@ -434,26 +481,15 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="ircop_uptime">Uptime</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">Negeerlijst</string>
     <string name="ignore_nick_label">Te negeren nick</string>
     <string name="ignore_no_nicks">Geen genegeerde nicks.</string>
     <string name="ignore_no_networks">Nog geen netwerken geconfigureerd.</string>
     <string name="ignore_add">Toevoegen</string>
     <string name="ignore_remove">Verwijderen</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">Back-up exporteren</string>
-    <string name="settings_restore_backup">Back-up herstellen</string>
-    <string name="settings_restore_confirm_title">Back-up herstellen?</string>
-    <string name="settings_restore_confirm_ok">Herstellen</string>
-    <string name="settings_ok">OK</string>
-    <string name="settings_system_default">Systeemstandaard</string>
-    <string name="settings_matrix_theme">Matrix</string>
-    <string name="settings_custom_font">Aangepast lettertypebestand…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">Delen / Bestand openen</string>
-
     <!-- About screen -->
+    <string name="about_title">Over</string>
     <string name="about_open_website">Website openen</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="setting_ui_font">UI-lettertype</string>
     <string name="setting_chat_font">Chatlettertype</string>
     <string name="setting_font_size_label">Lettergrootte</string>
+    <string name="setting_line_spacing_label">Regelafstand in de chat</string>
+    <string name="setting_line_spacing_desc">Ruimte tussen het ene bericht en het volgende. De tekstgrootte verandert niet.</string>
+    <string name="setting_font_line_height_label">Regelhoogte van het lettertype</string>
+    <string name="setting_font_line_height_desc">Ruimte tussen de afgebroken regels binnen één bericht. De tekstgrootte verandert niet.</string>
+    <string name="setting_line_spacing_tight">Krap</string>
+    <string name="setting_line_spacing_normal">Normaal</string>
+    <string name="setting_line_spacing_relaxed">Ruim</string>
+    <string name="setting_nicklist_font_label">Tekstgrootte van de nicklijst</string>
+    <string name="setting_nicklist_font_desc">Past de nicklijst aan naast de breedte ervan. Het paneel breder maken vergroot de tekst nog steeds.</string>
     <string name="setting_log_internal">Interne opslag</string>
     <string name="setting_log_custom">Aangepaste map geselecteerd</string>
     <string name="setting_dcc_downloads_default">Downloads (standaard)</string>
@@ -550,19 +595,14 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="setting_previews_wifi_only">Alleen Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Voorbeelden alleen laden bij Wi-Fi-verbinding om mobiele data te besparen.</string>
     <string name="theme_system_default">Systeemstandaard</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">Bestand verzenden</string>
-    <string name="transfers_dcc_chat_section">DCC CHAT</string>
-    <string name="transfers_dcc_disabled">DCC is momenteel uitgeschakeld. Zet het aan om bestanden te verzenden/accepteren.</string>
-    <string name="transfers_dcc_auto_desc">Auto: probeer passieve DCC of val terug op actief als er geen reactie is.</string>
-    <string name="transfers_dcc_active_desc">Actief: klassieke DCC SEND (de ontvanger maakt verbinding met jou).</string>
-    <string name="transfers_dcc_passive_desc">Passief: vraag de ontvanger een poort te openen, dan verbindt u.</string>
-    <string name="transfers_chat_offers_section">Inkomende chatverzoeken</string>
-    <string name="transfers_offers_section">Inkomende aanbiedingen</string>
-    <string name="transfers_in_progress_section">Overdrachten</string>
-    <string name="transfers_unknown_size">onbekende grootte</string>
-    <string name="transfers_passive_port">passief (wachten op poort)</string>
-    <string name="transfers_error">Fout: %1$s</string>
+    <string name="settings_export_backup">Back-up exporteren</string>
+    <string name="settings_restore_backup">Back-up herstellen</string>
+    <string name="settings_restore_confirm_title">Back-up herstellen?</string>
+    <string name="settings_restore_confirm_ok">Herstellen</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">Systeemstandaard</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">Aangepast lettertypebestand…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">Onderwerp</string>
     <string name="chat_modes_panel">Kanaalmodi</string>
@@ -657,6 +697,29 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="about_support_desc">Bezoek de website voor handleidingen, veelgestelde vragen en het melden van problemen.</string>
     <string name="about_credits_title">Bijdragers</string>
     <string name="about_credits_contribute">Wil je bijdragen?</string>
+    <string name="about_doc_getting_started">Aan de slag</string>
+    <string name="about_doc_getting_started_desc">Verbind in drie stappen en stel daarna accounts en bouncers in.</string>
+    <string name="about_doc_features">Functies</string>
+    <string name="about_doc_features_desc">Wat HexDroid doet en hoe het werkt in gebruik.</string>
+    <string name="about_doc_reference">Naslag</string>
+    <string name="about_doc_reference_desc">Elke IRCv3-mogelijkheid en elke instelling, volledig.</string>
+    <string name="about_doc_commands">Commando\'s</string>
+    <string name="about_doc_commands_desc">Alle slash-commando\'s met syntaxis, voorbeelden en opmerkingen.</string>
+    <string name="about_doc_scripting">Scripting</string>
+    <string name="about_doc_scripting_desc">Schrijf en laad scripts om de client uit te breiden.</string>
+    <string name="about_doc_encryption">Versleuteling</string>
+    <string name="about_doc_encryption_desc">Hoe end-to-end versleutelde kanalen en privégesprekken werken.</string>
+    <string name="about_doc_troubleshooting">Probleemoplossing</string>
+    <string name="about_doc_troubleshooting_desc">Oplossingen voor verbinding, TLS, meldingen, DCC en accu.</string>
+    <string name="about_doc_changelog">Wijzigingslogboek</string>
+    <string name="about_doc_changelog_desc">Releaseopmerkingen, nieuwe functies, opgeloste fouten en beveiligingsupdates.</string>
+    <string name="about_help_title">Hulp nodig?</string>
+    <string name="about_join_support_channel">Word lid van het ondersteuningskanaal</string>
+    <string name="about_report_issue">Probleem melden</string>
+    <string name="about_report_issue_desc">Fouten en functieverzoeken op GitHub.</string>
+    <string name="about_privacy_policy">Privacybeleid</string>
+    <string name="about_privacy_policy_desc">Wat de app opslaat en wat de app nooit verzendt.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">SDCC gebruiken (TLS-versleuteling)</string>
@@ -817,6 +880,11 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">SASL-authenticatie geslaagd</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN afgebroken: het wachtwoord wordt niet over een onversleutelde verbinding verstuurd. Schakel TLS in of stap over op SCRAM-SHA-256.</string>
+    <string name="session_sasl_mech_upgraded">SASL: de server biedt geen PLAIN aan, SCRAM-SHA-256 wordt gebruikt (aangeboden: %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL: de server biedt geen SCRAM-SHA-256 aan, er wordt teruggevallen op PLAIN (aangeboden: %1$s). Je wachtwoord wordt binnen de TLS-verbinding naar de server gestuurd.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL afgebroken: de server biedt alleen %1$s aan, en terugvallen op PLAIN zou je wachtwoord over een onversleutelde verbinding sturen. Schakel TLS in voor dit netwerk.</string>
+    <string name="session_sasl_mech_unavailable">SASL afgebroken: de server ondersteunt %1$s niet. Aangeboden: %2$s. Wijzig het SASL-mechanisme in de netwerkinstellingen.</string>
+    <string name="session_sasl_prep_failed">SASL afgebroken: de gebruikersnaam of het wachtwoord bevat een teken dat niet is toegestaan in inloggegevens (%1$s). Wijzig dit in de netwerkinstellingen.</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN afgebroken: er is geen wachtwoord ingesteld voor dit profiel. Open de netwerkinstellingen en voer het SASL-wachtwoord opnieuw in (wachtwoorden staan om veiligheidsredenen niet in back-ups).</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN: de server heeft de authenticatie afgebroken</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN: onverwachte serveruitdaging &quot;%1$s&quot;, afbreken</string>
@@ -1053,10 +1121,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="settings_scripts">Scripts</string>
     <string name="settings_scripts_desc">.hex-scripts laden en beheren (spellen, hulpmiddelen, eigen commando\'s).</string>
     <string name="net_this_network">dit netwerk</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">Verbinding verbroken</string>
     <string name="core_disconnect_server_error">Serverfout: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">Vingerafdruk van TLS-certificaat gewijzigd</string>
@@ -1394,11 +1459,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="chat_font_preview">Pa\'s wijze lynx bezag vroom het fikse aquaduct</string>
     <string name="chat_bot_prefix">"[bot] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">Scriptcommando</string>
     <string name="cmd_me">Stuurt een CTCP ACTION (/me zwaait)</string>
     <string name="cmd_msg">Stuurt een privébericht</string>
@@ -1646,4 +1707,15 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="dcc_trusted_tip">Tip: je kunt iemand ook vertrouwen via de nicklijst of door in de chat op de naam te tikken.</string>
     <string name="dcc_trusted_dcc_off">DCC staat momenteel uit, dus hier gebeurt niets tot je het inschakelt.</string>
     <string name="dcc_trusted_entry_none">Nog niemand vertrouwd</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">Haakjes om tijdstempel</string>
+    <string name="setting_timestamp_colour">Kleur van tijdstempel</string>
+    <string name="setting_timestamp_colour_default">Zelfde als het bericht</string>
+    <string name="setting_nick_style">Haakjes om nick</string>
+    <string name="setting_chat_format_sample">hallo wereld</string>
+    <string name="setting_boot_wifi_only">Wachten op Wi-Fi</string>
+    <string name="setting_boot_wifi_only_desc">Houd de verbinding bij het opstarten vast tot Wi-Fi beschikbaar is, in plaats van via mobiele data te verbinden.</string>
+    <string name="vm_status_waiting_wifi">Wachten op Wi-Fi…</string>
+    <string name="vm_waiting_for_wifi">Wachten op Wi-Fi voordat er verbinding wordt gemaakt.</string>
 </resources>

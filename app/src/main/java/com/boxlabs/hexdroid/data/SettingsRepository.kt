@@ -264,6 +264,17 @@ class SettingsRepository(private val ctx: Context) {
 
                 showTimestamps = o.optBoolean("showTimestamps", true),
                 timestampFormat = o.optString("timestampFormat", "HH:mm:ss"),
+                timestampStyle = runCatching {
+                    com.boxlabs.hexdroid.TimestampStyle.valueOf(
+                        o.optString("timestampStyle", com.boxlabs.hexdroid.TimestampStyle.SQUARE.name)
+                    )
+                }.getOrDefault(com.boxlabs.hexdroid.TimestampStyle.SQUARE),
+                timestampColorInt = o.opt("timestampColorInt")?.let { (it as? Int) ?: (it as? Long)?.toInt() },
+                nickStyle = runCatching {
+                    com.boxlabs.hexdroid.NickStyle.valueOf(
+                        o.optString("nickStyle", com.boxlabs.hexdroid.NickStyle.ANGLE.name)
+                    )
+                }.getOrDefault(com.boxlabs.hexdroid.NickStyle.ANGLE),
                 fontScale = o.optDouble("fontScale", 1.0).toFloat(),
                 fontChoice = parseFontChoice(o.optString("fontChoice", com.boxlabs.hexdroid.FontChoice.OPEN_SANS.name), com.boxlabs.hexdroid.FontChoice.OPEN_SANS),
 
@@ -313,6 +324,7 @@ class SettingsRepository(private val ctx: Context) {
                 showConnectionStatusNotification = o.optBoolean("showConnectionStatusNotification", true),
                 keepAliveInBackground = o.optBoolean("keepAliveInBackground", true),
                 connectOnBoot = o.optBoolean("connectOnBoot", false),
+                connectOnBootWifiOnly = o.optBoolean("connectOnBootWifiOnly", false),
                 autoReconnectEnabled = o.optBoolean("autoReconnectEnabled", true),
                 autoReconnectDelaySec = o.optInt("autoReconnectDelaySec", 10),
                 autoConnectOnStartup = o.optBoolean("autoConnectOnStartup", false),
@@ -386,6 +398,9 @@ class SettingsRepository(private val ctx: Context) {
 
         o.put("showTimestamps", s.showTimestamps)
         o.put("timestampFormat", s.timestampFormat)
+        o.put("timestampStyle", s.timestampStyle.name)
+        if (s.timestampColorInt != null) o.put("timestampColorInt", s.timestampColorInt) else o.remove("timestampColorInt")
+        o.put("nickStyle", s.nickStyle.name)
         o.put("fontScale", s.fontScale.toDouble())
         o.put("fontChoice", s.fontChoice.name)
         o.put("chatFontChoice", s.chatFontChoice.name)
@@ -418,6 +433,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("showConnectionStatusNotification", s.showConnectionStatusNotification)
         o.put("keepAliveInBackground", s.keepAliveInBackground)
         o.put("connectOnBoot", s.connectOnBoot)
+        o.put("connectOnBootWifiOnly", s.connectOnBootWifiOnly)
         o.put("autoReconnectEnabled", s.autoReconnectEnabled)
         o.put("autoReconnectDelaySec", s.autoReconnectDelaySec)
         o.put("autoConnectOnStartup", s.autoConnectOnStartup)

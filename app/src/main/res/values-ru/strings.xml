@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">Мин. входящий порт</string>
     <string name="setting_incoming_port_max">Макс. входящий порт</string>
     <string name="setting_keep_alive">Поддерживать соединение активным</string>
+    <string name="setting_connect_on_boot">Переподключаться после перезагрузки</string>
+    <string name="setting_connect_on_boot_desc">После перезагрузки устройства повторно подключает сети с автоподключением, не открывая приложение. Требуется \"Поддерживать соединение активным\".</string>
     <string name="setting_enable_dcc">Включить DCC</string>
     <string name="setting_open_app_settings">Открыть настройки приложения</string>
     <string name="setting_battery_optimization">Список оптимизации батареи</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">Чат и сообщения</string>
+    <string name="settings_cat_appearance_desc">Язык, тема, шрифты, размер текста</string>
+    <string name="settings_cat_chat_desc">Цвета, отметки времени, скрытые события, боковые панели</string>
+    <string name="settings_cat_media_desc">Предпросмотр изображений и когда его загружать</string>
+    <string name="settings_cat_aliases_desc">Ваши собственные слэш-команды</string>
+    <string name="settings_cat_highlights_desc">Слова, по которым вас уведомляют</string>
+    <string name="settings_cat_irc_desc">Поведение подключения, список игнорируемых, скрипты</string>
+    <string name="settings_cat_notifications_desc">Оповещения, звук и вибрация</string>
+    <string name="settings_cat_logging_desc">Журналы чата, папка и хранение</string>
+    <string name="settings_cat_privacy_desc">Индикаторы набора текста</string>
+    <string name="settings_cat_history_desc">Воспроизведение истории с сервера</string>
+    <string name="settings_cat_transfers_desc">Отправка и приём DCC, порты</string>
+    <string name="settings_cat_backup_desc">Экспорт или восстановление настроек</string>
 
     <!-- Theme picker -->
     <string name="theme_label">Тема</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">Отключиться</string>
     <string name="networks_edit">Редактировать</string>
     <string name="networks_add">Добавить сеть</string>
+    <string name="networks_empty_title">Пока нет сетей</string>
+    <string name="networks_empty_body">Добавьте сеть, чтобы начать. Если не уверены, AfterNET — хорошее начало.</string>
     <string name="networks_auto_connect">Автоподключение</string>
     <string name="network_edit_title">Редактировать сеть</string>
     <string name="network_add_title">Добавить сеть</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">Повторить тур</string>
     <string name="tour_replay_body">Вы можете пройти ознакомительный тур снова в любое время через Настройки → О программе. Нажмите Готово для завершения.</string>
 
-    <!-- About -->
-    <string name="about_title">О программе</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">Передача файлов</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">Список игнорируемых</string>
-
-    <!-- List -->
-    <string name="list_title">Список каналов</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">Расширенные возможности IRCv3</string>
+    <string name="core_nick_change_refused">Сервер не позволяет сменить псевдоним: %1$s</string>
+    <string name="settings_raw_log">Журнал сырого протокола</string>
+    <string name="settings_raw_log_desc">Показывать каждую отправленную и полученную строку в буфере Raw для каждой сети. Пароли скрываются. Для отладки.</string>
+    <string name="chat_show_less">Показать меньше</string>
+    <string name="chat_not_delivered">Не доставлено</string>
+    <string name="vm_multiline_rejected">Сервер отклонил сообщение (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">также запрашивает %1$s</string>
     <string name="network_edit_caps_hint">Базовые функции IRCv3 включены по умолчанию. Включите для просмотра расширенных параметров.</string>
     <string name="network_edit_bouncer_caps">Функции баунсера (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">Передача файлов</string>
     <string name="transfers_enable_dcc">Включить DCC</string>
     <string name="transfers_dcc_send_mode">Режим отправки DCC</string>
     <string name="transfers_send_file">Отправить файл</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">Активные передачи</string>
     <string name="transfers_no_transfers">Нет активных передач.</string>
     <string name="transfers_share_file">Поделиться файлом</string>
+    <string name="transfers_share_open">Поделиться / Открыть файл</string>
+    <string name="transfers_tab_active">Активные</string>
+    <string name="transfers_tab_offers">Предложения</string>
+    <string name="transfers_tab_history">История</string>
+    <string name="transfers_tab_send">Отправка</string>
+    <string name="transfers_tab_settings">Настройки</string>
+    <string name="transfers_no_active">Нет активных передач.</string>
+    <string name="transfers_no_completed">Пока ничего не завершено.</string>
+    <string name="transfers_clear_completed">Очистить всё</string>
+    <string name="transfers_enable">Включить</string>
+    <string name="transfers_to">кому: %1$s</string>
+    <string name="transfers_send_file_section">Отправить файл</string>
+    <string name="transfers_dcc_chat_section">DCC CHAT</string>
+    <string name="transfers_dcc_disabled">DCC в данный момент отключен. Включите его для отправки/приема файлов.</string>
+    <string name="transfers_dcc_auto_desc">Авто: попробовать Passive DCC или вернуться к Active, если нет ответа.</string>
+    <string name="transfers_dcc_active_desc">Активный: классический DCC SEND (получатель подключается к вам).</string>
+    <string name="transfers_dcc_passive_desc">Пассивный: запросить у получателя открытие порта, затем подключиться.</string>
+    <string name="transfers_chat_offers_section">Входящие предложения чата</string>
+    <string name="transfers_offers_section">Входящие предложения</string>
+    <string name="transfers_in_progress_section">Передачи</string>
+    <string name="transfers_unknown_size">неизвестный размер</string>
+    <string name="transfers_passive_port">пассивный (ожидание порта)</string>
+    <string name="transfers_error">Ошибка: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">Нажмите для упоминания</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">Выбрано</string>
+    <string name="networks_favourite">Избранная</string>
     <string name="networks_add_favourite">Добавить в избранное</string>
     <string name="networks_remove_favourite">Удалить из избранного</string>
     <string name="networks_drag_reorder">Перетащите для изменения порядка</string>
@@ -367,10 +406,18 @@
     <string name="networks_insecure_body2">Для подключения к %1$s без TLS необходимо явно разрешить незашифрованные подключения для этой сети.</string>
     <string name="networks_allow_connect">Разрешить и подключить</string>
     <string name="networks_reconnect">Переподключиться</string>
+    <string name="networks_open_details">Открыть сведения о сети</string>
+    <string name="networks_tag_auto_connect">Автоподключение</string>
+    <string name="networks_tag_no_tls">Без TLS</string>
+    <string name="networks_order">Порядок</string>
+    <string name="networks_move_up">Переместить вверх</string>
+    <string name="networks_move_down">Переместить вниз</string>
+    <string name="networks_empty_detail">Выберите сеть, чтобы увидеть её сведения</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">Каналы</string>
     <string name="list_search_hint">Поиск каналов / темы</string>
+    <string name="list_title">Список каналов</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">Получить текущие режимы</string>
@@ -434,26 +481,15 @@
     <string name="ircop_uptime">Время работы</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">Список игнорируемых</string>
     <string name="ignore_nick_label">Ник для игнорирования</string>
     <string name="ignore_no_nicks">Нет игнорируемых ников.</string>
     <string name="ignore_no_networks">Нет настроенных сетей.</string>
     <string name="ignore_add">Добавить</string>
     <string name="ignore_remove">Удалить</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">Экспортировать резервную копию</string>
-    <string name="settings_restore_backup">Восстановить из резервной копии</string>
-    <string name="settings_restore_confirm_title">Восстановить резервную копию?</string>
-    <string name="settings_restore_confirm_ok">Восстановить</string>
-    <string name="settings_ok">OK</string>
-    <string name="settings_system_default">По умолчанию системы</string>
-    <string name="settings_matrix_theme">Matrix</string>
-    <string name="settings_custom_font">Пользовательский файл шрифта…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">Поделиться / Открыть файл</string>
-
     <!-- About screen -->
+    <string name="about_title">О программе</string>
     <string name="about_open_website">Открыть сайт</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@
     <string name="setting_ui_font">Шрифт интерфейса</string>
     <string name="setting_chat_font">Шрифт чата</string>
     <string name="setting_font_size_label">Размер шрифта</string>
+    <string name="setting_line_spacing_label">Межстрочный интервал в чате</string>
+    <string name="setting_line_spacing_desc">Расстояние между одним сообщением и следующим. Размер текста не меняется.</string>
+    <string name="setting_font_line_height_label">Высота строки шрифта</string>
+    <string name="setting_font_line_height_desc">Расстояние между перенесёнными строками внутри одного сообщения. Размер текста не меняется.</string>
+    <string name="setting_line_spacing_tight">Плотный</string>
+    <string name="setting_line_spacing_normal">Обычный</string>
+    <string name="setting_line_spacing_relaxed">Просторный</string>
+    <string name="setting_nicklist_font_label">Размер текста списка псевдонимов</string>
+    <string name="setting_nicklist_font_desc">Настраивает список псевдонимов в дополнение к его ширине. Расширение панели по-прежнему увеличивает текст.</string>
     <string name="setting_log_internal">Внутренняя память</string>
     <string name="setting_log_custom">Выбрана пользовательская папка</string>
     <string name="setting_dcc_downloads_default">Загрузки (по умолчанию)</string>
@@ -550,19 +595,14 @@
     <string name="setting_previews_wifi_only">Только Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Загружать превью только при подключении к Wi-Fi, чтобы не тратить мобильные данные.</string>
     <string name="theme_system_default">Системный по умолчанию</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">Отправить файл</string>
-    <string name="transfers_dcc_chat_section">DCC CHAT</string>
-    <string name="transfers_dcc_disabled">DCC в данный момент отключен. Включите его для отправки/приема файлов.</string>
-    <string name="transfers_dcc_auto_desc">Авто: попробовать Passive DCC или вернуться к Active, если нет ответа.</string>
-    <string name="transfers_dcc_active_desc">Активный: классический DCC SEND (получатель подключается к вам).</string>
-    <string name="transfers_dcc_passive_desc">Пассивный: запросить у получателя открытие порта, затем подключиться.</string>
-    <string name="transfers_chat_offers_section">Входящие предложения чата</string>
-    <string name="transfers_offers_section">Входящие предложения</string>
-    <string name="transfers_in_progress_section">Передачи</string>
-    <string name="transfers_unknown_size">неизвестный размер</string>
-    <string name="transfers_passive_port">пассивный (ожидание порта)</string>
-    <string name="transfers_error">Ошибка: %1$s</string>
+    <string name="settings_export_backup">Экспортировать резервную копию</string>
+    <string name="settings_restore_backup">Восстановить из резервной копии</string>
+    <string name="settings_restore_confirm_title">Восстановить резервную копию?</string>
+    <string name="settings_restore_confirm_ok">Восстановить</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">По умолчанию системы</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">Пользовательский файл шрифта…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">Тема</string>
     <string name="chat_modes_panel">Режимы канала</string>
@@ -657,6 +697,29 @@
     <string name="about_support_desc">Посетите сайт для руководств, FAQ и сообщения о проблемах.</string>
     <string name="about_credits_title">Участники</string>
     <string name="about_credits_contribute">Хотите помочь проекту?</string>
+    <string name="about_doc_getting_started">Первые шаги</string>
+    <string name="about_doc_getting_started_desc">Подключитесь за три шага, затем настройте учётные записи и баунсеры.</string>
+    <string name="about_doc_features">Возможности</string>
+    <string name="about_doc_features_desc">Что умеет HexDroid и каково им пользоваться.</string>
+    <string name="about_doc_reference">Справочник</string>
+    <string name="about_doc_reference_desc">Все возможности IRCv3 и все настройки, полностью.</string>
+    <string name="about_doc_commands">Команды</string>
+    <string name="about_doc_commands_desc">Все слэш-команды с синтаксисом, примерами и примечаниями.</string>
+    <string name="about_doc_scripting">Скрипты</string>
+    <string name="about_doc_scripting_desc">Пишите и загружайте скрипты, чтобы расширить клиент.</string>
+    <string name="about_doc_encryption">Шифрование</string>
+    <string name="about_doc_encryption_desc">Как работают каналы и личные сообщения со сквозным шифрованием.</string>
+    <string name="about_doc_troubleshooting">Устранение неполадок</string>
+    <string name="about_doc_troubleshooting_desc">Решения для подключения, TLS, уведомлений, DCC и батареи.</string>
+    <string name="about_doc_changelog">История изменений</string>
+    <string name="about_doc_changelog_desc">Примечания к выпускам, новые функции, исправления и обновления безопасности.</string>
+    <string name="about_help_title">Нужна помощь?</string>
+    <string name="about_join_support_channel">Зайти в канал поддержки</string>
+    <string name="about_report_issue">Сообщить о проблеме</string>
+    <string name="about_report_issue_desc">Ошибки и предложения функций на GitHub.</string>
+    <string name="about_privacy_policy">Политика конфиденциальности</string>
+    <string name="about_privacy_policy_desc">Что приложение хранит и что оно никогда не отправляет.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">Использовать SDCC (TLS-шифрование)</string>
@@ -817,6 +880,11 @@
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">Аутентификация SASL прошла успешно</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN прерван: пароль не будет отправлен по незашифрованному соединению. Включите TLS или переключитесь на SCRAM-SHA-256.</string>
+    <string name="session_sasl_mech_upgraded">SASL: сервер не предлагает PLAIN, вместо него используется SCRAM-SHA-256 (предложено: %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL: сервер не предлагает SCRAM-SHA-256, выполняется откат к PLAIN (предложено: %1$s). Ваш пароль отправляется на сервер внутри TLS-соединения.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL прерван: сервер предлагает только %1$s, а откат к PLAIN отправил бы ваш пароль по незашифрованному соединению. Включите TLS для этой сети.</string>
+    <string name="session_sasl_mech_unavailable">SASL прерван: сервер не поддерживает %1$s. Он предлагает: %2$s. Измените механизм SASL в настройках сети.</string>
+    <string name="session_sasl_prep_failed">SASL прерван: имя пользователя или пароль содержит символ, недопустимый в учётных данных (%1$s). Измените его в настройках сети.</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN прерван: для этого профиля не задан пароль. Откройте настройки сети и введите пароль SASL заново (пароли не включаются в резервные копии из соображений безопасности).</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN: сервер прервал аутентификацию</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN: неожиданный запрос сервера &quot;%1$s&quot;, прерывание</string>
@@ -1053,10 +1121,7 @@
     <string name="settings_scripts">Скрипты</string>
     <string name="settings_scripts_desc">Загрузка и управление скриптами .hex (игры, инструменты, свои команды).</string>
     <string name="net_this_network">эта сеть</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">Отключено</string>
     <string name="core_disconnect_server_error">Ошибка сервера: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">Отпечаток TLS-сертификата изменился</string>
@@ -1394,11 +1459,7 @@
     <string name="chat_font_preview">Съешь же ещё этих мягких французских булок да выпей чаю</string>
     <string name="chat_bot_prefix">"[бот] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">Команда скрипта</string>
     <string name="cmd_me">Отправляет CTCP ACTION (/me машет рукой)</string>
     <string name="cmd_msg">Отправляет личное сообщение</string>
@@ -1646,4 +1707,15 @@
     <string name="dcc_trusted_tip">Совет: доверять кому-то можно также из списка ников или нажав на имя в чате.</string>
     <string name="dcc_trusted_dcc_off">DCC сейчас выключен, поэтому ничего из этого не действует, пока вы его не включите.</string>
     <string name="dcc_trusted_entry_none">Никому не доверяете</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">Скобки отметки времени</string>
+    <string name="setting_timestamp_colour">Цвет отметки времени</string>
+    <string name="setting_timestamp_colour_default">Как у сообщения</string>
+    <string name="setting_nick_style">Скобки псевдонима</string>
+    <string name="setting_chat_format_sample">привет мир</string>
+    <string name="setting_boot_wifi_only">Ждать Wi-Fi</string>
+    <string name="setting_boot_wifi_only_desc">При загрузке удерживать подключение, пока не появится Wi-Fi, вместо подключения через мобильные данные.</string>
+    <string name="vm_status_waiting_wifi">Ожидание Wi-Fi…</string>
+    <string name="vm_waiting_for_wifi">Ожидание Wi-Fi перед подключением.</string>
 </resources>

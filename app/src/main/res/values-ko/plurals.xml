@@ -12,6 +12,9 @@
     <plurals name="chat_nicklist_users">
         <item quantity="other">%1$d명</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="other">%1$d줄 더 보기</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="other">읽지 않음 %1$d개</item>
     </plurals>

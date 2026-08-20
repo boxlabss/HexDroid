@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">Port entrant min</string>
     <string name="setting_incoming_port_max">Port entrant max</string>
     <string name="setting_keep_alive">Maintenir la connexion active</string>
+    <string name="setting_connect_on_boot">Se reconnecter après le redémarrage</string>
+    <string name="setting_connect_on_boot_desc">Après le redémarrage de l\'appareil, les réseaux marqués en auto-connexion sont reconnectés sans ouvrir l\'application. Nécessite \"Maintenir la connexion active\".</string>
     <string name="setting_enable_dcc">Activer DCC</string>
     <string name="setting_open_app_settings">Ouvrir les paramètres de l\'app</string>
     <string name="setting_battery_optimization">Liste d\'optimisation de batterie</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">Chat &amp; messages</string>
+    <string name="settings_cat_appearance_desc">Langue, thème, polices, taille du texte</string>
+    <string name="settings_cat_chat_desc">Couleurs, horodatages, événements masqués, panneaux latéraux</string>
+    <string name="settings_cat_media_desc">Aperçus d\'images et moment du chargement</string>
+    <string name="settings_cat_aliases_desc">Vos propres commandes slash</string>
+    <string name="settings_cat_highlights_desc">Les mots qui vous alertent</string>
+    <string name="settings_cat_irc_desc">Comportement de connexion, liste d\'ignorés, scripts</string>
+    <string name="settings_cat_notifications_desc">Alertes, son et vibration</string>
+    <string name="settings_cat_logging_desc">Journaux de chat, dossier et conservation</string>
+    <string name="settings_cat_privacy_desc">Indicateurs de frappe</string>
+    <string name="settings_cat_history_desc">Lecture de l\'historique côté serveur</string>
+    <string name="settings_cat_transfers_desc">Envoi et réception DCC, ports</string>
+    <string name="settings_cat_backup_desc">Exporter ou restaurer vos paramètres</string>
 
     <!-- Theme picker -->
     <string name="theme_label">Thème</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">Déconnecter</string>
     <string name="networks_edit">Modifier</string>
     <string name="networks_add">Ajouter un réseau</string>
+    <string name="networks_empty_title">Aucun réseau pour le moment</string>
+    <string name="networks_empty_body">Ajoutez un réseau pour commencer. AfterNET est un bon point de départ si vous hésitez.</string>
     <string name="networks_auto_connect">Auto-connexion</string>
     <string name="network_edit_title">Modifier le réseau</string>
     <string name="network_add_title">Ajouter un réseau</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">Rejouer cette visite</string>
     <string name="tour_replay_body">Vous pouvez relancer la visite guidée à tout moment depuis Paramètres → À propos. Appuyez sur Terminé pour finir.</string>
 
-    <!-- About -->
-    <string name="about_title">À propos</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">Transferts</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">Liste d\'ignorés</string>
-
-    <!-- List -->
-    <string name="list_title">Liste des canaux</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">Caps IRCv3 avancées</string>
+    <string name="core_nick_change_refused">Le serveur refuse le changement de pseudo : %1$s</string>
+    <string name="settings_raw_log">Journal brut du protocole</string>
+    <string name="settings_raw_log_desc">Affiche chaque ligne envoyée et reçue dans un tampon Raw par réseau. Les mots de passe sont masqués. Pour le débogage.</string>
+    <string name="chat_show_less">Afficher moins</string>
+    <string name="chat_not_delivered">Non remis</string>
+    <string name="vm_multiline_rejected">Le serveur a rejeté le message (%1$s) : %2$s</string>
+    <string name="network_edit_cap_also">demande aussi %1$s</string>
     <string name="network_edit_caps_hint">Les fonctionnalités IRCv3 de base sont activées par défaut. Activer pour voir les options avancées.</string>
     <string name="network_edit_bouncer_caps">Caps bouncer (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">Transferts</string>
     <string name="transfers_enable_dcc">Activer DCC</string>
     <string name="transfers_dcc_send_mode">Mode d\'envoi DCC</string>
     <string name="transfers_send_file">Envoyer un fichier</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">Transferts actifs</string>
     <string name="transfers_no_transfers">Aucun transfert en cours.</string>
     <string name="transfers_share_file">Partager le fichier</string>
+    <string name="transfers_share_open">Partager / Ouvrir le fichier</string>
+    <string name="transfers_tab_active">Actifs</string>
+    <string name="transfers_tab_offers">Offres</string>
+    <string name="transfers_tab_history">Historique</string>
+    <string name="transfers_tab_send">Envoyer</string>
+    <string name="transfers_tab_settings">Paramètres</string>
+    <string name="transfers_no_active">Aucun transfert en cours.</string>
+    <string name="transfers_no_completed">Rien de terminé pour l\'instant.</string>
+    <string name="transfers_clear_completed">Tout effacer</string>
+    <string name="transfers_enable">Activer</string>
+    <string name="transfers_to">à %1$s</string>
+    <string name="transfers_send_file_section">Envoyer un fichier</string>
+    <string name="transfers_dcc_chat_section">DCC CHAT</string>
+    <string name="transfers_dcc_disabled">DCC est actuellement désactivé. Activez-le pour envoyer/accepter des fichiers.</string>
+    <string name="transfers_dcc_auto_desc">Auto : essayer DCC passif ou basculer sur actif en l\'absence de réponse.</string>
+    <string name="transfers_dcc_active_desc">Actif : DCC SEND classique (le destinataire se connecte à vous).</string>
+    <string name="transfers_dcc_passive_desc">Passif : demander au destinataire d\'ouvrir un port, puis se connecter.</string>
+    <string name="transfers_chat_offers_section">Offres de chat entrantes</string>
+    <string name="transfers_offers_section">Offres entrantes</string>
+    <string name="transfers_in_progress_section">Transferts</string>
+    <string name="transfers_unknown_size">taille inconnue</string>
+    <string name="transfers_passive_port">passif (attente du port)</string>
+    <string name="transfers_error">Erreur : %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">Appuyer pour mentionner</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">Sélectionné</string>
+    <string name="networks_favourite">Favori</string>
     <string name="networks_add_favourite">Ajouter aux favoris</string>
     <string name="networks_remove_favourite">Retirer des favoris</string>
     <string name="networks_drag_reorder">Faire glisser pour réorganiser</string>
@@ -367,10 +406,18 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="networks_insecure_body2">Pour vous connecter à %1$s sans TLS, vous devez explicitement autoriser les connexions non chiffrées pour ce réseau.</string>
     <string name="networks_allow_connect">Autoriser et connecter</string>
     <string name="networks_reconnect">Reconnecter</string>
+    <string name="networks_open_details">Ouvrir les détails du réseau</string>
+    <string name="networks_tag_auto_connect">Auto-connexion</string>
+    <string name="networks_tag_no_tls">Sans TLS</string>
+    <string name="networks_order">Ordre</string>
+    <string name="networks_move_up">Monter</string>
+    <string name="networks_move_down">Descendre</string>
+    <string name="networks_empty_detail">Choisissez un réseau pour voir ses détails</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">Salons</string>
     <string name="list_search_hint">Rechercher salons / sujet</string>
+    <string name="list_title">Liste des canaux</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">Obtenir les modes actuels</string>
@@ -434,26 +481,15 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="ircop_uptime">Temps de fonctionnement</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">Liste d\'ignorés</string>
     <string name="ignore_nick_label">Nick à ignorer</string>
     <string name="ignore_no_nicks">Aucun nick ignoré.</string>
     <string name="ignore_no_networks">Aucun réseau configuré.</string>
     <string name="ignore_add">Ajouter</string>
     <string name="ignore_remove">Supprimer</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">Exporter la sauvegarde</string>
-    <string name="settings_restore_backup">Restaurer la sauvegarde</string>
-    <string name="settings_restore_confirm_title">Restaurer la sauvegarde ?</string>
-    <string name="settings_restore_confirm_ok">Restaurer</string>
-    <string name="settings_ok">OK</string>
-    <string name="settings_system_default">Défaut système</string>
-    <string name="settings_matrix_theme">Matrix</string>
-    <string name="settings_custom_font">Fichier de police personnalisé…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">Partager / Ouvrir le fichier</string>
-
     <!-- About screen -->
+    <string name="about_title">À propos</string>
     <string name="about_open_website">Ouvrir le site web</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="setting_ui_font">Police de l\'interface</string>
     <string name="setting_chat_font">Police du chat</string>
     <string name="setting_font_size_label">Taille de police</string>
+    <string name="setting_line_spacing_label">Espacement des lignes du chat</string>
+    <string name="setting_line_spacing_desc">Espace entre un message et le suivant. La taille du texte est inchangée.</string>
+    <string name="setting_font_line_height_label">Hauteur de ligne de la police</string>
+    <string name="setting_font_line_height_desc">Espace entre les lignes renvoyées à la ligne au sein d\'un même message. La taille du texte est inchangée.</string>
+    <string name="setting_line_spacing_tight">Serré</string>
+    <string name="setting_line_spacing_normal">Normal</string>
+    <string name="setting_line_spacing_relaxed">Aéré</string>
+    <string name="setting_nicklist_font_label">Taille du texte de la liste de pseudos</string>
+    <string name="setting_nicklist_font_desc">Ajuste la liste de pseudos en plus de sa largeur. Élargir le panneau agrandit toujours le texte.</string>
     <string name="setting_log_internal">Stockage interne</string>
     <string name="setting_log_custom">Dossier personnalisé sélectionné</string>
     <string name="setting_dcc_downloads_default">Téléchargements (défaut)</string>
@@ -550,19 +595,14 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="setting_previews_wifi_only">Wi-Fi uniquement</string>
     <string name="setting_previews_wifi_only_desc">Charger les aperçus uniquement en Wi-Fi pour ne pas consommer de données mobiles.</string>
     <string name="theme_system_default">Par défaut du système</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">Envoyer un fichier</string>
-    <string name="transfers_dcc_chat_section">DCC CHAT</string>
-    <string name="transfers_dcc_disabled">DCC est actuellement désactivé. Activez-le pour envoyer/accepter des fichiers.</string>
-    <string name="transfers_dcc_auto_desc">Auto : essayer DCC passif ou basculer sur actif en l\'absence de réponse.</string>
-    <string name="transfers_dcc_active_desc">Actif : DCC SEND classique (le destinataire se connecte à vous).</string>
-    <string name="transfers_dcc_passive_desc">Passif : demander au destinataire d\'ouvrir un port, puis se connecter.</string>
-    <string name="transfers_chat_offers_section">Offres de chat entrantes</string>
-    <string name="transfers_offers_section">Offres entrantes</string>
-    <string name="transfers_in_progress_section">Transferts</string>
-    <string name="transfers_unknown_size">taille inconnue</string>
-    <string name="transfers_passive_port">passif (attente du port)</string>
-    <string name="transfers_error">Erreur : %1$s</string>
+    <string name="settings_export_backup">Exporter la sauvegarde</string>
+    <string name="settings_restore_backup">Restaurer la sauvegarde</string>
+    <string name="settings_restore_confirm_title">Restaurer la sauvegarde ?</string>
+    <string name="settings_restore_confirm_ok">Restaurer</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">Défaut système</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">Fichier de police personnalisé…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">Sujet</string>
     <string name="chat_modes_panel">Modes du salon</string>
@@ -657,6 +697,29 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="about_support_desc">Visitez le site web pour des guides, des FAQ et pour signaler des problèmes.</string>
     <string name="about_credits_title">Contributions</string>
     <string name="about_credits_contribute">Envie de contribuer ?</string>
+    <string name="about_doc_getting_started">Premiers pas</string>
+    <string name="about_doc_getting_started_desc">Connectez-vous en trois étapes, puis configurez comptes et bouncers.</string>
+    <string name="about_doc_features">Fonctionnalités</string>
+    <string name="about_doc_features_desc">Ce que fait HexDroid et ce que donne son utilisation.</string>
+    <string name="about_doc_reference">Référence</string>
+    <string name="about_doc_reference_desc">Toutes les capacités IRCv3 et tous les paramètres, en détail.</string>
+    <string name="about_doc_commands">Commandes</string>
+    <string name="about_doc_commands_desc">Toutes les commandes slash avec syntaxe, exemples et remarques.</string>
+    <string name="about_doc_scripting">Scripts</string>
+    <string name="about_doc_scripting_desc">Écrivez et chargez des scripts pour étendre le client.</string>
+    <string name="about_doc_encryption">Chiffrement</string>
+    <string name="about_doc_encryption_desc">Comment fonctionnent les canaux et messages privés chiffrés de bout en bout.</string>
+    <string name="about_doc_troubleshooting">Dépannage</string>
+    <string name="about_doc_troubleshooting_desc">Correctifs pour la connexion, le TLS, les notifications, le DCC et la batterie.</string>
+    <string name="about_doc_changelog">Journal des modifications</string>
+    <string name="about_doc_changelog_desc">Notes de version, nouveautés, corrections de bugs et mises à jour de sécurité.</string>
+    <string name="about_help_title">Besoin d\'aide ?</string>
+    <string name="about_join_support_channel">Rejoindre le canal de support</string>
+    <string name="about_report_issue">Signaler un problème</string>
+    <string name="about_report_issue_desc">Bugs et demandes de fonctionnalités sur GitHub.</string>
+    <string name="about_privacy_policy">Politique de confidentialité</string>
+    <string name="about_privacy_policy_desc">Ce que l\'application stocke, et ce qu\'elle n\'envoie jamais.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">Utiliser SDCC (chiffrement TLS)</string>
@@ -817,6 +880,11 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="session_cap_nak">CAP NAK : %1$s</string>
     <string name="session_sasl_success">Authentification SASL réussie</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN interrompu : refus d\'envoyer le mot de passe sur une connexion non chiffrée. Activez TLS ou passez à SCRAM-SHA-256.</string>
+    <string name="session_sasl_mech_upgraded">SASL : le serveur ne propose pas PLAIN, utilisation de SCRAM-SHA-256 à la place (proposé : %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL : le serveur ne propose pas SCRAM-SHA-256, repli sur PLAIN (proposé : %1$s). Votre mot de passe est envoyé au serveur à l\'intérieur de la connexion TLS.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL interrompu : le serveur ne propose que %1$s, et un repli sur PLAIN enverrait votre mot de passe sur une connexion non chiffrée. Activez TLS pour ce réseau.</string>
+    <string name="session_sasl_mech_unavailable">SASL interrompu : le serveur ne prend pas en charge %1$s. Il propose : %2$s. Changez le mécanisme SASL dans les paramètres du réseau.</string>
+    <string name="session_sasl_prep_failed">SASL interrompu : le nom d\'utilisateur ou le mot de passe contient un caractère interdit dans un identifiant (%1$s). Modifiez-le dans les paramètres du réseau.</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN interrompu : aucun mot de passe défini pour ce profil. Ouvrez les paramètres du réseau et saisissez à nouveau le mot de passe SASL (les mots de passe ne sont pas inclus dans les sauvegardes pour des raisons de sécurité).</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN : le serveur a interrompu l\'authentification</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN : défi serveur inattendu « %1$s », abandon</string>
@@ -1053,10 +1121,7 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="settings_scripts">Scripts</string>
     <string name="settings_scripts_desc">Charger et gérer les scripts .hex (jeux, outils, commandes personnalisées).</string>
     <string name="net_this_network">ce réseau</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">Déconnecté</string>
     <string name="core_disconnect_server_error">Erreur du serveur : %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">L\'empreinte du certificat TLS a changé</string>
@@ -1394,11 +1459,7 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="chat_font_preview">Portez ce vieux whisky au juge blond qui fume</string>
     <string name="chat_bot_prefix">"[bot] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">Commande de script</string>
     <string name="cmd_me">Envoie une CTCP ACTION (/me salue)</string>
     <string name="cmd_msg">Envoie un message privé</string>
@@ -1646,4 +1707,15 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="dcc_trusted_tip">Astuce : vous pouvez aussi approuver quelqu\'un depuis la liste des pseudos, ou en touchant son nom dans la conversation.</string>
     <string name="dcc_trusted_dcc_off">DCC est actuellement désactivé : rien de tout cela ne s\'applique tant que vous ne l\'activez pas.</string>
     <string name="dcc_trusted_entry_none">Personne n\'est approuvé</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">Crochets d\'horodatage</string>
+    <string name="setting_timestamp_colour">Couleur de l\'horodatage</string>
+    <string name="setting_timestamp_colour_default">Comme le message</string>
+    <string name="setting_nick_style">Crochets du pseudo</string>
+    <string name="setting_chat_format_sample">bonjour le monde</string>
+    <string name="setting_boot_wifi_only">Attendre le Wi-Fi</string>
+    <string name="setting_boot_wifi_only_desc">Retarder la connexion au démarrage jusqu\'à ce que le Wi-Fi soit disponible, au lieu de se connecter via les données mobiles.</string>
+    <string name="vm_status_waiting_wifi">En attente du Wi-Fi…</string>
+    <string name="vm_waiting_for_wifi">En attente du Wi-Fi avant de se connecter.</string>
 </resources>

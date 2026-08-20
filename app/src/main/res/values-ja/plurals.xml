@@ -12,6 +12,9 @@
     <plurals name="chat_nicklist_users">
         <item quantity="other">%1$d 人</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="other">他 %1$d 行を表示</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="other">未読 %1$d 件</item>
     </plurals>

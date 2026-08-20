@@ -15,6 +15,10 @@
         <item quantity="one">%1$d kullanıcı</item>
         <item quantity="other">%1$d kullanıcı</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="one">%1$d satır daha göster</item>
+        <item quantity="other">%1$d satır daha göster</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="one">%1$d okunmamış</item>
         <item quantity="other">%1$d okunmamış</item>

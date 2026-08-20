@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">Bejövő port min</string>
     <string name="setting_incoming_port_max">Bejövő port max</string>
     <string name="setting_keep_alive">Kapcsolat fenntartása</string>
+    <string name="setting_connect_on_boot">Újracsatlakozás újraindítás után</string>
+    <string name="setting_connect_on_boot_desc">Az eszköz újraindítása után újracsatlakoztatja az automatikus kapcsolódásra jelölt hálózatokat az alkalmazás megnyitása nélkül. Szükséges: \"Kapcsolat fenntartása\".</string>
     <string name="setting_enable_dcc">DCC bekapcsolása</string>
     <string name="setting_open_app_settings">Alkalmazásbeállítások megnyitása</string>
     <string name="setting_battery_optimization">Akku optimalizálási lista</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">Csevegés és üzenetek</string>
+    <string name="settings_cat_appearance_desc">Nyelv, téma, betűtípusok, szövegméret</string>
+    <string name="settings_cat_chat_desc">Színek, időbélyegek, rejtett események, oldalsávok</string>
+    <string name="settings_cat_media_desc">Képelőnézetek és betöltésük ideje</string>
+    <string name="settings_cat_aliases_desc">Saját perjeles parancsok</string>
+    <string name="settings_cat_highlights_desc">Szavak, amelyek értesítenek</string>
+    <string name="settings_cat_irc_desc">Kapcsolódási viselkedés, mellőzés lista, szkriptek</string>
+    <string name="settings_cat_notifications_desc">Riasztások, hang és rezgés</string>
+    <string name="settings_cat_logging_desc">Csevegésnaplók, mappa és megőrzés</string>
+    <string name="settings_cat_privacy_desc">Gépelési jelzések</string>
+    <string name="settings_cat_history_desc">Kiszolgálóoldali előzmények lejátszása</string>
+    <string name="settings_cat_transfers_desc">DCC küldés, fogadás és portok</string>
+    <string name="settings_cat_backup_desc">Beállítások exportálása vagy visszaállítása</string>
 
     <!-- Theme picker -->
     <string name="theme_label">Téma</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">Lecsatlakozás</string>
     <string name="networks_edit">Szerkeszt</string>
     <string name="networks_add">Hálózat hozzáadás</string>
+    <string name="networks_empty_title">Még nincs hálózat</string>
+    <string name="networks_empty_body">Adj hozzá egy hálózatot a kezdéshez. Ha bizonytalan vagy, az AfterNET jó kiindulópont.</string>
     <string name="networks_auto_connect">Auto-kapcsolódás</string>
     <string name="network_edit_title">Hálózat szerkesztés</string>
     <string name="network_add_title">Hálózat hozzáadás</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">Bemutató újrakezdése</string>
     <string name="tour_replay_body">Az áttekintést bármikor újrakezdheted innen: Beállítások - Névjegy. Befejezéshez koppints erre: Kész</string>
 
-    <!-- About -->
-    <string name="about_title">Névjegy</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">Fájlátvitelek</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">Mellőzési lista</string>
-
-    <!-- List -->
-    <string name="list_title">Csatornalista</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">Haladó IRCv3 képességek</string>
+    <string name="core_nick_change_refused">A kiszolgáló nem engedi a becenév módosítását: %1$s</string>
+    <string name="settings_raw_log">Nyers protokollnapló</string>
+    <string name="settings_raw_log_desc">Minden elküldött és fogadott sor megjelenítése hálózatonként egy Raw pufferben. A jelszavak rejtve maradnak. Hibakereséshez.</string>
+    <string name="chat_show_less">Kevesebb megjelenítése</string>
+    <string name="chat_not_delivered">Nem kézbesítve</string>
+    <string name="vm_multiline_rejected">A kiszolgáló elutasította az üzenetet (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">emellett kéri: %1$s</string>
     <string name="network_edit_caps_hint">Az alap IRCv3 funkciók eleve aktívak. Kapcsold be a haladó beállításokhoz.</string>
     <string name="network_edit_bouncer_caps">Bouncer képességek</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">Fájlátvitelek</string>
     <string name="transfers_enable_dcc">DCC bekapcsolása</string>
     <string name="transfers_dcc_send_mode">DCC küldési mód</string>
     <string name="transfers_send_file">Fájlküldés</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">Aktív átvitelek</string>
     <string name="transfers_no_transfers">Nincs átvitel folyamatban.</string>
     <string name="transfers_share_file">Fájlmegosztás</string>
+    <string name="transfers_share_open">Fájl Megosztás / Megnyitás</string>
+    <string name="transfers_tab_active">Aktív</string>
+    <string name="transfers_tab_offers">Ajánlatok</string>
+    <string name="transfers_tab_history">Előzmények</string>
+    <string name="transfers_tab_send">Küldés</string>
+    <string name="transfers_tab_settings">Beállítások</string>
+    <string name="transfers_no_active">Nincs folyamatban lévő átvitel.</string>
+    <string name="transfers_no_completed">Még semmi sem fejeződött be.</string>
+    <string name="transfers_clear_completed">Összes törlése</string>
+    <string name="transfers_enable">Engedélyezés</string>
+    <string name="transfers_to">neki: %1$s</string>
+    <string name="transfers_send_file_section">Fájlküldés</string>
+    <string name="transfers_dcc_chat_section">DCC CSEVEGÉS</string>
+    <string name="transfers_dcc_disabled">A DCC jelenleg ki van kapcsolva. Fájlok küldéséhez/fogadásához kapcsold be.</string>
+    <string name="transfers_dcc_auto_desc">Auto: Passzív DCC módot próbál, vagy visszatér Aktív-hoz, ha nincs válasz.</string>
+    <string name="transfers_dcc_active_desc">Aktív: klasszikus DCC SEND (a fogadó csatlakozik hozzád).</string>
+    <string name="transfers_dcc_passive_desc">Passzív: portnyitási kérés küldése a fogadónak, majd csatlakozás hozzá.</string>
+    <string name="transfers_chat_offers_section">Bejövő csevegési kérelmek</string>
+    <string name="transfers_offers_section">Bejövő kérelmek</string>
+    <string name="transfers_in_progress_section">Átvitelek</string>
+    <string name="transfers_unknown_size">ismeretlen méret</string>
+    <string name="transfers_passive_port">passzív (várakozás portra)</string>
+    <string name="transfers_error">Hiba: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">Koppints a megemlítéshez</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">Választott</string>
+    <string name="networks_favourite">Kedvenc</string>
     <string name="networks_add_favourite">Kedvencekhez adás</string>
     <string name="networks_remove_favourite">Törlés a kedvencekből</string>
     <string name="networks_drag_reorder">Húzd az átrendezéshez</string>
@@ -367,10 +406,18 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="networks_insecure_body2">Egyértelműen engedélyezned kell a nem biztonságos egyszerű szöveges kapcsolatot a hálózathoz, ha TLS nélkül szeretnél kapcsolódni ide: %1$s .</string>
     <string name="networks_allow_connect">Engedélyezés &amp; Kapcsolódás</string>
     <string name="networks_reconnect">Újrakapcsolódás</string>
+    <string name="networks_open_details">Hálózat részleteinek megnyitása</string>
+    <string name="networks_tag_auto_connect">Auto-kapcsolódás</string>
+    <string name="networks_tag_no_tls">Nincs TLS</string>
+    <string name="networks_order">Sorrend</string>
+    <string name="networks_move_up">Mozgatás fel</string>
+    <string name="networks_move_down">Mozgatás le</string>
+    <string name="networks_empty_detail">Válassz hálózatot a részletek megtekintéséhez</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">Csatornák</string>
     <string name="list_search_hint">Csatornák / topik keresése</string>
+    <string name="list_title">Csatornalista</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">Jelenlegi módok lekérdezése</string>
@@ -434,26 +481,15 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="ircop_uptime">Üzemidő</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">Mellőzési lista</string>
     <string name="ignore_nick_label">Mellőzendő becenév</string>
     <string name="ignore_no_nicks">Nincs mellőzendő becenév.</string>
     <string name="ignore_no_networks">Még nincs beállított hálózat.</string>
     <string name="ignore_add">Hozzáad</string>
     <string name="ignore_remove">Töröl</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">Mentés exportálása</string>
-    <string name="settings_restore_backup">Mentés visszaállítása</string>
-    <string name="settings_restore_confirm_title">Visszaállítod a mentést?</string>
-    <string name="settings_restore_confirm_ok">Visszaállít</string>
-    <string name="settings_ok">OK</string>
-    <string name="settings_system_default">Rendszer alapértelmezés</string>
-    <string name="settings_matrix_theme">Mátrix</string>
-    <string name="settings_custom_font">Egyedi betűtípus…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">Fájl Megosztás / Megnyitás</string>
-
     <!-- About screen -->
+    <string name="about_title">Névjegy</string>
     <string name="about_open_website">Weblap Megnyitás</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="setting_ui_font">Felület betűtípus</string>
     <string name="setting_chat_font">Csevegés betűtípus</string>
     <string name="setting_font_size_label">Betűméret</string>
+    <string name="setting_line_spacing_label">Csevegés sortávolsága</string>
+    <string name="setting_line_spacing_desc">Az egyik üzenet és a következő közötti távolság. A szövegméret nem változik.</string>
+    <string name="setting_font_line_height_label">Betűtípus sormagassága</string>
+    <string name="setting_font_line_height_desc">Az egy üzeneten belül tördelt sorok közötti távolság. A szövegméret nem változik.</string>
+    <string name="setting_line_spacing_tight">Szűk</string>
+    <string name="setting_line_spacing_normal">Normál</string>
+    <string name="setting_line_spacing_relaxed">Laza</string>
+    <string name="setting_nicklist_font_label">Becenévlista szövegmérete</string>
+    <string name="setting_nicklist_font_desc">A becenévlistát a szélességén felül állítja. A panel szélesítése továbbra is nagyítja a szöveget.</string>
     <string name="setting_log_internal">Belső tárhely</string>
     <string name="setting_log_custom">Választott saját mappa</string>
     <string name="setting_dcc_downloads_default">Letöltések (alapértelmezett)</string>
@@ -550,19 +595,14 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="setting_previews_wifi_only">Csak Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Előnézet betöltése kizárólag Wi-Fi kapcsolat esetén, elkerülve mobil adat felhasználását.</string>
     <string name="theme_system_default">Rendszer alapértelmezés</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">Fájlküldés</string>
-    <string name="transfers_dcc_chat_section">DCC CSEVEGÉS</string>
-    <string name="transfers_dcc_disabled">A DCC jelenleg ki van kapcsolva. Fájlok küldéséhez/fogadásához kapcsold be.</string>
-    <string name="transfers_dcc_auto_desc">Auto: Passzív DCC módot próbál, vagy visszatér Aktív-hoz, ha nincs válasz.</string>
-    <string name="transfers_dcc_active_desc">Aktív: klasszikus DCC SEND (a fogadó csatlakozik hozzád).</string>
-    <string name="transfers_dcc_passive_desc">Passzív: portnyitási kérés küldése a fogadónak, majd csatlakozás hozzá.</string>
-    <string name="transfers_chat_offers_section">Bejövő csevegési kérelmek</string>
-    <string name="transfers_offers_section">Bejövő kérelmek</string>
-    <string name="transfers_in_progress_section">Átvitelek</string>
-    <string name="transfers_unknown_size">ismeretlen méret</string>
-    <string name="transfers_passive_port">passzív (várakozás portra)</string>
-    <string name="transfers_error">Hiba: %1$s</string>
+    <string name="settings_export_backup">Mentés exportálása</string>
+    <string name="settings_restore_backup">Mentés visszaállítása</string>
+    <string name="settings_restore_confirm_title">Visszaállítod a mentést?</string>
+    <string name="settings_restore_confirm_ok">Visszaállít</string>
+    <string name="settings_ok">OK</string>
+    <string name="settings_system_default">Rendszer alapértelmezés</string>
+    <string name="settings_matrix_theme">Mátrix</string>
+    <string name="settings_custom_font">Egyedi betűtípus…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">Topik</string>
     <string name="chat_modes_panel">Csatornamódok</string>
@@ -657,6 +697,29 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="about_support_desc">Útmutatásért látogass el a honlapra, nézd meg a GyIK-et (FAQ), valamint problémákat is ott jelezhetsz.</string>
     <string name="about_credits_title">Közreműködők</string>
     <string name="about_credits_contribute">Szeretnél közreműködni?</string>
+    <string name="about_doc_getting_started">Első lépések</string>
+    <string name="about_doc_getting_started_desc">Csatlakozz három lépésben, majd állítsd be a fiókokat és a bouncereket.</string>
+    <string name="about_doc_features">Funkciók</string>
+    <string name="about_doc_features_desc">Mit tud a HexDroid, és milyen használni.</string>
+    <string name="about_doc_reference">Referencia</string>
+    <string name="about_doc_reference_desc">Minden IRCv3 képesség és minden beállítás, teljes egészében.</string>
+    <string name="about_doc_commands">Parancsok</string>
+    <string name="about_doc_commands_desc">Az összes perjeles parancs szintaxissal, példákkal és megjegyzésekkel.</string>
+    <string name="about_doc_scripting">Szkriptelés</string>
+    <string name="about_doc_scripting_desc">Írj és tölts be szkripteket a kliens bővítéséhez.</string>
+    <string name="about_doc_encryption">Titkosítás</string>
+    <string name="about_doc_encryption_desc">Hogyan működnek a végponttól végpontig titkosított csatornák és privát üzenetek.</string>
+    <string name="about_doc_troubleshooting">Hibaelhárítás</string>
+    <string name="about_doc_troubleshooting_desc">Kapcsolat, TLS, értesítések, DCC és akkumulátor megoldások.</string>
+    <string name="about_doc_changelog">Változásnapló</string>
+    <string name="about_doc_changelog_desc">Kiadási megjegyzések, új funkciók, hibajavítások és biztonsági frissítések.</string>
+    <string name="about_help_title">Segítségre van szükséged?</string>
+    <string name="about_join_support_channel">Csatlakozás a támogatási csatornához</string>
+    <string name="about_report_issue">Hiba bejelentése</string>
+    <string name="about_report_issue_desc">Hibák és funkciókérések a GitHubon.</string>
+    <string name="about_privacy_policy">Adatvédelmi irányelvek</string>
+    <string name="about_privacy_policy_desc">Mit tárol az alkalmazás, és mit nem küld el soha.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">SDCC használata (TLS titkosítás)</string>
@@ -817,6 +880,11 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">A SASL hitelesítés sikerült</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN megszakítva: a jelszó nem küldhető titkosítatlan kapcsolaton. Kapcsold be a TLS-t, vagy válts SCRAM-SHA-256 használatára.</string>
+    <string name="session_sasl_mech_upgraded">SASL: a kiszolgáló nem kínál PLAIN mechanizmust, helyette SCRAM-SHA-256 lesz használva (kínált: %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL: a kiszolgáló nem kínál SCRAM-SHA-256 mechanizmust, visszalépés PLAIN-re (kínált: %1$s). A jelszavad a TLS-kapcsolaton belül jut el a kiszolgálóhoz.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL megszakítva: a kiszolgáló csak ezt kínálja: %1$s, és a PLAIN-re való visszalépés titkosítatlan kapcsolaton küldené el a jelszavad. Kapcsold be a TLS-t ehhez a hálózathoz.</string>
+    <string name="session_sasl_mech_unavailable">SASL megszakítva: a kiszolgáló nem támogatja ezt: %1$s. Amit kínál: %2$s. Módosítsd a SASL mechanizmust a hálózati beállításokban.</string>
+    <string name="session_sasl_prep_failed">SASL megszakítva: a felhasználónév vagy a jelszó olyan karaktert tartalmaz, amely hitelesítő adatban nem megengedett (%1$s). Módosítsd a hálózati beállításokban.</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN megszakítva: ehhez a profilhoz nincs jelszó beállítva. Nyisd meg a Hálózati beállításokat, és add meg újra a SASL jelszót (a jelszavak biztonsági okból nem kerülnek a mentésekbe).</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN: a kiszolgáló megszakította a hitelesítést</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN: váratlan kiszolgálói kihívás &quot;%1$s&quot;, megszakítás</string>
@@ -1053,10 +1121,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="settings_scripts">Szkriptek</string>
     <string name="settings_scripts_desc">.hex szkriptek betöltése és kezelése (játékok, eszközök, egyéni parancsok).</string>
     <string name="net_this_network">ez a hálózat</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">Kapcsolat bontva</string>
     <string name="core_disconnect_server_error">Kiszolgálóhiba: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">A TLS tanúsítvány ujjlenyomata megváltozott</string>
@@ -1394,11 +1459,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="chat_font_preview">Árvíztűrő tükörfúrógép jó nyugodt fixen</string>
     <string name="chat_bot_prefix">"[bot] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">Szkriptparancs</string>
     <string name="cmd_me">CTCP ACTION küldése (/me integet)</string>
     <string name="cmd_msg">Privát üzenet küldése</string>
@@ -1646,4 +1707,15 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="dcc_trusted_tip">Tipp: megbízhatóvá tehetsz valakit a becenévlistából is, vagy a nevére koppintva a csevegésben.</string>
     <string name="dcc_trusted_dcc_off">A DCC jelenleg ki van kapcsolva, így ezek addig nem lépnek életbe, amíg be nem kapcsolod.</string>
     <string name="dcc_trusted_entry_none">Még senki nem megbízható</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">Időbélyeg zárójelei</string>
+    <string name="setting_timestamp_colour">Időbélyeg színe</string>
+    <string name="setting_timestamp_colour_default">Ugyanaz, mint az üzenet</string>
+    <string name="setting_nick_style">Becenév zárójelei</string>
+    <string name="setting_chat_format_sample">helló világ</string>
+    <string name="setting_boot_wifi_only">Várakozás Wi-Fi-re</string>
+    <string name="setting_boot_wifi_only_desc">Indításkor tartsa vissza a kapcsolatot, amíg a Wi-Fi elérhető nem lesz, ahelyett hogy mobiladaton csatlakozna.</string>
+    <string name="vm_status_waiting_wifi">Várakozás Wi-Fi-re…</string>
+    <string name="vm_waiting_for_wifi">Várakozás Wi-Fi-re a csatlakozás előtt.</string>
 </resources>

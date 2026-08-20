@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">Gelen port minimum</string>
     <string name="setting_incoming_port_max">Gelen port maksimum</string>
     <string name="setting_keep_alive">Bağlantıyı canlı tut</string>
+    <string name="setting_connect_on_boot">Cihaz yeniden başladıktan sonra bağlan</string>
+    <string name="setting_connect_on_boot_desc">Cihaz yeniden başladıktan sonra, otomatik bağlan olarak işaretlenen ağlara uygulamayı açmadan yeniden bağlanır. \"Bağlantıyı canlı tut\" gerekir.</string>
     <string name="setting_enable_dcc">DCC\'yi etkinleştir</string>
     <string name="setting_open_app_settings">Uygulama ayarlarını aç</string>
     <string name="setting_battery_optimization">Pil optimizasyon listesi</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">Sohbet ve mesajlar</string>
+    <string name="settings_cat_appearance_desc">Dil, tema, yazı tipleri, metin boyutu</string>
+    <string name="settings_cat_chat_desc">Renkler, zaman damgaları, gizlenen olaylar, yan paneller</string>
+    <string name="settings_cat_media_desc">Görsel önizlemeleri ve ne zaman yükleneceği</string>
+    <string name="settings_cat_aliases_desc">Kendi eğik çizgi komutlarınız</string>
+    <string name="settings_cat_highlights_desc">Sizi uyaran kelimeler</string>
+    <string name="settings_cat_irc_desc">Bağlantı davranışı, yoksayma listesi, betikler</string>
+    <string name="settings_cat_notifications_desc">Uyarılar, ses ve titreşim</string>
+    <string name="settings_cat_logging_desc">Sohbet günlükleri, klasör ve saklama</string>
+    <string name="settings_cat_privacy_desc">Yazma göstergeleri</string>
+    <string name="settings_cat_history_desc">Sunucu tarafı geçmiş oynatma</string>
+    <string name="settings_cat_transfers_desc">DCC gönderme, alma ve bağlantı noktaları</string>
+    <string name="settings_cat_backup_desc">Ayarlarınızı dışa aktarın veya geri yükleyin</string>
 
     <!-- Theme picker -->
     <string name="theme_label">Tema</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">Bağlantıyı kes</string>
     <string name="networks_edit">Düzenle</string>
     <string name="networks_add">Ağ ekle</string>
+    <string name="networks_empty_title">Henüz ağ yok</string>
+    <string name="networks_empty_body">Başlamak için bir ağ ekleyin. Emin değilseniz AfterNET iyi bir başlangıçtır.</string>
     <string name="networks_auto_connect">Otomatik bağlan</string>
     <string name="network_edit_title">Ağı düzenle</string>
     <string name="network_add_title">Ağ ekle</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">Bu turu tekrar oynat</string>
     <string name="tour_replay_body">Tanıtımı istediğiniz zaman Ayarlar → Hakkında üzerinden tekrar başlatabilirsiniz. Bitirmek için Bitti\'ye dokunun.</string>
 
-    <!-- About -->
-    <string name="about_title">Hakkında</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">Aktarımlar</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">Yoksayma listesi</string>
-
-    <!-- List -->
-    <string name="list_title">Kanal listesi</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">Gelişmiş IRCv3 caps</string>
+    <string name="core_nick_change_refused">Sunucu takma adı değiştirmenize izin vermiyor: %1$s</string>
+    <string name="settings_raw_log">Ham protokol günlüğü</string>
+    <string name="settings_raw_log_desc">Gönderilen ve alınan her satırı ağ başına bir Raw tamponunda gösterir. Parolalar gizlenir. Hata ayıklama içindir.</string>
+    <string name="chat_show_less">Daha az göster</string>
+    <string name="chat_not_delivered">İletilmedi</string>
+    <string name="vm_multiline_rejected">Sunucu mesajı reddetti (%1$s): %2$s</string>
+    <string name="network_edit_cap_also">ayrıca %1$s ister</string>
     <string name="network_edit_caps_hint">Temel IRCv3 özellikleri varsayılan olarak etkin. Gelişmiş seçenekler için açın.</string>
     <string name="network_edit_bouncer_caps">Bouncer caps (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">Aktarımlar</string>
     <string name="transfers_enable_dcc">DCC etkinleştir</string>
     <string name="transfers_dcc_send_mode">DCC gönderme modu</string>
     <string name="transfers_send_file">Dosya gönder</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">Aktif transferler</string>
     <string name="transfers_no_transfers">Aktif transfer yok.</string>
     <string name="transfers_share_file">Dosyayı paylaş</string>
+    <string name="transfers_share_open">Paylaş / Dosyayı aç</string>
+    <string name="transfers_tab_active">Etkin</string>
+    <string name="transfers_tab_offers">Teklifler</string>
+    <string name="transfers_tab_history">Geçmiş</string>
+    <string name="transfers_tab_send">Gönder</string>
+    <string name="transfers_tab_settings">Ayarlar</string>
+    <string name="transfers_no_active">Devam eden aktarım yok.</string>
+    <string name="transfers_no_completed">Henüz tamamlanan bir şey yok.</string>
+    <string name="transfers_clear_completed">Tümünü temizle</string>
+    <string name="transfers_enable">Etkinleştir</string>
+    <string name="transfers_to">%1$s kullanıcısına</string>
+    <string name="transfers_send_file_section">Dosya gönder</string>
+    <string name="transfers_dcc_chat_section">DCC SOHBET</string>
+    <string name="transfers_dcc_disabled">DCC şu anda devre dışı. Dosya göndermek/kabul etmek için açın.</string>
+    <string name="transfers_dcc_auto_desc">Otomatik: Pasif DCC dene veya yanıt yoksa Aktif\'e geri dön.</string>
+    <string name="transfers_dcc_active_desc">Aktif: klasik DCC SEND (alıcı size bağlanır).</string>
+    <string name="transfers_dcc_passive_desc">Pasif: alıcıdan bir port açmasını iste, ardından sen bağlan.</string>
+    <string name="transfers_chat_offers_section">Gelen sohbet teklifleri</string>
+    <string name="transfers_offers_section">Gelen teklifler</string>
+    <string name="transfers_in_progress_section">Transferler</string>
+    <string name="transfers_unknown_size">bilinmeyen boyut</string>
+    <string name="transfers_passive_port">pasif (port bekleniyor)</string>
+    <string name="transfers_error">Hata: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">Bahsetmek için dokun</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">Seçildi</string>
+    <string name="networks_favourite">Favori</string>
     <string name="networks_add_favourite">Favorilere ekle</string>
     <string name="networks_remove_favourite">Favorilerden kaldır</string>
     <string name="networks_drag_reorder">Yeniden sıralamak için sürükle</string>
@@ -367,10 +406,18 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="networks_insecure_body2">%1$s adresine TLS olmadan bağlanmak için bu ağ için şifrelenmemiş bağlantılara açıkça izin vermelisiniz.</string>
     <string name="networks_allow_connect">İzin ver ve bağlan</string>
     <string name="networks_reconnect">Yeniden bağlan</string>
+    <string name="networks_open_details">Ağ ayrıntılarını aç</string>
+    <string name="networks_tag_auto_connect">Otomatik bağlan</string>
+    <string name="networks_tag_no_tls">TLS yok</string>
+    <string name="networks_order">Sıra</string>
+    <string name="networks_move_up">Yukarı taşı</string>
+    <string name="networks_move_down">Aşağı taşı</string>
+    <string name="networks_empty_detail">Ayrıntılarını görmek için bir ağ seçin</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">Kanallar</string>
     <string name="list_search_hint">Kanal / konu ara</string>
+    <string name="list_title">Kanal listesi</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">Mevcut modları al</string>
@@ -434,26 +481,15 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="ircop_uptime">Çalışma süresi</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">Yoksayma listesi</string>
     <string name="ignore_nick_label">Yoksayılacak nick</string>
     <string name="ignore_no_nicks">Yoksayılan nick yok.</string>
     <string name="ignore_no_networks">Henüz ağ yapılandırılmamış.</string>
     <string name="ignore_add">Ekle</string>
     <string name="ignore_remove">Kaldır</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">Yedek dışa aktar</string>
-    <string name="settings_restore_backup">Yedeği geri yükle</string>
-    <string name="settings_restore_confirm_title">Yedek geri yüklensin mi?</string>
-    <string name="settings_restore_confirm_ok">Geri yükle</string>
-    <string name="settings_ok">Tamam</string>
-    <string name="settings_system_default">Sistem varsayılanı</string>
-    <string name="settings_matrix_theme">Matrix</string>
-    <string name="settings_custom_font">Özel yazı tipi dosyası…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">Paylaş / Dosyayı aç</string>
-
     <!-- About screen -->
+    <string name="about_title">Hakkında</string>
     <string name="about_open_website">Web sitesini aç</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="setting_ui_font">Arayüz yazı tipi</string>
     <string name="setting_chat_font">Sohbet yazı tipi</string>
     <string name="setting_font_size_label">Yazı tipi boyutu</string>
+    <string name="setting_line_spacing_label">Sohbet satır aralığı</string>
+    <string name="setting_line_spacing_desc">Bir mesajla bir sonraki arasındaki boşluk. Metin boyutu değişmez.</string>
+    <string name="setting_font_line_height_label">Yazı tipi satır yüksekliği</string>
+    <string name="setting_font_line_height_desc">Tek bir mesaj içinde alta kayan satırlar arasındaki boşluk. Metin boyutu değişmez.</string>
+    <string name="setting_line_spacing_tight">Dar</string>
+    <string name="setting_line_spacing_normal">Normal</string>
+    <string name="setting_line_spacing_relaxed">Geniş</string>
+    <string name="setting_nicklist_font_label">Kullanıcı listesi metin boyutu</string>
+    <string name="setting_nicklist_font_desc">Kullanıcı listesini genişliğinin yanı sıra ayarlar. Paneli genişletmek metni yine de büyütür.</string>
     <string name="setting_log_internal">Dahili depolama</string>
     <string name="setting_log_custom">Özel klasör seçildi</string>
     <string name="setting_dcc_downloads_default">İndirmeler (varsayılan)</string>
@@ -550,19 +595,14 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="setting_previews_wifi_only">Yalnızca Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Mobil veri kullanımını önlemek için önizlemeleri yalnızca Wi-Fi bağlantısında yükle.</string>
     <string name="theme_system_default">Sistem varsayılanı</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">Dosya gönder</string>
-    <string name="transfers_dcc_chat_section">DCC SOHBET</string>
-    <string name="transfers_dcc_disabled">DCC şu anda devre dışı. Dosya göndermek/kabul etmek için açın.</string>
-    <string name="transfers_dcc_auto_desc">Otomatik: Pasif DCC dene veya yanıt yoksa Aktif\'e geri dön.</string>
-    <string name="transfers_dcc_active_desc">Aktif: klasik DCC SEND (alıcı size bağlanır).</string>
-    <string name="transfers_dcc_passive_desc">Pasif: alıcıdan bir port açmasını iste, ardından sen bağlan.</string>
-    <string name="transfers_chat_offers_section">Gelen sohbet teklifleri</string>
-    <string name="transfers_offers_section">Gelen teklifler</string>
-    <string name="transfers_in_progress_section">Transferler</string>
-    <string name="transfers_unknown_size">bilinmeyen boyut</string>
-    <string name="transfers_passive_port">pasif (port bekleniyor)</string>
-    <string name="transfers_error">Hata: %1$s</string>
+    <string name="settings_export_backup">Yedek dışa aktar</string>
+    <string name="settings_restore_backup">Yedeği geri yükle</string>
+    <string name="settings_restore_confirm_title">Yedek geri yüklensin mi?</string>
+    <string name="settings_restore_confirm_ok">Geri yükle</string>
+    <string name="settings_ok">Tamam</string>
+    <string name="settings_system_default">Sistem varsayılanı</string>
+    <string name="settings_matrix_theme">Matrix</string>
+    <string name="settings_custom_font">Özel yazı tipi dosyası…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">Konu</string>
     <string name="chat_modes_panel">Kanal modları</string>
@@ -657,6 +697,29 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="about_support_desc">Kılavuzlar, SSS ve sorun bildirmek için web sitesini ziyaret edin.</string>
     <string name="about_credits_title">Katkıda bulunanlar</string>
     <string name="about_credits_contribute">Katkıda bulunmak ister misiniz?</string>
+    <string name="about_doc_getting_started">Başlarken</string>
+    <string name="about_doc_getting_started_desc">Üç adımda bağlanın, ardından hesapları ve bouncer\'ları ayarlayın.</string>
+    <string name="about_doc_features">Özellikler</string>
+    <string name="about_doc_features_desc">HexDroid ne yapar ve kullanımı nasıldır.</string>
+    <string name="about_doc_reference">Başvuru</string>
+    <string name="about_doc_reference_desc">Tüm IRCv3 yetenekleri ve tüm ayarlar, eksiksiz.</string>
+    <string name="about_doc_commands">Komutlar</string>
+    <string name="about_doc_commands_desc">Tüm eğik çizgi komutları; söz dizimi, örnekler ve notlarla.</string>
+    <string name="about_doc_scripting">Betik yazma</string>
+    <string name="about_doc_scripting_desc">İstemciyi genişletmek için betikler yazın ve yükleyin.</string>
+    <string name="about_doc_encryption">Şifreleme</string>
+    <string name="about_doc_encryption_desc">Uçtan uca şifreli kanallar ve özel sohbetler nasıl çalışır.</string>
+    <string name="about_doc_troubleshooting">Sorun giderme</string>
+    <string name="about_doc_troubleshooting_desc">Bağlantı, TLS, bildirim, DCC ve pil çözümleri.</string>
+    <string name="about_doc_changelog">Değişiklik günlüğü</string>
+    <string name="about_doc_changelog_desc">Sürüm notları, yeni özellikler, hata düzeltmeleri ve güvenlik güncellemeleri.</string>
+    <string name="about_help_title">Yardım mı lazım?</string>
+    <string name="about_join_support_channel">Destek kanalına katıl</string>
+    <string name="about_report_issue">Sorun bildir</string>
+    <string name="about_report_issue_desc">GitHub üzerinde hatalar ve özellik istekleri.</string>
+    <string name="about_privacy_policy">Gizlilik politikası</string>
+    <string name="about_privacy_policy_desc">Uygulamanın neyi sakladığı ve asla neyi göndermediği.</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">SDCC kullan (TLS şifrelemesi)</string>
@@ -817,6 +880,11 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">SASL kimlik doğrulaması başarılı</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN iptal edildi: parola şifrelenmemiş bir bağlantı üzerinden gönderilmeyecek. TLS etkinleştirin ya da SCRAM-SHA-256 kullanın.</string>
+    <string name="session_sasl_mech_upgraded">SASL: sunucu PLAIN sunmuyor, bunun yerine SCRAM-SHA-256 kullanılıyor (sunulan: %1$s).</string>
+    <string name="session_sasl_mech_downgraded">SASL: sunucu SCRAM-SHA-256 sunmuyor, PLAIN\'e geri dönülüyor (sunulan: %1$s). Parolanız sunucuya TLS bağlantısı içinde gönderilir.</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL durduruldu: sunucu yalnızca %1$s sunuyor ve PLAIN\'e dönmek parolanızı şifrelenmemiş bir bağlantı üzerinden gönderirdi. Bu ağ için TLS\'i etkinleştirin.</string>
+    <string name="session_sasl_mech_unavailable">SASL durduruldu: sunucu %1$s desteklemiyor. Sunduğu: %2$s. SASL mekanizmasını ağ ayarlarından değiştirin.</string>
+    <string name="session_sasl_prep_failed">SASL durduruldu: kullanıcı adı veya parola, kimlik bilgisinde izin verilmeyen bir karakter içeriyor (%1$s). Ağ ayarlarından değiştirin.</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN iptal edildi: bu profil için parola ayarlanmamış. Ağ Ayarları bölümünü açıp SASL parolasını yeniden girin (güvenlik nedeniyle parolalar yedeklere dahil edilmez).</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN: sunucu kimlik doğrulamayı iptal etti</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN: sunucudan beklenmeyen istek &quot;%1$s&quot;, iptal ediliyor</string>
@@ -1053,10 +1121,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="settings_scripts">Betikler</string>
     <string name="settings_scripts_desc">.hex betiklerini yükleyin ve yönetin (oyunlar, araçlar, özel komutlar).</string>
     <string name="net_this_network">bu ağ</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">Bağlantı kesildi</string>
     <string name="core_disconnect_server_error">Sunucu hatası: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS sertifikası parmak izi değişti</string>
@@ -1394,11 +1459,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="chat_font_preview">Pijamalı hasta yağız şoföre çabucak güvendi</string>
     <string name="chat_bot_prefix">"[bot] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">Betik komutu</string>
     <string name="cmd_me">CTCP ACTION gönderir (/me el sallar)</string>
     <string name="cmd_msg">Özel mesaj gönderir</string>
@@ -1646,4 +1707,15 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="dcc_trusted_tip">İpucu: birine nick listesinden ya da sohbette adına dokunarak da güvenebilirsiniz.</string>
     <string name="dcc_trusted_dcc_off">DCC şu anda kapalı, bu yüzden siz açana kadar buradakiler etkili olmaz.</string>
     <string name="dcc_trusted_entry_none">Henüz kimseye güvenilmiyor</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">Zaman damgası parantezleri</string>
+    <string name="setting_timestamp_colour">Zaman damgası rengi</string>
+    <string name="setting_timestamp_colour_default">Mesajla aynı</string>
+    <string name="setting_nick_style">Takma ad parantezleri</string>
+    <string name="setting_chat_format_sample">merhaba dünya</string>
+    <string name="setting_boot_wifi_only">Wi-Fi\'yi bekle</string>
+    <string name="setting_boot_wifi_only_desc">Açılışta mobil veriyle bağlanmak yerine Wi-Fi hazır olana kadar bağlantıyı bekletir.</string>
+    <string name="vm_status_waiting_wifi">Wi-Fi bekleniyor…</string>
+    <string name="vm_waiting_for_wifi">Bağlanmadan önce Wi-Fi bekleniyor.</string>
 </resources>

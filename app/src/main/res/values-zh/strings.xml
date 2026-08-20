@@ -116,9 +116,26 @@
     <string name="setting_incoming_port_min">最小传入端口</string>
     <string name="setting_incoming_port_max">最大传入端口</string>
     <string name="setting_keep_alive">保持连接活跃</string>
+    <string name="setting_connect_on_boot">设备重启后重新连接</string>
+    <string name="setting_connect_on_boot_desc">设备重启后，无需打开应用即可重新连接标记为自动连接的网络。需要开启\"保持连接活跃\"。</string>
     <string name="setting_enable_dcc">启用 DCC</string>
     <string name="setting_open_app_settings">打开应用设置</string>
     <string name="setting_battery_optimization">电池优化列表</string>
+
+    <!-- Settings categories -->
+    <string name="settings_cat_chat">聊天与消息</string>
+    <string name="settings_cat_appearance_desc">语言、主题、字体、文字大小</string>
+    <string name="settings_cat_chat_desc">颜色、时间戳、隐藏事件、侧边栏</string>
+    <string name="settings_cat_media_desc">图片预览及其加载时机</string>
+    <string name="settings_cat_aliases_desc">你自己的斜杠命令</string>
+    <string name="settings_cat_highlights_desc">会提醒你的关键词</string>
+    <string name="settings_cat_irc_desc">连接行为、忽略列表、脚本</string>
+    <string name="settings_cat_notifications_desc">提醒、声音和振动</string>
+    <string name="settings_cat_logging_desc">聊天日志、文件夹和保留时长</string>
+    <string name="settings_cat_privacy_desc">输入状态指示</string>
+    <string name="settings_cat_history_desc">服务器端历史回放</string>
+    <string name="settings_cat_transfers_desc">DCC 发送、接收和端口</string>
+    <string name="settings_cat_backup_desc">导出或恢复你的设置</string>
 
     <!-- Theme picker -->
     <string name="theme_label">主题</string>
@@ -168,6 +185,8 @@
     <string name="networks_disconnect">断开</string>
     <string name="networks_edit">编辑</string>
     <string name="networks_add">添加网络</string>
+    <string name="networks_empty_title">还没有网络</string>
+    <string name="networks_empty_body">添加一个网络即可开始。如果拿不定主意，AfterNET 是不错的起点。</string>
     <string name="networks_auto_connect">自动连接</string>
     <string name="network_edit_title">编辑网络</string>
     <string name="network_add_title">添加网络</string>
@@ -213,18 +232,6 @@
     <string name="tour_replay_title">重新播放本导览</string>
     <string name="tour_replay_body">你随时可以从“设置 → 关于”再次运行此向导。点按“完成”结束。</string>
 
-    <!-- About -->
-    <string name="about_title">关于</string>
-
-    <!-- Transfers -->
-    <string name="transfers_title">文件传输</string>
-
-    <!-- Ignore -->
-    <string name="ignore_title">忽略列表</string>
-
-    <!-- List -->
-    <string name="list_title">频道列表</string>
-
     <!-- Language names -->
     <!-- <string name="lang_en" translatable="false">English</string> -->
     <!-- <string name="lang_de" translatable="false">Deutsch</string> -->
@@ -243,10 +250,18 @@
     <!-- <string name="lang_zh" translatable="false">中文</string> -->
 
     <string name="network_edit_advanced_caps">高级IRCv3功能</string>
+    <string name="core_nick_change_refused">服务器不允许更改昵称：%1$s</string>
+    <string name="settings_raw_log">原始协议日志</string>
+    <string name="settings_raw_log_desc">在每个网络的 Raw 缓冲区中显示收发的每一行。密码会被隐藏。用于调试。</string>
+    <string name="chat_show_less">收起</string>
+    <string name="chat_not_delivered">未送达</string>
+    <string name="vm_multiline_rejected">服务器拒绝了该消息（%1$s）：%2$s</string>
+    <string name="network_edit_cap_also">同时请求 %1$s</string>
     <string name="network_edit_caps_hint">基本IRCv3功能默认启用。开启以查看高级选项。</string>
     <string name="network_edit_bouncer_caps">跳板机功能 (soju/pounce)</string>
 
     <!-- DCC / Transfers Screen -->
+    <string name="transfers_title">文件传输</string>
     <string name="transfers_enable_dcc">启用 DCC</string>
     <string name="transfers_dcc_send_mode">DCC 发送模式</string>
     <string name="transfers_send_file">发送文件</string>
@@ -267,6 +282,29 @@
     <string name="transfers_active">活跃传输</string>
     <string name="transfers_no_transfers">暂无传输。</string>
     <string name="transfers_share_file">分享文件</string>
+    <string name="transfers_share_open">分享 / 打开文件</string>
+    <string name="transfers_tab_active">进行中</string>
+    <string name="transfers_tab_offers">邀请</string>
+    <string name="transfers_tab_history">历史</string>
+    <string name="transfers_tab_send">发送</string>
+    <string name="transfers_tab_settings">设置</string>
+    <string name="transfers_no_active">没有正在进行的传输。</string>
+    <string name="transfers_no_completed">还没有已完成的项目。</string>
+    <string name="transfers_clear_completed">全部清除</string>
+    <string name="transfers_enable">启用</string>
+    <string name="transfers_to">发送给 %1$s</string>
+    <string name="transfers_send_file_section">发送文件</string>
+    <string name="transfers_dcc_chat_section">DCC 聊天</string>
+    <string name="transfers_dcc_disabled">DCC 当前已禁用。请开启它以发送/接收文件。</string>
+    <string name="transfers_dcc_auto_desc">自动：尝试被动 DCC，无响应时回退到主动模式。</string>
+    <string name="transfers_dcc_active_desc">主动：经典 DCC SEND（接收方连接到您）。</string>
+    <string name="transfers_dcc_passive_desc">被动：请求接收方开放端口，然后连接到他们。</string>
+    <string name="transfers_chat_offers_section">收到的聊天邀请</string>
+    <string name="transfers_offers_section">收到的邀请</string>
+    <string name="transfers_in_progress_section">传输中</string>
+    <string name="transfers_unknown_size">大小未知</string>
+    <string name="transfers_passive_port">被动（等待端口）</string>
+    <string name="transfers_error">错误: %1$s</string>
 
     <!-- Nick completion hints -->
     <string name="nick_hint_tap_to_mention">点击提及</string>
@@ -337,7 +375,7 @@
     <string name="network_sasl_mechanism_label">机制</string>
     <string name="network_sasl_username_label">用户名 (authcid)</string>
     <string name="network_sasl_password_label">密码</string>
-    <string name="network_sasl_recommended_for_bouncers">推荐用于 bouncer — 留空用户名字段以使用上方"常规"部分的 bouncer 用户名。</string>
+    <string name="network_sasl_recommended_for_bouncers">推荐用于 bouncer — 留空用户名字段以使用上方\"常规\"部分的 bouncer 用户名。</string>
     <string name="network_cert_format_label">证书格式</string>
     <string name="network_cert_format_pem">PEM (.pem)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
@@ -354,6 +392,7 @@
 
     <!-- Networks screen -->
     <string name="networks_selected">已选择</string>
+    <string name="networks_favourite">收藏</string>
     <string name="networks_add_favourite">添加到收藏</string>
     <string name="networks_remove_favourite">从收藏中移除</string>
     <string name="networks_drag_reorder">拖动以重新排序</string>
@@ -367,10 +406,18 @@
     <string name="networks_insecure_body2">要在不使用 TLS 的情况下连接到 %1$s，您必须为此网络明确允许未加密的连接。</string>
     <string name="networks_allow_connect">允许并连接</string>
     <string name="networks_reconnect">重新连接</string>
+    <string name="networks_open_details">打开网络详情</string>
+    <string name="networks_tag_auto_connect">自动连接</string>
+    <string name="networks_tag_no_tls">无 TLS</string>
+    <string name="networks_order">排序</string>
+    <string name="networks_move_up">上移</string>
+    <string name="networks_move_down">下移</string>
+    <string name="networks_empty_detail">选择一个网络以查看详情</string>
 
     <!-- Channel / List screen -->
     <string name="list_channels_title">频道</string>
     <string name="list_search_hint">搜索频道 / 话题</string>
+    <string name="list_title">频道列表</string>
 
     <!-- Chat screen — channel tools -->
     <string name="chat_fetch_modes">获取当前模式</string>
@@ -434,26 +481,15 @@
     <string name="ircop_uptime">运行时间</string>
 
     <!-- Ignore list screen -->
+    <string name="ignore_title">忽略列表</string>
     <string name="ignore_nick_label">要忽略的 Nick</string>
     <string name="ignore_no_nicks">没有被忽略的 Nick。</string>
     <string name="ignore_no_networks">尚未配置网络。</string>
     <string name="ignore_add">添加</string>
     <string name="ignore_remove">删除</string>
 
-    <!-- Settings screen — extras -->
-    <string name="settings_export_backup">导出备份</string>
-    <string name="settings_restore_backup">恢复备份</string>
-    <string name="settings_restore_confirm_title">恢复备份？</string>
-    <string name="settings_restore_confirm_ok">恢复</string>
-    <string name="settings_ok">确定</string>
-    <string name="settings_system_default">系统默认</string>
-    <string name="settings_matrix_theme">黑客帝国</string>
-    <string name="settings_custom_font">自定义字体文件…</string>
-
-    <!-- Transfers screen — extras -->
-    <string name="transfers_share_open">分享 / 打开文件</string>
-
     <!-- About screen -->
+    <string name="about_title">关于</string>
     <string name="about_open_website">打开网站</string>
 
     <!-- DCC mode options -->
@@ -529,6 +565,15 @@
     <string name="setting_ui_font">界面字体</string>
     <string name="setting_chat_font">聊天字体</string>
     <string name="setting_font_size_label">字体大小</string>
+    <string name="setting_line_spacing_label">聊天行间距</string>
+    <string name="setting_line_spacing_desc">一条消息与下一条之间的间距。文字大小不变。</string>
+    <string name="setting_font_line_height_label">字体行高</string>
+    <string name="setting_font_line_height_desc">单条消息内换行文字之间的间距。文字大小不变。</string>
+    <string name="setting_line_spacing_tight">紧凑</string>
+    <string name="setting_line_spacing_normal">正常</string>
+    <string name="setting_line_spacing_relaxed">宽松</string>
+    <string name="setting_nicklist_font_label">昵称列表文字大小</string>
+    <string name="setting_nicklist_font_desc">在宽度之外单独调整昵称列表。加宽面板仍会放大文字。</string>
     <string name="setting_log_internal">内部存储</string>
     <string name="setting_log_custom">已选择自定义文件夹</string>
     <string name="setting_dcc_downloads_default">下载 (默认)</string>
@@ -550,19 +595,14 @@
     <string name="setting_previews_wifi_only">仅限 Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">仅在连接 Wi-Fi 时加载预览，以避免消耗移动数据流量。</string>
     <string name="theme_system_default">系统默认</string>
-    <!-- TransfersScreen -->
-    <string name="transfers_send_file_section">发送文件</string>
-    <string name="transfers_dcc_chat_section">DCC 聊天</string>
-    <string name="transfers_dcc_disabled">DCC 当前已禁用。请开启它以发送/接收文件。</string>
-    <string name="transfers_dcc_auto_desc">自动：尝试被动 DCC，无响应时回退到主动模式。</string>
-    <string name="transfers_dcc_active_desc">主动：经典 DCC SEND（接收方连接到您）。</string>
-    <string name="transfers_dcc_passive_desc">被动：请求接收方开放端口，然后连接到他们。</string>
-    <string name="transfers_chat_offers_section">收到的聊天邀请</string>
-    <string name="transfers_offers_section">收到的邀请</string>
-    <string name="transfers_in_progress_section">传输中</string>
-    <string name="transfers_unknown_size">大小未知</string>
-    <string name="transfers_passive_port">被动（等待端口）</string>
-    <string name="transfers_error">错误: %1$s</string>
+    <string name="settings_export_backup">导出备份</string>
+    <string name="settings_restore_backup">恢复备份</string>
+    <string name="settings_restore_confirm_title">恢复备份？</string>
+    <string name="settings_restore_confirm_ok">恢复</string>
+    <string name="settings_ok">确定</string>
+    <string name="settings_system_default">系统默认</string>
+    <string name="settings_matrix_theme">黑客帝国</string>
+    <string name="settings_custom_font">自定义字体文件…</string>
     <!-- ChatScreen: channel mode panel -->
     <string name="chat_topic_panel">主题</string>
     <string name="chat_modes_panel">频道模式</string>
@@ -657,6 +697,29 @@
     <string name="about_support_desc">访问网站获取指南、常见问题解答和报告问题。</string>
     <string name="about_credits_title">贡献者</string>
     <string name="about_credits_contribute">想要参与贡献吗？</string>
+    <string name="about_doc_getting_started">快速上手</string>
+    <string name="about_doc_getting_started_desc">三步完成连接，然后设置账户和 bouncer。</string>
+    <string name="about_doc_features">功能</string>
+    <string name="about_doc_features_desc">HexDroid 能做什么，用起来是什么感觉。</string>
+    <string name="about_doc_reference">参考</string>
+    <string name="about_doc_reference_desc">全部 IRCv3 能力和全部设置，完整收录。</string>
+    <string name="about_doc_commands">命令</string>
+    <string name="about_doc_commands_desc">所有斜杠命令的语法、示例和注意事项。</string>
+    <string name="about_doc_scripting">脚本</string>
+    <string name="about_doc_scripting_desc">编写并加载脚本来扩展客户端。</string>
+    <string name="about_doc_encryption">加密</string>
+    <string name="about_doc_encryption_desc">端到端加密的频道和私聊如何工作。</string>
+    <string name="about_doc_troubleshooting">疑难解答</string>
+    <string name="about_doc_troubleshooting_desc">连接、TLS、通知、DCC 和电池问题的解决办法。</string>
+    <string name="about_doc_changelog">更新日志</string>
+    <string name="about_doc_changelog_desc">版本说明、新功能、错误修复和安全更新。</string>
+    <string name="about_help_title">需要帮助？</string>
+    <string name="about_join_support_channel">加入支持频道</string>
+    <string name="about_report_issue">报告问题</string>
+    <string name="about_report_issue_desc">在 GitHub 上提交错误和功能请求。</string>
+    <string name="about_privacy_policy">隐私政策</string>
+    <string name="about_privacy_policy_desc">应用会保存什么，以及绝不会发送什么。</string>
+    <string name="about_footer_stack">Kotlin \u00b7 Jetpack Compose \u00b7 Material 3</string>
 
     <!-- SDCC settings -->
     <string name="setting_dcc_secure">使用 SDCC（TLS 加密）</string>
@@ -817,6 +880,11 @@
     <string name="session_cap_nak">CAP NAK: %1$s</string>
     <string name="session_sasl_success">SASL 认证成功</string>
     <string name="session_sasl_plain_no_tls">SASL PLAIN 已中止：不会在未加密的连接上发送密码。请启用 TLS 或改用 SCRAM-SHA-256。</string>
+    <string name="session_sasl_mech_upgraded">SASL：服务器不提供 PLAIN，改用 SCRAM-SHA-256（提供：%1$s）。</string>
+    <string name="session_sasl_mech_downgraded">SASL：服务器不提供 SCRAM-SHA-256，回退到 PLAIN（提供：%1$s）。你的密码会在 TLS 连接内部发送给服务器。</string>
+    <string name="session_sasl_mech_no_downgrade_cleartext">SASL 已中止：服务器仅提供 %1$s，回退到 PLAIN 会通过未加密的连接发送你的密码。请为该网络启用 TLS。</string>
+    <string name="session_sasl_mech_unavailable">SASL 已中止：服务器不支持 %1$s。它提供：%2$s。请在网络设置中更改 SASL 机制。</string>
+    <string name="session_sasl_prep_failed">SASL 已中止：用户名或密码含有凭据中不允许的字符（%1$s）。请在网络设置中修改。</string>
     <string name="session_sasl_plain_no_pw">SASL PLAIN 已中止：此配置未设置密码。请打开网络设置并重新输入 SASL 密码（出于安全考虑，备份中不包含密码）。</string>
     <string name="session_sasl_plain_aborted">SASL PLAIN：服务器中止了认证</string>
     <string name="session_sasl_plain_unexpected">SASL PLAIN：服务器发来意外的质询 &quot;%1$s&quot;，正在中止</string>
@@ -1053,10 +1121,7 @@
     <string name="settings_scripts">脚本</string>
     <string name="settings_scripts_desc">加载和管理 .hex 脚本（游戏、工具、自定义命令）。</string>
     <string name="net_this_network">此网络</string>
-    <!-- Connection / disconnect reasons emitted by IrcCore.
-         These are display text only. The machine-readable cause travels separately as
-         IrcEvent.Disconnected.code (DisconnectCode), so translating any of these can no
-         longer affect flap detection, the TLS halt or the host-unreachable halt. -->
+    <!-- Connection / disconnect reasons emitted by IrcCore. -->
     <string name="core_disconnected">已断开</string>
     <string name="core_disconnect_server_error">服务器错误：%1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS 证书指纹已更改</string>
@@ -1394,11 +1459,7 @@
     <string name="chat_font_preview">天地玄黄 宇宙洪荒 日月盈昃 辰宿列张</string>
     <string name="chat_bot_prefix">"[机器人] "</string>
 
-    <!-- Slash-command help shown in the command autocomplete popup.
-         Command names and usage syntax stay English (they are typed); only these
-         descriptions are translated. Keys are prefixed by service where the same
-         verb appears under NickServ, ChanServ, MemoServ, HostServ, BotServ,
-         AuthServ, ZNC *status and soju BouncerServ. -->
+    <!-- Slash-command help shown in the command autocomplete popup. -->
     <string name="cmd_script_command">脚本命令</string>
     <string name="cmd_me">发送 CTCP ACTION（/me 挥手）</string>
     <string name="cmd_msg">发送私聊消息</string>
@@ -1646,4 +1707,15 @@
     <string name="dcc_trusted_tip">提示：你也可以在昵称列表中，或在聊天中点按对方的名字来信任对方。</string>
     <string name="dcc_trusted_dcc_off">DCC 目前已关闭，在你启用之前这里的设置不会生效。</string>
     <string name="dcc_trusted_entry_none">尚未信任任何人</string>
+
+    <!-- Chat formatting -->
+    <string name="setting_timestamp_style">时间戳括号</string>
+    <string name="setting_timestamp_colour">时间戳颜色</string>
+    <string name="setting_timestamp_colour_default">与消息相同</string>
+    <string name="setting_nick_style">昵称括号</string>
+    <string name="setting_chat_format_sample">你好世界</string>
+    <string name="setting_boot_wifi_only">等待 Wi-Fi</string>
+    <string name="setting_boot_wifi_only_desc">启动时先等待 Wi-Fi 就绪再连接，而不是使用移动数据。</string>
+    <string name="vm_status_waiting_wifi">正在等待 Wi-Fi…</string>
+    <string name="vm_waiting_for_wifi">连接前正在等待 Wi-Fi。</string>
 </resources>

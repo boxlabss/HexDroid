@@ -15,6 +15,10 @@
         <item quantity="one">%1$d felhasználó</item>
         <item quantity="other">%1$d felhasználó</item>
     </plurals>
+    <plurals name="chat_show_more">
+        <item quantity="one">%1$d további sor megjelenítése</item>
+        <item quantity="other">%1$d további sor megjelenítése</item>
+    </plurals>
     <plurals name="chat_unread_count">
         <item quantity="one">%1$d olvasatlan</item>
         <item quantity="other">%1$d olvasatlan</item>
