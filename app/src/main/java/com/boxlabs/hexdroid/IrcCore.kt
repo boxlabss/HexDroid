@@ -2484,7 +2484,12 @@ class IrcClient(val config: IrcConfig) {
 						val isPrivate = !isChannel
 
 						// If this PRIVMSG comes from a server prefix (no '!'), route it to *server*.
-						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
+						// Some networks replay our OWN historical PMs (via CHATHISTORY) with a bare
+						// nick prefix and no !user@host - identical in shape to a real server prefix.
+						// Check nickEquals() first so that case routes to the PM buffer instead of
+						// being misclassified as a server message (our own nick is never a server name).
+						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@')
+							&& !nickEquals(from, currentNick))
 
 						// For private messages, use the *other party* as the buffer name.
 						val buf = if (isPrivate) {
@@ -2728,7 +2733,11 @@ class IrcClient(val config: IrcConfig) {
 						}
 
 						val isChannel = isChannelName(target)
-						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@'))
+						// See the PRIVMSG handler above: our own historical NOTICEs can replay with
+						// a bare nick prefix (no !user@host), which would otherwise be misclassified
+						// as a server-originated NOTICE.
+						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@')
+							&& !nickEquals(from, currentNick))
 
 						// Bouncer pseudo-user NOTICE routing. ZNC replies to /msg *status
 						// commands (and to /znc slash-command wrapper) via NOTICE — without
