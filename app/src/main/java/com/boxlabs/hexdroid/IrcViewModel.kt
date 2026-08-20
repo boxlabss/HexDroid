@@ -2809,7 +2809,7 @@ class IrcViewModel(
             val rt = runtimes[networkId] ?: return@launch
             val client = rt.client
             val myNick = _state.value.connections[networkId]?.myNick ?: _state.value.myNick
-            val key = bufKey(networkId, buffer)
+            val key = resolveBufferKey(networkId, buffer)
 
             // draft/reply is a client-only tag ("+draft/reply")
             // It's permitted whenever message-tags is negotiated. Some servers also
