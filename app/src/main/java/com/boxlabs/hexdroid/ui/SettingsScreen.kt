@@ -48,7 +48,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -79,6 +83,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -87,7 +93,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -474,8 +482,23 @@ fun SettingsScreen(
     var picked by rememberSaveable { mutableStateOf<SettingsCategory?>(null) }
     val current = if (railLayout) (picked ?: SettingsCategory.APPEARANCE) else picked
 
-    // On phones, back leaves the open category before it leaves the screen.
-    BackHandler(enabled = !railLayout && picked != null) { picked = null }
+    // Search spans every category, so while it is open the field and its results
+    // replace both panes. Picking a result opens the category holding that setting.
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val searchFocus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val searchResults = rememberSettingsSearchResults(searchQuery)
+
+    fun closeSearch() {
+        searchOpen = false
+        searchQuery = ""
+    }
+
+    // Back closes search first, then the open category, then the screen.
+    BackHandler(enabled = searchOpen || (!railLayout && picked != null)) {
+        if (searchOpen) closeSearch() else picked = null
+    }
 
     Scaffold(
         topBar = {
@@ -488,11 +511,30 @@ fun SettingsScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = { if (!railLayout && picked != null) picked = null else onBack() },
+                        onClick = {
+                            when {
+                                searchOpen -> closeSearch()
+                                !railLayout && picked != null -> picked = null
+                                else -> onBack()
+                            }
+                        },
                         modifier = Modifier.focusHighlight()
                     ) { Text("←") }
                 },
-                actions = { IconButton(onClick = onOpenNetworks, modifier = Modifier.focusHighlight()) { Text("🌐") } }
+                actions = {
+                    IconButton(
+                        onClick = { if (searchOpen) closeSearch() else searchOpen = true },
+                        modifier = Modifier.focusHighlight()
+                    ) {
+                        Icon(
+                            if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
+                            contentDescription = stringResource(
+                                if (searchOpen) R.string.close else R.string.buffer_toolbar_search_action
+                            )
+                        )
+                    }
+                    IconButton(onClick = onOpenNetworks, modifier = Modifier.focusHighlight()) { Text("🌐") }
+                }
             )
         }
     ) { padding ->
@@ -503,7 +545,10 @@ fun SettingsScreen(
             if (!tourActive) return@LaunchedEffect
             when (tourTarget) {
                 TourTarget.SETTINGS_APPEARANCE_SECTION,
-                TourTarget.SETTINGS_RUN_TOUR -> if (!railLayout) picked = null
+                TourTarget.SETTINGS_RUN_TOUR -> {
+                    closeSearch()
+                    if (!railLayout) picked = null
+                }
                 else -> Unit
             }
         }
@@ -514,10 +559,64 @@ fun SettingsScreen(
             runCatching { listState.scrollToItem(0) }
         }
 
-        Row(
+        Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+        ) {
+
+        if (searchOpen) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.focusHighlight()
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.clear)
+                            )
+                        }
+                    }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .focusRequester(searchFocus)
+                    .focusHighlight(RoundedCornerShape(4.dp))
+            )
+
+            // Opening search puts the caret in the field, so the keyboard is up
+            // and typing starts straight away.
+            LaunchedEffect(Unit) {
+                runCatching { searchFocus.requestFocus() }
+            }
+
+            HorizontalDivider()
+        }
+
+        if (searchOpen && searchQuery.isNotBlank()) {
+            SettingsSearchResults(
+                results = searchResults,
+                onOpen = { entry ->
+                    picked = entry.category
+                    closeSearch()
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        } else {
+
+        Row(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
         ) {
             if (railLayout || current == null) {
                 SettingsNavPanel(
@@ -1492,6 +1591,9 @@ fun SettingsScreen(
                 }
             }
             }
+        }
+
+        }
         }
     }
     // Restore confirmation dialog
