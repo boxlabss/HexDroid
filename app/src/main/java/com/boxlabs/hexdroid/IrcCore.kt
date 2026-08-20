@@ -4702,10 +4702,17 @@ class IrcClient(val config: IrcConfig) {
             // Registration lines are exempt: servers are lenient before 001 and pacing them would
             // slow every connect. A `floodClock` tracks the virtual time by which the queued penalty
             // is "paid"; when it runs more than floodBurstMs ahead of now we wait for it to catch up.
+            //
+            // Bouncer connections are exempt too, for the same reason: a personal soju/ZNC bouncer
+            // isn't a public ircd guarding against flooders, and its own connection to us doesn't
+            // need protecting from OUR traffic. Without this, syncing dozens of channels (each
+            // needing its own JOIN + CHATHISTORY LATEST + WHO) gets throttled at floodPenaltyMs per
+            // line as if we were a stranger flooding a public network - turning a sub-second sync
+            // into minutes for an account with many channels.
             var floodClock = System.currentTimeMillis()
             try {
                 for (unit in outbound) {
-                    if (registered) {
+                    if (registered && !config.isBouncer) {
                         val now = System.currentTimeMillis()
                         if (floodClock < now) floodClock = now
                         if (unit.paced) {
