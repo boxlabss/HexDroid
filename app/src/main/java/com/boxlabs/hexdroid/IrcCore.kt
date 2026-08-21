@@ -166,7 +166,15 @@ data class CapPrefs(
      * soju.im/FILEHOST uploads. the endpoint arrives via ISUPPORT, but grouped
      * with the per-network capability toggles so the attach button can be disabled per network.
      */
-    val filehostUploads: Boolean = true
+    val filehostUploads: Boolean = true,
+
+    /**
+     * draft/webpush (soju.im/webpush): lets the server deliver messages of interest as
+     * Web Push notifications while no TCP connection is open. The push endpoint comes
+     * from a UnifiedPush distributor on the device and is handed to the server with
+     * WEBPUSH REGISTER.
+     */
+    val webPush: Boolean = true
 )
 
 data class TlsClientCert(
@@ -1060,6 +1068,50 @@ data class Notice(
      *               so the UI can hint at which credential to fix.
      */
     data class AuthFailed(val reason: String, val source: String) : IrcEvent()
+
+    /**
+     * A CHATHISTORY reply batch opened for [target].
+     *
+     * The messages inside arrive as ordinary ChatMessage/Notice events with
+     * isHistory = true. The ViewModel uses the open/close pair to decide whether a
+     * history message belongs to an explicit backfill request (and so must be spliced
+     * in above the existing scrollback) rather than appended as catch-up.
+     */
+    data class HistoryBatchStart(val target: String) : IrcEvent()
+
+    /** The CHATHISTORY reply batch for [target] closed. See [HistoryBatchStart]. */
+    data class HistoryBatchEnd(val target: String) : IrcEvent()
+
+    /**
+     * One entry of a CHATHISTORY TARGETS reply: a buffer the server holds history for.
+     *
+     * @param target     Channel or nick.
+     * @param timestamp  ISO 8601 time of the most recent stored message for that target.
+     */
+    data class HistoryTarget(val target: String, val timestamp: String) : IrcEvent()
+
+    /**
+     * An outgoing `/msg` or `/notice`, to be shown in the buffer the user typed it in.
+     */
+    data class OutgoingEcho(val originBuffer: String, val target: String, val text: String) : IrcEvent()
+
+    /**
+     * A CTCP request and the automatic reply we sent, as a pair.
+     *
+     * Emitted together so the UI can show both sides in one place.
+     * [reply] is null for a request we recognised but did not answer, so the request is
+     * still visible without implying a reply went out.
+     */
+    data class CtcpExchange(val fromNick: String, val request: String, val reply: String?) : IrcEvent()
+
+    /**
+     * The server confirmed a WEBPUSH REGISTER for [endpoint]. Registration is only
+     * durable once this arrives, so the ViewModel records the endpoint here.
+     */
+    data class WebPushRegistered(val endpoint: String) : IrcEvent()
+
+    /** The server confirmed a WEBPUSH UNREGISTER for [endpoint]. */
+    data class WebPushUnregistered(val endpoint: String) : IrcEvent()
 }
 
 /**
@@ -1684,6 +1736,14 @@ class IrcClient(val config: IrcConfig) {
     @Volatile private var chatHistoryLimit: Int = 0
 
     /**
+     * VAPID ISUPPORT token (draft/webpush): the server's application-server public key,
+     * URL-safe base64 of an uncompressed P-256 point. Handed to the UnifiedPush
+     * distributor so it can reject push messages that are not signed by this server.
+     * Null when the server offers no VAPID key.
+     */
+    @Volatile private var vapidPublicKey: String? = null
+
+    /**
      * MSGREFTYPES ISUPPORT token: the message-reference types the server accepts in
      * CHATHISTORY selectors (e.g. "timestamp", "msgid"). Empty = token absent, in which
      * case both are assumed per the spec default.
@@ -1981,6 +2041,56 @@ class IrcClient(val config: IrcConfig) {
      */
     private val namesRequested = mutableSetOf<String>()
 
+    /**
+     * Outgoing lines we have already displayed locally, awaiting their echo-message copy.
+     *
+     */
+    private data class PendingEcho(
+        val notice: Boolean,
+        val target: String,
+        val text: String,
+        val expiry: Long,
+    )
+
+    private val suppressedEchoes = ArrayDeque<PendingEcho>()
+
+    /** Remember an outgoing line so [consumeOutgoingEcho] can recognise its echo. */
+    private fun registerOutgoingEcho(notice: Boolean, target: String, text: String) {
+        val now = System.currentTimeMillis()
+        while (suppressedEchoes.isNotEmpty() && suppressedEchoes.first().expiry < now) {
+            suppressedEchoes.removeFirst()
+        }
+        if (suppressedEchoes.size >= 32) suppressedEchoes.removeFirst()
+        suppressedEchoes.addLast(PendingEcho(notice, casefold(target), text, now + 30_000L))
+    }
+
+    /**
+     * True when this self-echo is the server's copy of a line we already displayed.
+     * Consumes the entry, so sending the same text twice suppresses only the first echo.
+     */
+    private fun consumeOutgoingEcho(notice: Boolean, target: String, text: String): Boolean {
+        val now = System.currentTimeMillis()
+        val fold = casefold(target)
+        val idx = suppressedEchoes.indexOfFirst {
+            it.notice == notice && it.target == fold && it.text == text && it.expiry >= now
+        }
+        if (idx < 0) return false
+        suppressedEchoes.removeAt(idx)
+        return true
+    }
+
+    /**
+     * Answer a CTCP request and record the reply for echo suppression.
+     *
+     * [payload] is the CTCP body without the \u0001 framing, which is added here so every
+     * reply site frames identically and the recorded text matches what comes back.
+     */
+    private suspend fun sendCtcpReply(target: String, payload: String) {
+        val framed = "\u0001$payload\u0001"
+        sendRaw("NOTICE $target :$framed")
+        registerOutgoingEcho(notice = true, target = target, text = framed)
+    }
+
     /** Per-buffer "history expected until" timestamp, anything older than this is treated as
      *  history rather than live, so we don't re-notify for already-seen messages.
      *  Keyed by [casefold] - see [historyRequested] for why lowercase() is not enough. */
@@ -2003,6 +2113,16 @@ class IrcClient(val config: IrcConfig) {
     /** Channel of the innermost open playback batch this message belongs to, if any. */
     private fun playbackChannelFor(tags: Map<String, String?>): String? =
         tags["batch"]?.let { playbackBatchTargets[it] }
+
+    /**
+     * Target of each open CHATHISTORY batch, by batch id.
+     *
+     * Kept apart from [playbackBatchTargets], which deliberately holds channels only
+     * because it exists to give a replayed QUIT a channel to attribute itself to. A
+     * CHATHISTORY batch target is just as often a nick (a PM backfill), and the
+     * ViewModel needs it to know which buffer a batch is filling.
+     */
+    private val chathistoryBatchTargets = mutableMapOf<String, String>()
 
     /** Open netsplit/netjoin batch IDs → "netsplit" / "netjoin". */
     private val openNetsplitBatches = mutableMapOf<String, String>()
@@ -2490,6 +2610,13 @@ class IrcClient(val config: IrcConfig) {
 						val isChannel = isChannelName(target)
 						val isPrivate = !isChannel
 
+						// Echo of a /msg we already printed into the origin buffer.
+						if (isPrivate && nickEquals(from, currentNick) && !playbackHistory &&
+							consumeOutgoingEcho(notice = false, target = target, text = textRaw)
+						) {
+							return
+						}
+
 						// If this PRIVMSG comes from a server prefix (no '!'), route it to *server*.
 						// Some networks replay our OWN historical PMs (via CHATHISTORY) with a bare
 						// nick prefix and no !user@host - identical in shape to a real server prefix.
@@ -2541,8 +2668,9 @@ class IrcClient(val config: IrcConfig) {
 										// Build the reply at call time so it always reflects the
 										// installed app version - never stale from a saved config.
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.org\u0001")
-										send(IrcEvent.Status(tr(R.string.core_ctcp_version_sent, safeSender)))
+										val reply = "VERSION HexDroid v${BuildConfig.VERSION_NAME} - https://hexdroid.org"
+										sendCtcpReply(safeSender, reply)
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = reply))
 										return
 									}
 									"PING" -> {
@@ -2550,34 +2678,39 @@ class IrcClient(val config: IrcConfig) {
 										// command injection via a crafted CTCP PING argument.
 										val safeArgs = ctcpArgs.replace(Regex("[\r\n\u0000\u0001]"), "").take(200)
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001PING $safeArgs\u0001")
-										send(IrcEvent.Status(tr(R.string.core_ctcp_ping_reply_sent, safeSender)))
+										val reply = "PING $safeArgs"
+										sendCtcpReply(safeSender, reply)
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = reply))
 										return
 									}
 									"TIME" -> {
 										val timeStr = java.text.SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", java.util.Locale.US).format(java.util.Date())
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001TIME $timeStr\u0001")
-										send(IrcEvent.Status(tr(R.string.core_ctcp_time_sent, safeSender)))
+										val reply = "TIME $timeStr"
+										sendCtcpReply(safeSender, reply)
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = reply))
 										return
 									}
 									"FINGER", "USERINFO" -> {
 										val safeRealname = config.realname.take(100)
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001$ctcpCmd $safeRealname\u0001")
-										send(IrcEvent.Status(tr(R.string.core_ctcp_reply_sent, ctcpCmd, safeSender)))
+										val reply = "$ctcpCmd $safeRealname"
+										sendCtcpReply(safeSender, reply)
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = reply))
 										return
 									}
 									"CLIENTINFO" -> {
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001CLIENTINFO ACTION PING VERSION TIME FINGER USERINFO CLIENTINFO SOURCE DCC\u0001")
-										send(IrcEvent.Status(tr(R.string.core_ctcp_clientinfo_reply_sent, safeSender)))
+										val reply = "CLIENTINFO ACTION PING VERSION TIME FINGER USERINFO CLIENTINFO SOURCE DCC"
+										sendCtcpReply(safeSender, reply)
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = reply))
 										return
 									}
 									"SOURCE" -> {
 										ctcpLastReplyMs[senderKey] = now
-										sendRaw("NOTICE $safeSender :\u0001SOURCE https://hexdroid.org\u0001")
-										send(IrcEvent.Status(tr(R.string.core_ctcp_source_sent, safeSender)))
+										val reply = "SOURCE https://hexdroid.org"
+										sendCtcpReply(safeSender, reply)
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = reply))
 										return
 									}
 									"ACTION" -> {
@@ -2588,7 +2721,9 @@ class IrcClient(val config: IrcConfig) {
 									}
 									else -> {
 										// Unknown CTCP — log but don't reply (no reply = no flood risk).
-										send(IrcEvent.Status(tr(R.string.core_ctcp_unknown, ctcpCmd, safeSender)))
+										// Shown with a null reply so the request is still visible without
+										// implying we answered it.
+										send(IrcEvent.CtcpExchange(fromNick = safeSender, request = ctcpContent, reply = null))
 										return
 									}
 								}
@@ -2721,6 +2856,13 @@ class IrcClient(val config: IrcConfig) {
 							}
 						}
 
+						// Echo of a notice we sent and already displayed
+						if (!isChannelName(target) && nickEquals(from, currentNick) && !playbackHistory &&
+							consumeOutgoingEcho(notice = true, target = target, text = text)
+						) {
+							return
+						}
+
 						// Check for CTCP reply (wrapped in \x01)
 						// Only process if it's from someone else, not our own echoed reply
 						if (text.startsWith("\u0001") && text.endsWith("\u0001") && !nickEquals(from, currentNick)) {
@@ -2740,9 +2882,6 @@ class IrcClient(val config: IrcConfig) {
 						}
 
 						val isChannel = isChannelName(target)
-						// See the PRIVMSG handler above: our own historical NOTICEs can replay with
-						// a bare nick prefix (no !user@host), which would otherwise be misclassified
-						// as a server-originated NOTICE.
 						val isServerPrefix = (msg.prefix != null && !msg.prefix.contains('!') && !msg.prefix.contains('@')
 							&& !nickEquals(from, currentNick))
 
@@ -2872,13 +3011,8 @@ class IrcClient(val config: IrcConfig) {
 								joinedChannelCases[fold] = chan
 							}
 
-							// soju.im/no-implicit-names / draft/no-implicit-names: the server won't
-							// send an automatic 353/366 NAMES list on JOIN when this cap is negotiated
-							// (it's requested by default for bouncer connections, see IrcSession's CAP
-							// REQ list). Without an explicit request the nicklist stays empty except
-							// for our own self-JOIN. Skip when chanHist is true for the same reason as
-							// the CHATHISTORY/playback requests below: a JOIN arriving as part of
-							// buffer playback is our prior session, not the current one.
+							// soju.im/no-implicit-names and draft/no-implicit-names
+							// the server won't send an automatic 353/366 NAMES list on JOIN when this cap is negotiated
 							if (nickEquals(nick, currentNick)
 								&& !chanHist
 								&& (hasCap("soju.im/no-implicit-names") || hasCap("draft/no-implicit-names"))
@@ -3305,6 +3439,31 @@ class IrcClient(val config: IrcConfig) {
 						))
 					}
 
+					// Server confirmation of a subscription change.
+					// Format: WEBPUSH REGISTER <endpoint> <keys> | WEBPUSH UNREGISTER <endpoint>
+					"WEBPUSH" -> {
+						val ap = msg.allParams
+						val sub = ap.getOrNull(0)?.uppercase(Locale.ROOT) ?: return
+						val wpEndpoint = ap.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return
+						when (sub) {
+							"REGISTER" -> send(IrcEvent.WebPushRegistered(wpEndpoint))
+							"UNREGISTER" -> send(IrcEvent.WebPushUnregistered(wpEndpoint))
+						}
+					}
+
+					// CHATHISTORY TARGETS reply: one line per buffer the server stores
+					// history for, delivered inside a draft/chathistory-targets batch.
+					// Format: CHATHISTORY TARGETS <target> <timestamp>
+					"CHATHISTORY" -> {
+						val ap = msg.allParams
+						if (!ap.getOrNull(0).equals("TARGETS", ignoreCase = true)) return
+						val histTarget = ap.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return
+						val histTs = ap.getOrNull(2)
+							?.removePrefix("timestamp=")
+							?.takeIf { it.isNotBlank() } ?: return
+						send(IrcEvent.HistoryTarget(target = histTarget, timestamp = histTs))
+					}
+
 					"MARKREAD", "READ" -> {
 						val target = msg.params.getOrNull(0) ?: return
 						val tsParam = (msg.params.drop(1) + listOfNotNull(msg.trailing))
@@ -3323,10 +3482,7 @@ class IrcClient(val config: IrcConfig) {
 								// BOUNCER NETWORK <id> <attrs> | BOUNCER NETWORK <id> *
 								// Per the soju.im/bouncer-networks spec, <attrs> is a single field of
 								// semicolon-separated key=value pairs (message-tag escaping rules apply
-								// to each value) - NOT space-separated tokens. A raw ';' is always a real
-								// delimiter here (a literal semicolon inside a value is escaped as `\:`,
-								// never as `\;`), so splitting on it needs no escape-awareness.
-								// Parsing extracted to top-level [parseBouncerNetworkAttrs] for unit testability.
+								// to each value) NOT space-separated tokens.
 								val networkId = msg.params.getOrNull(1) ?: return
 								val attrTokens = (msg.params.drop(2) + listOfNotNull(msg.trailing))
 									.flatMap { it.split(';') }
@@ -3566,24 +3722,32 @@ class IrcClient(val config: IrcConfig) {
     }
 
     /**
+     * True when this connection negotiated chathistory and can serve backfill requests.
+     * Public so the UI can show or hide "load older messages"
+     */
+    fun supportsChatHistory(): Boolean = hasChathistoryCap()
+
+    /**
      * Request older history for [target] using IRCv3 CHATHISTORY BEFORE.
      *
      * Servers that support `draft/chathistory` will send back at most [limit] messages
-     * that occurred strictly before [beforeTimestamp] (ISO 8601, e.g. "2024-01-15T10:00:00.000Z").
-     * Pass null for [beforeTimestamp] to use the oldest message already displayed (i.e. server
-     * decides the anchor point, which most implementations treat as the current oldest).
+     * that occurred strictly before the anchor, delivered inside a chathistory BATCH.
      *
-     * This is used to implement "pull up to load more history" in the chat scroll view.
+     * The anchor is [beforeTimestamp] (ISO 8601, e.g. "2024-01-15T10:00:00.000Z") when the
+     * server accepts timestamp selectors, otherwise [beforeMsgId]
      */
     suspend fun requestChatHistoryBefore(
         target: String,
         beforeTimestamp: String?,
+        beforeMsgId: String? = null,
         limit: Int = 50
     ) {
         if (!hasChathistoryCap()) return
-        // Fall back to the server-decided oldest anchor (*) when timestamp selectors are
-        // not among MSGREFTYPES, so "load more" still works on a msgid-only server.
-        val anchor = if (beforeTimestamp != null && historyTimestampOk()) "timestamp=$beforeTimestamp" else "*"
+        val anchor = when {
+            beforeTimestamp != null && historyTimestampOk() -> "timestamp=$beforeTimestamp"
+            beforeMsgId != null && historyMsgidOk() -> "msgid=$beforeMsgId"
+            else -> return
+        }
         sendRaw("${labelTag()}CHATHISTORY BEFORE $target $anchor ${clampHistoryLimit(limit)}")
     }
 
@@ -3603,6 +3767,54 @@ class IrcClient(val config: IrcConfig) {
         // AFTER needs a concrete anchor; without timestamp support we can't express it.
         if (!historyTimestampOk()) return
         sendRaw("${labelTag()}CHATHISTORY AFTER $target timestamp=$afterTimestamp ${clampHistoryLimit(limit)}")
+    }
+
+    /** True if either the draft or soju's vendored webpush cap is enabled. */
+    fun hasWebPushCap(): Boolean = hasCap("draft/webpush") || hasCap("soju.im/webpush")
+
+    /**
+     * The server's VAPID application-server public key, or null when it advertises none.
+     *
+     * Handed to the UnifiedPush distributor at subscribe time so the push service can
+     * reject notifications not signed by this server. The value is fixed for the lifetime
+     * of the connection by spec, which is what lets a registration sent now be matched to
+     * the key we read at 005.
+     */
+    fun webPushVapidKey(): String? = vapidPublicKey
+
+    /**
+     * Subscribe this server to a Web Push endpoint (WEBPUSH REGISTER).
+     *
+     * [auth] and [p256dh] are the subscription's keys, URL-safe base64 without padding
+     * Registering an endpoint the server already holds replaces the stored keys rather
+     * than adding a second subscription.
+     *
+     * The server confirms with its own WEBPUSH REGISTER line, surfaced as
+     * [IrcEvent.WebPushRegistered]; failures arrive as FAIL WEBPUSH.
+     */
+    suspend fun webPushRegister(endpoint: String, auth: String, p256dh: String) {
+        if (!hasWebPushCap()) return
+        if (endpoint.isBlank() || auth.isBlank() || p256dh.isBlank()) return
+        sendRaw("${labelTag()}WEBPUSH REGISTER $endpoint auth=$auth;p256dh=$p256dh")
+    }
+
+    /**
+     * Drop a Web Push subscription (WEBPUSH UNREGISTER)
+     */
+    suspend fun webPushUnregister(endpoint: String) {
+        if (!hasWebPushCap()) return
+        if (endpoint.isBlank()) return
+        sendRaw("${labelTag()}WEBPUSH UNREGISTER $endpoint")
+    }
+
+    /**
+     * Request the most recent [limit] messages for [target] (CHATHISTORY LATEST *).
+     */
+    suspend fun requestChatHistoryLatest(target: String, limit: Int = 50) {
+        if (!hasChathistoryCap()) return
+        val lim = clampHistoryLimit(limit)
+        if (lim <= 0) return
+        sendRaw("${labelTag()}CHATHISTORY LATEST $target * $lim")
     }
 
     /**
@@ -3879,9 +4091,9 @@ class IrcClient(val config: IrcConfig) {
      * `draft/chathistory-targets` BATCH of `CHATHISTORY TARGETS <name> <timestamp>`
      * messages (not numerics), bounded by two timestamps rather than `*`.
      *
-     * Currently unused: there is no UI that surfaces the target list, so this is kept as
-     * a stub for a future "missed conversations" view and deliberately not wired to any
-     * response handler. Only sent when draft/chathistory is negotiated.
+     * Each reply line is surfaced as an [IrcEvent.HistoryTarget]. Used on connect to
+     * discover buffers that gained messages while we were offline, in particular PMs.
+     * Only sent when draft/chathistory is negotiated.
      */
     suspend fun requestChatHistoryTargets(limit: Int = 50) {
         if (!hasChathistoryCap()) return
@@ -3939,7 +4151,12 @@ class IrcClient(val config: IrcConfig) {
                         text = tr(R.string.core_usage_msg), isPrivate = true))
                     return
                 }
+                val origin = currentBuffer
                 privmsg(target, msg)
+                // Print where the user typed, and remember the line so the server's
+                // echo-message copy is dropped rather than opening a query buffer.
+                registerOutgoingEcho(notice = false, target = target, text = msg)
+                commandEvents.send(IrcEvent.OutgoingEcho(originBuffer = origin, target = target, text = msg))
             }
             // /query <nick> [message] - open a PM buffer with a user (buffer switching handled in ViewModel)
             // /query with no message just opens the buffer; with a message it sends it too.
@@ -4284,7 +4501,10 @@ class IrcClient(val config: IrcConfig) {
 						text = tr(R.string.core_usage_notice), isPrivate = true))
 					return
 				}
+				val origin = currentBuffer
 				sendRaw("NOTICE $target :$msg")
+				registerOutgoingEcho(notice = true, target = target, text = msg)
+				commandEvents.send(IrcEvent.OutgoingEcho(originBuffer = origin, target = target, text = msg))
 			}
 			"invite" -> {
 				val nick = parts.getOrNull(1)
@@ -4703,12 +4923,7 @@ class IrcClient(val config: IrcConfig) {
             // slow every connect. A `floodClock` tracks the virtual time by which the queued penalty
             // is "paid"; when it runs more than floodBurstMs ahead of now we wait for it to catch up.
             //
-            // Bouncer connections are exempt too, for the same reason: a personal soju/ZNC bouncer
-            // isn't a public ircd guarding against flooders, and its own connection to us doesn't
-            // need protecting from OUR traffic. Without this, syncing dozens of channels (each
-            // needing its own JOIN + CHATHISTORY LATEST + WHO) gets throttled at floodPenaltyMs per
-            // line as if we were a stranger flooding a public network - turning a sub-second sync
-            // into minutes for an account with many channels.
+            // Bouncer connections are exempt.
             var floodClock = System.currentTimeMillis()
             try {
                 for (unit in outbound) {
@@ -4828,6 +5043,7 @@ class IrcClient(val config: IrcConfig) {
         // Reset per-session state on every events() invocation (one IrcClient may
         // technically be reused, although in practice we create a fresh one per connect).
         historyRequested.clear()
+        namesRequested.clear()
         historyExpectUntil.clear()
         zncLastSeen.clear()
         openPlaybackBatches.clear()
@@ -4845,6 +5061,8 @@ class IrcClient(val config: IrcConfig) {
         accountExtban = null
         chatHistoryLimit = 0
         msgRefTypes = emptySet()
+        vapidPublicKey = null
+        chathistoryBatchTargets.clear()
         lengthLimits.clear()
         knockSupported = false
         chanLimits.clear()
@@ -4998,6 +5216,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                     "ACCOUNTEXTBAN" -> accountExtban = null
                     "CHATHISTORY" -> chatHistoryLimit = 0
                     "MSGREFTYPES" -> msgRefTypes = emptySet()
+                    "VAPID" -> vapidPublicKey = null
                     "TOPICLEN", "KICKLEN", "AWAYLEN", "QUITLEN", "NICKLEN", "MAXNICKLEN",
                     "CHANNELLEN", "NAMELEN" -> lengthLimits.remove(k.drop(1))
                     "KNOCK" -> knockSupported = false
@@ -5035,6 +5254,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                     v?.split(",")?.mapNotNull { it.trim().takeIf { t -> t.isNotEmpty() } }?.lastOrNull()
                 // CHATHISTORY=<n>: max messages returned per CHATHISTORY request.
                 "CHATHISTORY" -> chatHistoryLimit = v?.trim()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                // VAPID=<key>: application-server public key for draft/webpush notifications.
+                "VAPID" -> vapidPublicKey = v?.trim()?.takeIf { it.isNotEmpty() }
                 // MSGREFTYPES=<csv>: which reference types CHATHISTORY selectors may use.
                 "MSGREFTYPES" -> msgRefTypes =
                     v?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
@@ -5603,6 +5824,16 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 							msg.allParams.getOrNull(2)?.takeIf { isChannelName(it) }
 								?.let { playbackBatchTargets[id] = it }
 						}
+						// A CHATHISTORY batch names its target in param 2, which may be a nick
+						// as readily as a channel. Recorded and announced so the ViewModel can
+						// tell an explicit backfill's reply from ordinary catch-up replay.
+						if (type.contains("chathistory", ignoreCase = true)) {
+							val histTarget = msg.allParams.getOrNull(2)?.takeIf { it.isNotBlank() }
+							if (histTarget != null && chathistoryBatchTargets.size < 64) {
+								chathistoryBatchTargets[id] = histTarget
+								send(IrcEvent.HistoryBatchStart(histTarget))
+							}
+						}
 						// Batches nest, and playback-ness is inherited. A multiline message
 						// replayed through CHATHISTORY arrives as BATCH +inner draft/multiline
 						// carrying @batch=<outer>, and its inner lines reference the INNER id.
@@ -5646,6 +5877,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val id = idToken.drop(1)
 						openPlaybackBatches.remove(id)
 						playbackBatchTargets.remove(id)
+						chathistoryBatchTargets.remove(id)?.let { send(IrcEvent.HistoryBatchEnd(it)) }
 						// Flush a closing multiline batch as a single ChatMessage / Notice
 						// event with the joined body. Per spec: lines without
 						// +draft/multiline-concat get a "\n" separator; lines WITH it get
