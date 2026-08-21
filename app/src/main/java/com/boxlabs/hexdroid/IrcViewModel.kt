@@ -791,6 +791,10 @@ class IrcViewModel(
         const val CHANNEL_LIST_FLUSH_INTERVAL_MS = 300L
         /** How many older messages one "load older" request asks the server for. */
         const val HISTORY_BACKFILL_PAGE = 50
+        /** Selector timestamp format for CHATHISTORY anchors. See [historyAnchorTimestamp]. */
+        val HISTORY_ANCHOR_FORMAT: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                .withZone(java.time.ZoneOffset.UTC)
         /**
          * How long to wait for a backfill's reply batch before giving up on it.
          *
@@ -986,6 +990,17 @@ class IrcViewModel(
     private val manualDisconnecting: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val noNetworkNotice: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * Networks already told, on their server buffer, that the boot connect is holding out
+     * for Wi-Fi.
+     *
+     * Kept apart from [noNetworkNotice] so the two notices don't suppress each other: a
+     * network parked on the Wi-Fi wait that then loses connectivity altogether should
+     * still get the "no network" line, and vice versa.
+     */
+    private val waitingForWifiNotice: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
@@ -2954,6 +2969,24 @@ class IrcViewModel(
     fun hasLiveConnection(networkId: String): Boolean =
         runtimes[networkId]?.client?.isConnectedNow() == true
 
+    /**
+     * The network id and display name that a pushed message about [buffer] belongs to.
+     */
+    fun networkForPushTarget(buffer: String): Pair<String, String>? {
+        if (buffer.isBlank()) return null
+        val st = _state.value
+        val matches = runtimes.keys.toList().filter { netId ->
+            if (!hasLiveConnection(netId)) return@filter false
+            val fold = casefoldText(netId, buffer)
+            st.buffers.keys.any { k ->
+                val (nid, bn) = splitKey(k)
+                nid == netId && casefoldText(netId, bn) == fold
+            }
+        }
+        val netId = matches.singleOrNull() ?: return null
+        return netId to (st.networks.firstOrNull { it.id == netId }?.name ?: "")
+    }
+
     fun updateSettings(update: UiSettings.() -> UiSettings) {
         // Apply immediately; DataStore confirms shortly after.
         val st = _state.value
@@ -3310,6 +3343,7 @@ fun startAddNetwork() {
         autoReconnectJobs.remove(netId)?.cancel()
         stableConnectionJobs.remove(netId)?.cancel()
         noNetworkNotice.remove(netId)
+        waitingForWifiNotice.remove(netId)
         // The flap-PAUSED set (flapPaused) is likewise NOT cleared here: a network that
         // tripped flap protection must stay paused across reconnect cycles until the user
         // explicitly intervenes. Cleared in reconnectNetwork() on a manual reconnect.
@@ -3492,6 +3526,9 @@ fun startAddNetwork() {
         // Profile is gone for good; drop its session-registration marker too. (Unlike a
         // disconnect, a delete means there's no reconnect that should still count as one.)
         everRegisteredThisSession.remove(id)
+        // Profile is gone, so its unsent composer text is too. removeBuffer() handles the
+        // per-buffer case, but a delete drops every buffer at once without going through it.
+        draftStore.clearNetwork(id)
         // Purge orphan state for the deleted network: buffers, the connection record, and
         // the per-buffer chathistory marker tracker. Without this, buffer messages and
         // associated state stay in memory until the process is killed - a real leak in
@@ -4903,8 +4940,9 @@ fun startAddNetwork() {
 
         // Connect on boot, waiting for Wi-Fi: mobile data is up but the user asked not to use it.
         if (waitingForWifi()) {
-            if (!noNetworkNotice.contains(netId)) {
-                noNetworkNotice.add(netId)
+            // add() returns false when the notice is already on the buffer, so a retry
+            // every reconnect interval doesn't repeat the line.
+            if (waitingForWifiNotice.add(netId)) {
                 append(serverKey, from = null,
                     text = "*** " + appContext.getString(R.string.vm_waiting_for_wifi), doNotify = false)
             }
@@ -4915,6 +4953,8 @@ fun startAddNetwork() {
             if (_state.value.settings.autoReconnectEnabled) scheduleAutoReconnect(netId)
             return
         }
+
+        waitingForWifiNotice.remove(netId)
 
         val preservedListModes = conn?.listModes ?: NetConnState().listModes
         val newConns = st.connections + (netId to NetConnState(
@@ -5250,6 +5290,7 @@ fun startAddNetwork() {
         stableConnectionJobs.values.forEach { it.cancel() }
         stableConnectionJobs.clear()
         noNetworkNotice.clear()
+        waitingForWifiNotice.clear()
 
         // Stop the foreground service + cancel notifications immediately.
         runCatching { NotificationHelper.cancelAll(appContext) }
@@ -9467,9 +9508,11 @@ if (code == "442") {
             }
 
             is IrcEvent.HistoryBatchStart -> {
-                // Nothing to do on open: append() already routes history messages into the
-                // backfill collector for as long as one exists for that buffer. Handled
-                // explicitly so the event isn't swallowed by an unrelated else branch.
+                // append() already routes history messages into the backfill collector for
+                // as long as one exists for that buffer, so there is no state to open here.
+                // The watchdog is restarted, though: it was armed when the request went out
+                // and would otherwise be counting the transfer as well as the round trip.
+                backfillKeyForTarget(netId, ev.target)?.let { armHistoryBackfillWatchdog(it) }
             }
 
             is IrcEvent.HistoryBatchEnd -> {
@@ -10020,6 +10063,16 @@ if (code == "442") {
     // Chat history backfill (IRCv3 CHATHISTORY BEFORE)
 
     /**
+     * Format [timeMs] as a CHATHISTORY selector timestamp.
+     *
+     * ISO_INSTANT drops the fractional seconds entirely when the millisecond field is
+     * zero, which leaves the spec's `YYYY-MM-DDThh:mm:ss.sssZ` grammar. The pattern is
+     * pinned so an anchor is well formed whatever the message's timestamp happens to be.
+     */
+    private fun historyAnchorTimestamp(timeMs: Long): String =
+        HISTORY_ANCHOR_FORMAT.format(Instant.ofEpochMilli(timeMs))
+
+    /**
      * Fetch the page of messages immediately older than the top of [key]'s scrollback.
      *
      * Called when the user reaches the top of the chat view.
@@ -10038,7 +10091,7 @@ if (code == "442") {
         // Anchor on the oldest message that actually came from the server.
         val oldest = buf.messages.firstOrNull { it.from != null } ?: return
         val anchorTs = runCatching {
-            DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(oldest.timeMs))
+            historyAnchorTimestamp(oldest.timeMs)
         }.getOrNull()
         if (anchorTs == null && oldest.msgId == null) return
 
@@ -10050,11 +10103,7 @@ if (code == "442") {
 
         // A server that holds nothing older answers with an empty batch, which closes
         // straight away; this watchdog is for the case where no batch arrives at all.
-        historyBackfillTimeouts.remove(key)?.cancel()
-        historyBackfillTimeouts[key] = viewModelScope.launch {
-            delay(HISTORY_BACKFILL_TIMEOUT_MS)
-            finishHistoryBackfill(key)
-        }
+        armHistoryBackfillWatchdog(key)
 
         viewModelScope.launch {
             val sent = runCatching {
@@ -10066,6 +10115,24 @@ if (code == "442") {
                 )
             }
             if (sent.isFailure) finishHistoryBackfill(key)
+        }
+    }
+
+    /**
+     * (Re)start the watchdog that closes [key]'s backfill if the reply stalls.
+     *
+     * Armed when the request goes out and restarted when the reply batch opens, because
+     * the timer otherwise measures round-trip plus transfer: a slow link can deliver a
+     * full page over more than [HISTORY_BACKFILL_TIMEOUT_MS], and firing mid-batch
+     * releases the collector, so every message still in flight falls through to the
+     * normal append path and lands at the bottom of the buffer instead of above the
+     * scrollback.
+     */
+    private fun armHistoryBackfillWatchdog(key: String) {
+        historyBackfillTimeouts.remove(key)?.cancel()
+        historyBackfillTimeouts[key] = viewModelScope.launch {
+            delay(HISTORY_BACKFILL_TIMEOUT_MS)
+            finishHistoryBackfill(key)
         }
     }
 
@@ -10132,11 +10199,15 @@ if (code == "442") {
      */
     private val draftStore = com.boxlabs.hexdroid.data.DraftStore()
 
-    /** The saved draft for [bufferKey], or an empty string. Read when the composer switches buffer. */
-    fun draftFor(bufferKey: String): String = draftStore.get(bufferKey)
+    /** The saved draft for [bufferKey], or an empty one. Read when the composer switches buffer. */
+    fun draftFor(bufferKey: String): com.boxlabs.hexdroid.data.Draft = draftStore.get(bufferKey)
 
-    /** Save the composer's current text for [bufferKey]. Blank text discards the draft. */
-    fun saveDraft(bufferKey: String, text: String) = draftStore.put(bufferKey, text)
+    /**
+     * Save the composer's current text and caret offset for [bufferKey]. Blank text
+     * discards the draft.
+     */
+    fun saveDraft(bufferKey: String, text: String, cursor: Int) =
+        draftStore.put(bufferKey, text, cursor)
 
     // Web Push (draft/webpush)
 
@@ -10151,16 +10222,47 @@ if (code == "442") {
         val client = runtimes[netId]?.client ?: return
         if (!client.hasWebPushCap()) return
 
+        val serverVapid = client.webPushVapidKey()
         val sub = com.boxlabs.hexdroid.push.WebPushManager.subscription(appContext)
         if (sub == null) {
-            com.boxlabs.hexdroid.push.WebPushManager.register(appContext, client.webPushVapidKey())
+            com.boxlabs.hexdroid.push.WebPushManager.register(appContext, serverVapid)
             return
         }
+
+        // A subscription requested before any server was connected has no key bound to it,
+        // and a server that signs its pushes will have them dropped by the distributor.
+        // Ask for a fresh endpoint now that a key is known. Only when the stored key is
+        // absent: replacing one server's key with another's would flap between two
+        // webpush servers, and the first key still wins by design (see
+        // WebPushManager.register).
+        if (serverVapid != null &&
+            com.boxlabs.hexdroid.push.WebPushManager.subscribedVapid(appContext) == null
+        ) {
+            com.boxlabs.hexdroid.push.WebPushManager.register(appContext, serverVapid)
+            return
+        }
+
         if (com.boxlabs.hexdroid.push.WebPushManager.isRegisteredWith(appContext, netId)) return
 
         viewModelScope.launch {
             runCatching { client.webPushRegister(sub.endpoint, sub.auth, sub.p256dh) }
         }
+    }
+
+    /**
+     * Choose [distributor] and subscribe through it.
+     *
+     * The subscription is bound to a server's VAPID key so the distributor can reject
+     * pushes that server did not sign, so the key of a connected webpush-capable network
+     * is used rather than none. With nothing connected yet there is no key to offer; the
+     * subscription is still requested, and [maybeRegisterWebPush] re-subscribes with a
+     * key on the next registration that has one.
+     */
+    fun selectPushDistributor(distributor: String) {
+        val vapid = runtimes.values
+            .firstOrNull { it.client.hasWebPushCap() && it.client.webPushVapidKey() != null }
+            ?.client?.webPushVapidKey()
+        com.boxlabs.hexdroid.push.WebPushManager.selectDistributor(appContext, distributor, vapid)
     }
 
     /**
@@ -10234,7 +10336,7 @@ if (code == "442") {
         // With nothing on record locally there is no gap to describe, so fall back to the
         // server's own idea of recent rather than inventing an anchor.
         val afterTs = newest?.let {
-            runCatching { DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(it.timeMs)) }.getOrNull()
+            runCatching { historyAnchorTimestamp(it.timeMs) }.getOrNull()
         }
 
         viewModelScope.launch {

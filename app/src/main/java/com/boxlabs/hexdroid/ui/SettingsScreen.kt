@@ -400,6 +400,10 @@ fun SettingsScreen(
     onImportBackup: (Uri) -> Unit = {},
     onClearBackupMessage: () -> Unit = {},
     onWebPushToggled: (Boolean) -> Unit = {},
+    /**
+     * Pick [distributor] as the UnifiedPush target and subscribe with the server's VAPID key
+     */
+    onSelectPushDistributor: (distributor: String) -> Unit = {},
 ) {
     val s = state.settings
     val ctx = LocalContext.current
@@ -1327,9 +1331,7 @@ fun SettingsScreen(
                         Spacer(Modifier.height(4.dp))
                         distributors.forEach { d ->
                             TextButton(
-                                onClick = {
-                                    com.boxlabs.hexdroid.push.WebPushManager.selectDistributor(ctx, d, null)
-                                },
+                                onClick = { onSelectPushDistributor(d) },
                                 modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
                             ) {
                                 Text(

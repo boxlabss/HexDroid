@@ -1244,10 +1244,11 @@ fun ChatScreen(
     onSearchFromToolbar: (query: String, global: Boolean) -> Unit = { _, _ -> },
     /** Fetch the page of messages older than the top of [bufferKey]'s scrollback. */
     onLoadOlderHistory: (bufferKey: String) -> Unit = {},
-    /** Unsent composer text for [bufferKey], restored when the buffer is selected. */
-    draftFor: (bufferKey: String) -> String = { "" },
-    /** Park the composer's current text against [bufferKey]. Blank text discards the draft. */
-    onDraftChanged: (bufferKey: String, text: String) -> Unit = { _, _ -> },
+    /** Unsent composer text and caret for [bufferKey], restored when the buffer is selected. */
+    draftFor: (bufferKey: String) -> com.boxlabs.hexdroid.data.Draft =
+        { com.boxlabs.hexdroid.data.Draft.EMPTY },
+    /** Park the composer's current text and caret against [bufferKey]. Blank text discards the draft. */
+    onDraftChanged: (bufferKey: String, text: String, cursor: Int) -> Unit = { _, _, _ -> },
     /**
      * Optional reference to the ViewModel for features that need a richer API than
      * fits in a callback list — currently the EncryptionDialog, which exposes
@@ -1448,13 +1449,20 @@ fun ChatScreen(
     }
 
     var input by remember(selected) {
-        val restored = selected?.let { draftFor(it) }.orEmpty()
-        mutableStateOf(TextFieldValue(restored, TextRange(restored.length)))
+        val restored = selected?.let { draftFor(it) } ?: com.boxlabs.hexdroid.data.Draft.EMPTY
+        mutableStateOf(
+            TextFieldValue(
+                restored.text,
+                TextRange(restored.cursor.coerceIn(0, restored.text.length)),
+            )
+        )
     }
 
-    LaunchedEffect(Unit) {
-        snapshotFlow { selected to input.text }
-            .collect { (key, text) -> if (key != null) onDraftChanged(key, text) }
+    // Keyed on the selected buffer because the composer state above is too
+    LaunchedEffect(selected) {
+        val key = selected ?: return@LaunchedEffect
+        snapshotFlow { input }
+            .collect { onDraftChanged(key, it.text, it.selection.start) }
     }
     /** Non-null when the user has tapped Reply on a message: cleared after send or cancel. */
     var pendingReply by remember(selected) { mutableStateOf<UiMessage?>(null) }

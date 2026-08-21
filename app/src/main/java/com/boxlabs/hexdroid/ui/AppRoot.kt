@@ -389,6 +389,7 @@ fun AppRoot(
                     onImportBackup = vm::importBackup,
                     onClearBackupMessage = vm::clearBackupMessage,
                     onWebPushToggled = vm::applyWebPushSetting,
+                    onSelectPushDistributor = vm::selectPushDistributor,
                 )
 
                 AppScreen.SCRIPTS -> {

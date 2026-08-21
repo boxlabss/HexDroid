@@ -62,9 +62,33 @@ private val AppMono = FontFamily(
 )
 
 /**
- * Custom font families, one instance per font file.
+ * One Typography per family
+ *
+ * Entries for custom fonts.  [MAX_CACHED_FONTS]
  */
-private val customFontFamilies = ConcurrentHashMap<String, FontFamily>()
+private val typographies = ConcurrentHashMap<FontFamily, Typography>()
+
+/**
+ * How many custom font families to keep loaded. A user has one font selected at a time;
+ * the rest of the room is for the ones they tried before settling.
+ */
+private const val MAX_CACHED_FONTS = 8
+
+/**
+ * Custom font families, one instance per font file, in least-recently-used order.
+ *
+ * Synchronised because a Compose recomposition can resolve a font off the main thread.
+ */
+private val customFontFamilies: MutableMap<String, FontFamily> =
+    java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, FontFamily>(MAX_CACHED_FONTS, 0.75f, true) {
+            override fun removeEldestEntry(eldest: Map.Entry<String, FontFamily>): Boolean {
+                if (size <= MAX_CACHED_FONTS) return false
+                typographies.remove(eldest.value)
+                return true
+            }
+        }
+    )
 
 /**
  * Load a custom font from a file path.
@@ -86,7 +110,6 @@ fun loadCustomFontFamily(path: String?): FontFamily? {
             Font(file, weight = FontWeight.Normal, style = FontStyle.Italic),
             Font(file, weight = FontWeight.Bold, style = FontStyle.Italic),
         )
-        if (customFontFamilies.size >= 8) customFontFamilies.clear()
         customFontFamilies[key] = family
         family
     } catch (e: Exception) {
@@ -100,9 +123,6 @@ fun fontFamilyForChoice(choice: FontChoice, customFontPath: String? = null): Fon
     FontChoice.MONOSPACE -> AppMono
     FontChoice.CUSTOM -> loadCustomFontFamily(customFontPath) ?: AppDefault
 }
-
-/** One Typography per family, so the theme does not rebuild fifteen styles per frame. */
-private val typographies = ConcurrentHashMap<FontFamily, Typography>()
 
 fun typographyForFont(choice: FontChoice, customFontPath: String? = null): Typography {
     val fam = fontFamilyForChoice(choice, customFontPath)
@@ -126,7 +146,6 @@ fun typographyForFont(choice: FontChoice, customFontPath: String? = null): Typog
         labelMedium = base.labelMedium.withFamily(fam),
         labelSmall = base.labelSmall.withFamily(fam)
     )
-    if (typographies.size >= 8) typographies.clear()
     typographies[fam] = typography
     return typography
 }

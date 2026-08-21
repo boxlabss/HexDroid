@@ -1611,6 +1611,14 @@ class IrcClient(val config: IrcConfig) {
         private val CRLF = "\r\n".toByteArray(Charsets.US_ASCII)
 
         /**
+         * CHATHISTORY selector timestamp format. See [historyTimestamp].
+         */
+        private val HISTORY_TS_FORMAT: java.time.format.DateTimeFormatter =
+            java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                .withZone(java.time.ZoneOffset.UTC)
+
+        /**
          * Shared [SSLContext] cache, keyed by the tuple that determines the context's trust
          * and key material. Reconnects to the same profile (same trust settings, same client
          * cert) get the same context — and therefore the same JSSE session cache — which
@@ -1761,6 +1769,20 @@ class IrcClient(val config: IrcConfig) {
     /** True when msgid= selectors are usable (token absent means "assume yes"). */
     private fun historyMsgidOk(): Boolean =
         msgRefTypes.isEmpty() || "msgid" in msgRefTypes
+
+    /**
+     * Format an instant as a CHATHISTORY timestamp selector value.
+     *
+     * The spec's grammar is `YYYY-MM-DDThh:mm:ss.sssZ` with the fractional part always
+     * present. `Instant.toString()` and `ISO_INSTANT` both omit it entirely when the
+     * millisecond field happens to be zero, which produces a value some servers reject,
+     * so the pattern is pinned here instead.
+     */
+    private fun historyTimestamp(instant: java.time.Instant): String =
+        HISTORY_TS_FORMAT.format(instant)
+
+    /** Lower bound for a CHATHISTORY range that means "everything the server holds". */
+    private fun historyEpochTimestamp(): String = historyTimestamp(java.time.Instant.EPOCH)
 
     /**
      * Server-advertised length limits from ISUPPORT (TOPICLEN, KICKLEN, AWAYLEN,
@@ -3752,8 +3774,8 @@ class IrcClient(val config: IrcConfig) {
     }
 
     /**
-     * Request the unread history for [target] using CHATHISTORY LATEST with an after-timestamp
-     * anchor so we only fetch messages newer than [afterTimestamp].
+     * Request the unread history for [target] using CHATHISTORY AFTER, anchored on
+     * [afterTimestamp] so we only fetch messages newer than what we already hold.
      *
      * Used after a reconnect or when the server notifies us via read-marker that messages
      * in this buffer haven't been seen yet.
@@ -4089,7 +4111,7 @@ class IrcClient(val config: IrcConfig) {
      * Request the list of targets (channels + queries) for which the server holds stored
      * history, via IRCv3 CHATHISTORY TARGETS. Per the current spec the reply is a
      * `draft/chathistory-targets` BATCH of `CHATHISTORY TARGETS <name> <timestamp>`
-     * messages (not numerics), bounded by two timestamps rather than `*`.
+     * messages (not numerics), bounded by two timestamps.
      *
      * Each reply line is surfaced as an [IrcEvent.HistoryTarget]. Used on connect to
      * discover buffers that gained messages while we were offline, in particular PMs.
@@ -4097,9 +4119,10 @@ class IrcClient(val config: IrcConfig) {
      */
     suspend fun requestChatHistoryTargets(limit: Int = 50) {
         if (!hasChathistoryCap()) return
-        val now = java.time.Instant.now().toString()
         if (!historyTimestampOk()) return
-        sendRaw("${labelTag()}CHATHISTORY TARGETS timestamp=* timestamp=$now ${clampHistoryLimit(limit)}")
+        val from = historyEpochTimestamp()
+        val now = historyTimestamp(java.time.Instant.now())
+        sendRaw("${labelTag()}CHATHISTORY TARGETS timestamp=$from timestamp=$now ${clampHistoryLimit(limit)}")
     }
 
     suspend fun ctcp(target: String, payload: String): String? {

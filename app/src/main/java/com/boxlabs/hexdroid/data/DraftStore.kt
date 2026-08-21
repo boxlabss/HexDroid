@@ -21,27 +21,40 @@ package com.boxlabs.hexdroid.data
 import java.util.concurrent.ConcurrentHashMap
 
 /**
+ * Unsent composer text and the caret position it was left at.
+ */
+data class Draft(val text: String, val cursor: Int) {
+    companion object {
+        val EMPTY = Draft("", 0)
+    }
+}
+
+/**
  * Unsent message text, kept per buffer.
  *
  * The chat composer is a single text field shared by every buffer, so without somewhere
- * to park the text, switching buffers carriess a half-written line across to the next one
- * and the next send delivered it to the wrong target.
+ * to park the text, switching buffers carries a half-written line across to the next one
+ * and the next send delivers it to the wrong target.
  */
 class DraftStore {
 
-    private val drafts = ConcurrentHashMap<String, String>()
+    private val drafts = ConcurrentHashMap<String, Draft>()
 
-    /** The saved draft for [bufferKey], or an empty string when there is none. */
-    fun get(bufferKey: String): String = drafts[bufferKey].orEmpty()
+    /** The saved draft for [bufferKey], or an empty one when there is none. */
+    fun get(bufferKey: String): Draft = drafts[bufferKey] ?: Draft.EMPTY
 
     /**
-     * Save [text] as the draft for [bufferKey].
+     * Save [text] and the caret offset [cursor] as the draft for [bufferKey].
      *
      * Blank text removes the entry rather than storing an empty string, so a buffer the
      * user has typed in and then cleared doesn't sit in the map forever.
      */
-    fun put(bufferKey: String, text: String) {
-        if (text.isEmpty()) drafts.remove(bufferKey) else drafts[bufferKey] = text
+    fun put(bufferKey: String, text: String, cursor: Int) {
+        if (text.isEmpty()) {
+            drafts.remove(bufferKey)
+        } else {
+            drafts[bufferKey] = Draft(text, cursor.coerceIn(0, text.length))
+        }
     }
 
     /** Discard the draft for [bufferKey]. */

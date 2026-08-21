@@ -40,9 +40,19 @@ class HexDroidApp : Application() {
      * Process-wide singleton for the IRC ViewModel.
      * Ensures connections/coroutines survive activity recreation and config changes.
      */
-    val ircViewModel: IrcViewModel by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    private val ircViewModelDelegate = lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         IrcViewModel(repo, applicationContext)
     }
+
+    val ircViewModel: IrcViewModel by ircViewModelDelegate
+
+    /**
+     * The ViewModel only if something has already built it, without building it.
+     *
+     * A background entry point that merely wants to read connection state asks through here
+     */
+    val ircViewModelOrNull: IrcViewModel?
+        get() = if (ircViewModelDelegate.isInitialized()) ircViewModel else null
 
     override fun onCreate() {
         super.onCreate()

@@ -38,6 +38,7 @@ object WebPushManager {
     private const val KEY_AUTH = "auth"
     private const val KEY_P256DH = "p256dh"
     private const val KEY_REGISTERED_PREFIX = "registered_"
+    private const val KEY_VAPID = "vapid"
 
     /** A subscription with its encryption keys, as handed to WEBPUSH REGISTER. */
     data class Subscription(
@@ -76,12 +77,19 @@ object WebPushManager {
         if (previous != endpoint) clearRegistrations(ctx)
     }
 
+    /**
+     * The VAPID key the current subscription was requested with, or null when it was
+     * requested without one.
+     */
+    fun subscribedVapid(ctx: Context): String? = prefs(ctx).getString(KEY_VAPID, null)
+
     /** Forget the subscription and every server-side registration we believed in. */
     fun clearSubscription(ctx: Context) {
         prefs(ctx).edit()
             .remove(KEY_ENDPOINT)
             .remove(KEY_AUTH)
             .remove(KEY_P256DH)
+            .remove(KEY_VAPID)
             .apply()
         clearRegistrations(ctx)
     }
@@ -126,11 +134,13 @@ object WebPushManager {
      */
     fun register(ctx: Context, vapid: String?) {
         if (UnifiedPush.getAckDistributor(ctx) == null) return
+        prefs(ctx).edit().putString(KEY_VAPID, vapid).apply()
         runCatching { UnifiedPush.register(ctx, vapid = vapid) }
     }
 
     /** Choose [distributor] and immediately ask it for an endpoint. */
     fun selectDistributor(ctx: Context, distributor: String, vapid: String?) {
+        prefs(ctx).edit().putString(KEY_VAPID, vapid).apply()
         runCatching {
             UnifiedPush.saveDistributor(ctx, distributor)
             UnifiedPush.register(ctx, vapid = vapid)

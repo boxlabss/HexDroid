@@ -189,6 +189,25 @@ class NotificationHelper(private val ctx: Context) {
         } catch (_: Throwable) {}
     }
 
+    /**
+     * The highlight channel to post on for [networkName].
+     *
+     * A blank name means the network is not known
+     * Those fall back to the shared channel rather than the per-network one.
+     */
+    private fun highlightChannelFor(networkName: String, sound: Boolean): String {
+        if (networkName.isBlank()) return if (sound) CH_HIGHLIGHT_SOUND else CH_HIGHLIGHT_SILENT
+        ensureNetworkChannels(networkName)
+        return networkHighlightChannelId(networkName, sound)
+    }
+
+    /** The private-message channel for [networkName]. See [highlightChannelFor]. */
+    private fun pmChannelFor(networkName: String): String {
+        if (networkName.isBlank()) return CH_PM
+        ensureNetworkChannels(networkName)
+        return networkPmChannelId(networkName)
+    }
+
     private fun actionPendingIntent(networkId: String, action: String, stableRequestCode: Int = -1): PendingIntent? {
         val i = Intent(ctx, MainActivity::class.java)
             .putExtra(EXTRA_NETWORK_ID, networkId)
@@ -301,9 +320,7 @@ class NotificationHelper(private val ctx: Context) {
 
     fun notifyHighlight(networkId: String, buffer: String, text: String, playSound: Boolean, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = "") {
         ensureChannels()
-        val netName = networkName.ifBlank { displayTitle }
-        ensureNetworkChannels(netName)
-        val channelId = networkHighlightChannelId(netName, playSound)
+        val channelId = highlightChannelFor(networkName, playSound)
         val notifId = nextNotifId()
         val builder = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -312,7 +329,12 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
         openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
-        buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+        // Without a network the reply has nowhere to go: the receiver looks the connection
+        // up by id and would report the reply as undeliverable however well connected the
+        // user actually is. Offering no Reply button.
+        if (networkId.isNotBlank()) {
+            buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+        }
         NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
     }
 
@@ -333,9 +355,7 @@ class NotificationHelper(private val ctx: Context) {
 
     fun notifyPm(networkId: String, buffer: String, text: String, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = "") {
         ensureChannels()
-        val netName = networkName.ifBlank { displayTitle }
-        ensureNetworkChannels(netName)
-        val channelId = networkPmChannelId(netName)
+        val channelId = pmChannelFor(networkName)
         val notifId = nextNotifId()
         val builder = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -344,7 +364,10 @@ class NotificationHelper(private val ctx: Context) {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
         openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
-        buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+        // See notifyHighlight: no network means no deliverable reply.
+        if (networkId.isNotBlank()) {
+            buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+        }
         NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
     }
 

@@ -92,32 +92,37 @@ class HexPushService : PushService() {
         val isChannel = target.firstOrNull()?.let { it == '#' || it == '&' || it == '!' || it == '+' } == true
         val buffer = if (isChannel) target else from
 
-        // The network id is unknown here: a push carries no indication of which of the
-        // user's configured networks it came from, and this process may hold no state at
-        // all. An empty id means the notification opens the app rather than a specific buffer
+        // A push carries no indication of which of the user's networks it came from, so
+        // it is resolved against the live connections when this process still has them.
+        val (netId, netName) = resolvePushNetwork(buffer)
+
         if (isChannel) {
             helper.notifyHighlight(
-                networkId = "",
+                networkId = netId,
                 buffer = buffer,
                 text = "$from: $text",
                 playSound = true,
                 displayTitle = buffer,
                 from = from,
                 originalText = text,
+                networkName = netName,
             )
         } else {
             helper.notifyPm(
-                networkId = "",
+                networkId = netId,
                 buffer = buffer,
                 text = text,
                 displayTitle = from,
                 from = from,
                 originalText = text,
+                networkName = netName,
             )
         }
     }
 
     private fun notifyInvite(from: String, channel: String) {
+        // An invite names a channel we are not in, so there is no buffer to resolve
+        // against and the notification is deliberately network-less.
         NotificationHelper(applicationContext).notifyHighlight(
             networkId = "",
             buffer = channel,
@@ -126,6 +131,17 @@ class HexPushService : PushService() {
             displayTitle = channel,
             from = from,
         )
+    }
+
+    /**
+     * The network id and display name holding [buffer], or a pair of empty strings.
+     *
+     * Reads the ViewModel only if the process already has one
+     */
+    private fun resolvePushNetwork(buffer: String): Pair<String, String> {
+        val app = applicationContext as? com.boxlabs.hexdroid.HexDroidApp ?: return "" to ""
+        val vm = app.ircViewModelOrNull ?: return "" to ""
+        return runCatching { vm.networkForPushTarget(buffer) }.getOrNull() ?: ("" to "")
     }
 
     override fun onUnregistered(instance: String) {
