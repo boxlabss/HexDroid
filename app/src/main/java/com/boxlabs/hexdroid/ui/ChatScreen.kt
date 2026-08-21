@@ -147,6 +147,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -187,6 +188,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
@@ -196,11 +199,16 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -242,6 +250,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.boxlabs.hexdroid.ChatFontStyle
+import com.boxlabs.hexdroid.NickStyle
 import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.UiMessage
 import com.boxlabs.hexdroid.UiSettings
@@ -249,6 +258,7 @@ import com.boxlabs.hexdroid.UiState
 import com.boxlabs.hexdroid.parseAnsiRuns
 import com.boxlabs.hexdroid.stripIrcFormatting
 import com.boxlabs.hexdroid.ui.components.LagBar
+import com.boxlabs.hexdroid.ui.theme.LocalAccentColors
 import com.boxlabs.hexdroid.ui.theme.fontFamilyForChoice
 import com.boxlabs.hexdroid.ui.tour.TourTarget
 import com.boxlabs.hexdroid.ui.tour.tourTarget
@@ -992,6 +1002,22 @@ private sealed class SidebarItem(val stableKey: String) {
 }
 
 
+/**
+ * A tab-completion in progress, so a second Tab cycles to the next match rather than
+ * completing the word the first one produced.
+ *
+ * [text] and [cursor] are what the last completion left in the field: the cycle is only
+ * continued when the field still holds exactly that, so any edit in between starts over.
+ */
+private data class NickCycle(
+    val start: Int,
+    val hadAt: Boolean,
+    val matches: List<String>,
+    val index: Int,
+    val text: String,
+    val cursor: Int,
+)
+
 /** Drag handle for sidebar network rows. Long-press to start drag.
  *  onDrag receives the CUMULATIVE y offset from the drag start position. */
 @Composable
@@ -999,9 +1025,14 @@ private fun SidebarDragHandle(
     onStart: () -> Unit,
     onDrag: (totalOffsetY: Float) -> Unit,
     onEnd: () -> Unit,
+    onCancel: () -> Unit = onEnd,
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
 ) {
+    val start by rememberUpdatedState(onStart)
+    val drag by rememberUpdatedState(onDrag)
+    val end by rememberUpdatedState(onEnd)
+    val cancel by rememberUpdatedState(onCancel)
     Box(
         modifier = Modifier
             .size(24.dp)
@@ -1009,14 +1040,14 @@ private fun SidebarDragHandle(
             .pointerInput(Unit) {
                 var accumulated = 0f
                 detectDragGesturesAfterLongPress(
-                    onDragStart = { accumulated = 0f; onStart() },
+                    onDragStart = { accumulated = 0f; start() },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         accumulated += dragAmount.y
-                        onDrag(accumulated)
+                        drag(accumulated)
                     },
-                    onDragEnd = { onEnd() },
-                    onDragCancel = { onEnd() }
+                    onDragEnd = { end() },
+                    onDragCancel = { cancel() }
                 )
             },
         contentAlignment = Alignment.Center
@@ -1367,6 +1398,11 @@ fun ChatScreen(
     /** Non-null when the user has tapped Reply on a message: cleared after send or cancel. */
     var pendingReply by remember(selected) { mutableStateOf<UiMessage?>(null) }
     var inputHasFocus by remember { mutableStateOf(false) }
+    val inputFocus = remember { FocusRequester() }
+
+    // A physical keyboard is attached (Chromebooks, tablets with a keyboard).
+    // Typing then goes to the message field wherever focus happens to be.
+    val hardwareKeyboard = cfg.keyboard == Configuration.KEYBOARD_QWERTY
 
     // Pre-fill input with text shared from another app via the system share sheet.
     LaunchedEffect(state.pendingShareText) {
@@ -1653,10 +1689,22 @@ fun ChatScreen(
 
 	@Composable
 	fun BufferDrawer(mod: Modifier = Modifier) {
-		// During a drag this holds the reordered network IDs so that child rows
-		// (channels) move with their parent without any graphicsLayer hacks.
-		// null means "use the natural sort order".
-		var dragNetworkOrder by remember { mutableStateOf<List<String>?>(null) }
+		// Sidebar list plus its drag-to-reorder engine.
+		val listState = rememberLazyListState()
+		val reorder = rememberGroupReorderState(listState) { key ->
+			val k = key as? String
+			when {
+				k == null -> null
+				k.startsWith("h:") -> k.removePrefix("h:")
+				k.startsWith("d:") -> k.removePrefix("d:")
+				k.startsWith("b:") -> splitKey(k.removePrefix("b:")).first
+				else -> null
+			}
+		}
+
+		// While a drag is in progress the drawer follows this order instead of the stored
+		// one, so channels travel with their network. null means use the sort order.
+		val dragNetworkOrder = reorder.previewOrder
 
 		// Network of the buffer currently open, so it's never hidden and the tab strip can
 		// follow what the user is viewing.
@@ -1669,8 +1717,8 @@ fun ChatScreen(
 				.sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
 			val sortedNets = if (dragNetworkOrder != null) {
 				val map = naturalOrder.associateBy { it.id }
-				dragNetworkOrder!!.mapNotNull { map[it] } +
-					naturalOrder.filter { it.id !in dragNetworkOrder!! }
+				dragNetworkOrder.mapNotNull { map[it] } +
+					naturalOrder.filter { it.id !in dragNetworkOrder }
 			} else naturalOrder
 			// Show networks the user keeps in the switcher, plus whichever network holds the
 			// buffer you're currently viewing (so opening a hidden network never loses your place).
@@ -1763,7 +1811,7 @@ fun ChatScreen(
 				) {
 					IconButton(
 						onClick = onCollapseAllNetworks,
-						modifier = Modifier.size(28.dp)
+						modifier = Modifier.size(28.dp).focusHighlight(CircleShape)
 					) {
 						Icon(
 							imageVector = Icons.Default.UnfoldLess,
@@ -1774,7 +1822,7 @@ fun ChatScreen(
 					}
 					IconButton(
 						onClick = onMarkAllBuffersRead,
-						modifier = Modifier.size(28.dp)
+						modifier = Modifier.size(28.dp).focusHighlight(CircleShape)
 					) {
 						Icon(
 							imageVector = Icons.Default.MarkChatRead,
@@ -1785,7 +1833,7 @@ fun ChatScreen(
 					}
 					IconButton(
 						onClick = { showSearchDialog = true },
-						modifier = Modifier.size(28.dp)
+						modifier = Modifier.size(28.dp).focusHighlight(CircleShape)
 					) {
 						Icon(
 							imageVector = Icons.Default.Search,
@@ -1837,16 +1885,14 @@ fun ChatScreen(
 								// than leaving the sidebar open obscuring it. Mirrors what
 								// happens when the user picks a buffer from the sidebar.
 								scope.launch { if (!isWide) drawerState.close() }
-							}
+							}, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))
 						) { Text(stringResource(R.string.buffer_toolbar_search_action)) }
 					},
 					dismissButton = {
-						TextButton(onClick = { showSearchDialog = false }) { Text(stringResource(R.string.cancel)) }
+						TextButton(onClick = { showSearchDialog = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.cancel)) }
 					}
 				)
 			}
-
-			val listState = rememberLazyListState()
 
 			// Current display order of root netIds - kept in sync with sidebarItems
 			val netOrder = remember(sidebarItems) {
@@ -1858,17 +1904,57 @@ fun ChatScreen(
 					}
 				}
 			}
-			// Drag state - index-based swap approach:
-			// We track the dragged item's current index in netOrder and how far it has moved.
-			// When the cumulative offset exceeds half the height of the next/previous slot,
-			// we swap it one position and reset the offset accumulator.
-			var dragNetId       by remember { mutableStateOf<String?>(null) }
-			var dragOriginalIdx by remember { mutableIntStateOf(-1) }
-			var dragCurrentIdx  by remember { mutableIntStateOf(-1) }
-			var dragAdjustmentY by remember { mutableFloatStateOf(0f) }
-			var dragTranslationY by remember { mutableFloatStateOf(0f) }
-			// netId -> measured height (updated freely, used for swap threshold)
-			val slotHeights = remember { mutableMapOf<String, Float>() }
+			// Stored order of every network, including the ones hidden from the drawer.
+			val fullNetIds = remember(state.networks) {
+				state.networks
+					.sortedWith(compareBy({ !it.isFavourite }, { it.sortOrder }, { it.name }))
+					.map { it.id }
+			}
+			val favouriteById = remember(state.networks) {
+				state.networks.associate { it.id to it.isFavourite }
+			}
+			val currentNetOrder by rememberUpdatedState(netOrder)
+			val currentFullNetIds by rememberUpdatedState(fullNetIds)
+			val currentFavourites by rememberUpdatedState(favouriteById)
+
+			// Saves the order the network was dropped into.
+			val commitNetDrag: (String) -> Unit = { movedId ->
+				val dropped = reorder.end()
+				if (dropped != null) {
+					reorderIndices(currentFullNetIds, dropped, movedId)?.let { (from, to) ->
+						onReorderNetworks(from, to)
+					}
+				}
+			}
+
+			// One position up or down, for the D-pad path.
+			val stepNet: (String, Int) -> Unit = { movedId, delta ->
+				val order = currentNetOrder
+				val idx = order.indexOf(movedId)
+				val target = idx + delta
+				if (idx >= 0 && target in order.indices &&
+					currentFavourites[movedId] == currentFavourites[order[target]]
+				) {
+					val moved = order.toMutableList().also { it.add(target, it.removeAt(idx)) }
+					reorderIndices(currentFullNetIds, moved, movedId)?.let { (from, to) ->
+						onReorderNetworks(from, to)
+					}
+				}
+			}
+
+			// Keep the dropped order on screen until the saved order matches it, so the
+			// drawer does not flick back to the old positions while the save is in flight.
+			LaunchedEffect(fullNetIds, reorder.previewOrder, reorder.draggedId) {
+				if (reorder.draggedId != null) return@LaunchedEffect
+				val preview = reorder.previewOrder ?: return@LaunchedEffect
+				val settled = fullNetIds.filter { it in preview } == preview.filter { it in fullNetIds }
+				if (settled) {
+					reorder.clearPreview()
+				} else {
+					delay(1000)
+					reorder.clearPreview()
+				}
+			}
 
 			if (state.settings.networkTabs) {
 				// Tabs mode: a horizontal channel switcher.
@@ -1985,11 +2071,16 @@ fun ChatScreen(
 						else -> null
 					}
 					val isRoot    = rootNetId != null
-					val isDragging = isRoot && dragNetId == rootNetId
+					val itemNetId: String? = when (item) {
+						is SidebarItem.Header -> item.netId
+						is SidebarItem.Buffer -> item.netId ?: splitKey(item.key).first
+						is SidebarItem.DividerItem -> item.netId
+					}
+					val isDragging = reorder.isDragging(itemNetId)
 
 					Box(modifier = Modifier
-						.animateItem()
-						.graphicsLayer { if (isDragging) translationY = dragTranslationY else 0f }
+						.then(if (isDragging) Modifier else Modifier.animateItem())
+						.graphicsLayer { translationY = if (isDragging) reorder.translation else 0f }
 						.then(
 							if (isDragging)
 								Modifier
@@ -2001,12 +2092,7 @@ fun ChatScreen(
 							is SidebarItem.Header -> {
 								val (lagLabel, lagProgress) = lagInfoByNet[item.netId] ?: ("—" to 0f)
 								Column(
-									Modifier
-										.padding(start = 6.dp, top = 12.dp, bottom = 8.dp)
-										.onGloballyPositioned { coords ->
-											val id = rootNetId ?: return@onGloballyPositioned
-											slotHeights[id] = coords.size.height.toFloat()
-										}
+									Modifier.padding(start = 6.dp, top = 12.dp, bottom = 8.dp)
 								) {
 									Row(
 										Modifier
@@ -2034,78 +2120,16 @@ fun ChatScreen(
 										)
 										if (rootNetId != null) {
 											SidebarDragHandle(
-												onStart = {
-													val id = rootNetId
-													val idx = netOrder.indexOf(id)
-													if (idx < 0) return@SidebarDragHandle
-													dragNetId       = id
-													dragOriginalIdx = idx
-													dragCurrentIdx  = idx
-													dragAdjustmentY = 0f
-													dragTranslationY = 0f
-													dragNetworkOrder = netOrder.toList()
-												},
+												onStart = { reorder.start(rootNetId, currentNetOrder) },
 												onDrag = { dy ->
-													val order = dragNetworkOrder ?: return@SidebarDragHandle
-													dragNetId ?: return@SidebarDragHandle
-													var accum = dy - dragAdjustmentY
-													var curIdx = dragCurrentIdx
-													var curOrder = order.toMutableList()
-													var changed = false
-													while (true) {
-														if (accum >= 0f && curIdx < curOrder.size - 1) {
-															val nextId = curOrder[curIdx + 1]
-															val h = slotHeights[nextId] ?: 60f
-															val threshold = h / 2f
-															if (accum >= threshold) {
-																curOrder.add(curIdx + 1, curOrder.removeAt(curIdx))
-																dragAdjustmentY += h
-																accum -= h
-																curIdx++
-																changed = true
-																continue
-															}
-														} else if (accum < 0f && curIdx > 0) {
-															val prevId = curOrder[curIdx - 1]
-															val h = slotHeights[prevId] ?: 60f
-															val threshold = h / 2f
-															if (accum < -threshold) {
-																curOrder.add(curIdx - 1, curOrder.removeAt(curIdx))
-																dragAdjustmentY -= h
-																accum += h
-																curIdx--
-																changed = true
-																continue
-															}
-														}
-														break
+													reorder.drag(dy) { movedId, otherId ->
+														currentFavourites[movedId] == currentFavourites[otherId]
 													}
-													if (changed) {
-														dragCurrentIdx = curIdx
-														dragNetworkOrder = curOrder
-													}
-													dragTranslationY = accum
 												},
-												onEnd = {
-													val origIdx = dragOriginalIdx
-													val newIdx = dragCurrentIdx
-													if (dragNetId != null && origIdx >= 0 && newIdx >= 0 && origIdx != newIdx)
-														onReorderNetworks(origIdx, newIdx)
-													dragNetId = null
-													dragOriginalIdx = -1
-													dragCurrentIdx = -1
-													dragAdjustmentY = 0f
-													dragTranslationY = 0f
-													dragNetworkOrder = null
-												},
-												onMoveUp = {
-													val idx = netOrder.indexOf(rootNetId)
-													if (idx > 0) onReorderNetworks(idx, idx - 1)
-												},
-												onMoveDown = {
-													val idx = netOrder.indexOf(rootNetId)
-													if (idx >= 0 && idx < netOrder.size - 1) onReorderNetworks(idx, idx + 1)
-												}
+												onEnd = { commitNetDrag(rootNetId) },
+												onCancel = { reorder.cancel() },
+												onMoveUp = { stepNet(rootNetId, -1) },
+												onMoveDown = { stepNet(rootNetId, 1) },
 											)
 										}
 									}
@@ -2120,13 +2144,7 @@ fun ChatScreen(
 								val (netId, name) = splitKey(item.key)
 								val closable = name != "*server*"
 								val lag = if (name == "*server*") lagInfoByNet[netId] else null
-								val rowMod = if (isRoot) {
-									Modifier.onGloballyPositioned { coords ->
-										val id = rootNetId
-										slotHeights[id] = coords.size.height.toFloat()
-									}
-								} else Modifier
-								Row(modifier = rowMod, verticalAlignment = Alignment.CenterVertically) {
+								Row(verticalAlignment = Alignment.CenterVertically) {
 									// Chevron for network header rows (server buffer acting as header)
 									if (item.isNetworkHeader && item.netId != null) {
 										Icon(
@@ -2171,78 +2189,16 @@ fun ChatScreen(
 									}
 									if (isRoot) {
 										SidebarDragHandle(
-											onStart = {
-												val id = rootNetId
-												val idx = netOrder.indexOf(id)
-												if (idx < 0) return@SidebarDragHandle
-												dragNetId       = id
-												dragOriginalIdx = idx
-												dragCurrentIdx  = idx
-												dragAdjustmentY = 0f
-												dragTranslationY = 0f
-												dragNetworkOrder = netOrder.toList()
-											},
+											onStart = { reorder.start(rootNetId, currentNetOrder) },
 											onDrag = { dy ->
-												val order = dragNetworkOrder ?: return@SidebarDragHandle
-												dragNetId ?: return@SidebarDragHandle
-												var accum = dy - dragAdjustmentY
-												var curIdx = dragCurrentIdx
-												var curOrder = order.toMutableList()
-												var changed = false
-												while (true) {
-													if (accum >= 0f && curIdx < curOrder.size - 1) {
-														val nextId = curOrder[curIdx + 1]
-														val h = slotHeights[nextId] ?: 60f
-														val threshold = h / 2f
-														if (accum >= threshold) {
-															curOrder.add(curIdx + 1, curOrder.removeAt(curIdx))
-															dragAdjustmentY += h
-															accum -= h
-															curIdx++
-															changed = true
-															continue
-														}
-													} else if (accum < 0f && curIdx > 0) {
-														val prevId = curOrder[curIdx - 1]
-														val h = slotHeights[prevId] ?: 60f
-														val threshold = h / 2f
-														if (accum < -threshold) {
-															curOrder.add(curIdx - 1, curOrder.removeAt(curIdx))
-															dragAdjustmentY -= h
-															accum += h
-															curIdx--
-															changed = true
-															continue
-														}
-													}
-													break
+												reorder.drag(dy) { movedId, otherId ->
+													currentFavourites[movedId] == currentFavourites[otherId]
 												}
-												if (changed) {
-													dragCurrentIdx = curIdx
-													dragNetworkOrder = curOrder
-												}
-												dragTranslationY = accum
 											},
-											onEnd = {
-												val origIdx = dragOriginalIdx
-												val newIdx = dragCurrentIdx
-												if (dragNetId != null && origIdx >= 0 && newIdx >= 0 && origIdx != newIdx)
-													onReorderNetworks(origIdx, newIdx)
-												dragNetId = null
-												dragOriginalIdx = -1
-												dragCurrentIdx = -1
-												dragAdjustmentY = 0f
-												dragTranslationY = 0f
-												dragNetworkOrder = null
-											},
-											onMoveUp = {
-												val idx = netOrder.indexOf(rootNetId)
-												if (idx > 0) onReorderNetworks(idx, idx - 1)
-											},
-											onMoveDown = {
-												val idx = netOrder.indexOf(rootNetId)
-												if (idx >= 0 && idx < netOrder.size - 1) onReorderNetworks(idx, idx + 1)
-											}
+											onEnd = { commitNetDrag(rootNetId) },
+											onCancel = { reorder.cancel() },
+											onMoveUp = { stepNet(rootNetId, -1) },
+											onMoveDown = { stepNet(rootNetId, 1) },
 										)
 									}
 								}
@@ -2665,19 +2621,27 @@ fun ChatScreen(
         ChatFontStyle.BOLD_ITALIC -> FontWeight.Bold to FontStyle.Italic
     }
 
-    val chatTextStyle = MaterialTheme.typography.bodyMedium.copy(
-        fontFamily = fontFamilyForChoice(state.settings.chatFontChoice, state.settings.customChatFontPath),
-        fontWeight = baseWeight,
-        fontStyle = baseStyle,
-        // Font line height: the leading between the wrapped lines of ONE message.
-        lineHeight = MaterialTheme.typography.bodyMedium.fontSize *
-            state.settings.chatFontLineHeight.coerceIn(0.9f, 2.0f),
-        platformStyle = PlatformTextStyle(includeFontPadding = false),
-        lineHeightStyle = LineHeightStyle(
-            alignment = LineHeightStyle.Alignment.Center,
-            trim = LineHeightStyle.Trim.None,
-        ),
-    )
+    val chatFontFamily = remember(state.settings.chatFontChoice, state.settings.customChatFontPath) {
+        fontFamilyForChoice(state.settings.chatFontChoice, state.settings.customChatFontPath)
+    }
+
+    // Held across recompositions so every message Text sees the same instance.
+    val bodyMedium = MaterialTheme.typography.bodyMedium
+    val chatLineHeightFactor = state.settings.chatFontLineHeight.coerceIn(0.9f, 2.0f)
+    val chatTextStyle = remember(bodyMedium, chatFontFamily, baseWeight, baseStyle, chatLineHeightFactor) {
+        bodyMedium.copy(
+            fontFamily = chatFontFamily,
+            fontWeight = baseWeight,
+            fontStyle = baseStyle,
+            // Font line height: the leading between the wrapped lines of ONE message.
+            lineHeight = bodyMedium.fontSize * chatLineHeightFactor,
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.None,
+            ),
+        )
+    }
 
     // Chat line spacing: the gap between one message and the next, and nothing else.
     // Stored as a fraction of the font size so the steps scale with the font size slider.
@@ -3091,7 +3055,7 @@ fun ChatScreen(
                             Spacer(Modifier.width(8.dp))
                             TextButton(
                                 onClick = { topicExpanded = !topicExpanded },
-                                contentPadding = PaddingValues(0.dp)
+                                contentPadding = PaddingValues(0.dp), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                             ) { Text(stringResource(if (topicExpanded) R.string.chat_topic_less else R.string.chat_topic_more)) }
                         }
                         if (canTopic) {
@@ -3332,7 +3296,10 @@ fun ChatScreen(
                         is DisplayItem.Single -> {
                         val m = item.msg
                         val ts =
-                            if (state.settings.showTimestamps) "[${timeFmt.format(Date(m.timeMs))}] " else ""
+                            if (state.settings.showTimestamps) {
+                                val style = state.settings.timestampStyle
+                                "${style.open}${timeFmt.format(Date(m.timeMs))}${style.close} "
+                            } else ""
                         // The per-scheme encryption badge is now rendered inside
                         // SingleMessageItem as a Material icon (InlineTextContent) from
                         // m.encryption, so nothing scheme-specific is baked into `ts` here.
@@ -3342,6 +3309,8 @@ fun ChatScreen(
                         SingleMessageItem(
                             m = m,
                             ts = ts,
+                            nickStyle = state.settings.nickStyle,
+                            timestampColor = state.settings.timestampColorInt?.let { Color(it) },
                             isFlickering = flickerMsgId == m.id,
                             flickerAlphaValue = flickerAlpha.value,
                             isFindMatch = isFindMatch,
@@ -3446,7 +3415,7 @@ fun ChatScreen(
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                 disabledContentColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.38f),
-                            ),
+                            ), modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                         ) { Text(stringResource(R.string.copy)) }
                         TextButton(
                             onClick = {
@@ -3455,7 +3424,7 @@ fun ChatScreen(
                             },
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            ),
+                            ), modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                         ) { Text(stringResource(R.string.cancel)) }
                     }
                 }
@@ -3489,10 +3458,19 @@ fun ChatScreen(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = ripple(bounded = true)
                         ) {
-                            scope.launch {
-                                listState.animateScrollToItem(unreadScrollTarget)
-                                userScrolledUp = true
-                                hasReachedUnread = true
+                            // Read once, here. unreadScrollTarget is state that the
+                            // composition keeps updating, and it goes to -1 as soon as the
+                            // buffer changes or the unread run is cleared. Passing it
+                            // straight to the coroutine meant a message arriving between
+                            // the tap and the coroutine running could hand -1 to
+                            // animateScrollToItem, which rejects a negative index.
+                            val target = unreadScrollTarget
+                            if (target >= 0) {
+                                scope.launch {
+                                    runCatching { listState.animateScrollToItem(target) }
+                                    userScrolledUp = true
+                                    hasReachedUnread = true
+                                }
                             }
                         }
                 ) {
@@ -3588,16 +3566,16 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     IconButton(onClick = { onFindNavigate(-1) }, enabled = cur > 0,
-                        modifier = Modifier.size(32.dp)) {
+                        modifier = Modifier.size(32.dp).focusHighlight(CircleShape)) {
                         Icon(Icons.Default.KeyboardArrowUp, "Previous match",
                             modifier = Modifier.size(18.dp))
                     }
                     IconButton(onClick = { onFindNavigate(1) }, enabled = cur < matchCount - 1,
-                        modifier = Modifier.size(32.dp)) {
+                        modifier = Modifier.size(32.dp).focusHighlight(CircleShape)) {
                         Icon(Icons.Default.KeyboardArrowDown, "Next match",
                             modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = onCloseFindOverlay, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onCloseFindOverlay, modifier = Modifier.size(32.dp).focusHighlight(CircleShape)) {
                         Icon(Icons.Default.Close, "Close search", modifier = Modifier.size(18.dp))
                     }
                 }
@@ -3645,6 +3623,72 @@ fun ChatScreen(
             // SUB_COMMANDS entry already contain that space.
             if (rest.count { it == ' ' } > subCommandMaxSpaces(parent)) return@remember null
             parent to rest
+        }
+
+        // Tab completion of nicks, for anyone with a physical keyboard.
+        var nickCycle by remember { mutableStateOf<NickCycle?>(null) }
+
+        /**
+         * Completes the word before the cursor against the nicklist.
+         * A repeat press cycles forward through the matches, Shift+Tab backwards.
+         * Returns false when there is nothing to complete.
+         */
+        fun completeNick(backwards: Boolean): Boolean {
+            if (!isChannel || nicklist.isEmpty()) return false
+
+            fun bare(n: String) = n.trimStart('~', '&', '@', '%', '+')
+
+            // Non-null only while the field still holds exactly what the last completion
+            // left, so an edit in between starts a fresh completion rather than cycling
+            // matches for a word that is no longer there.
+            val cycle = nickCycle?.takeIf {
+                input.text == it.text &&
+                    input.selection.start == it.cursor &&
+                    input.selection.collapsed
+            }
+
+            val start: Int
+            val hadAt: Boolean
+            val matches: List<String>
+            val index: Int
+
+            if (cycle != null) {
+                start = cycle.start
+                hadAt = cycle.hadAt
+                matches = cycle.matches
+                index = if (backwards) {
+                    (cycle.index - 1 + matches.size) % matches.size
+                } else {
+                    (cycle.index + 1) % matches.size
+                }
+            } else {
+                val cursor = input.selection.start
+                if (!input.selection.collapsed) return false
+                var wordStart = cursor
+                while (wordStart > 0 && !input.text[wordStart - 1].isWhitespace()) wordStart--
+                val word = input.text.substring(wordStart, cursor)
+                if (word.isEmpty()) return false
+                hadAt = word.startsWith("@")
+                val prefix = if (hadAt) word.substring(1) else word
+                if (prefix.isEmpty()) return false
+                matches = nicklist
+                    .map { bare(it) }
+                    .filter { it.startsWith(prefix, ignoreCase = true) }
+                    .distinct()
+                    .sortedBy { it.lowercase() }
+                if (matches.isEmpty()) return false
+                start = wordStart
+                index = 0
+            }
+            val nick = matches[index]
+            val suffix = if (start == 0) ": " else " "
+            val replacement = (if (hadAt) "@" else "") + nick + suffix
+            val end = input.selection.start
+            val newText = input.text.substring(0, start) + replacement + input.text.substring(end)
+            val newCursor = start + replacement.length
+            input = TextFieldValue(newText, TextRange(newCursor))
+            nickCycle = NickCycle(start, hadAt, matches, index, newText, newCursor)
+            return true
         }
 
         // Nick-hint query: non-null when the word at cursor starts with "@" and has ≥1 char after it.
@@ -3897,7 +3941,7 @@ fun ChatScreen(
                     )
                     IconButton(
                         onClick = { pendingReply = null },
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(20.dp).focusHighlight(CircleShape),
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
@@ -3932,7 +3976,7 @@ fun ChatScreen(
                     if (keyInfo != null) {
                         IconButton(
                             onClick = { showEncryptionDialog = true },
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(28.dp).focusHighlight(CircleShape),
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Lock,
@@ -4026,6 +4070,7 @@ fun ChatScreen(
 						.weight(1f)
 						.heightIn(min = 40.dp)
 						.tourTarget(TourTarget.CHAT_INPUT)
+						.focusRequester(inputFocus)
 						.onFocusChanged { inputHasFocus = it.isFocused }
 						.onPreviewKeyEvent { ev ->
                             // onPreviewKeyEvent rather than onKeyEvent because the text field's
@@ -4041,6 +4086,10 @@ fun ChatScreen(
                                     if (ev.isShiftPressed) return@onPreviewKeyEvent false
                                     sendNow()
                                     true
+                                }
+                                Key.Tab -> {
+                                    // Consumed in a channel even when nothing matched
+                                    completeNick(backwards = ev.isShiftPressed) || isChannel
                                 }
                                 Key.DirectionUp -> {
                                     // Up-arrow recalls input history. Only intercepted when the
@@ -4126,18 +4175,14 @@ fun ChatScreen(
                 if (isChannel && (canKick || canBan || canTopic)) {
                     val opsInteraction = remember { MutableInteractionSource() }
                     val opsPressed by opsInteraction.collectIsPressedAsState()
+                    val accents = LocalAccentColors.current
 
                     Box(
                         modifier = Modifier
                             .size(40.dp)
                             .scale(if (opsPressed) 0.92f else 1f)
                             .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        Color(0xFFFF9500),  // Orange
-                                        Color(0xFFFF5E3A)   // Red-orange
-                                    )
-                                ),
+                                brush = Brush.linearGradient(colors = accents.channelTools),
                                 shape = RoundedCornerShape(4.dp)
                             )
                             .focusHighlight(RoundedCornerShape(4.dp))
@@ -4152,7 +4197,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.Filled.Build,
                             contentDescription = stringResource(R.string.chat_channel_tools),
-                            tint = Color.White.copy(alpha = if (opsPressed) 0.7f else 1f),
+                            tint = accents.onAccent.copy(alpha = if (opsPressed) 0.7f else 1f),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -4162,18 +4207,14 @@ fun ChatScreen(
                 run {
                     val sendInteraction = remember { MutableInteractionSource() }
                     val sendPressed by sendInteraction.collectIsPressedAsState()
+                    val accents = LocalAccentColors.current
 
                     Box(
                         modifier = Modifier
                             .size(40.dp)
                             .scale(if (sendPressed) 0.92f else 1f)
                             .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-										Color(0xFF5B86E5),  // Blue
-										Color(0xFF36D1DC)   // Cyan
-                                    )
-                                ),
+                                brush = Brush.linearGradient(colors = accents.send),
                                 shape = RoundedCornerShape(4.dp)
                             )
                             .focusHighlight(RoundedCornerShape(4.dp))
@@ -4188,7 +4229,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = stringResource(R.string.chat_send_message),
-                            tint = Color.White.copy(alpha = if (sendPressed) 0.7f else 1f),
+                            tint = accents.onAccent.copy(alpha = if (sendPressed) 0.7f else 1f),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -4240,10 +4281,30 @@ fun ChatScreen(
                         .fillMaxHeight())
 
                     // Thin drag handle
+                    val portraitStepPx = with(LocalDensity.current) { 16.dp.toPx() }
+                    val savePortraitFrac = {
+                        val clamped = portraitNickFrac.coerceIn(
+                            minPortraitNickFrac,
+                            maxPortraitNickFrac
+                        )
+                        portraitNickFrac = clamped
+                        onUpdateSettings { copy(portraitNickPaneFrac = clamped) }
+                    }
                     Box(
                         modifier = Modifier
                             .width(10.dp)
                             .fillMaxHeight()
+                            .dpadResize(
+                                onLeft = {
+                                    portraitNickFrac = (portraitNickFrac + portraitStepPx / portraitScreenWpx)
+                                        .coerceIn(minPortraitNickFrac, maxPortraitNickFrac)
+                                },
+                                onRight = {
+                                    portraitNickFrac = (portraitNickFrac - portraitStepPx / portraitScreenWpx)
+                                        .coerceIn(minPortraitNickFrac, maxPortraitNickFrac)
+                                },
+                                onEnd = { savePortraitFrac() },
+                            )
                             .draggable(
                                 orientation = Orientation.Horizontal,
                                 state = portraitDragSt,
@@ -4251,12 +4312,7 @@ fun ChatScreen(
                                 onDragStarted = { portraitDragging = true },
                                 onDragStopped = {
                                     portraitDragging = false
-                                    val clamped = portraitNickFrac.coerceIn(
-                                        minPortraitNickFrac,
-                                        maxPortraitNickFrac
-                                    )
-                                    portraitNickFrac = clamped
-                                    onUpdateSettings { copy(portraitNickPaneFrac = clamped) }
+                                    savePortraitFrac()
                                 },
                             ),
                         contentAlignment = Alignment.Center
@@ -4341,11 +4397,19 @@ fun ChatScreen(
                     onDragDeltaPx(deltaPx)
                 }
 
+                // One D-pad step.
+                val stepPx = with(LocalDensity.current) { 16.dp.toPx() }
+
                 Box(
                     modifier = Modifier
                         // Bigger touch target helps a lot in landscape / gesture navigation.
                         .width(15.dp)
                         .fillMaxHeight()
+                        .dpadResize(
+                            onLeft = { onDragDeltaPx(-stepPx) },
+                            onRight = { onDragDeltaPx(stepPx) },
+                            onEnd = onDragEnd,
+                        )
                         .draggable(
                             orientation = Orientation.Horizontal,
                             state = dragState,
@@ -4427,11 +4491,27 @@ fun ChatScreen(
 
     val scaffold: @Composable () -> Unit = {
         Scaffold(
-            modifier = Modifier.windowInsetsPadding(
-                WindowInsets.navigationBars.only(
-                    WindowInsetsSides.Horizontal
-                )
-            ),
+            modifier = Modifier
+                .onPreviewKeyEvent { ev ->
+                    // With a physical keyboard, typing anywhere in the chat goes to the
+                    // message field the way a desktop client behaves. The character is
+                    // inserted here because the event is not delivered again once focus
+                    // moves, so letting it through would swallow the first keystroke.
+                    if (!hardwareKeyboard || inputHasFocus) return@onPreviewKeyEvent false
+                    val typed = typedCharacter(ev) ?: return@onPreviewKeyEvent false
+                    val start = input.selection.min
+                    val end = input.selection.max
+                    val text = input.text.substring(0, start) + typed + input.text.substring(end)
+                    input = TextFieldValue(text, TextRange(start + 1))
+                    onTypingChanged(text)
+                    runCatching { inputFocus.requestFocus() }
+                    true
+                }
+                .windowInsetsPadding(
+                    WindowInsets.navigationBars.only(
+                        WindowInsetsSides.Horizontal
+                    )
+                ),
             topBar = topBar,
             bottomBar = bottomBar,
             snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
@@ -4486,12 +4566,10 @@ fun ChatScreen(
         LaunchedEffect(showChanOps, selBufName) {
             if (selBufName.isNotBlank() && selBufName != "*server*") onRefreshChannelModes()
         }
-        // windowInsets = WindowInsets(0) so we control insets ourselves.
-        // imePadding() goes on the OUTER container, not inside the scroll — this prevents
-        // the "bounce" where scrolled-to-bottom content jumps when the keyboard appears,
-        // because the sheet shrinks from outside rather than padding growing inside.
+        // contentWindowInsets = WindowInsets(0) so we control insets ourselves.
         ModalBottomSheet(
             onDismissRequest = { showChanOps = false },
+            contentWindowInsets = { WindowInsets(0) },
         ) {
             val scrollState = rememberScrollState()
             // Sticky header (title + meta) — never scrolls away
@@ -4523,7 +4601,7 @@ fun ChatScreen(
                     } else {
                         TextButton(
                             onClick = { onSend("/mode $selBufName") },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                         ) { Text(stringResource(R.string.chat_fetch_modes), style = MaterialTheme.typography.labelSmall) }
                     }
                 }
@@ -4555,8 +4633,8 @@ fun ChatScreen(
                             val t = opsTopic.trim()
                             onSend(if (t.isBlank()) "/topic $selBufName" else "/topic $selBufName $t")
                             showChanOps = false
-                        }) { Text(stringResource(R.string.set)) }
-                        OutlinedButton(onClick = { opsTopic = topic ?: "" }) { Text(stringResource(R.string.reset)) }
+                        }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.set)) }
+                        OutlinedButton(onClick = { opsTopic = topic ?: "" }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.reset)) }
                     }
                     HorizontalDivider()
                 }
@@ -4640,8 +4718,8 @@ fun ChatScreen(
                         Button(onClick = {
                             val k = keyInput.trim()
                             if (k.isNotBlank()) onSend("/mode $selBufName +k $k")
-                        }, enabled = keyInput.isNotBlank()) { Text(stringResource(R.string.set)) }
-                        OutlinedButton(onClick = { onSend("/mode $selBufName -k *") }) { Text(stringResource(R.string.ignore_remove)) }
+                        }, enabled = keyInput.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.set)) }
+                        OutlinedButton(onClick = { onSend("/mode $selBufName -k *") }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ignore_remove)) }
                     }
 
                     // Limit
@@ -4664,8 +4742,8 @@ fun ChatScreen(
                         Button(onClick = {
                             val l = limitInput.trim()
                             if (l.isNotBlank()) onSend("/mode $selBufName +l $l")
-                        }, enabled = limitInput.isNotBlank()) { Text(stringResource(R.string.set)) }
-                        OutlinedButton(onClick = { onSend("/mode $selBufName -l"); limitInput = "" }) { Text(stringResource(R.string.ignore_remove)) }
+                        }, enabled = limitInput.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.set)) }
+                        OutlinedButton(onClick = { onSend("/mode $selBufName -l"); limitInput = "" }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ignore_remove)) }
                     }
 
                     HorizontalDivider()
@@ -4701,7 +4779,7 @@ fun ChatScreen(
                                         onSend(if (r.isBlank()) "/kick $selBufName $n" else "/kick $selBufName $n $r")
                                         showChanOps = false
                                     }
-                                }
+                                }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                             ) { Text(stringResource(R.string.chat_kick)) }
                         }
                         if (canBan) {
@@ -4712,7 +4790,7 @@ fun ChatScreen(
                                         onSend("/ban $selBufName $n")
                                         showChanOps = false
                                     }
-                                }
+                                }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                             ) { Text(stringResource(R.string.chat_ban)) }
                             OutlinedButton(
                                 onClick = {
@@ -4722,7 +4800,7 @@ fun ChatScreen(
                                         onSend(if (r.isBlank()) "/kb $selBufName $n" else "/kb $selBufName $n $r")
                                         showChanOps = false
                                     }
-                                }
+                                }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                             ) { Text(stringResource(R.string.chat_kick_ban_btn)) }
                         }
                     }
@@ -4733,7 +4811,7 @@ fun ChatScreen(
                                 showChanOps = false
                                 chanListTab = 0
                                 showChanListSheet = true
-                            }
+                            }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                         ) { Text(stringResource(R.string.chat_channel_lists)) }
                     }
                 }
@@ -4744,7 +4822,12 @@ fun ChatScreen(
 
     // IRCop tools
     if (showIrcOpTools) {
-        ModalBottomSheet(onDismissRequest = { showIrcOpTools = false }) {
+        // Insets are handled by the content, not the sheet: see the note on the channel
+        // tools sheet above.
+        ModalBottomSheet(
+            onDismissRequest = { showIrcOpTools = false },
+            contentWindowInsets = { WindowInsets(0) },
+        ) {
             val scrollState = rememberScrollState()
             Column(
                 Modifier
@@ -4817,7 +4900,7 @@ fun ChatScreen(
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = opTarget.isNotBlank()
+                        enabled = opTarget.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_kill)) }
                     OutlinedButton(
                         onClick = {
@@ -4828,7 +4911,7 @@ fun ChatScreen(
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = canLine
+                        enabled = canLine, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_kline)) }
                     OutlinedButton(
                         onClick = {
@@ -4839,7 +4922,7 @@ fun ChatScreen(
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = canLine
+                        enabled = canLine, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_zline)) }
                     OutlinedButton(
                         onClick = {
@@ -4850,7 +4933,7 @@ fun ChatScreen(
                                 showIrcOpTools = false
                             }
                         },
-                        enabled = canLine
+                        enabled = canLine, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_gline)) }
                     OutlinedButton(
                         onClick = {
@@ -4860,7 +4943,7 @@ fun ChatScreen(
                                 onSend("/shun $t $d $r")
                             }
                         },
-                        enabled = canLine
+                        enabled = canLine, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_shun)) }
                     OutlinedButton(
                         onClick = {
@@ -4870,7 +4953,7 @@ fun ChatScreen(
                                 onSend("/dline $t $d $r")
                             }
                         },
-                        enabled = canLine
+                        enabled = canLine, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_dline)) }
                 }
 
@@ -4892,14 +4975,14 @@ fun ChatScreen(
                             val t = opTarget.trim(); val ch = opServer.trim()
                             if (t.isNotBlank() && ch.isNotBlank()) onSend("/sajoin $t $ch")
                         },
-                        enabled = opTarget.isNotBlank() && opServer.isNotBlank()
+                        enabled = opTarget.isNotBlank() && opServer.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_sajoin)) }
                     OutlinedButton(
                         onClick = {
                             val t = opTarget.trim(); val ch = opServer.trim()
                             if (t.isNotBlank() && ch.isNotBlank()) onSend("/sapart $t $ch")
                         },
-                        enabled = opTarget.isNotBlank() && opServer.isNotBlank()
+                        enabled = opTarget.isNotBlank() && opServer.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_sapart)) }
                 }
 
@@ -4918,15 +5001,15 @@ fun ChatScreen(
                 ) {
                     Button(
                         onClick = { if (opMessage.isNotBlank()) onSend("/wallops ${opMessage.trim()}") },
-                        enabled = opMessage.isNotBlank()
+                        enabled = opMessage.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_wallops)) }
                     OutlinedButton(
                         onClick = { if (opMessage.isNotBlank()) onSend("/globops ${opMessage.trim()}") },
-                        enabled = opMessage.isNotBlank()
+                        enabled = opMessage.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_globops)) }
                     OutlinedButton(
                         onClick = { if (opMessage.isNotBlank()) onSend("/locops ${opMessage.trim()}") },
-                        enabled = opMessage.isNotBlank()
+                        enabled = opMessage.isNotBlank(), modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.ircop_locops)) }
                 }
 
@@ -4938,10 +5021,10 @@ fun ChatScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(onClick = { onSend("/motd"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_motd)) }
-                    OutlinedButton(onClick = { onSend("/admin"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_admin)) }
-                    OutlinedButton(onClick = { onSend("/stats u"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_uptime)) }
-                    OutlinedButton(onClick = { onSend("/stats l"); showIrcOpTools = false }) { Text(stringResource(R.string.ircop_links)) }
+                    OutlinedButton(onClick = { onSend("/motd"); showIrcOpTools = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ircop_motd)) }
+                    OutlinedButton(onClick = { onSend("/admin"); showIrcOpTools = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ircop_admin)) }
+                    OutlinedButton(onClick = { onSend("/stats u"); showIrcOpTools = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ircop_uptime)) }
+                    OutlinedButton(onClick = { onSend("/stats l"); showIrcOpTools = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.ircop_links)) }
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -4962,9 +5045,12 @@ fun ChatScreen(
 
         var colorMode by remember { mutableStateOf(0) } // 0 = FG, 1 = BG
 
+        // Insets are handled by the content, not the sheet: see the note on the channel
+        // tools sheet above.
         ModalBottomSheet(
             onDismissRequest = { showColorPicker = false },
             sheetMaxWidth = 600.dp,
+            contentWindowInsets = { WindowInsets(0) },
         ) {
             Column(
                 Modifier
@@ -5280,12 +5366,12 @@ fun ChatScreen(
                             underlineActive = false
                             reverseActive = false
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.chat_clear_all)) }
 
                     Button(
                         onClick = { showColorPicker = false },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(50))
                     ) { Text(stringResource(R.string.done)) }
                 }
             }
@@ -5373,7 +5459,12 @@ fun ChatScreen(
             )
         }
 
-        ModalBottomSheet(onDismissRequest = { showChanListSheet = false }) {
+        // Insets are handled by the content, not the sheet: see the note on the channel
+        // tools sheet above.
+        ModalBottomSheet(
+            onDismissRequest = { showChanListSheet = false },
+            contentWindowInsets = { WindowInsets(0) },
+        ) {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -5468,10 +5559,10 @@ fun ChatScreen(
                         2 -> supportsExcept
                         else -> supportsInvex
                     }
-                    OutlinedButton(enabled = canRefresh, onClick = { refreshCurrentList() }) {
+                    OutlinedButton(enabled = canRefresh, onClick = { refreshCurrentList() }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                         Text(stringResource(R.string.chat_refresh))
                     }
-                    OutlinedButton(onClick = { showChanListSheet = false }) { Text(stringResource(R.string.close)) }
+                    OutlinedButton(onClick = { showChanListSheet = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.close)) }
                 }
 
                 HorizontalDivider()
@@ -5524,7 +5615,7 @@ fun ChatScreen(
                                                 delay(250)
                                                 onSend(ui.refreshCmd)
                                             }
-                                        }
+                                        }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                     ) { Text(ui.removeLabel) }
                                 }
                             }
@@ -5559,7 +5650,7 @@ fun ChatScreen(
                                         onSend(ui.refreshCmd)
                                     }
                                     banInput = ""
-                                }
+                                }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                             ) { Text(stringResource(R.string.chat_add)) }
                         }
                         // Extended-ban helpers (EXTBAN / draft/account-extban). Only shown on
@@ -5578,7 +5669,7 @@ fun ChatScreen(
                                             onSend(ui.refreshCmd)
                                         }
                                         banInput = ""
-                                    }
+                                    }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
                                 ) { Text(stringResource(R.string.chat_ban_account)) }
                             }
                             Text(
@@ -5649,10 +5740,10 @@ fun ChatScreen(
                     val t = editTopicText.trim()
                     onSend("/topic $selBufName $t")
                     showTopicQuickEdit = false
-                }) { Text(stringResource(R.string.topic_set)) }
+                }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.topic_set)) }
             },
             dismissButton = {
-                TextButton(onClick = { showTopicQuickEdit = false }) { Text(stringResource(R.string.cancel)) }
+                TextButton(onClick = { showTopicQuickEdit = false }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -5813,10 +5904,10 @@ fun ChatScreen(
                     onSetDccAutoAccept(selNetId, pendingNick, true)
                     confirmAutoAcceptFor = null
                     showNickActions = false
-                }) { Text(stringResource(R.string.dcc_auto_confirm_ok)) }
+                }, modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.dcc_auto_confirm_ok)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmAutoAcceptFor = null }) {
+                TextButton(onClick = { confirmAutoAcceptFor = null }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                     Text(stringResource(R.string.cancel))
                 }
             }
@@ -6194,6 +6285,10 @@ fun ChatScreen(
 private fun SingleMessageItem(
     m: UiMessage,
     ts: String,
+    /** Brackets drawn around the sender's nick. */
+    nickStyle: NickStyle,
+    /** Colour for the timestamp span, or null to use the message colour. */
+    timestampColor: Color?,
     // Pre-computed booleans so the item doesn't capture find/flicker state objects.
     isFlickering: Boolean,
     flickerAlphaValue: Float,       // Float, not Animatable, so Compose sees a stable param
@@ -6291,6 +6386,7 @@ private fun SingleMessageItem(
 
     // Collapse multiline messages to the first COLLAPSE_LINES and offer to expand.
     val bodyLineCount = remember(m.text) { m.text.count { it == '\n' } + 1 }
+    val isTv = isTvDevice()
     val collapsible = m.multiline && bodyLineCount > COLLAPSE_LINES
     val hiddenLines = bodyLineCount - COLLAPSE_LINES
     val bodyText = remember(m.text, collapsible, isExpanded) {
@@ -6388,8 +6484,16 @@ private fun SingleMessageItem(
                         }
                     } else Modifier
                 )
+                // A remote has no long press, so select opens the message actions there.
+                // Touch keeps long press, where a select-to-open row would fight with tapping links inside the message.
+                .then(if (isTv) Modifier.focusHighlight(RoundedCornerShape(4.dp)) else Modifier)
                 .combinedClickable(
-                    onClick = { if (copyRangeMode) onToggleSelected() },
+                    onClick = {
+                        when {
+                            copyRangeMode -> onToggleSelected()
+                            isTv -> onLongPress()
+                        }
+                    },
                     onLongClick = { if (copyRangeMode) onToggleSelected() else onLongPress() }
                 )
         ) {
@@ -6444,6 +6548,8 @@ private fun SingleMessageItem(
                         findHighlight = findHighlight,
                         findHighlightBg = hlBg,
                         findHighlightFg = hlFg,
+                        prefixLength = ts.length,
+                        prefixColor = timestampColor,
                     )
                 }
             } else if (m.isAction) {
@@ -6451,10 +6557,11 @@ private fun SingleMessageItem(
                 val fromBase = baseNick(fromDisplay)
                 val botPrefix = stringResource(R.string.chat_bot_prefix)
                 val annotated = remember(ts, fromDisplay, fromBase, bodyText, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix,
+                    timestampColor) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
-                        append(ts); append("* ")
+                        appendTimestamp(ts, timestampColor); append("* ")
                         // draft/oper-tag: amber star marks messages from IRC operators.
                         if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
                         // Bot Mode: a muted [bot] tag marks messages from bots.
@@ -6477,10 +6584,11 @@ private fun SingleMessageItem(
                 val fromBase = baseNick(fromDisplay)
                 val botPrefix = stringResource(R.string.chat_bot_prefix)
                 val annotated = remember(ts, fromDisplay, fromBase, bodyText, colorizeNicks,
-                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix) {
+                    mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix,
+                    timestampColor, nickStyle) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
-                        append(ts); append("<")
+                        appendTimestamp(ts, timestampColor); append(nickStyle.open)
                         // draft/oper-tag: amber star marks messages from IRC operators.
                         if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
                         // Bot Mode: a muted [bot] tag marks messages from bots.
@@ -6493,7 +6601,7 @@ private fun SingleMessageItem(
                         if (displayName != null) {
                             withStyle(SpanStyle(color = Color.Gray)) { append(" ($displayName)") }
                         }
-                        append("> ")
+                        append(nickStyle.close); append(" ")
                         appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
@@ -6996,6 +7104,12 @@ private fun AnnotatedClickableText(
     )
 }
 
+/** Appends the timestamp, tinted when the user has picked a colour for it. */
+private fun AnnotatedString.Builder.appendTimestamp(ts: String, color: Color?) {
+    if (ts.isEmpty()) return
+    if (color == null) append(ts) else withStyle(SpanStyle(color = color)) { append(ts) }
+}
+
 @Composable
 private fun IrcLinkifiedText(
     text: String,
@@ -7011,9 +7125,21 @@ private fun IrcLinkifiedText(
     findHighlight: String? = null,  // when non-null, highlight all occurrences of this query
     findHighlightBg: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color(0xFFFFD54F),
     findHighlightFg: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Black,
+    /** Leading characters of [text] holding the timestamp, tinted with [prefixColor]. */
+    prefixLength: Int = 0,
+    prefixColor: androidx.compose.ui.graphics.Color? = null,
 ) {
-    val annotated = remember(text, linkStyle, mircColorsEnabled, ansiColorsEnabled, findHighlight, findHighlightBg) {
-        val base = buildAnnotatedString { appendIrcStyledLinkified(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) }
+    val annotated = remember(text, linkStyle, mircColorsEnabled, ansiColorsEnabled, findHighlight, findHighlightBg,
+        prefixLength, prefixColor) {
+        val styled = buildAnnotatedString { appendIrcStyledLinkified(text, linkStyle, mircColorsEnabled, ansiColorsEnabled) }
+        val base = if (prefixColor != null && prefixLength > 0 && prefixLength <= styled.length) {
+            buildAnnotatedString {
+                append(styled)
+                addStyle(SpanStyle(color = prefixColor), 0, prefixLength)
+            }
+        } else {
+            styled
+        }
         if (findHighlight.isNullOrBlank()) return@remember base
         val plain = base.text
         val query = findHighlight.lowercase()
@@ -7456,4 +7582,17 @@ private fun MotdLine(
         maxLines = 1,
         overflow = TextOverflow.Clip,
     )
+}
+
+/**
+ * The character a key event types, or null when the event is a shortcut, a
+ * modifier or a control key rather than text. Space counts as null because it
+ * activates whatever control has focus.
+ */
+private fun typedCharacter(ev: KeyEvent): Char? {
+    if (ev.type != KeyEventType.KeyDown) return null
+    if (ev.isCtrlPressed || ev.isAltPressed || ev.isMetaPressed) return null
+    val code = ev.utf16CodePoint
+    if (code == 0 || code == ' '.code || Character.isISOControl(code)) return null
+    return code.toChar()
 }

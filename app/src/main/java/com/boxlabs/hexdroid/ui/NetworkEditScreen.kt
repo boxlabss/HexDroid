@@ -29,10 +29,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.boxlabs.hexdroid.CapPrefs
@@ -47,6 +60,23 @@ import com.boxlabs.hexdroid.connection.ProxyType
 import com.boxlabs.hexdroid.connection.ProxyConfig
 import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
+
+/**
+ * One page of the network editor. Order here is the order shown in the rail and tabs.
+ */
+enum class NetEditSection(val titleRes: Int, val icon: ImageVector) {
+    CONNECTION(R.string.network_section_connection, Icons.Filled.Dns),
+    IDENTITY(R.string.network_section_identity, Icons.Filled.Person),
+    AUTOCONNECT(R.string.network_section_autoconnect, Icons.Filled.PowerSettingsNew),
+    SASL(R.string.network_section_sasl, Icons.Filled.VpnKey),
+    TLS_CERT(R.string.network_section_tls_cert, Icons.Filled.Security),
+    AUTOJOIN(R.string.network_section_autojoin, Icons.Filled.Forum),
+    POSTCMDS(R.string.network_section_postcmds, Icons.Filled.Terminal),
+    PROXY(R.string.network_section_proxy, Icons.Filled.Shield),
+    ENCODING(R.string.network_section_encoding, Icons.Filled.Translate),
+    NOTIFICATIONS(R.string.network_section_notifications, Icons.Filled.Notifications),
+    IRCV3(R.string.network_section_ircv3, Icons.Filled.Extension),
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -232,6 +262,17 @@ fun NetworkEditScreen(
         SaslMechanism.SCRAM_SHA_256 to "SCRAM-SHA-256"
     )
 
+    // One page at a time: a rail beside the form on TV and tablets, a tab strip on phones.
+    val railLayout = useSideRailNav()
+    var picked by rememberSaveable { mutableStateOf(NetEditSection.CONNECTION) }
+    val sections = NetEditSection.values().filter { it != NetEditSection.TLS_CERT || tls }
+    val section = if (picked in sections) picked else NetEditSection.CONNECTION
+    val formScroll = rememberScrollState()
+
+    LaunchedEffect(section) {
+        runCatching { formScroll.scrollTo(0) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -407,16 +448,54 @@ fun NetworkEditScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
                 .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             state.networkEditError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
             }
 
-            CardSection(stringResource(R.string.network_section_connection)) {
+            if (!railLayout) {
+                SectionTabs(
+                    entries = sections,
+                    selected = section,
+                    label = { stringResource(it.titleRes) },
+                    onSelect = { picked = it },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (railLayout) {
+                    SectionRail(
+                        entries = sections,
+                        selected = section,
+                        label = { stringResource(it.titleRes) },
+                        icon = { it.icon },
+                        onSelect = { picked = it },
+                        modifier = Modifier.width(RAIL_WIDTH).fillMaxHeight(),
+                    )
+                    VerticalDivider()
+                }
+
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(formScroll)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                ) {
+
+            CardSection(stringResource(R.string.network_section_connection), visible = section == NetEditSection.CONNECTION) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -656,7 +735,7 @@ fun NetworkEditScreen(
                 }
             }
 
-            CardSection(stringResource(R.string.network_section_identity)) {
+            CardSection(stringResource(R.string.network_section_identity), visible = section == NetEditSection.IDENTITY) {
                 OutlinedTextField(
                     value = nick,
                     onValueChange = { nick = it },
@@ -692,7 +771,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_autoconnect)) {
+            CardSection(stringResource(R.string.network_section_autoconnect), visible = section == NetEditSection.AUTOCONNECT) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -834,7 +913,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_sasl)) {
+            CardSection(stringResource(R.string.network_section_sasl), visible = section == NetEditSection.SASL) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -904,7 +983,7 @@ fun NetworkEditScreen(
                 }
             }
 
-            AnimatedVisibility(visible = tls) {
+            AnimatedVisibility(visible = tls && section == NetEditSection.TLS_CERT) {
                 CardSection(stringResource(R.string.network_section_tls_cert)) {
                     val activeLabel = when {
                         pendingPemLabel != null -> pendingPemLabel
@@ -1059,7 +1138,7 @@ fun NetworkEditScreen(
                 }
             }
 			
-            CardSection(stringResource(R.string.network_section_autojoin)) {
+            CardSection(stringResource(R.string.network_section_autojoin), visible = section == NetEditSection.AUTOJOIN) {
                 Text(
                     stringResource(R.string.network_autojoin_hint),
                     style = MaterialTheme.typography.bodySmall,
@@ -1073,7 +1152,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_postcmds)) {
+            CardSection(stringResource(R.string.network_section_postcmds), visible = section == NetEditSection.POSTCMDS) {
                 OutlinedTextField(
                     value = postDelayText,
                     onValueChange = { postDelayText = it.filter { c -> c.isDigit() } },
@@ -1110,7 +1189,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_proxy)) {
+            CardSection(stringResource(R.string.network_section_proxy), visible = section == NetEditSection.PROXY) {
                 // Proxy type selector. SOCKS5 is the right pick for Tor (Orbot) and for any
                 // modern proxy; SOCKS4a is offered for legacy proxies. Both resolve the
                 // destination host at the proxy (remote DNS), which is what lets `.onion`
@@ -1246,7 +1325,7 @@ fun NetworkEditScreen(
                 }
             }
 
-            CardSection(stringResource(R.string.network_section_encoding)) {
+            CardSection(stringResource(R.string.network_section_encoding), visible = section == NetEditSection.ENCODING) {
                 ExposedDropdownMenuBox(
                     expanded = encodingExpanded,
                     onExpandedChange = { encodingExpanded = it }
@@ -1289,7 +1368,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_notifications)) {
+            CardSection(stringResource(R.string.network_section_notifications), visible = section == NetEditSection.NOTIFICATIONS) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1324,7 +1403,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_ircv3)) {
+            CardSection(stringResource(R.string.network_section_ircv3), visible = section == NetEditSection.IRCV3) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1407,7 +1486,9 @@ fun NetworkEditScreen(
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(32.dp))
+                }
+            }
         }
     }
 }
@@ -1438,11 +1519,17 @@ private fun CapSwitch(
     }
 }
 
+/**
+ * Titled card holding one group of fields. Renders nothing when [visible] is false,
+ * which is how the editor shows a single section at a time.
+ */
 @Composable
 private fun CardSection(
     title: String,
+    visible: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    if (!visible) return
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             Modifier.padding(16.dp),

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -98,10 +99,10 @@ fun DccTrustedScreen(
                     onSetDccAutoAccept(selectedNetId, pendingNick, true)
                     addNick = ""
                     confirmFor = null
-                }) { Text(stringResource(R.string.dcc_auto_confirm_ok)) }
+                }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.dcc_auto_confirm_ok)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmFor = null }) { Text(stringResource(R.string.cancel)) }
+                TextButton(onClick = { confirmFor = null }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(R.string.cancel)) }
             }
         )
     }

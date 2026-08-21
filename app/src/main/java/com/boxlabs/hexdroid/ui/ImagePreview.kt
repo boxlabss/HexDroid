@@ -391,6 +391,8 @@ private fun YouTubePlayer(videoId: String, onClose: () -> Unit) {
                 .align(Alignment.TopEnd)
                 .padding(4.dp)
                 .size(36.dp)
+                .focusHighlight(RoundedCornerShape(18.dp))
+                .tvInitialFocus()
                 .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(18.dp)),
         ) {
             Icon(
@@ -465,6 +467,8 @@ private fun TwitterVideoPlayer(videoUrl: String, onClose: () -> Unit) {
                 .align(Alignment.TopEnd)
                 .padding(4.dp)
                 .size(36.dp)
+                .focusHighlight(RoundedCornerShape(18.dp))
+                .tvInitialFocus()
                 .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(18.dp)),
         ) {
             Icon(
@@ -652,7 +656,7 @@ fun InlinePreview(
         is PreviewState.Idle, is PreviewState.Failed -> {
             androidx.compose.material3.OutlinedButton(
                 onClick = { loadRequested = true },
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(top = 2.dp).focusHighlight(RoundedCornerShape(6.dp)),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(6.dp),
             ) {
@@ -764,6 +768,7 @@ fun InlinePreview(
                                 .align(Alignment.TopEnd)
                                 .padding(4.dp)
                                 .size(28.dp)
+                                .focusHighlight(RoundedCornerShape(14.dp))
                                 .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(14.dp)),
                         ) {
                             Icon(

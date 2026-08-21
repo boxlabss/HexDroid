@@ -65,6 +65,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.boxlabs.hexdroid.ui.focusHighlight
+import com.boxlabs.hexdroid.ui.tvInitialFocus
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -117,8 +119,18 @@ fun ScriptsScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.scripts_title)) },
-                navigationIcon = { TextButton(onBack) { Text(stringResource(R.string.back)) } },
-                actions = { TextButton(onReloadAll) { Text(stringResource(R.string.scripts_reload)) } },
+                navigationIcon = {
+                    TextButton(
+                        onClick = onBack,
+                        modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50)),
+                    ) { Text(stringResource(R.string.back)) }
+                },
+                actions = {
+                    TextButton(
+                        onClick = onReloadAll,
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                    ) { Text(stringResource(R.string.scripts_reload)) }
+                },
             )
         },
     ) { pad ->
@@ -139,8 +151,14 @@ fun ScriptsScreen(
 
             HorizontalDivider()
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ onImportFile() }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_import_file)) }
-                OutlinedButton({ pasting = true }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_paste)) }
+                OutlinedButton(
+                    { onImportFile() },
+                    Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.scripts_import_file)) }
+                OutlinedButton(
+                    { pasting = true },
+                    Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.scripts_paste)) }
             }
         }
     }
@@ -192,13 +210,29 @@ fun ScriptsDialog(
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton({ onImportFile() }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_import)) }
-                    OutlinedButton({ pasting = true }, Modifier.weight(1f)) { Text(stringResource(R.string.scripts_paste)) }
+                    OutlinedButton(
+                        { onImportFile() },
+                        Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                    ) { Text(stringResource(R.string.scripts_import)) }
+                    OutlinedButton(
+                        { pasting = true },
+                        Modifier.weight(1f).focusHighlight(RoundedCornerShape(50)),
+                    ) { Text(stringResource(R.string.scripts_paste)) }
                 }
             }
         },
-        confirmButton = { TextButton(onReloadAll) { Text(stringResource(R.string.scripts_reload)) } },
-        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.close)) } },
+        confirmButton = {
+            TextButton(
+                onClick = onReloadAll,
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+            ) { Text(stringResource(R.string.scripts_reload)) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+            ) { Text(stringResource(R.string.close)) }
+        },
     )
 
     if (pasting) PasteDialog(state.backendName, onDismiss = { pasting = false }) { name, src ->
@@ -266,7 +300,11 @@ private fun ScriptRow(
                     Spacer(Modifier.height(4.dp))
                     StatusPill(s)
                 }
-                Switch(checked = s.enabled, onCheckedChange = { onToggle(s.name, it) })
+                Switch(
+                    checked = s.enabled,
+                    onCheckedChange = { onToggle(s.name, it) },
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                )
             }
             // Show the load error in full
             if (s.enabled && !s.ok) {
@@ -286,8 +324,14 @@ private fun ScriptRow(
             }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton({ onEdit(s.name) }) { Text(stringResource(R.string.edit)) }
-                TextButton({ onRemove(s.name) }) { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) }
+                TextButton(
+                    { onEdit(s.name) },
+                    Modifier.focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.edit)) }
+                TextButton(
+                    { onRemove(s.name) },
+                    Modifier.focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -317,10 +361,23 @@ private fun ScriptEditorScreen(
         topBar = {
             TopAppBar(
                 title = { Text(name, fontFamily = FontFamily.Monospace, maxLines = 1) },
-                navigationIcon = { TextButton(onBack) { Text(stringResource(R.string.cancel)) } },
+                navigationIcon = {
+                    TextButton(
+                        onClick = onBack,
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                    ) { Text(stringResource(R.string.cancel)) }
+                },
                 actions = {
-                    if (canRevert) TextButton({ confirmRevert = true }) { Text(stringResource(R.string.scripts_revert)) }
-                    TextButton({ onSave(text) }) { Text(stringResource(R.string.save)) }
+                    if (canRevert) {
+                        TextButton(
+                            { confirmRevert = true },
+                            Modifier.focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.scripts_revert)) }
+                    }
+                    TextButton(
+                        { onSave(text) },
+                        Modifier.focusHighlight(RoundedCornerShape(50)),
+                    ) { Text(stringResource(R.string.save)) }
                 },
             )
         },
@@ -348,6 +405,7 @@ private fun ScriptEditorScreen(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 modifier = Modifier
                     .weight(1f)
+                    .focusHighlight(RoundedCornerShape(4.dp))
                     .padding(start = 10.dp, top = 10.dp, end = 10.dp, bottom = 10.dp)
                     .horizontalScroll(hscroll),
             )
@@ -359,9 +417,17 @@ private fun ScriptEditorScreen(
             title = { Text(stringResource(R.string.scripts_revert_title, name)) },
             text = { Text(stringResource(R.string.scripts_revert_body)) },
             confirmButton = {
-                TextButton({ onRevert()?.let { text = it }; confirmRevert = false }) { Text(stringResource(R.string.scripts_revert)) }
+                TextButton(
+                    { onRevert()?.let { text = it }; confirmRevert = false },
+                    Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.scripts_revert)) }
             },
-            dismissButton = { TextButton({ confirmRevert = false }) { Text(stringResource(R.string.cancel)) } },
+            dismissButton = {
+                TextButton(
+                    { confirmRevert = false },
+                    Modifier.focusHighlight(RoundedCornerShape(50)),
+                ) { Text(stringResource(R.string.cancel)) }
+            },
         )
     }
 }
@@ -398,7 +464,13 @@ private fun PasteDialog(ext: String, onDismiss: () -> Unit, onConfirm: (String, 
         title = { Text(stringResource(R.string.scripts_paste_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.scripts_name_hint, ext)) }, singleLine = true)
+                OutlinedTextField(
+                    name,
+                    { name = it },
+                    label = { Text(stringResource(R.string.scripts_name_hint, ext)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().tvInitialFocus(),
+                )
                 OutlinedTextField(
                     body, { body = it }, label = { Text(stringResource(R.string.scripts_source)) },
                     modifier = Modifier.fillMaxWidth().height(220.dp),
@@ -409,8 +481,14 @@ private fun PasteDialog(ext: String, onDismiss: () -> Unit, onConfirm: (String, 
         confirmButton = {
             TextButton(
                 onClick = { if (name.isNotBlank() && body.isNotBlank()) onConfirm(name.trim(), body) },
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
             ) { Text(stringResource(R.string.add)) }
         },
-        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+            ) { Text(stringResource(R.string.cancel)) }
+        },
     )
 }

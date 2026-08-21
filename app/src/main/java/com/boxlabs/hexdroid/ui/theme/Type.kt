@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.boxlabs.hexdroid.FontChoice
 import com.boxlabs.hexdroid.R
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 private fun TextStyle.withFamily(f: FontFamily): TextStyle = copy(fontFamily = f)
 
@@ -61,6 +62,11 @@ private val AppMono = FontFamily(
 )
 
 /**
+ * Custom font families, one instance per font file.
+ */
+private val customFontFamilies = ConcurrentHashMap<String, FontFamily>()
+
+/**
  * Load a custom font from a file path.
  * Returns null if the file doesn't exist or can't be loaded.
  */
@@ -68,14 +74,21 @@ fun loadCustomFontFamily(path: String?): FontFamily? {
     if (path.isNullOrBlank()) return null
     val file = File(path)
     if (!file.exists()) return null
+
+    val key = "$path|${file.lastModified()}|${file.length()}"
+    customFontFamilies[key]?.let { return it }
+
     return try {
-        FontFamily(
+        val family = FontFamily(
             Font(file, weight = FontWeight.Normal, style = FontStyle.Normal),
             // Use the same file for all weights/styles - the font will be synthesized
             Font(file, weight = FontWeight.Bold, style = FontStyle.Normal),
             Font(file, weight = FontWeight.Normal, style = FontStyle.Italic),
             Font(file, weight = FontWeight.Bold, style = FontStyle.Italic),
         )
+        if (customFontFamilies.size >= 8) customFontFamilies.clear()
+        customFontFamilies[key] = family
+        family
     } catch (e: Exception) {
         null
     }
@@ -88,10 +101,15 @@ fun fontFamilyForChoice(choice: FontChoice, customFontPath: String? = null): Fon
     FontChoice.CUSTOM -> loadCustomFontFamily(customFontPath) ?: AppDefault
 }
 
+/** One Typography per family, so the theme does not rebuild fifteen styles per frame. */
+private val typographies = ConcurrentHashMap<FontFamily, Typography>()
+
 fun typographyForFont(choice: FontChoice, customFontPath: String? = null): Typography {
-    val base = Typography()
     val fam = fontFamilyForChoice(choice, customFontPath)
-    return base.copy(
+    typographies[fam]?.let { return it }
+
+    val base = Typography()
+    val typography = base.copy(
         displayLarge = base.displayLarge.withFamily(fam),
         displayMedium = base.displayMedium.withFamily(fam),
         displaySmall = base.displaySmall.withFamily(fam),
@@ -108,4 +126,7 @@ fun typographyForFont(choice: FontChoice, customFontPath: String? = null): Typog
         labelMedium = base.labelMedium.withFamily(fam),
         labelSmall = base.labelSmall.withFamily(fam)
     )
+    if (typographies.size >= 8) typographies.clear()
+    typographies[fam] = typography
+    return typography
 }

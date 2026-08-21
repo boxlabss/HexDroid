@@ -223,6 +223,67 @@ fun Modifier.dpadColourWheel(
 }
 
 /**
+ * Makes a drag handle that resizes a pane usable without touch, following the
+ * same select-to-engage pattern as [dpadReorder]. The handle becomes focusable;
+ * select (D-pad centre/enter) toggles resize mode, shown as a filled highlight.
+ * While in resize mode, left/right call [onLeft]/[onRight] instead
+ * of moving focus, and key auto-repeat makes a held key sweep the pane. Select,
+ * back, or moving focus away exits resize mode, and [onEnd] runs so the caller
+ * can persist the new width.
+ */
+@Composable
+fun Modifier.dpadResize(
+    onLeft: () -> Unit,
+    onRight: () -> Unit,
+    onEnd: () -> Unit = {},
+): Modifier {
+    var focused by remember { mutableStateOf(false) }
+    var resizeMode by remember { mutableStateOf(false) }
+    val color = MaterialTheme.colorScheme.primary
+    val shape = RoundedCornerShape(4.dp)
+
+    fun exit() {
+        if (resizeMode) {
+            resizeMode = false
+            onEnd()
+        }
+    }
+
+    return this
+        .onFocusChanged {
+            focused = it.isFocused
+            if (!it.isFocused) exit()
+        }
+        .onKeyEvent { ev ->
+            if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+            when (ev.key) {
+                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                    if (resizeMode) exit() else resizeMode = true
+                    true
+                }
+                Key.DirectionLeft -> {
+                    if (resizeMode) { onLeft(); true } else false
+                }
+                Key.DirectionRight -> {
+                    if (resizeMode) { onRight(); true } else false
+                }
+                Key.Back, Key.Escape -> {
+                    if (resizeMode) { exit(); true } else false
+                }
+                else -> false
+            }
+        }
+        .focusable()
+        .then(
+            when {
+                resizeMode -> Modifier.background(color.copy(alpha = 0.35f), shape)
+                focused -> Modifier.border(2.dp, color, shape)
+                else -> Modifier
+            }
+        )
+}
+
+/**
  * Makes a D-pad select press (center / Enter) activate an element that only
  * responds to pointer input. Compose clickables handle select natively, but
  * ExposedDropdownMenuBox's menuAnchor opens its menu from a pointerInput tap

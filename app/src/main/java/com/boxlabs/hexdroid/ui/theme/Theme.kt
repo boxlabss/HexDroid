@@ -27,6 +27,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.boxlabs.hexdroid.FontChoice
@@ -143,6 +147,41 @@ private val TerminalColorScheme = darkColorScheme(
     scrim               = Color(0xCC000000),
 )
 
+/**
+ * Colours for the accent buttons in the message input bar.
+ * Held here so a theme can carry its own.
+ */
+@Immutable
+data class AccentColors(
+    /** Gradient behind the send button. */
+    val send: List<Color>,
+    /** Gradient behind the channel tools button. */
+    val channelTools: List<Color>,
+    /** Icon colour drawn on top of either gradient. */
+    val onAccent: Color,
+)
+
+private val DefaultAccents = AccentColors(
+    send = listOf(Color(0xFF5B86E5), Color(0xFF36D1DC)),
+    channelTools = listOf(Color(0xFFFF9500), Color(0xFFFF5E3A)),
+    onAccent = Color.White,
+)
+
+private val MatrixAccents = AccentColors(
+    send = listOf(MatrixGreen, Color(0xFF39FF6A)),
+    channelTools = listOf(MatrixGreenDim, MatrixGreenMuted),
+    onAccent = MatrixBackground,
+)
+
+private val TerminalAccents = AccentColors(
+    send = listOf(TerminalAmber, Color(0xFFFFD966)),
+    channelTools = listOf(TerminalAmberDim, TerminalAmberMuted),
+    onAccent = TerminalBackground,
+)
+
+/** Accent colours for the current theme. */
+val LocalAccentColors = staticCompositionLocalOf { DefaultAccents }
+
 @Composable
 fun HexDroidIRCTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
@@ -183,10 +222,22 @@ fun HexDroidIRCTheme(
     // Matrix and Terminal themes use monospace font to reinforce the terminal aesthetic.
     val effectiveFont = if ((isMatrix || isTerminal) && fontChoice == FontChoice.OPEN_SANS) FontChoice.MONOSPACE else fontChoice
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = typographyForFont(effectiveFont, customFontPath),
-        shapes = HexShapes,
-        content = content
-    )
+    val typography = remember(effectiveFont, customFontPath) {
+        typographyForFont(effectiveFont, customFontPath)
+    }
+
+    val accents = when {
+        isMatrix -> MatrixAccents
+        isTerminal -> TerminalAccents
+        else -> DefaultAccents
+    }
+
+    CompositionLocalProvider(LocalAccentColors provides accents) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = typography,
+            shapes = HexShapes,
+            content = content
+        )
+    }
 }

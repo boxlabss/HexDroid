@@ -356,7 +356,7 @@ fun EncryptionDialog(
             // Only the AGM "first key" action lives in the button row.
             val cur = current
             if (cur == null && pickedScheme == E2eScheme.AGM) {
-                Button(modifier = Modifier.focusHighlight(RoundedCornerShape(50)), onClick = {
+                Button(modifier = Modifier.tvInitialFocus().focusHighlight(RoundedCornerShape(50)), onClick = {
                     val info = viewModel.generateE2eKey(networkId, target)
                     current = info
                     revealKey = true

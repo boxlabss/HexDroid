@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -57,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,6 +77,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import com.boxlabs.hexdroid.ui.focusHighlight
+import com.boxlabs.hexdroid.ui.tvInitialFocus
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -148,7 +152,7 @@ fun IntroTourOverlay(
             // Scrim + cutout
             CanvasScrim(rect = targetRect, screenWpx = screenWpx, screenHpx = screenHpx)
 
-            // Tap gesture layer: tap inside spotlight = next, outside = skip
+            // Tap gesture layer: tap inside spotlight = next, outside = skip.
             val tapRect = targetRect?.let {
                 Rect(it.left - padPx, it.top - padPx, it.right + padPx, it.bottom + padPx)
             }
@@ -259,7 +263,10 @@ fun IntroTourOverlay(
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.weight(1f),
                             )
-                            IconButton(onClick = onSkip, modifier = Modifier.size(32.dp)) {
+                            IconButton(
+                                onClick = onSkip,
+                                modifier = Modifier.size(32.dp).focusHighlight(CircleShape),
+                            ) {
                                 Icon(
                                     Icons.Default.Close,
                                     contentDescription = stringResource(R.string.skip),
@@ -275,7 +282,9 @@ fun IntroTourOverlay(
                         if (action != null && onAction != null && (!action.fallbackOnly || usingFallback)) {
                             OutlinedButton(
                                 onClick = { onAction(action.id) },
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusHighlight(RoundedCornerShape(50)),
                             ) { Text(action.label) }
                         }
 
@@ -287,7 +296,10 @@ fun IntroTourOverlay(
                         ) {
                             // Back
                             if (onBack != null) {
-                                IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier.size(36.dp).focusHighlight(CircleShape),
+                                ) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back), modifier = Modifier.size(18.dp))
                                 }
                             } else {
@@ -314,12 +326,20 @@ fun IntroTourOverlay(
                                 }
                             }
 
-                            // Next / Done
-                            IconButton(onClick = onNext, modifier = Modifier.size(36.dp)) {
-                                if (stepIndex + 1 == stepCount) {
-                                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.done), modifier = Modifier.size(18.dp))
-                                } else {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.next), modifier = Modifier.size(18.dp))
+                            // Next/Done. Keyed on the step so focus follows the tour forward.
+                            key(stepIndex) {
+                                IconButton(
+                                    onClick = onNext,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .tvInitialFocus()
+                                        .focusHighlight(CircleShape),
+                                ) {
+                                    if (stepIndex + 1 == stepCount) {
+                                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.done), modifier = Modifier.size(18.dp))
+                                    } else {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = stringResource(R.string.next), modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }

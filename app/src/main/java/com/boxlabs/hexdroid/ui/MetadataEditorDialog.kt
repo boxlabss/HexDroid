@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -157,7 +158,9 @@ fun MetadataEditorDialog(
                             label = { Text(stringResource(f.labelRes)) },
                             singleLine = f.singleLine,
                             maxLines = if (f.singleLine) 1 else 3,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (f == fields.first()) Modifier.tvInitialFocus() else Modifier),
                         )
                     }
                 }
@@ -173,6 +176,7 @@ fun MetadataEditorDialog(
         confirmButton = {
             TextButton(
                 enabled = colorValid,
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                 onClick = {
                     for (f in fields) {
                         val newVal = (edited[f.key] ?: "").trim()
@@ -187,7 +191,10 @@ fun MetadataEditorDialog(
             ) { Text(stringResource(R.string.save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+            ) { Text(stringResource(R.string.cancel)) }
         },
     )
 }

@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -113,7 +114,11 @@ fun RegistrationDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                Checkbox(checked = savePassword, onCheckedChange = { savePassword = it })
+                                Checkbox(
+                                    checked = savePassword,
+                                    onCheckedChange = { savePassword = it },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(4.dp)),
+                                )
                                 Text(
                                     stringResource(R.string.register_save_password),
                                     style = MaterialTheme.typography.bodySmall,
@@ -132,7 +137,7 @@ fun RegistrationDialog(
                             onValueChange = { code = it },
                             label = { Text(stringResource(R.string.register_code)) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().tvInitialFocus(),
                         )
                     }
 
@@ -195,19 +200,23 @@ fun RegistrationDialog(
         confirmButton = {
             when (phase) {
                 RegPhase.SUCCESS -> {
-                    TextButton(onClick = {
-                        if (savePassword && password.isNotEmpty()) {
-                            val acct = (reg?.account ?: account).trim()
-                            viewModel.saveSaslCredentialsAfterRegister(networkId, acct, password.trim())
-                        }
-                        viewModel.clearRegState(networkId)
-                        onDismiss()
-                    }) { Text(stringResource(R.string.done)) }
+                    TextButton(
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                        onClick = {
+                            if (savePassword && password.isNotEmpty()) {
+                                val acct = (reg?.account ?: account).trim()
+                                viewModel.saveSaslCredentialsAfterRegister(networkId, acct, password.trim())
+                            }
+                            viewModel.clearRegState(networkId)
+                            onDismiss()
+                        },
+                    ) { Text(stringResource(R.string.done)) }
                 }
 
                 RegPhase.VERIFY_REQUIRED -> {
                     TextButton(
                         enabled = code.isNotBlank(),
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                         onClick = {
                             viewModel.verifyAccount(networkId, reg?.account ?: account, code.trim())
                         },
@@ -217,6 +226,7 @@ fun RegistrationDialog(
                 else -> {
                     TextButton(
                         enabled = canRegister,
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
                         onClick = {
                             viewModel.registerAccount(
                                 networkId,
@@ -230,10 +240,13 @@ fun RegistrationDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = {
-                viewModel.clearRegState(networkId)
-                onDismiss()
-            }) {
+            TextButton(
+                modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                onClick = {
+                    viewModel.clearRegState(networkId)
+                    onDismiss()
+                },
+            ) {
                 Text(stringResource(
                     if (phase == RegPhase.SUCCESS) R.string.close else R.string.cancel
                 ))

@@ -27,8 +27,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,15 +37,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.os.LocaleListCompat
 import com.boxlabs.hexdroid.R
 import java.util.Locale
@@ -111,6 +105,11 @@ fun WelcomeScreen(
 
     LaunchedEffect(Unit) { showContent = true }
 
+    val selectedName = remember(selectedLang) {
+        SUPPORTED_LANGUAGES.firstOrNull { it.code == selectedLang }?.nativeName ?: "English"
+    }
+    var langMenu by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -122,118 +121,118 @@ fun WelcomeScreen(
             visible = showContent,
             enter = fadeIn() + slideInVertically { it / 4 }
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Spacer(Modifier.height(48.dp))
+            Column(modifier = Modifier.fillMaxSize()) {
 
-                Text(
-                    text = stringResource(R.string.welcome_title),
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = stringResource(R.string.welcome_subtitle),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(Modifier.height(32.dp))
-
-                // Language picker
-                Text(
-                    text = stringResource(R.string.welcome_language_label),
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-
-                Surface(
-                    tonalElevation = 2.dp,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Plain Column (not LazyColumn) so it can live inside the outer
-                    // verticalScroll without nested-scroll conflicts. 14 items is small
-                    // enough that lazy loading gives no benefit here.
-                    Column(
-                        modifier = Modifier
-                            .heightIn(max = 220.dp)
-                            .verticalScroll(rememberScrollState())
-                            .fillMaxWidth()
+                    Spacer(Modifier.height(48.dp))
+
+                    Text(
+                        text = stringResource(R.string.welcome_title),
+                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.welcome_subtitle),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(32.dp))
+
+                    Text(
+                        text = stringResource(R.string.welcome_language_label),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    // A menu rather than an inline list
+                    ExposedDropdownMenuBox(
+                        expanded = langMenu,
+                        onExpandedChange = { langMenu = !langMenu },
                     ) {
-                        SUPPORTED_LANGUAGES.forEach { lang ->
-                            val isSelected = lang.code == selectedLang
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .focusHighlight()
-                                    .clickable { selectedLang = lang.code }
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                        else Color.Transparent
-                                    )
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = lang.nativeName,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                                            else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.weight(1f)
+                        OutlinedTextField(
+                            value = selectedName,
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = langMenu) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .tvInitialFocus()
+                                .focusHighlight(RoundedCornerShape(4.dp))
+                                .dpadActivate { langMenu = !langMenu }
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = langMenu,
+                            onDismissRequest = { langMenu = false },
+                        ) {
+                            SUPPORTED_LANGUAGES.forEach { lang ->
+                                DropdownMenuItem(
+                                    text = { Text(lang.nativeName) },
+                                    trailingIcon = {
+                                        if (lang.code == selectedLang) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedLang = lang.code
+                                        langMenu = false
+                                    },
                                 )
-                                if (isSelected) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
                             }
                         }
                     }
+
+                    Spacer(Modifier.height(24.dp))
+
+                    Text(
+                        text = stringResource(R.string.welcome_nick_label),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = nick,
+                        onValueChange = { v ->
+                            nick = v.trim().take(16)
+                            nickError = null
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusHighlight(RoundedCornerShape(4.dp)),
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.welcome_nick_hint)) },
+                        supportingText = {
+                            if (nickError != null) {
+                                Text(nickError!!, color = MaterialTheme.colorScheme.error)
+                            } else {
+                                Text(stringResource(R.string.welcome_nick_helper))
+                            }
+                        },
+                        isError = nickError != null,
+                    )
+
+                    Spacer(Modifier.height(24.dp))
                 }
 
-                Spacer(Modifier.height(24.dp))
-
-                // Nickname input
-                Text(
-                    text = stringResource(R.string.welcome_nick_label),
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = nick,
-                    onValueChange = { v ->
-                        nick = v.trim().take(16)
-                        nickError = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text(stringResource(R.string.welcome_nick_hint)) },
-                    supportingText = {
-                        if (nickError != null) {
-                            Text(nickError!!, color = MaterialTheme.colorScheme.error)
-                        } else {
-                            Text(stringResource(R.string.welcome_nick_helper))
-                        }
-                    },
-                    isError = nickError != null,
-                )
-
-                Spacer(Modifier.height(32.dp))
-
-                // Continue button
+                // Outside the scroll, so it is on screen from the moment the page opens
+                // whatever the window height.
                 Button(
                     onClick = {
                         // Validate nick
@@ -256,8 +255,8 @@ fun WelcomeScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
                         .height(52.dp)
-                        .tvInitialFocus()
                         .focusHighlight(),
                     shape = RoundedCornerShape(14.dp)
                 ) {
@@ -266,8 +265,6 @@ fun WelcomeScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
-
-                Spacer(Modifier.height(32.dp))
             }
         }
     }

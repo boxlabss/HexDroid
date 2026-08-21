@@ -25,6 +25,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
@@ -43,6 +44,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.Surface
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.boxlabs.hexdroid.AppScreen
@@ -203,7 +205,13 @@ fun AppRoot(
             fontChoice = state.settings.fontChoice,
             customFontPath = state.settings.customFontPath
         ) {
-        Surface(modifier = Modifier.fillMaxSize()) {
+        val tvInset = if (isTvDevice()) 20.dp else 0.dp
+
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = tvInset, vertical = tvInset / 2)
+        ) {
 
         // Welcome screen gate: shown before everything else on first launch.
         if (showWelcome) {
@@ -425,7 +433,9 @@ fun AppRoot(
                     onCancelIncoming = vm::cancelIncomingDcc,
                     onClearTransfer = vm::clearDccTransfer,
                     onAcceptResume = vm::acceptDccResume,
-                    partialFor = vm::getPartialFor
+                    partialFor = vm::getPartialFor,
+                    tourActive = tourActive,
+                    tourTarget = currentTourStep?.target
                 )
 
                 AppScreen.ABOUT -> AboutScreen(

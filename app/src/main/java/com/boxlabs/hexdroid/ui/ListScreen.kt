@@ -23,6 +23,8 @@ package com.boxlabs.hexdroid.ui
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -92,7 +94,7 @@ fun ListScreen(
                 navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.tvInitialFocus().focusHighlight()) { Text("←") } },
                 actions = {
                     IconButton(onClick = { onRefresh(minUsers, maxUsers) }, modifier = Modifier.focusHighlight()) { Text("⟳") }
-                    IconButton(onClick = onOpenSettings) { Text("⚙") }
+                    IconButton(onClick = onOpenSettings, modifier = Modifier.focusHighlight(CircleShape)) { Text("⚙") }
                 }
             )
         }
@@ -164,7 +166,7 @@ fun ListScreen(
                     modifier = Modifier.weight(1f),
                 )
                 if (state.listElistUserFilter) {
-                    TextButton(onClick = { onRefresh(minUsers, maxUsers) }) {
+                    TextButton(onClick = { onRefresh(minUsers, maxUsers) }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) {
                         Text(stringResource(R.string.list_users_apply))
                     }
                 }
