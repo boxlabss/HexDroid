@@ -323,6 +323,7 @@ class SettingsRepository(private val ctx: Context) {
                 notifyOnPrivateMessages = o.optBoolean("notifyOnPrivateMessages", true),
                 showConnectionStatusNotification = o.optBoolean("showConnectionStatusNotification", true),
                 keepAliveInBackground = o.optBoolean("keepAliveInBackground", true),
+                webPushEnabled = o.optBoolean("webPushEnabled", false),
                 connectOnBoot = o.optBoolean("connectOnBoot", false),
                 connectOnBootWifiOnly = o.optBoolean("connectOnBootWifiOnly", false),
                 autoReconnectEnabled = o.optBoolean("autoReconnectEnabled", true),
@@ -432,6 +433,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("notifyOnPrivateMessages", s.notifyOnPrivateMessages)
         o.put("showConnectionStatusNotification", s.showConnectionStatusNotification)
         o.put("keepAliveInBackground", s.keepAliveInBackground)
+        o.put("webPushEnabled", s.webPushEnabled)
         o.put("connectOnBoot", s.connectOnBoot)
         o.put("connectOnBootWifiOnly", s.connectOnBootWifiOnly)
         o.put("autoReconnectEnabled", s.autoReconnectEnabled)

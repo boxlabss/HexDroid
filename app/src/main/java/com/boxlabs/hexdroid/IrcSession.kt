@@ -540,6 +540,14 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             req += "multiline"
         }
 
+        // Web Push: lets the server deliver messages of interest while no TCP connection
+        // is open. soju shipped this as a vendored extension before the draft existed and
+        // still advertises the vendored name, so both are requested.
+        if (config.capPrefs.webPush) {
+            req += "draft/webpush"
+            req += "soju.im/webpush"
+        }
+
         return req
     }
 
