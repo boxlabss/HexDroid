@@ -316,6 +316,9 @@ fun AppRoot(
                     onCollapseAllNetworks = vm::collapseOrExpandAllNetworks,
                     onMarkAllBuffersRead = vm::markAllBuffersRead,
                     onSearchFromToolbar = vm::searchFromToolbar,
+                    onLoadOlderHistory = vm::loadOlderHistory,
+                    draftFor = vm::draftFor,
+                    onDraftChanged = vm::saveDraft,
                     viewModel = vm,
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
@@ -385,6 +388,7 @@ fun AppRoot(
                     onExportBackup = vm::exportBackup,
                     onImportBackup = vm::importBackup,
                     onClearBackupMessage = vm::clearBackupMessage,
+                    onWebPushToggled = vm::applyWebPushSetting,
                 )
 
                 AppScreen.SCRIPTS -> {

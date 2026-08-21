@@ -1416,6 +1416,13 @@
          The toolbar labels are the initials of Bold/Italic/Underline/Reverse and the
          colour swatch, so they are translated, not fixed glyphs. -->
     <string name="chat_unread_divider">"  unread  "</string>
+    <string name="chat_history_load_older">Load older messages</string>
+    <string name="chat_history_loading">Loading older messages…</string>
+    <string name="push_invite">%1$s invited you to %2$s</string>
+    <string name="setting_webpush">Push notifications</string>
+    <string name="setting_webpush_desc">Let servers that support it deliver messages through a push distributor, so you can be notified without keeping a connection open.</string>
+    <string name="setting_webpush_no_distributor">No push distributor installed. Install one (for example ntfy) to use this.</string>
+    <string name="setting_webpush_distributor_current">%1$s (in use)</string>
     <string name="chat_fmt_bold">B</string>
     <string name="chat_fmt_italic">I</string>
     <string name="chat_fmt_underline">U</string>

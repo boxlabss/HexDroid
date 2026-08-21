@@ -88,6 +88,20 @@
                     android:exported="false" />
 
                 <!--
+                UnifiedPush delivery target. Not exported: the connector library declares
+                the exported receiver that the distributor talks to, and forwards events
+                here. Only present so a bouncer supporting the webpush extension can wake
+                us for a message without the app holding a connection open.
+                -->
+                <service
+                    android:name=".push.HexPushService"
+                    android:exported="false">
+                    <intent-filter>
+                        <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+                    </intent-filter>
+                </service>
+
+                <!--
                 exported="true" is required: BOOT_COMPLETED is delivered by the system,
                 which is an external caller. The receiver acts only on the actions listed
                 here and reads no data from the intent, so there is nothing for another

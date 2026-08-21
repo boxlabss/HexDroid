@@ -399,6 +399,7 @@ fun SettingsScreen(
     onExportBackup: (Uri) -> Unit = {},
     onImportBackup: (Uri) -> Unit = {},
     onClearBackupMessage: () -> Unit = {},
+    onWebPushToggled: (Boolean) -> Unit = {},
 ) {
     val s = state.settings
     val ctx = LocalContext.current
@@ -1287,6 +1288,59 @@ fun SettingsScreen(
             }
 
             item { SettingToggle(stringResource(R.string.setting_auto_reconnect), s.autoReconnectEnabled) { onUpdate { copy(autoReconnectEnabled = !autoReconnectEnabled) } } }
+
+            item {
+                // Web Push. Needs both a distributor app on the device and a server that supports the extension
+                val distributors = remember { com.boxlabs.hexdroid.push.WebPushManager.availableDistributors(ctx) }
+                val current = com.boxlabs.hexdroid.push.WebPushManager.currentDistributor(ctx)
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(stringResource(R.string.setting_webpush), modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = s.webPushEnabled,
+                            enabled = distributors.isNotEmpty(),
+                            onCheckedChange = { want ->
+                                onUpdate { copy(webPushEnabled = want) }
+                                onWebPushToggled(want)
+                            },
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.setting_webpush_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (distributors.isEmpty()) {
+                        Text(
+                            stringResource(R.string.setting_webpush_no_distributor),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else if (s.webPushEnabled && distributors.size > 1) {
+                        // Only worth asking when there is a choice to make; with one
+                        // installed the connector's default resolution is the right answer.
+                        Spacer(Modifier.height(4.dp))
+                        distributors.forEach { d ->
+                            TextButton(
+                                onClick = {
+                                    com.boxlabs.hexdroid.push.WebPushManager.selectDistributor(ctx, d, null)
+                                },
+                                modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                            ) {
+                                Text(
+                                    if (d == current) stringResource(R.string.setting_webpush_distributor_current, d) else d,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
             item {
                 Column(Modifier.fillMaxWidth()) {

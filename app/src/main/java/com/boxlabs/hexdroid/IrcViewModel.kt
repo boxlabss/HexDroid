@@ -203,7 +203,25 @@ data class UiBuffer(
      *
      * Sized identically to [seenMsgIds] and rebuilt the same way on scrollback trim.
      */
-    val seenHistoryFingerprints: PersistentSet<String> = persistentSetOf()
+    val seenHistoryFingerprints: PersistentSet<String> = persistentSetOf(),
+
+    /** True while a CHATHISTORY BEFORE request for this buffer is in flight. Drives the spinner. */
+    val historyLoading: Boolean = false,
+
+    /**
+     * True once the server has answered a backfill request with nothing new, i.e. we have
+     * reached the start of its stored history for this buffer. Hides The "load older" control
+     */
+    val historyExhausted: Boolean = false,
+
+    /**
+     * How many backfilled messages this buffer holds beyond the normal scrollback cap.
+     *
+     * The cap trims from the front, so without this a backfill into a buffer already at
+     * maxScrollbackLines would evict the messages it had just fetched. The effective cap
+     * for a buffer is maxScrollbackLines + this, bounded by [MAX_BACKFILL_EXTRA]
+     */
+    val extraScrollback: Int = 0
 )
 
 enum class FontChoice { OPEN_SANS, INTER, MONOSPACE, CUSTOM }
@@ -323,6 +341,17 @@ data class UiSettings(
     val notifyOnPrivateMessages: Boolean = true,
     val showConnectionStatusNotification: Boolean = true,
     val keepAliveInBackground: Boolean = true,
+    /**
+     * Let servers supporting the webpush extension deliver messages of interest through a
+     * UnifiedPush distributor while no connection is open.
+     *
+     * Off by default: it needs a distributor app installed and a server that supports the
+     * extension, so silently enabling it would do nothing on most setups while implying
+     * push is working. Independent of [keepAliveInBackground] rather than replacing it —
+     * once push is confirmed working against a bouncer, the user can turn keep-alive off
+     * and get the battery back, but that is their call to make.
+     */
+    val webPushEnabled: Boolean = false,
     /**
      * Reconnect the networks marked auto-connect after the device reboots, without the
      * user opening the app. Off by default.
@@ -687,6 +716,25 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap()
 
     /**
+     * CHATHISTORY BEFORE backfills, keyed by buffer.
+     *
+     * While an entry exists, history messages for that buffer are diverted out of [append]
+     */
+    private val historyBackfills: MutableMap<String, MutableList<UiMessage>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /** Watchdogs that close a backfill whose reply batch never arrives (or never closes). */
+    private val historyBackfillTimeouts: MutableMap<String, Job> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Buffers whose unread catch-up (CHATHISTORY AFTER) has been requested this session,
+     * so a reconnect storm can't fire the same request repeatedly.
+     */
+    private val historyCatchupRequested: MutableSet<String> =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
+    /**
      * Per-buffer "newest server-history message timestamp seen since the last live message".
      *
      * Populated as messages with `isHistory = true` flow through [append]. Read on the FIRST
@@ -741,6 +789,32 @@ class IrcViewModel(
     private companion object {
         /** Minimum gap between streaming LIST UI flushes. See [_channelListLastFlushMs]. */
         const val CHANNEL_LIST_FLUSH_INTERVAL_MS = 300L
+        /** How many older messages one "load older" request asks the server for. */
+        const val HISTORY_BACKFILL_PAGE = 50
+        /**
+         * How long to wait for a backfill's reply batch before giving up on it.
+         *
+         * A server that supports chathistory but holds nothing older answers with an empty
+         * batch, which closes immediately, so this only fires when the server ignores the
+         * request outright or the connection stalls mid-batch. The buffer is released for
+         * another attempt rather than being left with a spinner that never stops.
+         */
+        const val HISTORY_BACKFILL_TIMEOUT_MS = 12_000L
+        /**
+         * Ceiling on how far past the normal scrollback cap repeated backfills may grow a
+         * single buffer. See [UiBuffer.extraScrollback].
+         */
+        const val MAX_BACKFILL_EXTRA = 5000
+        /**
+         * Ceiling on CHATHISTORY catch-up requests fired from one CHATHISTORY TARGETS reply.
+         *
+         * TARGETS can name every buffer the bouncer has ever stored, and each one turns into
+         * a request. Bouncer connections are exempt from outbound flood pacing, so without a
+         * cap an account with a long history sends that whole burst back to back on connect.
+         * Beyond this, buffers are still opened; they just fill from local logs and from
+         * "load older" when the user actually looks at them.
+         */
+        const val MAX_CATCHUP_TARGETS = 40
         /**
          * Default upper user-count bound for ELIST range queries when the user hasn't set a max
          * (see requestList).
@@ -5466,10 +5540,6 @@ fun startAddNetwork() {
                     )
                 }
             } finally {
-                // Always evict the stale job reference so a fresh scheduleAutoReconnect
-                // can start cleanly. Without this, a thrown-out job would linger in
-                // autoReconnectJobs and the "already have a job for this netId" early
-                // return in scheduleAutoReconnect would silently refuse all later retries.
                 autoReconnectJobs.remove(netId)
             }
         }
@@ -7856,6 +7926,22 @@ if (code == "442") {
                     refreshBouncerNetworks(netId)
                 }
 
+                // A reconnect is a new session for backfill purposes: the buffers we hold may
+                // have gaps the server can fill, and the exhausted flags were about the
+                // previous connection's view of history.
+                clearHistoryStateFor(netId)
+
+                // Ask which buffers the server has stored history for
+                if (rt.client.supportsChatHistory()) {
+                    viewModelScope.launch {
+                        runCatching { rt.client.requestChatHistoryTargets() }
+                    }
+                }
+
+                // Hand this server our push endpoint, so it can reach us once this
+                // connection goes away.
+                maybeRegisterWebPush(netId)
+
                 viewModelScope.launch {
                     // Service auth command (e.g. /msg NickServ IDENTIFY password)
                     //    Runs first, before autojoin, so channels with +r can be joined.
@@ -9380,6 +9466,70 @@ if (code == "442") {
                 }
             }
 
+            is IrcEvent.HistoryBatchStart -> {
+                // Nothing to do on open: append() already routes history messages into the
+                // backfill collector for as long as one exists for that buffer. Handled
+                // explicitly so the event isn't swallowed by an unrelated else branch.
+            }
+
+            is IrcEvent.HistoryBatchEnd -> {
+                // A chathistory batch closed.
+                backfillKeyForTarget(netId, ev.target)?.let { finishHistoryBackfill(it) }
+            }
+
+            is IrcEvent.HistoryTarget -> {
+                // CHATHISTORY TARGETS: the server holds stored history for this buffer.
+                if (isChannelOnNet(netId, ev.target)) return
+                val targetKey = resolveBufferKey(netId, ev.target)
+                ensureBuffer(targetKey)
+                requestHistoryCatchup(netId, targetKey, ev.target)
+            }
+
+            is IrcEvent.OutgoingEcho -> {
+                // notice format (`* <nick> text`) with the brackets reversed to mark it outgoing
+                val destKey = resolveBufferKey(netId, ev.originBuffer)
+                ensureBuffer(destKey)
+                append(
+                    destKey,
+                    from = null,
+                    text = "* >${ev.target}< ${ev.text}",
+                    isLocal = true,
+                    doNotify = false,
+                )
+            }
+
+            is IrcEvent.CtcpExchange -> {
+                // Request and reply are shown as a pair, in the buffer the user is looking at
+                val destKey = currentBufferOrServer(netId)
+                ensureBuffer(destKey)
+                val myNick = _state.value.connections[netId]?.myNick ?: _state.value.myNick
+                append(
+                    destKey,
+                    from = null,
+                    text = "* <${ev.fromNick}> ${ev.request}",
+                    isLocal = true,
+                    doNotify = false,
+                )
+                if (ev.reply != null) {
+                    append(
+                        destKey,
+                        from = null,
+                        text = "* <$myNick> ${ev.reply}",
+                        isLocal = true,
+                        doNotify = false,
+                    )
+                }
+            }
+
+            is IrcEvent.WebPushRegistered -> {
+                // Only now is the subscription real for this network.
+                com.boxlabs.hexdroid.push.WebPushManager.setRegisteredWith(appContext, netId, true)
+            }
+
+            is IrcEvent.WebPushUnregistered -> {
+                com.boxlabs.hexdroid.push.WebPushManager.setRegisteredWith(appContext, netId, false)
+            }
+
             is IrcEvent.TypingStatus -> {
                 // draft/typing: update per-buffer typing indicator set.
                 // Silently ignore if user has opted out of receiving typing indicators.
@@ -9867,6 +10017,279 @@ if (code == "442") {
         }
     }
 
+    // Chat history backfill (IRCv3 CHATHISTORY BEFORE)
+
+    /**
+     * Fetch the page of messages immediately older than the top of [key]'s scrollback.
+     *
+     * Called when the user reaches the top of the chat view.
+     */
+    fun loadOlderHistory(key: String) {
+        val st = _state.value
+        val buf = st.buffers[key] ?: return
+        if (buf.historyLoading || buf.historyExhausted) return
+        if (historyBackfills.containsKey(key)) return
+
+        val (netId, bufferName) = splitKey(key)
+        if (bufferName == "*server*" || isDccChatBufferName(bufferName)) return
+        val rt = runtimes[netId] ?: return
+        if (!rt.client.supportsChatHistory()) return
+
+        // Anchor on the oldest message that actually came from the server.
+        val oldest = buf.messages.firstOrNull { it.from != null } ?: return
+        val anchorTs = runCatching {
+            DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(oldest.timeMs))
+        }.getOrNull()
+        if (anchorTs == null && oldest.msgId == null) return
+
+        historyBackfills[key] = mutableListOf()
+        _state.update { s ->
+            val b = s.buffers[key] ?: return@update s
+            s.copy(buffers = s.buffers + (key to b.copy(historyLoading = true)))
+        }
+
+        // A server that holds nothing older answers with an empty batch, which closes
+        // straight away; this watchdog is for the case where no batch arrives at all.
+        historyBackfillTimeouts.remove(key)?.cancel()
+        historyBackfillTimeouts[key] = viewModelScope.launch {
+            delay(HISTORY_BACKFILL_TIMEOUT_MS)
+            finishHistoryBackfill(key)
+        }
+
+        viewModelScope.launch {
+            val sent = runCatching {
+                rt.client.requestChatHistoryBefore(
+                    target = bufferName,
+                    beforeTimestamp = anchorTs,
+                    beforeMsgId = oldest.msgId,
+                    limit = HISTORY_BACKFILL_PAGE,
+                )
+            }
+            if (sent.isFailure) finishHistoryBackfill(key)
+        }
+    }
+
+    /**
+     * Merge a completed backfill into the front of [key]'s scrollback.
+     */
+    private fun finishHistoryBackfill(key: String) {
+        historyBackfillTimeouts.remove(key)?.cancel()
+        val collected = historyBackfills.remove(key) ?: return
+
+        _state.update { st ->
+            val buf = st.buffers[key] ?: return@update st
+            val exhausted = buf.copy(historyLoading = false, historyExhausted = true)
+
+            if (collected.isEmpty()) {
+                return@update st.copy(buffers = st.buffers + (key to exhausted))
+            }
+
+            // Drop anything already on screen. msgid first, falling back to a
+            // time|sender|text fingerprint, so a server without message-ids still dedupes
+            // a backfill against lines already loaded from the disk logs.
+            //
+            // The fingerprint set is built here rather than reusing seenHistoryFingerprints,
+            // which only tracks lines with a sender. Replayed JOIN/PART/QUIT lines have
+            // from == null and no msgid, so they are invisible to both of the buffer's dedup
+            // sets; without covering them here, loading the same page twice would stack a
+            // second copy of every event line.
+            val shownFingerprints = buf.messages
+                .mapTo(HashSet(buf.messages.size)) { "${it.timeMs}|${it.from}|${it.text.hashCode()}" }
+            val fresh = collected
+                .filter { m ->
+                    val byId = m.msgId != null && buf.seenMsgIds.contains(m.msgId)
+                    val byFp = shownFingerprints.contains("${m.timeMs}|${m.from}|${m.text.hashCode()}")
+                    !byId && !byFp
+                }
+                .distinctBy { it.msgId ?: "${it.timeMs}|${it.from}|${it.text.hashCode()}" }
+                .sortedWith(compareBy<UiMessage> { it.timeMs }.thenBy { it.id })
+
+            if (fresh.isEmpty()) {
+                return@update st.copy(buffers = st.buffers + (key to exhausted))
+            }
+
+            val extra = (buf.extraScrollback + fresh.size).coerceAtMost(MAX_BACKFILL_EXTRA)
+            val cap = st.settings.maxScrollbackLines.coerceIn(100, 5000) + extra
+            val merged = (fresh + buf.messages).takeLast(cap).toPersistentList()
+
+            val newBuf = buf.copy(
+                messages = merged,
+                seenMsgIds = merged.mapNotNull { it.msgId }.toPersistentSet(),
+                seenHistoryFingerprints = merged.mapNotNull { m ->
+                    if (m.from != null) "${m.timeMs}|${m.from}|${m.text.hashCode()}" else null
+                }.toPersistentSet(),
+                historyLoading = false,
+                historyExhausted = false,
+                extraScrollback = extra,
+            )
+            st.copy(buffers = st.buffers + (key to newBuf))
+        }
+    }
+
+    /**
+     * Unsent composer text per buffer. Delegated to [DraftStore] rather than held as
+     * another map on this class.
+     */
+    private val draftStore = com.boxlabs.hexdroid.data.DraftStore()
+
+    /** The saved draft for [bufferKey], or an empty string. Read when the composer switches buffer. */
+    fun draftFor(bufferKey: String): String = draftStore.get(bufferKey)
+
+    /** Save the composer's current text for [bufferKey]. Blank text discards the draft. */
+    fun saveDraft(bufferKey: String, text: String) = draftStore.put(bufferKey, text)
+
+    // Web Push (draft/webpush)
+
+    /**
+     * Give [netId] the device's push endpoint, if there is one and the server wants it.
+     *
+     * Runs on every registration. When no endpoint exists yet this asks the distributor
+     * for one instead; that reply is asynchronous and arrives at the push service.
+     */
+    private fun maybeRegisterWebPush(netId: String) {
+        if (!_state.value.settings.webPushEnabled) return
+        val client = runtimes[netId]?.client ?: return
+        if (!client.hasWebPushCap()) return
+
+        val sub = com.boxlabs.hexdroid.push.WebPushManager.subscription(appContext)
+        if (sub == null) {
+            com.boxlabs.hexdroid.push.WebPushManager.register(appContext, client.webPushVapidKey())
+            return
+        }
+        if (com.boxlabs.hexdroid.push.WebPushManager.isRegisteredWith(appContext, netId)) return
+
+        viewModelScope.launch {
+            runCatching { client.webPushRegister(sub.endpoint, sub.auth, sub.p256dh) }
+        }
+    }
+
+    /**
+     * Apply a change to the Web Push setting.
+     *
+     * Turning it off tells every connected server to drop the endpoint before the
+     * subscription is torn down locally, because once the endpoint is gone we can no
+     * longer name it in an UNREGISTER, and a server left holding a dead endpoint keeps
+     * POSTing to it until its own expiry logic notices.
+     */
+    fun applyWebPushSetting(enabled: Boolean) {
+        if (enabled) {
+            for (netId in runtimes.keys.toList()) maybeRegisterWebPush(netId)
+            return
+        }
+
+        val sub = com.boxlabs.hexdroid.push.WebPushManager.subscription(appContext)
+        if (sub != null) {
+            for ((netId, rt) in runtimes.entries.toList()) {
+                if (!rt.client.hasWebPushCap()) continue
+                com.boxlabs.hexdroid.push.WebPushManager.setRegisteredWith(appContext, netId, false)
+                viewModelScope.launch {
+                    runCatching { rt.client.webPushUnregister(sub.endpoint) }
+                }
+            }
+        }
+        com.boxlabs.hexdroid.push.WebPushManager.unregister(appContext)
+    }
+
+    /**
+     * The buffer an unsolicited, network-wide event should be shown in.
+     *
+     * The selected buffer when it belongs to [netId] otherwise that network's `*server*` buffer.
+     */
+    private fun currentBufferOrServer(netId: String): String {
+        val selected = _state.value.selectedBuffer
+        if (selected.isNotBlank()) {
+            val (selNet, selBuf) = splitKey(selected)
+            if (selNet == netId && !isDccChatBufferName(selBuf)) return selected
+        }
+        return bufKey(netId, "*server*")
+    }
+
+    /**
+     * True when [key]'s network negotiated chathistory, so a backfill request would
+     * actually be answered. Read by the chat view to decide whether to offer the
+     * "load older messages" control at all.
+     */
+    fun supportsChatHistory(key: String?): Boolean {
+        if (key == null) return false
+        val (netId, bufferName) = splitKey(key)
+        if (bufferName == "*server*" || isDccChatBufferName(bufferName)) return false
+        return runtimes[netId]?.client?.supportsChatHistory() == true
+    }
+
+    /**
+     * Ask for the messages [key] gained while we were disconnected (CHATHISTORY AFTER).
+     *
+     * Anchored on the newest message we already hold, so the reply carries only the gap
+     * rather than a fixed replay window we would then have to dedupe.
+     */
+    private fun requestHistoryCatchup(netId: String, key: String, target: String) {
+        val rt = runtimes[netId] ?: return
+        if (!rt.client.supportsChatHistory()) return
+        val prefix = "$netId::"
+        if (historyCatchupRequested.count { it.startsWith(prefix) } >= MAX_CATCHUP_TARGETS) return
+        if (!historyCatchupRequested.add(key)) return
+
+        val buf = _state.value.buffers[key]
+        val newest = buf?.messages?.lastOrNull { it.from != null }
+        // With nothing on record locally there is no gap to describe, so fall back to the
+        // server's own idea of recent rather than inventing an anchor.
+        val afterTs = newest?.let {
+            runCatching { DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(it.timeMs)) }.getOrNull()
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                if (afterTs != null) {
+                    rt.client.requestChatHistoryAfter(target, afterTs, HISTORY_BACKFILL_PAGE)
+                } else {
+                    rt.client.requestChatHistoryLatest(target, HISTORY_BACKFILL_PAGE)
+                }
+            }
+        }
+    }
+
+    /**
+     * Drop this network's backfill bookkeeping.
+     *
+     * Called on each registration. An in-flight request cannot be answered across a
+     * reconnect, and "exhausted" was a statement about the previous connection: the
+     * server may well hold more history than it was willing or able to give us then, so
+     * the buffers get another chance rather than permanently hiding the control.
+     */
+    private fun clearHistoryStateFor(netId: String) {
+        val prefix = "$netId::"
+        for (k in historyBackfills.keys.filter { it.startsWith(prefix) }) {
+            historyBackfills.remove(k)
+            historyBackfillTimeouts.remove(k)?.cancel()
+        }
+        historyCatchupRequested.removeAll { it.startsWith(prefix) }
+        _state.update { st ->
+            var changed = false
+            var bufs = st.buffers
+            for ((k, b) in st.buffers) {
+                if (!k.startsWith(prefix)) continue
+                if (!b.historyLoading && !b.historyExhausted) continue
+                bufs = bufs + (k to b.copy(historyLoading = false, historyExhausted = false))
+                changed = true
+            }
+            if (changed) st.copy(buffers = bufs) else st
+        }
+    }
+
+    /**
+     * Resolve a CHATHISTORY batch target to the buffer key of an in-flight backfill.
+     *
+     * The server echoes the target as it knows it, which can differ in case from the
+     * buffer name we hold, so the match is case-folded per the network's CASEMAPPING.
+     */
+    private fun backfillKeyForTarget(netId: String, target: String): String? {
+        val fold = casefoldText(netId, target)
+        return historyBackfills.keys.firstOrNull { k ->
+            val (nid, bn) = splitKey(k)
+            nid == netId && casefoldText(netId, bn) == fold
+        }
+    }
+
     private fun removeBuffer(key: String) {
         // If this is a DCC CHAT buffer, close the underlying session.
         val (_, name) = splitKey(key)
@@ -9877,6 +10300,10 @@ if (code == "442") {
         scrollbackRequested.remove(key)
         scrollbackLoadStartedAtMs.remove(key)
         pendingChathistoryMarkerMs.remove(key)
+        historyBackfills.remove(key)
+        historyBackfillTimeouts.remove(key)?.cancel()
+        historyCatchupRequested.remove(key)
+        draftStore.clear(key)
 
         // Use atomic update to prevent race conditions
         _state.update { st0: UiState ->
@@ -10138,6 +10565,20 @@ if (code == "442") {
             fromBot = fromBot,
         )
 
+        // Explicit backfill: while a CHATHISTORY BEFORE reply is being received for this
+        // buffer, its messages are older than everything on screen, so appending them to
+        // the end would both misorder them and put them first in line for the front trim.
+        // They are collected instead and spliced in above the scrollback by
+        // [finishHistoryBackfill] when the reply batch closes.
+        run {
+            val backfill = historyBackfills[bufferKey] ?: return@run
+            val oldestShown = _state.value.buffers[bufferKey]?.messages?.firstOrNull()?.timeMs
+            val belongsAbove = isHistory || (oldestShown != null && ts < oldestShown)
+            if (!belongsAbove) return@run
+            if (backfill.size < MAX_BACKFILL_EXTRA) backfill.add(msg)
+            return
+        }
+
         // Content-fingerprint dedup. `time=` is server-stamped on replayed messages so two
         // replays of the same line produce identical fingerprints. The hashCode of text is
         // sufficient — these are best-effort dedup keys, not a security boundary, and the
@@ -10265,7 +10706,9 @@ if (code == "442") {
             val unreadInc = if (!isSelected && !isLocal) 1 else 0
             val highlightInc = if (!isSelected && effectiveHighlight && !isLocal) 1 else 0
 
-            val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000)
+            // Backfilled buffers keep the extra depth the user explicitly asked for, so an
+            // incoming message doesn't trim away the older history they just loaded.
+            val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000) + buf.extraScrollback
             // Splice in the chathistory marker (if any) before the new live message, in a
             // single state update. The marker is a system line (from = null) and does not
             // affect dedup — it is inserted directly rather than going through this path.

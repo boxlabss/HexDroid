@@ -1029,6 +1029,9 @@ private fun SidebarDragHandle(
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
 ) {
+    // The gesture block is set up once and then outlives every recomposition, so it
+    // reads the callbacks through state rather than capturing the first ones it saw,
+    // which would leave a drag acting on the network order as it was at first draw.
     val start by rememberUpdatedState(onStart)
     val drag by rememberUpdatedState(onDrag)
     val end by rememberUpdatedState(onEnd)
@@ -1106,6 +1109,50 @@ private fun ReplyQuote(
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * Top-of-scrollback row offering the next page of stored history.
+ *
+ * Shown only for buffers whose server has chathistory and hasn't reported itself out of
+ * older messages.
+ */
+@Composable
+private fun LoadOlderHistoryRow(
+    loading: Boolean,
+    onLoad: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.chat_history_loading),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            TextButton(
+                onClick = onLoad,
+                modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+            ) {
+                Text(
+                    text = stringResource(R.string.chat_history_load_older),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
+
 /**
  * Horizontal divider shown above the first unread message in a buffer.
  * Driven by the server's draft/read-marker or soju.im/read timestamp.
@@ -1195,6 +1242,12 @@ fun ChatScreen(
     onCollapseAllNetworks: () -> Unit = {},
     onMarkAllBuffersRead: () -> Unit = {},
     onSearchFromToolbar: (query: String, global: Boolean) -> Unit = { _, _ -> },
+    /** Fetch the page of messages older than the top of [bufferKey]'s scrollback. */
+    onLoadOlderHistory: (bufferKey: String) -> Unit = {},
+    /** Unsent composer text for [bufferKey], restored when the buffer is selected. */
+    draftFor: (bufferKey: String) -> String = { "" },
+    /** Park the composer's current text against [bufferKey]. Blank text discards the draft. */
+    onDraftChanged: (bufferKey: String, text: String) -> Unit = { _, _ -> },
     /**
      * Optional reference to the ViewModel for features that need a richer API than
      * fits in a callback list — currently the EncryptionDialog, which exposes
@@ -1394,7 +1447,15 @@ fun ChatScreen(
         }
     }
 
-    var input by remember { mutableStateOf(TextFieldValue("")) }
+    var input by remember(selected) {
+        val restored = selected?.let { draftFor(it) }.orEmpty()
+        mutableStateOf(TextFieldValue(restored, TextRange(restored.length)))
+    }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { selected to input.text }
+            .collect { (key, text) -> if (key != null) onDraftChanged(key, text) }
+    }
     /** Non-null when the user has tapped Reply on a message: cleared after send or cancel. */
     var pendingReply by remember(selected) { mutableStateOf<UiMessage?>(null) }
     var inputHasFocus by remember { mutableStateOf(false) }
@@ -1913,6 +1974,8 @@ fun ChatScreen(
 			val favouriteById = remember(state.networks) {
 				state.networks.associate { it.id to it.isFavourite }
 			}
+			// The gesture handler outlives a recomposition, so it reads these rather than
+			// capturing the lists and acting on a stale order.
 			val currentNetOrder by rememberUpdatedState(netOrder)
 			val currentFullNetIds by rememberUpdatedState(fullNetIds)
 			val currentFavourites by rememberUpdatedState(favouriteById)
@@ -1927,7 +1990,7 @@ fun ChatScreen(
 				}
 			}
 
-			// One position up or down, for the D-pad path.
+			// One position up or down, for the D-pad
 			val stepNet: (String, Int) -> Unit = { movedId, delta ->
 				val order = currentNetOrder
 				val idx = order.indexOf(movedId)
@@ -2071,6 +2134,7 @@ fun ChatScreen(
 						else -> null
 					}
 					val isRoot    = rootNetId != null
+					// The whole group travels with the finger, not just its header row.
 					val itemNetId: String? = when (item) {
 						is SidebarItem.Header -> item.netId
 						is SidebarItem.Buffer -> item.netId ?: splitKey(item.key).first
@@ -2079,6 +2143,8 @@ fun ChatScreen(
 					val isDragging = reorder.isDragging(itemNetId)
 
 					Box(modifier = Modifier
+						// The dragged group is placed by the finger, so it opts out of the
+						// item animation the rows it passes use to slide aside.
 						.then(if (isDragging) Modifier else Modifier.animateItem())
 						.graphicsLayer { translationY = if (isDragging) reorder.translation else 0f }
 						.then(
@@ -2366,6 +2432,32 @@ fun ChatScreen(
         }
     }
 
+    // Older-history state for the selected buffer. The control is offered only when the
+    // server can actually answer (chathistory negotiated) and hasn't already told us it
+    // has nothing older, so the user is never shown a button that can only fail.
+    val selectedBufferHistoryLoading = selected?.let { state.buffers[it]?.historyLoading } ?: false
+    val historyBackfillAvailable = run {
+        val buf = selected?.let { state.buffers[it] }
+        buf != null &&
+            !buf.historyExhausted &&
+            buf.messages.any { it.from != null } &&
+            viewModel?.supportsChatHistory(selected) == true
+    }
+
+    // Auto-load when the top of the list comes into view, so scrolling back simply keeps
+    // going rather than stopping at a button. The header item is the last index in the
+    // reversed layout; requesting is idempotent, so a repeated trigger while a request is
+    // already in flight is harmless.
+    LaunchedEffect(selected, historyBackfillAvailable) {
+        if (!historyBackfillAvailable) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key }
+            .collect { lastKey ->
+                if (lastKey == "history-load-older") {
+                    selected?.let { onLoadOlderHistory(it) }
+                }
+            }
+    }
+
     // True once the user has jumped/scrolled to the unread marker this session.
     // Distinct from userScrolledUp, the jump-to-unread button should stay visible
     // while the user is scrolling up toward unread messages, not disappear the moment
@@ -2621,11 +2713,16 @@ fun ChatScreen(
         ChatFontStyle.BOLD_ITALIC -> FontWeight.Bold to FontStyle.Italic
     }
 
+    // Held across recompositions: resolving this hits the filesystem for a custom font,
+    // and ChatScreen recomposes on every incoming line.
     val chatFontFamily = remember(state.settings.chatFontChoice, state.settings.customChatFontPath) {
         fontFamilyForChoice(state.settings.chatFontChoice, state.settings.customChatFontPath)
     }
 
-    // Held across recompositions so every message Text sees the same instance.
+    // Held across recompositions so every message Text sees the same instance. A style
+    // rebuilt each time is only skippable while it stays equal to the last one, and a
+    // freshly built font family breaks that equality, which re-lays-out the whole
+    // scrollback on every recomposition.
     val bodyMedium = MaterialTheme.typography.bodyMedium
     val chatLineHeightFactor = state.settings.chatFontLineHeight.coerceIn(0.9f, 2.0f)
     val chatTextStyle = remember(bodyMedium, chatFontFamily, baseWeight, baseStyle, chatLineHeightFactor) {
@@ -3364,6 +3461,16 @@ fun ChatScreen(
 
                         } // end when
                     }
+
+                    // Older-history control.
+                    if (historyBackfillAvailable) {
+                        item(key = "history-load-older") {
+                            LoadOlderHistoryRow(
+                                loading = selectedBufferHistoryLoading,
+                                onLoad = { selected?.let { onLoadOlderHistory(it) } },
+                            )
+                        }
+                    }
                 }
             } // end BoxWithConstraints
 
@@ -3458,12 +3565,7 @@ fun ChatScreen(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = ripple(bounded = true)
                         ) {
-                            // Read once, here. unreadScrollTarget is state that the
-                            // composition keeps updating, and it goes to -1 as soon as the
-                            // buffer changes or the unread run is cleared. Passing it
-                            // straight to the coroutine meant a message arriving between
-                            // the tap and the coroutine running could hand -1 to
-                            // animateScrollToItem, which rejects a negative index.
+                            // Read once
                             val target = unreadScrollTarget
                             if (target >= 0) {
                                 scope.launch {
@@ -4397,7 +4499,7 @@ fun ChatScreen(
                     onDragDeltaPx(deltaPx)
                 }
 
-                // One D-pad step.
+                // One D-pad step
                 val stepPx = with(LocalDensity.current) { 16.dp.toPx() }
 
                 Box(
@@ -4494,9 +4596,7 @@ fun ChatScreen(
             modifier = Modifier
                 .onPreviewKeyEvent { ev ->
                     // With a physical keyboard, typing anywhere in the chat goes to the
-                    // message field the way a desktop client behaves. The character is
-                    // inserted here because the event is not delivered again once focus
-                    // moves, so letting it through would swallow the first keystroke.
+                    // message field the way a desktop client behaves.
                     if (!hardwareKeyboard || inputHasFocus) return@onPreviewKeyEvent false
                     val typed = typedCharacter(ev) ?: return@onPreviewKeyEvent false
                     val start = input.selection.min
@@ -4567,6 +4667,7 @@ fun ChatScreen(
             if (selBufName.isNotBlank() && selBufName != "*server*") onRefreshChannelModes()
         }
         // contentWindowInsets = WindowInsets(0) so we control insets ourselves.
+        // imePadding() goes on the OUTER container, not inside the scroll
         ModalBottomSheet(
             onDismissRequest = { showChanOps = false },
             contentWindowInsets = { WindowInsets(0) },
@@ -6484,8 +6585,9 @@ private fun SingleMessageItem(
                         }
                     } else Modifier
                 )
-                // A remote has no long press, so select opens the message actions there.
-                // Touch keeps long press, where a select-to-open row would fight with tapping links inside the message.
+                // A remote has no dependable long press, so select opens the message
+                // actions there. Touch keeps long press, where a select-to-open row
+                // would fight with tapping links inside the message.
                 .then(if (isTv) Modifier.focusHighlight(RoundedCornerShape(4.dp)) else Modifier)
                 .combinedClickable(
                     onClick = {
