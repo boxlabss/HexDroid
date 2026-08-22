@@ -1718,4 +1718,12 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="setting_boot_wifi_only_desc">Houd de verbinding bij het opstarten vast tot Wi-Fi beschikbaar is, in plaats van via mobiele data te verbinden.</string>
     <string name="vm_status_waiting_wifi">Wachten op Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">Wachten op Wi-Fi voordat er verbinding wordt gemaakt.</string>
+    <string name="chat_history_load_older">Oudere berichten laden</string>
+    <string name="chat_history_loading">Oudere berichten laden…</string>
+    <string name="push_invite">%1$s heeft je uitgenodigd voor %2$s</string>
+    <string name="setting_webpush">Pushmeldingen</string>
+    <string name="setting_webpush_desc">Laat servers die dit ondersteunen berichten bezorgen via een pushdistributeur, zodat je meldingen krijgt zonder een verbinding open te houden.</string>
+    <string name="setting_webpush_no_distributor">Geen pushdistributeur geïnstalleerd. Installeer er een (bijvoorbeeld ntfy) om dit te gebruiken.</string>
+    <string name="setting_webpush_distributor_current">%1$s (in gebruik)</string>
+    <string name="vm_webpush_failed">Pushmeldingen: de server heeft het abonnement geweigerd (%1$s: %2$s).</string>
 </resources>

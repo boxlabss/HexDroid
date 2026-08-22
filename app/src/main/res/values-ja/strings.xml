@@ -1718,4 +1718,12 @@
     <string name="setting_boot_wifi_only_desc">起動時にモバイルデータで接続せず、Wi-Fi が利用可能になるまで接続を保留します。</string>
     <string name="vm_status_waiting_wifi">Wi-Fiを待機中…</string>
     <string name="vm_waiting_for_wifi">接続前に Wi-Fi を待っています。</string>
+    <string name="chat_history_load_older">過去のメッセージを読み込む</string>
+    <string name="chat_history_loading">過去のメッセージを読み込んでいます…</string>
+    <string name="push_invite">%1$s さんが %2$s に招待しました</string>
+    <string name="setting_webpush">プッシュ通知</string>
+    <string name="setting_webpush_desc">対応するサーバーがプッシュディストリビューター経由でメッセージを配信できるようにします。接続を維持しなくても通知を受け取れます。</string>
+    <string name="setting_webpush_no_distributor">プッシュディストリビューターがインストールされていません。利用するには ntfy などをインストールしてください。</string>
+    <string name="setting_webpush_distributor_current">%1$s（使用中）</string>
+    <string name="vm_webpush_failed">プッシュ通知: サーバーが購読を拒否しました (%1$s: %2$s)。</string>
 </resources>

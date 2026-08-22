@@ -1718,4 +1718,12 @@ Este es un nuevo requisito de Android 17 para conectarse a servidores en la red 
     <string name="setting_boot_wifi_only_desc">Retener la conexión al arrancar hasta que haya Wi-Fi, en lugar de conectar por datos móviles.</string>
     <string name="vm_status_waiting_wifi">Esperando al Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">Esperando al Wi-Fi antes de conectar.</string>
+    <string name="chat_history_load_older">Cargar mensajes anteriores</string>
+    <string name="chat_history_loading">Cargando mensajes anteriores…</string>
+    <string name="push_invite">%1$s te ha invitado a %2$s</string>
+    <string name="setting_webpush">Notificaciones push</string>
+    <string name="setting_webpush_desc">Permite que los servidores compatibles entreguen mensajes a través de un distribuidor push, para recibir avisos sin mantener una conexión abierta.</string>
+    <string name="setting_webpush_no_distributor">No hay ningún distribuidor push instalado. Instala uno (por ejemplo ntfy) para usar esta opción.</string>
+    <string name="setting_webpush_distributor_current">%1$s (en uso)</string>
+    <string name="vm_webpush_failed">Notificaciones push: el servidor rechazó la suscripción (%1$s: %2$s).</string>
 </resources>

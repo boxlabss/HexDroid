@@ -1718,4 +1718,12 @@
     <string name="setting_boot_wifi_only_desc">Під час запуску утримувати підключення, доки не з\'явиться Wi-Fi, замість підключення через мобільні дані.</string>
     <string name="vm_status_waiting_wifi">Очікування Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">Очікування Wi-Fi перед підключенням.</string>
+    <string name="chat_history_load_older">Завантажити давніші повідомлення</string>
+    <string name="chat_history_loading">Завантаження давніших повідомлень…</string>
+    <string name="push_invite">%1$s запросив вас до %2$s</string>
+    <string name="setting_webpush">Push-сповіщення</string>
+    <string name="setting_webpush_desc">Дозволяє серверам із підтримкою цієї функції доставляти повідомлення через push-розповсюджувач, щоб отримувати сповіщення без постійного з’єднання.</string>
+    <string name="setting_webpush_no_distributor">Push-розповсюджувач не встановлено. Установіть його (наприклад, ntfy), щоб скористатися цим.</string>
+    <string name="setting_webpush_distributor_current">%1$s (використовується)</string>
+    <string name="vm_webpush_failed">Push-сповіщення: сервер відхилив підписку (%1$s: %2$s).</string>
 </resources>

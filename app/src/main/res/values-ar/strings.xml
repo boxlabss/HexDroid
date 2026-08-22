@@ -1718,4 +1718,12 @@
     <string name="setting_boot_wifi_only_desc">تأجيل الاتصال عند الإقلاع حتى يتوفّر Wi-Fi، بدلاً من الاتصال عبر بيانات الجوال.</string>
     <string name="vm_status_waiting_wifi">في انتظار Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">في انتظار Wi-Fi قبل الاتصال.</string>
+    <string name="chat_history_load_older">تحميل الرسائل الأقدم</string>
+    <string name="chat_history_loading">جارٍ تحميل الرسائل الأقدم…</string>
+    <string name="push_invite">دعاك %1$s إلى %2$s</string>
+    <string name="setting_webpush">الإشعارات الفورية</string>
+    <string name="setting_webpush_desc">يتيح للخوادم التي تدعم ذلك تسليم الرسائل عبر موزّع إشعارات، فتصلك التنبيهات دون إبقاء اتصال مفتوح.</string>
+    <string name="setting_webpush_no_distributor">لا يوجد موزّع إشعارات مثبَّت. ثبِّت واحدًا (مثل ntfy) لاستخدام هذه الميزة.</string>
+    <string name="setting_webpush_distributor_current">%1$s (قيد الاستخدام)</string>
+    <string name="vm_webpush_failed">الإشعارات الفورية: رفض الخادم الاشتراك (%1$s: %2$s).</string>
 </resources>

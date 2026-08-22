@@ -1449,7 +1449,7 @@ fun ChatScreen(
     }
 
     var input by remember(selected) {
-        val restored = selected?.let { draftFor(it) } ?: com.boxlabs.hexdroid.data.Draft.EMPTY
+        val restored = if (selected.isBlank()) com.boxlabs.hexdroid.data.Draft.EMPTY else draftFor(selected)
         mutableStateOf(
             TextFieldValue(
                 restored.text,
@@ -1460,7 +1460,7 @@ fun ChatScreen(
 
     // Keyed on the selected buffer because the composer state above is too
     LaunchedEffect(selected) {
-        val key = selected ?: return@LaunchedEffect
+        val key = selected.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         snapshotFlow { input }
             .collect { onDraftChanged(key, it.text, it.selection.start) }
     }
@@ -2443,9 +2443,9 @@ fun ChatScreen(
     // Older-history state for the selected buffer. The control is offered only when the
     // server can actually answer (chathistory negotiated) and hasn't already told us it
     // has nothing older, so the user is never shown a button that can only fail.
-    val selectedBufferHistoryLoading = selected?.let { state.buffers[it]?.historyLoading } ?: false
+    val selectedBufferHistoryLoading = state.buffers[selected]?.historyLoading ?: false
     val historyBackfillAvailable = run {
-        val buf = selected?.let { state.buffers[it] }
+        val buf = state.buffers[selected]
         buf != null &&
             !buf.historyExhausted &&
             buf.messages.any { it.from != null } &&
@@ -2461,7 +2461,7 @@ fun ChatScreen(
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key }
             .collect { lastKey ->
                 if (lastKey == "history-load-older") {
-                    selected?.let { onLoadOlderHistory(it) }
+                    onLoadOlderHistory(selected)
                 }
             }
     }
@@ -3475,7 +3475,7 @@ fun ChatScreen(
                         item(key = "history-load-older") {
                             LoadOlderHistoryRow(
                                 loading = selectedBufferHistoryLoading,
-                                onLoad = { selected?.let { onLoadOlderHistory(it) } },
+                                onLoad = { onLoadOlderHistory(selected) },
                             )
                         }
                     }

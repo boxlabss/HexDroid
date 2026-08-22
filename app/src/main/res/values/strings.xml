@@ -1725,4 +1725,5 @@
     <string name="setting_boot_wifi_only_desc">Hold the connection at boot until Wi-Fi is up, instead of connecting over mobile data.</string>
     <string name="vm_status_waiting_wifi">Waiting for Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">Waiting for Wi-Fi before connecting.</string>
+    <string name="vm_webpush_failed">Push notifications: the server rejected the subscription (%1$s: %2$s).</string>
 </resources>

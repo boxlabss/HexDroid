@@ -9,8 +9,8 @@ android {
         applicationId = "com.boxlabs.hexdroid"
         minSdk = 26
         targetSdk = 37
-        versionCode = 30
-        versionName = "1.7.2"
+        versionCode = 31
+        versionName = "1.7.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     // Release signing
@@ -154,6 +154,8 @@ dependencies {
     // low-level org.bouncycastle.crypto.* classes directly (no JCA provider registration), so it
     // never collides with Android's platform-repackaged com.android.org.bouncycastle.
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    // UnifiedPush connector: Web Push transport for the draft/webpush IRC extension.
+    implementation("org.unifiedpush.android:connector:3.0.10")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

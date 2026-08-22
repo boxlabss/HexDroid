@@ -1718,4 +1718,12 @@
     <string name="setting_boot_wifi_only_desc">При загрузке удерживать подключение, пока не появится Wi-Fi, вместо подключения через мобильные данные.</string>
     <string name="vm_status_waiting_wifi">Ожидание Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">Ожидание Wi-Fi перед подключением.</string>
+    <string name="chat_history_load_older">Загрузить старые сообщения</string>
+    <string name="chat_history_loading">Загрузка старых сообщений…</string>
+    <string name="push_invite">%1$s пригласил вас в %2$s</string>
+    <string name="setting_webpush">Push-уведомления</string>
+    <string name="setting_webpush_desc">Позволяет серверам с поддержкой этой функции доставлять сообщения через push-распространитель, чтобы получать уведомления без постоянного соединения.</string>
+    <string name="setting_webpush_no_distributor">Push-распространитель не установлен. Установите его (например, ntfy), чтобы использовать эту функцию.</string>
+    <string name="setting_webpush_distributor_current">%1$s (используется)</string>
+    <string name="vm_webpush_failed">Push-уведомления: сервер отклонил подписку (%1$s: %2$s).</string>
 </resources>

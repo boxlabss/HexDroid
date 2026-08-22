@@ -1718,4 +1718,12 @@ C\'est une nouvelle exigence d\'Android 17 pour les connexions aux serveurs du r
     <string name="setting_boot_wifi_only_desc">Retarder la connexion au démarrage jusqu\'à ce que le Wi-Fi soit disponible, au lieu de se connecter via les données mobiles.</string>
     <string name="vm_status_waiting_wifi">En attente du Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">En attente du Wi-Fi avant de se connecter.</string>
+    <string name="chat_history_load_older">Charger les messages plus anciens</string>
+    <string name="chat_history_loading">Chargement des messages plus anciens…</string>
+    <string name="push_invite">%1$s vous a invité sur %2$s</string>
+    <string name="setting_webpush">Notifications push</string>
+    <string name="setting_webpush_desc">Permet aux serveurs compatibles de livrer les messages via un distributeur push, afin d’être notifié sans garder une connexion ouverte.</string>
+    <string name="setting_webpush_no_distributor">Aucun distributeur push installé. Installez-en un (par exemple ntfy) pour utiliser cette option.</string>
+    <string name="setting_webpush_distributor_current">%1$s (utilisé)</string>
+    <string name="vm_webpush_failed">Notifications push : le serveur a rejeté l’abonnement (%1$s : %2$s).</string>
 </resources>

@@ -192,7 +192,8 @@ class NotificationHelper(private val ctx: Context) {
     /**
      * The highlight channel to post on for [networkName].
      *
-     * A blank name means the network is not known
+     * A blank name means the network is not known, which happens for a Web Push
+     * notification: the push carries no network and the process may hold no state at all.
      * Those fall back to the shared channel rather than the per-network one.
      */
     private fun highlightChannelFor(networkName: String, sound: Boolean): String {
@@ -318,7 +319,11 @@ class NotificationHelper(private val ctx: Context) {
 
     fun cancelConnection() { NotificationManagerCompat.from(ctx).cancel(NOTIF_ID_CONNECTION) }
 
-    fun notifyHighlight(networkId: String, buffer: String, text: String, playSound: Boolean, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = "") {
+    /** Post a highlight notification. Returns false when this message has already been notified. */
+    fun notifyHighlight(networkId: String, buffer: String, text: String, playSound: Boolean, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = ""): Boolean {
+        // One message, one ping: a Web Push and the live connection can both surface the
+        // same message, and which of them fires depends on the bouncer's configuration.
+        if (!com.boxlabs.hexdroid.data.NotifiedMessages.claim(ctx, msgAnchor)) return false
         ensureChannels()
         val channelId = highlightChannelFor(networkName, playSound)
         val notifId = nextNotifId()
@@ -331,11 +336,12 @@ class NotificationHelper(private val ctx: Context) {
         openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
         // Without a network the reply has nowhere to go: the receiver looks the connection
         // up by id and would report the reply as undeliverable however well connected the
-        // user actually is. Offering no Reply button.
+        // user actually is. Offering no Reply button is better than offering one that always fails.
         if (networkId.isNotBlank()) {
             buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
         }
         NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
+        return true
     }
 
     /** Post a server/connection error notification. Opt-in per network (NetworkProfile.notifyOnErrors).
@@ -353,7 +359,10 @@ class NotificationHelper(private val ctx: Context) {
         NotificationManagerCompat.from(ctx).notify(nextNotifId(), builder.build())
     }
 
-    fun notifyPm(networkId: String, buffer: String, text: String, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = "") {
+    /** Post a private-message notification. Returns false when this message has already been notified. */
+    fun notifyPm(networkId: String, buffer: String, text: String, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = ""): Boolean {
+        // See notifyHighlight: the same message can arrive by push and by connection.
+        if (!com.boxlabs.hexdroid.data.NotifiedMessages.claim(ctx, msgAnchor)) return false
         ensureChannels()
         val channelId = pmChannelFor(networkName)
         val notifId = nextNotifId()
@@ -369,6 +378,7 @@ class NotificationHelper(private val ctx: Context) {
             buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
         }
         NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
+        return true
     }
 
     fun notifyFileDone(networkId: String, filename: String, where: String) {

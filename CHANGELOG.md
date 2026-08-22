@@ -1,6 +1,17 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
+## [1.7.3] - 2026-08-22
+- **Chathistory** Ability to load older messages for servers that support `chathistory before`, with `chathistory targets` support so conversations that happened while you were offline are picked up when you connect
+- **Input** Text typed in the message field on one channel and left unsent stays there when you switch away, and comes back when you return with the cursor where you left it.
+- **Push notifications** Servers that support webpush (or bouncers such as soju) can now reach you through a push distributor of your choosing and be notified of a highlight or a private message. Off by default, and it needs a distributor app installed. Built on UnifiedPush.
+- **UI improvements** Settings are searchable and categorised. Network settings redesigned with smoother drag and drop reordering.
+- **Timestamp and nick formatting** Ability to change timestamp colour and brackets for timestamps and nicks.
+- **Tab complete** With a physical keyboard ie Chromebook, Tab completes nicks against the nicklist and repeat presses cycle through the matches, Shift+Tab to go backwards.
+- **Wait for Wi-Fi on boot** Connect on boot can now hold until an unmetered network is up rather than connecting over mobile data.
+- **More Android TV reach** Better navigation with a remote.
+- **Bug fix** The custom font family was rebuilt on every recomposition, so every line of chat resolved its own Typeface from the font file instead of reusing a cached one.
+
 ## [1.7.2] - 2026-08-16
 - **Fix CAP NAK sending CAP END without checking saslInProgress**
 - **Fix SCRAM-SHA-256 skipping SASLprep/PRECIS on the password**

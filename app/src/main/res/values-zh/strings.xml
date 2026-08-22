@@ -1718,4 +1718,12 @@
     <string name="setting_boot_wifi_only_desc">启动时先等待 Wi-Fi 就绪再连接，而不是使用移动数据。</string>
     <string name="vm_status_waiting_wifi">正在等待 Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">连接前正在等待 Wi-Fi。</string>
+    <string name="chat_history_load_older">加载更早的消息</string>
+    <string name="chat_history_loading">正在加载更早的消息…</string>
+    <string name="push_invite">%1$s 邀请你加入 %2$s</string>
+    <string name="setting_webpush">推送通知</string>
+    <string name="setting_webpush_desc">让支持该功能的服务器通过推送分发器发送消息，无需保持连接也能收到通知。</string>
+    <string name="setting_webpush_no_distributor">未安装推送分发器。请安装一个（例如 ntfy）后使用。</string>
+    <string name="setting_webpush_distributor_current">%1$s（使用中）</string>
+    <string name="vm_webpush_failed">推送通知：服务器拒绝了订阅（%1$s: %2$s）。</string>
 </resources>

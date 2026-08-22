@@ -1718,4 +1718,12 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="setting_boot_wifi_only_desc">Açılışta mobil veriyle bağlanmak yerine Wi-Fi hazır olana kadar bağlantıyı bekletir.</string>
     <string name="vm_status_waiting_wifi">Wi-Fi bekleniyor…</string>
     <string name="vm_waiting_for_wifi">Bağlanmadan önce Wi-Fi bekleniyor.</string>
+    <string name="chat_history_load_older">Daha eski iletileri yükle</string>
+    <string name="chat_history_loading">Daha eski iletiler yükleniyor…</string>
+    <string name="push_invite">%1$s seni %2$s kanalına davet etti</string>
+    <string name="setting_webpush">Anlık bildirimler</string>
+    <string name="setting_webpush_desc">Destekleyen sunucuların iletileri bir anlık bildirim dağıtıcısı üzerinden göndermesine izin verir; böylece bağlantıyı açık tutmadan bildirim alırsın.</string>
+    <string name="setting_webpush_no_distributor">Kurulu bir anlık bildirim dağıtıcısı yok. Bunu kullanmak için bir tane kur (örneğin ntfy).</string>
+    <string name="setting_webpush_distributor_current">%1$s (kullanımda)</string>
+    <string name="vm_webpush_failed">Anlık bildirimler: sunucu aboneliği reddetti (%1$s: %2$s).</string>
 </resources>

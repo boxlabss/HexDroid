@@ -21,6 +21,7 @@ package com.boxlabs.hexdroid.push
 import com.boxlabs.hexdroid.IrcParser
 import com.boxlabs.hexdroid.NotificationHelper
 import com.boxlabs.hexdroid.stripIrcFormatting
+import com.boxlabs.hexdroid.vibrateForHighlight
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.PushService
 import org.unifiedpush.android.connector.data.PushEndpoint
@@ -75,14 +76,29 @@ class HexPushService : PushService() {
         val target = msg.params.getOrNull(0) ?: return
         val body = msg.trailing?.takeIf { it.isNotBlank() } ?: return
 
+        // The spec allows servers to strip tags to fit the payload but never the msgid,
+        // Correlate a pushed message with the same message seen over a connection.
+        // null when a server sends one anyway, in which case the message simply is not deduped.
+        val anchor = msg.tags["msgid"]?.takeIf { it.isNotBlank() }?.let { "msgid:$it" }
+
+        // Notification settings
+        val policy = PushNotifyPolicy.read(applicationContext)
+        if (!policy.notificationsEnabled) return
+
         when (msg.command.uppercase()) {
-            "PRIVMSG", "NOTICE" -> notifyMessage(from, target, body)
+            "PRIVMSG", "NOTICE" -> notifyMessage(from, target, body, anchor, policy)
             "INVITE" -> notifyInvite(from, body)
             else -> Unit
         }
     }
 
-    private fun notifyMessage(from: String, target: String, rawBody: String) {
+    private fun notifyMessage(
+        from: String,
+        target: String,
+        rawBody: String,
+        msgAnchor: String?,
+        policy: PushNotifyPolicy.Policy,
+    ) {
         val text = stripIrcFormatting(rawBody)
         val helper = NotificationHelper(applicationContext)
 
@@ -96,18 +112,28 @@ class HexPushService : PushService() {
         // it is resolved against the live connections when this process still has them.
         val (netId, netName) = resolvePushNetwork(buffer)
 
-        if (isChannel) {
+        // The user is looking at this conversation, so the message is already on screen.
+        if (isBufferOnScreen(buffer)) return
+
+        // Sender on the highlight-ignore list: the message still reaches the buffer over
+        // the connection, it just raises no alert.
+        if (policy.mutesNick(netId, from)) return
+
+        val posted = if (isChannel) {
+            if (!policy.notifyHighlights) return
             helper.notifyHighlight(
                 networkId = netId,
                 buffer = buffer,
                 text = "$from: $text",
-                playSound = true,
+                playSound = policy.playSound,
                 displayTitle = buffer,
                 from = from,
                 originalText = text,
+                msgAnchor = msgAnchor,
                 networkName = netName,
             )
         } else {
+            if (!policy.notifyPrivateMessages) return
             helper.notifyPm(
                 networkId = netId,
                 buffer = buffer,
@@ -115,14 +141,23 @@ class HexPushService : PushService() {
                 displayTitle = from,
                 from = from,
                 originalText = text,
+                msgAnchor = msgAnchor,
                 networkName = netName,
             )
+        }
+
+        // Nothing was posted when the connection had already notified for this message,
+        // and buzzing for it would be the second alert the dedupe exists to prevent.
+        if (posted && policy.vibrate) {
+            vibrateForHighlight(applicationContext, policy.vibrateIntensity)
         }
     }
 
     private fun notifyInvite(from: String, channel: String) {
         // An invite names a channel we are not in, so there is no buffer to resolve
-        // against and the notification is deliberately network-less.
+        // against and the notification is deliberately network-less. Only the master
+        // notification switch applies; the highlight and PM toggles are about
+        // conversations the user is already in.
         NotificationHelper(applicationContext).notifyHighlight(
             networkId = "",
             buffer = channel,
@@ -142,6 +177,17 @@ class HexPushService : PushService() {
         val app = applicationContext as? com.boxlabs.hexdroid.HexDroidApp ?: return "" to ""
         val vm = app.ircViewModelOrNull ?: return "" to ""
         return runCatching { vm.networkForPushTarget(buffer) }.getOrNull() ?: ("" to "")
+    }
+
+    /**
+     * True when [buffer] is the conversation on screen in the foreground app.
+     *
+     * False whenever this process has no ViewModel
+     */
+    private fun isBufferOnScreen(buffer: String): Boolean {
+        val app = applicationContext as? com.boxlabs.hexdroid.HexDroidApp ?: return false
+        val vm = app.ircViewModelOrNull ?: return false
+        return runCatching { vm.isBufferActivelyVisible(buffer) }.getOrDefault(false)
     }
 
     override fun onUnregistered(instance: String) {

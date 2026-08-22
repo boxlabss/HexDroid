@@ -1718,4 +1718,12 @@ To nowe wymaganie Android 17 dla połączeń z serwerami w sieci lokalnej.</stri
     <string name="setting_boot_wifi_only_desc">Wstrzymuje połączenie po uruchomieniu, aż pojawi się Wi-Fi, zamiast łączyć się przez dane komórkowe.</string>
     <string name="vm_status_waiting_wifi">Oczekiwanie na Wi-Fi…</string>
     <string name="vm_waiting_for_wifi">Oczekiwanie na Wi-Fi przed połączeniem.</string>
+    <string name="chat_history_load_older">Wczytaj starsze wiadomości</string>
+    <string name="chat_history_loading">Wczytywanie starszych wiadomości…</string>
+    <string name="push_invite">%1$s zaprosił(a) Cię na %2$s</string>
+    <string name="setting_webpush">Powiadomienia push</string>
+    <string name="setting_webpush_desc">Pozwala obsługującym to serwerom dostarczać wiadomości przez dystrybutora push, dzięki czemu otrzymasz powiadomienie bez utrzymywania otwartego połączenia.</string>
+    <string name="setting_webpush_no_distributor">Nie zainstalowano dystrybutora push. Zainstaluj jakiegoś (na przykład ntfy), aby z tego korzystać.</string>
+    <string name="setting_webpush_distributor_current">%1$s (w użyciu)</string>
+    <string name="vm_webpush_failed">Powiadomienia push: serwer odrzucił subskrypcję (%1$s: %2$s).</string>
 </resources>

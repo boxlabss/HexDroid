@@ -1718,4 +1718,12 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="setting_boot_wifi_only_desc">Indításkor tartsa vissza a kapcsolatot, amíg a Wi-Fi elérhető nem lesz, ahelyett hogy mobiladaton csatlakozna.</string>
     <string name="vm_status_waiting_wifi">Várakozás Wi-Fi-re…</string>
     <string name="vm_waiting_for_wifi">Várakozás Wi-Fi-re a csatlakozás előtt.</string>
+    <string name="chat_history_load_older">Régebbi üzenetek betöltése</string>
+    <string name="chat_history_loading">Régebbi üzenetek betöltése…</string>
+    <string name="push_invite">%1$s meghívott ide: %2$s</string>
+    <string name="setting_webpush">Push-értesítések</string>
+    <string name="setting_webpush_desc">Lehetővé teszi, hogy az ezt támogató kiszolgálók push-elosztón keresztül kézbesítsék az üzeneteket, így nyitva tartott kapcsolat nélkül is kapsz értesítést.</string>
+    <string name="setting_webpush_no_distributor">Nincs telepítve push-elosztó. Telepíts egyet (például ntfy), hogy használhasd.</string>
+    <string name="setting_webpush_distributor_current">%1$s (használatban)</string>
+    <string name="vm_webpush_failed">Push-értesítések: a kiszolgáló elutasította a feliratkozást (%1$s: %2$s).</string>
 </resources>

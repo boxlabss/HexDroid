@@ -1718,4 +1718,12 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="setting_boot_wifi_only_desc">부팅 시 모바일 데이터로 연결하는 대신 Wi-Fi가 준비될 때까지 연결을 미룹니다.</string>
     <string name="vm_status_waiting_wifi">Wi-Fi 기다리는 중…</string>
     <string name="vm_waiting_for_wifi">연결하기 전에 Wi-Fi를 기다리는 중입니다.</string>
+    <string name="chat_history_load_older">이전 메시지 불러오기</string>
+    <string name="chat_history_loading">이전 메시지를 불러오는 중…</string>
+    <string name="push_invite">%1$s님이 %2$s에 초대했습니다</string>
+    <string name="setting_webpush">푸시 알림</string>
+    <string name="setting_webpush_desc">지원하는 서버가 푸시 배포자를 통해 메시지를 전달하도록 합니다. 연결을 유지하지 않아도 알림을 받을 수 있습니다.</string>
+    <string name="setting_webpush_no_distributor">설치된 푸시 배포자가 없습니다. 사용하려면 ntfy 같은 앱을 설치하세요.</string>
+    <string name="setting_webpush_distributor_current">%1$s(사용 중)</string>
+    <string name="vm_webpush_failed">푸시 알림: 서버가 구독을 거부했습니다 (%1$s: %2$s).</string>
 </resources>

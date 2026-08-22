@@ -1112,6 +1112,18 @@ data class Notice(
 
     /** The server confirmed a WEBPUSH UNREGISTER for [endpoint]. */
     data class WebPushUnregistered(val endpoint: String) : IrcEvent()
+
+    /**
+     * The server rejected a WEBPUSH command with a FAIL.
+     *
+     * [subcommand] is REGISTER or UNREGISTER, [code] the standard-replies error code.
+     */
+    data class WebPushFailed(val subcommand: String, val code: String, val message: String) : IrcEvent()
+
+    /**
+     * The server advertised a VAPID public key it had not advertised before.
+     */
+    data class WebPushVapidReady(val key: String) : IrcEvent()
 }
 
 /**
@@ -1247,6 +1259,16 @@ internal fun redactRawLine(line: String): String {
         }
         // draft/account-registration.
         verb == "REGISTER" || verb == "VERIFY" -> hide(args.substringBefore(' '))
+        // soju.im/webpush. The endpoint is a bearer capability: anyone holding it can
+        // push to this device, and the p256dh/auth keys let them encrypt a payload it
+        // will decrypt and show as a notification. Keep only the subcommand.
+        verb == "WEBPUSH" -> hide(args.substringBefore(' '))
+        // The server echoes the endpoint back as context on FAIL/WARN/NOTE for WEBPUSH,
+        // so the same secret arrives inbound. Keep the shape that identifies the problem
+        // (WEBPUSH <code> <subcommand>) and drop everything after it.
+        (verb == "FAIL" || verb == "WARN" || verb == "NOTE") &&
+            args.substringBefore(' ').equals("WEBPUSH", true) ->
+            hide(args.split(' ').take(3).joinToString(" "))
         else -> line
     }
 }
@@ -1750,6 +1772,12 @@ class IrcClient(val config: IrcConfig) {
      * Null when the server offers no VAPID key.
      */
     @Volatile private var vapidPublicKey: String? = null
+
+    /**
+     * Set when this 005 line introduced a VAPID key, so the event can be emitted after the
+     * whole line is parsed rather than mid-token.
+     */
+    private var vapidBecameReady: Boolean = false
 
     /**
      * MSGREFTYPES ISUPPORT token: the message-reference types the server accepts in
@@ -3462,7 +3490,7 @@ class IrcClient(val config: IrcConfig) {
 					}
 
 					// Server confirmation of a subscription change.
-					// Format: WEBPUSH REGISTER <endpoint> <keys> | WEBPUSH UNREGISTER <endpoint>
+					// Format: WEBPUSH REGISTER <endpoint> | WEBPUSH UNREGISTER <endpoint>
 					"WEBPUSH" -> {
 						val ap = msg.allParams
 						val sub = ap.getOrNull(0)?.uppercase(Locale.ROOT) ?: return
@@ -3554,6 +3582,20 @@ class IrcClient(val config: IrcConfig) {
 						// when there is no trailing, the last param IS the description (no context).
 						val contextTokens = if (msg.trailing != null) msg.params.drop(2) else emptyList()
 						val srDesc = msg.trailing ?: msg.params.lastOrNull() ?: "?"
+						// soju.im/webpush echoes the push endpoint back as a context token.
+						if (srCmd.equals("WEBPUSH", true)) {
+							if (msg.command == "FAIL") {
+								send(IrcEvent.WebPushFailed(
+									subcommand = contextTokens.firstOrNull() ?: "?",
+									code = srCode,
+									message = srDesc,
+								))
+							} else {
+								send(IrcEvent.ServerText(
+									"${msg.command} WEBPUSH $srCode: $srDesc", code = msg.command))
+							}
+							return
+						}
 						val srContextStr = if (contextTokens.isNotEmpty()) " [${contextTokens.joinToString(" ")}]" else ""
 						val srText = "${msg.command} $srCmd $srCode$srContextStr: $srDesc"
 						// draft/account-registration failures: append an actionable hint so the
@@ -5085,6 +5127,7 @@ class IrcClient(val config: IrcConfig) {
         chatHistoryLimit = 0
         msgRefTypes = emptySet()
         vapidPublicKey = null
+        vapidBecameReady = false
         chathistoryBatchTargets.clear()
         lengthLimits.clear()
         knockSupported = false
@@ -5278,7 +5321,13 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                 // CHATHISTORY=<n>: max messages returned per CHATHISTORY request.
                 "CHATHISTORY" -> chatHistoryLimit = v?.trim()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
                 // VAPID=<key>: application-server public key for draft/webpush notifications.
-                "VAPID" -> vapidPublicKey = v?.trim()?.takeIf { it.isNotEmpty() }
+                // A transition from "no key" to a key is the cue to subscribe.
+                "VAPID" -> {
+                    val newKey = v?.trim()?.takeIf { it.isNotEmpty() }
+                    val changed = newKey != null && newKey != vapidPublicKey
+                    vapidPublicKey = newKey
+                    if (changed) vapidBecameReady = true
+                }
                 // MSGREFTYPES=<csv>: which reference types CHATHISTORY selectors may use.
                 "MSGREFTYPES" -> msgRefTypes =
                     v?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
@@ -5337,6 +5386,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         if (mp.isNotEmpty()) prefixModeToSymbol = mp
 
         send(IrcEvent.ISupport(chantypes, caseMapping, prefixModes, prefixSymbols, statusMsg, chanModes, ll, elistTokens, filehostUrl, networkIconUrl, extbanPrefix, extbanTypes, accountExtban))
+        if (vapidBecameReady) {
+            vapidBecameReady = false
+            vapidPublicKey?.let { send(IrcEvent.WebPushVapidReady(it)) }
+        }
     },
 
     // LIST output

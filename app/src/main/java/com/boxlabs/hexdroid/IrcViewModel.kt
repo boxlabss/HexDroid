@@ -29,12 +29,8 @@ import android.net.Uri
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.GLES20
-import android.os.Build
 import android.os.StatFs
 import android.os.SystemClock
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -791,6 +787,11 @@ class IrcViewModel(
         const val CHANNEL_LIST_FLUSH_INTERVAL_MS = 300L
         /** How many older messages one "load older" request asks the server for. */
         const val HISTORY_BACKFILL_PAGE = 50
+        /**
+         * How many seconds either side of a message to accept as "the same message" when
+         * comparing a disk-log copy with a replayed one.
+         */
+        val DEDUP_WINDOW_SECONDS = -3L..3L
         /** Selector timestamp format for CHATHISTORY anchors. See [historyAnchorTimestamp]. */
         val HISTORY_ANCHOR_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
@@ -1001,6 +1002,13 @@ class IrcViewModel(
      * still get the "no network" line, and vice versa.
      */
     private val waitingForWifiNotice: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * Networks already told, on their server buffer, that the push subscription was
+     * rejected. Cleared when a registration succeeds so the next failure is reported.
+     */
+    private val webPushFailureNotice: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
@@ -1539,34 +1547,9 @@ class IrcViewModel(
     }
 
 
-    private fun vibrateForHighlight(intensity: VibrateIntensity) {
-        val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= 31) {
-            val vm = appContext.getSystemService(VibratorManager::class.java)
-            vm?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        }
-
-        if (vibrator == null || !vibrator.hasVibrator()) return
-
-        val (durationMs, amplitude) = when (intensity) {
-            VibrateIntensity.LOW -> 25L to 80
-            VibrateIntensity.MEDIUM -> 40L to 160
-            VibrateIntensity.HIGH -> 70L to 255
-        }
-
-        try {
-            if (Build.VERSION.SDK_INT >= 26) {
-                vibrator.vibrate(VibrationEffect.createOneShot(durationMs, amplitude))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(durationMs)
-            }
-        } catch (_: Throwable) {
-            // Ignore vibration failures.
-        }
-    }
+    /** Vibrate once at [intensity] */
+    private fun vibrateForHighlight(intensity: VibrateIntensity) =
+        com.boxlabs.hexdroid.vibrateForHighlight(appContext, intensity)
 
     // PART is sent when the user closes a buffer; the buffer is removed when we receive our own PART back.
     private val pendingCloseAfterPart: MutableSet<String> =
@@ -1747,6 +1730,20 @@ class IrcViewModel(
         }
         return "$ts\t$body"
     }
+
+    /**
+     * Signature for matching one message against a copy of itself that reached us by a different route.
+     */
+    private fun dedupSigAt(sec: Long, from: String?, strippedLowerText: String): String =
+        "$sec|${from?.lowercase() ?: "*"}|$strippedLowerText"
+
+    /** Normalise a message body for [dedupSigAt]. */
+    private fun dedupText(text: String): String =
+        stripIrcFormatting(text).take(100).lowercase()
+
+    /** [dedupSigAt] for a message whose time is known in milliseconds. */
+    private fun dedupSig(timeMs: Long, from: String?, text: String): String =
+        dedupSigAt(timeMs / 1000, from, dedupText(text))
 
     private data class SentSig(val bufferKey: String, val text: String, val isAction: Boolean, val ts: Long)
     private val pendingSendsByNet: MutableMap<String, ArrayDeque<SentSig>> =
@@ -2229,6 +2226,7 @@ class IrcViewModel(
                 // Applies live: flipping the switch starts or stops logging on connections
                 // that are already up, which is the point of a debugging toggle.
                 runtimes.values.forEach { it.client.rawLogEnabled = s.rawLog }
+                syncPushNotifyPolicy()
                 maybeAutoConnect()
                 maybeRestoreDesiredConnections()
             }
@@ -2244,6 +2242,7 @@ class IrcViewModel(
                 if (st.selectedBuffer.isBlank() && active != null) {
                     _state.value = _state.value.copy(selectedBuffer = bufKey(active, "*server*"), screen = AppScreen.NETWORKS)
                 }
+                syncPushNotifyPolicy()
                 maybeAutoConnect()
                 maybeRestoreDesiredConnections()
             }
@@ -2970,6 +2969,33 @@ class IrcViewModel(
         runtimes[networkId]?.client?.isConnectedNow() == true
 
     /**
+     * Copy the notification settings that gate an alert to where the push service can
+     * read them without a coroutine or a ViewModel.
+     */
+    private fun syncPushNotifyPolicy() {
+        val st = _state.value
+        runCatching {
+            com.boxlabs.hexdroid.push.PushNotifyPolicy.store(appContext, st.settings, st.networks)
+        }
+    }
+
+    /**
+     * True when [buffer] is the conversation currently on screen in the foreground app.
+     *
+     * The name is compared under the selected network's CASEMAPPING, because a pushed
+     * message names a target rather than one of our buffer keys.
+     */
+    fun isBufferActivelyVisible(buffer: String): Boolean {
+        if (buffer.isBlank()) return false
+        if (!AppVisibility.isForeground) return false
+        val st = _state.value
+        if (st.screen != AppScreen.CHAT) return false
+        val selected = st.selectedBuffer.takeIf { it.isNotBlank() } ?: return false
+        val (selNet, selBuf) = splitKey(selected)
+        return casefoldText(selNet, selBuf) == casefoldText(selNet, buffer)
+    }
+
+    /**
      * The network id and display name that a pushed message about [buffer] belongs to.
      */
     fun networkForPushTarget(buffer: String): Pair<String, String>? {
@@ -3344,6 +3370,7 @@ fun startAddNetwork() {
         stableConnectionJobs.remove(netId)?.cancel()
         noNetworkNotice.remove(netId)
         waitingForWifiNotice.remove(netId)
+        webPushFailureNotice.remove(netId)
         // The flap-PAUSED set (flapPaused) is likewise NOT cleared here: a network that
         // tripped flap protection must stay paused across reconnect cycles until the user
         // explicitly intervenes. Cleared in reconnectNetwork() on a manual reconnect.
@@ -6991,20 +7018,8 @@ fun startAddNetwork() {
     }
 
     /** Match an IRC-style glob pattern (*, ?) against [input], case-insensitive. */
-    private fun matchIrcGlob(pattern: String, input: String): Boolean {
-        val regex = buildString {
-            append("(?i)\\A")
-            for (ch in pattern) {
-                when (ch) {
-                    '*' -> append(".*")
-                    '?' -> append(".")
-                    else -> append(Regex.escape(ch.toString()))
-                }
-            }
-            append("\\z")
-        }
-        return Regex(regex).containsMatchIn(input)
-    }
+    private fun matchIrcGlob(pattern: String, input: String): Boolean =
+        com.boxlabs.hexdroid.data.NotifyMasks.matchIrcGlob(pattern, input)
 
     /**
      * True when [nick]'s messages on [netId] should NOT raise a highlight or PM
@@ -7014,22 +7029,8 @@ fun startAddNetwork() {
      * mask as a regex (`/.../`), an IRC glob (`*`/`?`), or a plain case-insensitive nick.
      */
     private fun isNotifyIgnoredSender(netId: String, nick: String?): Boolean {
-        val base = nick?.trim()?.trimStart('~', '&', '@', '%', '+').takeIf { !it.isNullOrBlank() }
-            ?: return false
         val masks = _state.value.networks.firstOrNull { it.id == netId }?.highlightIgnoreMasks.orEmpty()
-        if (masks.isEmpty()) return false
-        return masks.any { raw ->
-            val m = raw.trim()
-            when {
-                m.isEmpty() -> false
-                m.length >= 2 && m.startsWith("/") && m.endsWith("/") ->
-                    runCatching {
-                        Regex(m.substring(1, m.length - 1), RegexOption.IGNORE_CASE).containsMatchIn(base)
-                    }.getOrDefault(false)
-                m.contains('*') || m.contains('?') -> matchIrcGlob(m, base)
-                else -> m.equals(base, ignoreCase = true)
-            }
-        }
+        return com.boxlabs.hexdroid.data.NotifyMasks.mutesNick(masks, nick)
     }
 
     private fun updateNetworkInState(updated: com.boxlabs.hexdroid.data.NetworkProfile) {
@@ -9564,13 +9565,32 @@ if (code == "442") {
                 }
             }
 
+            is IrcEvent.WebPushVapidReady -> {
+                // The key needed to bind the subscription is only now known.
+                maybeRegisterWebPush(netId)
+            }
+
             is IrcEvent.WebPushRegistered -> {
-                // Only now is the subscription real for this network.
-                com.boxlabs.hexdroid.push.WebPushManager.setRegisteredWith(appContext, netId, true)
+                // Re-arm the failure notice: a later rejection is news again now that the
+                // server has accepted a subscription at least once.
+                webPushFailureNotice.remove(netId)
             }
 
             is IrcEvent.WebPushUnregistered -> {
-                com.boxlabs.hexdroid.push.WebPushManager.setRegisteredWith(appContext, netId, false)
+                webPushFailureNotice.remove(netId)
+            }
+
+            is IrcEvent.WebPushFailed -> {
+                if (ev.subcommand.equals("REGISTER", true) && webPushFailureNotice.add(netId)) {
+                    append(
+                        bufKey(netId, "*server*"),
+                        from = null,
+                        text = "*** " + appContext.getString(
+                            R.string.vm_webpush_failed, ev.code, ev.message,
+                        ),
+                        doNotify = false,
+                    )
+                }
             }
 
             is IrcEvent.TypingStatus -> {
@@ -9966,13 +9986,14 @@ if (code == "442") {
                 // in the buffer. This must cover *every* message currently displayed, not just
                 // the ones that arrived after this scrollback pass started (liveDuringLoad).
                 val existingMsgIds = buf.messages.mapNotNull { it.msgId }.toHashSet()
-                data class FuzzySig(val sec: Long, val from: String?, val text: String)
-                val existingFuzzy = buildSet<FuzzySig> {
+                // Normalised via dedupSig: the buffer holds raw text with formatting codes
+                // while the log stores it stripped, so comparing the two directly missed
+                // every formatted message.
+                val existingFuzzy = buildSet {
                     for (msg in buf.messages) {
                         val sec = msg.timeMs / 1000
-                        val from = msg.from?.lowercase()
-                        val text = msg.text.take(100).lowercase()
-                        for (delta in -3L..3L) add(FuzzySig(sec + delta, from, text))
+                        val text = dedupText(msg.text)
+                        for (delta in DEDUP_WINDOW_SECONDS) add(dedupSigAt(sec + delta, msg.from, text))
                     }
                 }
 
@@ -9989,11 +10010,7 @@ if (code == "442") {
                     val isDupe = if (msg.msgId != null) {
                         existingMsgIds.contains(msg.msgId)
                     } else {
-                        existingFuzzy.contains(FuzzySig(
-                            msg.timeMs / 1000,
-                            msg.from?.lowercase(),
-                            msg.text.take(100).lowercase()
-                        ))
+                        existingFuzzy.contains(dedupSig(msg.timeMs, msg.from, msg.text))
                     }
                     isOlder && !isDupe && !isTooRecent
                 }
@@ -10151,21 +10168,20 @@ if (code == "442") {
                 return@update st.copy(buffers = st.buffers + (key to exhausted))
             }
 
-            // Drop anything already on screen. msgid first, falling back to a
-            // time|sender|text fingerprint, so a server without message-ids still dedupes
-            // a backfill against lines already loaded from the disk logs.
-            //
-            // The fingerprint set is built here rather than reusing seenHistoryFingerprints,
-            // which only tracks lines with a sender. Replayed JOIN/PART/QUIT lines have
-            // from == null and no msgid, so they are invisible to both of the buffer's dedup
-            // sets; without covering them here, loading the same page twice would stack a
-            // second copy of every event line.
-            val shownFingerprints = buf.messages
-                .mapTo(HashSet(buf.messages.size)) { "${it.timeMs}|${it.from}|${it.text.hashCode()}" }
+            // Drop anything already on screen. msgid first, falling back to a normalised
+            // time|sender|text signature so a server without message-ids still dedupes a
+            // backfill against lines already loaded from the disk logs.
+            val shownFingerprints = buildSet {
+                for (m in buf.messages) {
+                    val sec = m.timeMs / 1000
+                    val text = dedupText(m.text)
+                    for (delta in DEDUP_WINDOW_SECONDS) add(dedupSigAt(sec + delta, m.from, text))
+                }
+            }
             val fresh = collected
                 .filter { m ->
                     val byId = m.msgId != null && buf.seenMsgIds.contains(m.msgId)
-                    val byFp = shownFingerprints.contains("${m.timeMs}|${m.from}|${m.text.hashCode()}")
+                    val byFp = shownFingerprints.contains(dedupSig(m.timeMs, m.from, m.text))
                     !byId && !byFp
                 }
                 .distinctBy { it.msgId ?: "${it.timeMs}|${it.from}|${it.text.hashCode()}" }
@@ -10242,8 +10258,7 @@ if (code == "442") {
             return
         }
 
-        if (com.boxlabs.hexdroid.push.WebPushManager.isRegisteredWith(appContext, netId)) return
-
+        // Sent on every registration rather than once per endpoint: a server may expire a subscription at any time
         viewModelScope.launch {
             runCatching { client.webPushRegister(sub.endpoint, sub.auth, sub.p256dh) }
         }
@@ -10280,16 +10295,19 @@ if (code == "442") {
         }
 
         val sub = com.boxlabs.hexdroid.push.WebPushManager.subscription(appContext)
-        if (sub != null) {
-            for ((netId, rt) in runtimes.entries.toList()) {
-                if (!rt.client.hasWebPushCap()) continue
-                com.boxlabs.hexdroid.push.WebPushManager.setRegisteredWith(appContext, netId, false)
-                viewModelScope.launch {
+        val targets = runtimes.entries.toList().filter { (_, rt) -> rt.client.hasWebPushCap() }
+        for ((netId, _) in targets) webPushFailureNotice.remove(netId)
+
+        // One coroutine rather than one per network plus a synchronous end, so the
+        // UNREGISTER lines exist before the distributor drops the endpoint.
+        viewModelScope.launch {
+            if (sub != null) {
+                for ((_, rt) in targets) {
                     runCatching { rt.client.webPushUnregister(sub.endpoint) }
                 }
             }
+            com.boxlabs.hexdroid.push.WebPushManager.unregister(appContext)
         }
-        com.boxlabs.hexdroid.push.WebPushManager.unregister(appContext)
     }
 
     /**
@@ -11002,14 +11020,17 @@ if (code == "442") {
                 // Sender on the highlight-ignore list: message is visible but raises no alert.
                 senderNotifyIgnored -> { /* intentionally silent */ }
                 isPrivate && st.settings.notifyOnPrivateMessages -> {
-                    runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
-                    if (st.settings.vibrateOnHighlight) {
+                    // A false return means a Web Push already alerted for this message
+                    val posted = runCatching { notifier.notifyPm(netId, bufferForNotif, preview, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
+                        .getOrDefault(false)
+                    if (posted && st.settings.vibrateOnHighlight) {
                         runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                     }
                 }
                 effectiveHighlight && st.settings.notifyOnHighlights -> {
-                    runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
-                    if (st.settings.vibrateOnHighlight) {
+                    val posted = runCatching { notifier.notifyHighlight(netId, bufferForNotif, preview, st.settings.playSoundOnHighlight, msg.id, notifTitle, from = senderNick, originalText = originalSnippet, msgAnchor = msgAnchor, networkName = netDisplayName) }
+                        .getOrDefault(false)
+                    if (posted && st.settings.vibrateOnHighlight) {
                         runCatching { vibrateForHighlight(st.settings.vibrateIntensity) }
                     }
                 }

@@ -37,7 +37,6 @@ object WebPushManager {
     private const val KEY_ENDPOINT = "endpoint"
     private const val KEY_AUTH = "auth"
     private const val KEY_P256DH = "p256dh"
-    private const val KEY_REGISTERED_PREFIX = "registered_"
     private const val KEY_VAPID = "vapid"
 
     /** A subscription with its encryption keys, as handed to WEBPUSH REGISTER. */
@@ -62,28 +61,26 @@ object WebPushManager {
 
     /**
      * Record the subscription a distributor just issued.
-     *
-     * Any endpoint we had is now stale, so every network's "already registered" mark is
-     * dropped: the next connection to each will send a fresh WEBPUSH REGISTER rather than
-     * assuming the server still has a usable endpoint for us.
      */
     fun storeSubscription(ctx: Context, endpoint: String, auth: String, p256dh: String) {
-        val previous = prefs(ctx).getString(KEY_ENDPOINT, null)
         prefs(ctx).edit()
             .putString(KEY_ENDPOINT, endpoint)
             .putString(KEY_AUTH, auth)
             .putString(KEY_P256DH, p256dh)
             .apply()
-        if (previous != endpoint) clearRegistrations(ctx)
     }
 
     /**
      * The VAPID key the current subscription was requested with, or null when it was
      * requested without one.
+     *
+     * A keyless subscription still works with distributors that don't enforce signing,
+     * but a server that does sign will have its pushes dropped, so callers use this to
+     * notice a subscription that predates knowing any server's key.
      */
     fun subscribedVapid(ctx: Context): String? = prefs(ctx).getString(KEY_VAPID, null)
 
-    /** Forget the subscription and every server-side registration we believed in. */
+    /** Forget the subscription. */
     fun clearSubscription(ctx: Context) {
         prefs(ctx).edit()
             .remove(KEY_ENDPOINT)
@@ -91,31 +88,6 @@ object WebPushManager {
             .remove(KEY_P256DH)
             .remove(KEY_VAPID)
             .apply()
-        clearRegistrations(ctx)
-    }
-
-    /**
-     * True when [netId] has already been sent the current endpoint and confirmed it.
-     *
-     * Re-registering an endpoint a server already holds is defined as a replace rather
-     * than a duplicate, so this is an optimisation, not a correctness requirement: the
-     * cost of getting it wrong is one redundant command per connect.
-     */
-    fun isRegisteredWith(ctx: Context, netId: String): Boolean =
-        prefs(ctx).getBoolean(KEY_REGISTERED_PREFIX + netId, false)
-
-    /** Mark [netId] as holding (or no longer holding) the current endpoint. */
-    fun setRegisteredWith(ctx: Context, netId: String, registered: Boolean) {
-        prefs(ctx).edit().putBoolean(KEY_REGISTERED_PREFIX + netId, registered).apply()
-    }
-
-    private fun clearRegistrations(ctx: Context) {
-        val p = prefs(ctx)
-        val stale = p.all.keys.filter { it.startsWith(KEY_REGISTERED_PREFIX) }
-        if (stale.isEmpty()) return
-        val e = p.edit()
-        stale.forEach { e.remove(it) }
-        e.apply()
     }
 
     /** Distributor apps installed on this device that can carry our push messages. */
