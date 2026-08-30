@@ -1538,6 +1538,8 @@ fun ChatScreen(
     val canTopic = isChannel && myPrefix in listOf('~', '&', '@', '%')
     val canMode  = isChannel && myPrefix in listOf('~', '&', '@')
     val isIrcOper = state.connections[selNetId]?.isIrcOper == true
+    val selNetUnproxied = state.networks.firstOrNull { it.id == selNetId }?.proxyType ==
+        com.boxlabs.hexdroid.connection.ProxyType.NONE
     val hasReactionSupport = state.connections[selNetId]?.hasReactionSupport == true
     // draft/metadata-2 display names for this network, keyed by lowercased nick.
     val metadataDisplayNames = state.connections[selNetId]?.displayNames ?: emptyMap()
@@ -3449,7 +3451,7 @@ fun ChatScreen(
                             colorizeNicks = state.settings.colorizeNicks,
                             mircColorsEnabled = state.settings.mircColorsEnabled,
                             ansiColorsEnabled = state.settings.ansiColorsEnabled,
-                            imagePreviewsEnabled = state.settings.imagePreviewsEnabled,
+                            imagePreviewsEnabled = state.settings.imagePreviewsEnabled && selNetUnproxied,
                             imagePreviewsWifiOnly = state.settings.imagePreviewsWifiOnly,
                             nickColor = ::nickColor,
                             displayNick = ::displayNick,
