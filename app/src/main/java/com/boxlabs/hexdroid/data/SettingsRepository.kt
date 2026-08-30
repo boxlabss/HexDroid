@@ -614,6 +614,13 @@ class SettingsRepository(private val ctx: Context) {
                     bouncerNetworkName = o.optString("bouncerNetworkName", "").takeIf { it.isNotBlank() },
                     bouncerClientId = o.optString("bouncerClientId", "").takeIf { it.isNotBlank() },
                     tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
+                    tlsAcceptedIdentities = run {
+                        val arr = o.optJSONArray("tlsAcceptedIdentities") ?: return@run emptySet()
+                        buildSet { for (i in 0 until arr.length()) arr.optString(i)?.takeIf { it.isNotBlank() }?.let { add(it) } }
+                    },
+                    // Absent key means the profile predates the hostname check, so it gets the
+                    // grace. The field is always written back, so this only ever fires once.
+                    tlsHostnameGrace = o.optBoolean("tlsHostnameGrace", true),
                     tlsTofuFingerprints = run {
                         val arr = o.optJSONArray("tlsTofuFingerprints") ?: return@run emptySet()
                         val s = LinkedHashSet<String>(arr.length())
@@ -726,6 +733,12 @@ class SettingsRepository(private val ctx: Context) {
             if (!n.bouncerNetworkName.isNullOrBlank()) o.put("bouncerNetworkName", n.bouncerNetworkName)
             if (!n.bouncerClientId.isNullOrBlank()) o.put("bouncerClientId", n.bouncerClientId)
             if (n.tlsTofuFingerprint != null) o.put("tlsTofuFingerprint", n.tlsTofuFingerprint)
+            o.put("tlsHostnameGrace", n.tlsHostnameGrace)
+            if (n.tlsAcceptedIdentities.isNotEmpty()) {
+                val arr = org.json.JSONArray()
+                for (id in n.tlsAcceptedIdentities) arr.put(id)
+                o.put("tlsAcceptedIdentities", arr)
+            }
             if (n.tlsTofuFingerprints.isNotEmpty()) {
                 val arr = JSONArray()
                 for (fp in n.tlsTofuFingerprints) arr.put(fp)
@@ -1324,6 +1337,20 @@ data class NetworkProfile(
     val tlsTofuFingerprints: Set<String> = emptySet(),
 
     /**
+     * Certificate identities (SAN dNSNames, SAN IP addresses, and the subject CN) the user has
+     * accepted for this profile after a hostname mismatch, lowercased. A connection is allowed
+     * when the peer certificate's identity set is a subset of this one.
+     */
+    val tlsAcceptedIdentities: Set<String> = emptySet(),
+
+    /**
+     * One-time upgrade grace for the hostname check: consumed on the first mismatch, cleared on
+     * the first successful connect. Profiles written before the check existed default to true on
+     * load; profiles created since default to false.
+     */
+    val tlsHostnameGrace: Boolean = false,
+
+    /**
      * SOCKS proxy settings for this network. Default is [ProxyType.NONE] (direct connection).
      * When set to SOCKS5/SOCKS4A, the connection is tunnelled through [proxyHost]:[proxyPort]
      * and the destination is resolved at the proxy (remote DNS), which is what enables Tor
@@ -1370,6 +1397,7 @@ data class NetworkProfile(
             bouncerClientId = bouncerClientId?.takeIf { it.isNotBlank() },
             tlsTofuFingerprint = tlsTofuFingerprint,
             tlsTofuFingerprints = tlsTofuFingerprints,
+            tlsAcceptedIdentities = tlsAcceptedIdentities,
             proxy = com.boxlabs.hexdroid.connection.ProxyConfig(
                 type = proxyType,
                 host = proxyHost,

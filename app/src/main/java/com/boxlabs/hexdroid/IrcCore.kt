@@ -228,8 +228,10 @@ data class IrcConfig(
      *  - With invalid-certs ON, subsequent connect (pin stored): chain + hostname checks are
      *    bypassed; only the pin is enforced. On mismatch, [IrcEvent.TlsFingerprintChanged]
      *    fires and the connection is refused.
-     *  - With invalid-certs OFF: standard chain validation runs AND a soft hostname-mismatch
-     *    warning is surfaced (see [IrcEvent.TlsHostnameMismatch]). Any stored pin is ignored.
+     *  - With invalid-certs OFF: standard chain validation runs AND the hostname must match the
+     *    certificate, or be covered by [tlsAcceptedIdentities]. On neither,
+     *    [IrcEvent.TlsHostnameMismatch] fires and the connection is refused. Any stored pin is
+     *    ignored.
      */
     val tlsTofuFingerprint: String? = null,
     /**
@@ -240,6 +242,12 @@ data class IrcConfig(
      * gating as [tlsTofuFingerprint] - dormant when invalid-certs is off.
      */
     val tlsTofuFingerprints: Set<String> = emptySet(),
+    /**
+     * Certificate identities the user has accepted for this profile after a hostname mismatch,
+     * lowercased. The connection proceeds when the peer certificate's identity set is a subset
+     * of this one. Only consulted when [allowInvalidCerts] is off.
+     */
+    val tlsAcceptedIdentities: Set<String> = emptySet(),
     /**
      * Which bouncer protocol family this profile targets, if any. Drives the syntax that
      * [effectiveAuthIdentity] uses to assemble the SASL authcid and the USER command:
@@ -425,6 +433,9 @@ enum class DisconnectCode {
     /** Presented certificate no longer matches the stored TOFU fingerprint. */
     TLS_FINGERPRINT_CHANGED,
 
+    /** Certificate is valid but was not issued for the host we connected to. */
+    TLS_HOSTNAME_MISMATCH,
+
     /** Registration did not complete within REGISTRATION_TIMEOUT_MS. */
     REGISTRATION_TIMEOUT,
 
@@ -489,16 +500,12 @@ sealed class IrcEvent {
      */
     data class TlsFingerprintLearned(val fingerprint: String) : IrcEvent()
     /**
-     * Emitted when the connected host doesn't match any of the certificate's subjectAltNames
-     * (RFC 6125). This is a soft warning - the connection proceeds because IRC has a long
-     * tradition of small networks running certs with mismatched/legacy CNs, and the user has
-     * TOFU pinning available as the strict-identity option. Surfaced in the *server* buffer
-     * so the user can spot it and decide whether to act (typically by setting a TOFU pin).
+     * Emitted when the connected host doesn't match the certificate's identities (RFC 6125) and
+     * the profile has not accepted exactly those identities. The connection is refused.
      *
      * @param expected   The hostname we connected to.
-     * @param sans       The DNS names actually present in the cert's SAN extension; useful for
-     *                   diagnosing typos ("oh, the cert is for `irc.example.org` but I typed
-     *                   `irc.example.com`").
+     * @param sans       The identities the certificate claims (SAN dNSNames, SAN iPAddresses,
+     *                   and the subject CN).
      */
     data class TlsHostnameMismatch(val expected: String, val sans: List<String>) : IrcEvent()
     /**
@@ -1215,6 +1222,18 @@ internal fun parseMultilineLimits(raw: String?): MultilineLimits {
     )
 }
 
+/** Nicknames that reach a network service, lowercased. */
+private val SERVICE_NICKS = setOf(
+    "nickserv", "chanserv", "authserv", "hostserv", "operserv", "botserv", "memoserv",
+    "ns", "cs", "hs", "os", "bs", "ms", "x", "q", "l", "w",
+)
+
+/** Service subcommands whose arguments carry a password. */
+private val SERVICE_SECRET_CMDS = setOf(
+    "IDENTIFY", "REGISTER", "SETPASS", "GHOST", "RECOVER", "RELEASE",
+    "LOGIN", "AUTH", "PASS", "SASLPASS", "CONFIRM", "RESETPASS",
+)
+
 /**
  * Strip credentials from a raw protocol line before it is shown or copied.
  */
@@ -1233,10 +1252,22 @@ internal fun redactRawLine(line: String): String {
     }
     val body = if (rest.startsWith(":")) rest.substringAfter(' ', "") else rest
     val leader = if (rest.startsWith(":")) rest.substring(0, rest.length - body.length) else ""
-    val verb = body.substringBefore(' ').uppercase(Locale.ROOT)
-    val args = body.substringAfter(' ', "")
+    val rawVerb = body.substringBefore(' ').uppercase(Locale.ROOT)
+    val rawArgs = body.substringAfter(' ', "")
 
-    fun hide(keep: String) = tagPrefix + leader + verb + (if (keep.isEmpty()) "" else " $keep") + " <hidden>"
+    // MSG, SQUERY and the NICKSERV-as-verb aliases are rewritten to the PRIVMSG form.
+    val aliasService = rawVerb.lowercase(Locale.ROOT).takeIf { it in SERVICE_NICKS }
+    val verb = when {
+        aliasService != null -> "PRIVMSG"
+        rawVerb == "MSG" || rawVerb == "SQUERY" -> "PRIVMSG"
+        else -> rawVerb
+    }
+    val args = when {
+        aliasService != null -> "$rawVerb $rawArgs"
+        else -> rawArgs
+    }
+
+    fun hide(keep: String) = tagPrefix + leader + rawVerb + (if (keep.isEmpty()) "" else " $keep") + " <hidden>"
 
     return when {
         // PASS <password>, and the bouncer form PASS <user>/<network>:<password>.
@@ -1252,10 +1283,14 @@ internal fun redactRawLine(line: String): String {
             val target = args.substringBefore(' ')
             val text = args.substringAfter(' ', "").removePrefix(":")
             val svc = target.substringBefore('@').lowercase(Locale.ROOT)
-            val isService = svc in setOf("nickserv", "chanserv", "authserv", "hostserv", "ns", "x")
             val cmd = text.substringBefore(' ').uppercase(Locale.ROOT)
-            val secretCmd = cmd in setOf("IDENTIFY", "REGISTER", "SETPASS", "SET", "GHOST", "RECOVER", "RELEASE", "LOGIN", "AUTH")
-            if (isService && secretCmd) "$tagPrefix$leader$verb $target :$cmd <hidden>" else line
+            val sub = text.substringAfter(' ', "").substringBefore(' ').uppercase(Locale.ROOT)
+            val secretCmd = cmd in SERVICE_SECRET_CMDS || (cmd == "SET" && sub in setOf("PASSWORD", "PASS"))
+            when {
+                svc !in SERVICE_NICKS || !secretCmd -> line
+                aliasService != null -> "$tagPrefix$leader$rawVerb $cmd <hidden>"
+                else -> "$tagPrefix$leader$rawVerb $target :$cmd <hidden>"
+            }
         }
         // draft/account-registration.
         verb == "REGISTER" || verb == "VERIFY" -> hide(args.substringBefore(' '))
@@ -3679,16 +3714,6 @@ class IrcClient(val config: IrcConfig) {
     }
 
 
-    /**
-     * Soft hostname-verification result from THIS connection's handshake. Non-null when the
-     * cert chain validated but its SAN list did NOT cover [config.host]. The [events] flow
-     * picks this up after the socket is open and emits [IrcEvent.TlsHostnameMismatch] so the
-     * UI can surface a warning - the connection itself is allowed to proceed (see the
-     * docstring on [IrcEvent.TlsHostnameMismatch]). Same staged-field pattern as
-     * [learnedFingerprint] because [openSocket] is not inside the channelFlow's send scope.
-     */
-    @Volatile private var pendingHostnameMismatchSans: List<String>? = null
-
     fun tlsInfo(): String? = lastTlsInfo
 
 	fun isConnectedNow(): Boolean {
@@ -4885,6 +4910,14 @@ class IrcClient(val config: IrcConfig) {
                 )
                 return@channelFlow
             }
+            if (t is TlsHostnameMismatchException) {
+                send(IrcEvent.TlsHostnameMismatch(expected = t.expected, sans = t.identities))
+                sendDisconnectedOnce(
+                    tr(R.string.core_disconnect_tls_hostname_mismatch),
+                    DisconnectCode.TLS_HOSTNAME_MISMATCH,
+                )
+                return@channelFlow
+            }
             val msg = friendlyErrorMessage(t)
             // Emit a single Disconnected event prefixed with "Connect failed: …" instead
             // of the previous Error + Disconnected pair. The two-event pattern produced
@@ -4913,14 +4946,6 @@ class IrcClient(val config: IrcConfig) {
         learnedFingerprint?.let { fp ->
             learnedFingerprint = null
             send(IrcEvent.TlsFingerprintLearned(fp))
-        }
-
-        // Same drain pattern for the soft hostname-mismatch warning. Cleared so a reconnect
-        // on the same IrcClient against a re-issued cert doesn't keep re-emitting the warning
-        // when the new cert actually does match.
-        pendingHostnameMismatchSans?.let { sans ->
-            pendingHostnameMismatchSans = null
-            send(IrcEvent.TlsHostnameMismatch(expected = config.host, sans = sans))
         }
 
         // If TLS is enabled put TLS session info in the server buffer.
@@ -6584,18 +6609,9 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			val allowed = ss.supportedProtocols.filter { it == "TLSv1.3" || it == "TLSv1.2" }
 			if (allowed.isNotEmpty()) ss.enabledProtocols = allowed.toTypedArray()
 
-			// Hostname verification (RFC 6125) is performed AFTER the handshake instead of
-			// during it. Conscrypt's setEndpointIdentificationAlgorithm("HTTPS") would refuse
-			// the connection on mismatch, but in practice many small IRC networks run certs
-			// with legacy CNs that don't match the connect host; failing closed there caused
-			// a regression. Instead, the post-handshake check below extracts the SAN list,
-			// matches it against [config.host], and emits a soft warning event on miss while
-			// letting the connection proceed. Users who want strict identity have TOFU pinning
-			// available as a separate, explicit opt-in.
-			//
-			// Note: chain validation (the cert chains to a system CA, isn't expired, etc.) is
-			// still enforced by the default JSSE trust manager in non-pin mode. Only the
-			// hostname-binds-to-cert step is downgraded to a warning.
+			// Hostname verification (RFC 6125) runs post-handshake rather than via
+			// setEndpointIdentificationAlgorithm, so a mismatch can be reported with the names the
+			// certificate actually carries and accepted per profile. It fails closed either way.
 
 			// Apply a bounded soTimeout during startHandshake() so TLS negotiation cannot hang
 			// forever. On some devices (MediaTek SoCs, certain MIUI/OneUI builds) BoringSSL
@@ -6625,25 +6641,23 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
             }
             ss.soTimeout = config.readTimeoutMs  // restore post-handshake timeout
 
-			// Soft hostname check (skipped in pin mode: TOFU pinning is the identity proof in
-			// that case, and self-signed bouncer certs commonly have CNs that won't match the
-			// connect host). Stages the SAN list into [pendingHostnameMismatchSans]; the events
-			// flow scope picks it up and emits IrcEvent.TlsHostnameMismatch (we can't send()
-			// from here because openSocket is not inside the channelFlow's ProducerScope).
+			// Skipped in pin mode, where the stored fingerprint is the identity proof.
 			if (!pinMode) {
-				runCatching {
-					val peerCerts = ss.session.peerCertificates
-					val leaf = peerCerts.firstOrNull() as? java.security.cert.X509Certificate
-					if (leaf != null && !hostnameMatchesCert(config.host, leaf)) {
-						val sans = leaf.subjectAlternativeNames?.mapNotNull { entry ->
-							// SAN entries are List<Any> where [0] is the type code (2 = DNS,
-							// 7 = IP) and [1] is the value. We only surface DNS and IP for the
-							// warning; other types (URI, RFC822) aren't relevant to IRC.
-							val type = entry.getOrNull(0) as? Int ?: return@mapNotNull null
-							val value = entry.getOrNull(1) as? String ?: return@mapNotNull null
-							if (type == 2 || type == 7) value else null
-						} ?: emptyList()
-						pendingHostnameMismatchSans = sans
+				val leaf = runCatching { ss.session.peerCertificates.firstOrNull() }
+					.getOrNull() as? java.security.cert.X509Certificate
+				if (leaf == null) {
+					runCatching { ss.close() }
+					runCatching { rawSocket.close() }
+					throw java.io.IOException("TLS: peer presented no X.509 certificate")
+				}
+				if (!hostnameMatchesCert(config.host, leaf)) {
+					val ids = certIdentities(leaf)
+					val accepted = config.tlsAcceptedIdentities.map { it.lowercase(Locale.ROOT) }.toSet()
+					val ok = ids.isNotEmpty() && accepted.containsAll(ids.map { it.lowercase(Locale.ROOT) })
+					if (!ok) {
+						runCatching { ss.close() }
+						runCatching { rawSocket.close() }
+						throw TlsHostnameMismatchException(expected = config.host, identities = ids)
 					}
 				}
 			}
@@ -6719,26 +6733,27 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			}
 
 			// Capture basic session info for UI (cipher/protocol/cert subject).
-			// Three trust modes are surfaced distinctly: pinned (cert matched stored fingerprint),
-			// unverified (allowInvalidCerts on, no pin — full trust-everything mode), and verified
-			// (standard CA chain + RFC 6125 hostname check both passed).
+			// The trust-mode label states what authenticated the peer.
 			lastTlsInfo = runCatching {
 				val sess = ss.session
 				val proto = sess.protocol ?: "?"
 				val cipher = sess.cipherSuite ?: "?"
 				val peer = runCatching { sess.peerPrincipal?.name }.getOrNull()
-				// Trust-mode label reflects what actually verified the connection:
-				//   - allowInvalidCerts ON  + pin stored = "(pinned)" - TOFU was the auth.
-				//   - allowInvalidCerts ON  + no pin     = "(unverified)" - first connect,
-				//                                          chain was bypassed, no pin yet.
-				//   - allowInvalidCerts OFF                = "(verified)" - CA chain + RFC 6125.
-				//                                          A stored pin (if any) is dormant
-				//                                          and ignored.
+				//   pinned          - TOFU fingerprint matched; chain was bypassed.
+				//   unverified      - invalid-certs on, nothing pinned yet.
+				//   verified        - CA chain and RFC 6125 hostname both passed.
+				//   name accepted   - CA chain passed, hostname accepted by the user.
 				val pinned = config.allowInvalidCerts && !config.tlsTofuFingerprint.isNullOrBlank()
+				val nameMatched = pinned || config.allowInvalidCerts ||
+					runCatching {
+						(ss.session.peerCertificates.firstOrNull() as? java.security.cert.X509Certificate)
+							?.let { hostnameMatchesCert(config.host, it) } ?: false
+					}.getOrDefault(false)
 				val verified = when {
 					pinned -> "(pinned)"
 					config.allowInvalidCerts -> "(unverified)"
-					else -> "(verified)"
+					nameMatched -> "(verified)"
+					else -> "(name accepted)"
 				}
 				val peerShort = peer?.substringAfter("CN=")?.substringBefore(',')?.takeIf { it.isNotBlank() }
 					?: peer
@@ -6839,9 +6854,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		}
 
 		// SSL handshake failures (certificate problems, protocol mismatch).
-		// Note: hostname mismatch is NOT here - we now perform RFC 6125 verification
-		// post-handshake as a soft warning (TlsHostnameMismatch event) rather than as a
-		// hard failure, so SAN/CN mismatches never produce an SSLHandshakeException.
+		// Hostname mismatch is not here: it raises TlsHostnameMismatchException post-handshake,
+		// never an SSLHandshakeException.
 		if (anyIs(SSLHandshakeException::class.java)) {
 			return when {
 				raw.contains("CERTIFICATE_VERIFY_FAILED", ignoreCase = true) ||
@@ -6942,6 +6956,13 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		"TLS certificate fingerprint mismatch — expected $stored, got $actual"
 	)
 
+	private class TlsHostnameMismatchException(
+		val expected: String,
+		val identities: List<String>,
+	) : java.io.IOException(
+		"TLS certificate is not valid for $expected (cert names: ${identities.joinToString(", ").ifEmpty { "none" }})"
+	)
+
 	/**
 	 * Compute the SHA-256 fingerprint of an X.509 certificate's DER encoding, formatted as
 	 * lowercase hex pairs separated by colons (e.g. "a1:b2:c3:…"). This is the canonical
@@ -6981,17 +7002,42 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 	 * flagged.
 	 */
 	private fun hostnameMatchesCert(host: String, cert: java.security.cert.X509Certificate): Boolean {
-		val hostLower = host.lowercase()
+		val hostLower = host.lowercase(Locale.ROOT).trimEnd('.')
 		val sans = runCatching { cert.subjectAlternativeNames }.getOrNull() ?: return false
 		for (entry in sans) {
 			val type = entry.getOrNull(0) as? Int ?: continue
-			val value = (entry.getOrNull(1) as? String)?.lowercase() ?: continue
+			val value = (entry.getOrNull(1) as? String)?.lowercase(Locale.ROOT) ?: continue
 			when (type) {
 				2 /* dNSName */ -> if (dnsNameMatches(hostLower, value)) return true
-				7 /* iPAddress */ -> if (hostLower == value) return true
+				7 /* iPAddress */ -> if (ipAddressMatches(hostLower, value)) return true
 			}
 		}
 		return false
+	}
+
+	private fun ipAddressMatches(host: String, value: String): Boolean {
+		if (host == value) return true
+		return runCatching {
+			java.net.InetAddress.getByName(host) == java.net.InetAddress.getByName(value)
+		}.getOrDefault(false)
+	}
+
+	/**
+	 * Every identity an X.509 certificate claims: SAN dNSNames, SAN iPAddresses, and the subject
+	 * CN. The CN is reported but never matched on ([hostnameMatchesCert] follows RFC 6125 §6.4.4).
+	 */
+	private fun certIdentities(cert: java.security.cert.X509Certificate): List<String> {
+		val out = LinkedHashSet<String>()
+		runCatching { cert.subjectAlternativeNames }.getOrNull()?.forEach { entry ->
+			val type = entry.getOrNull(0) as? Int
+			val value = entry.getOrNull(1) as? String
+			if ((type == 2 || type == 7) && !value.isNullOrBlank()) out.add(value.lowercase(Locale.ROOT))
+		}
+		runCatching {
+			val dn = cert.subjectX500Principal.getName(javax.security.auth.x500.X500Principal.RFC2253)
+			Regex("(?:^|,)CN=([^,]+)").find(dn)?.groupValues?.get(1)
+		}.getOrNull()?.trim()?.takeIf { it.isNotBlank() }?.let { out.add(it.lowercase(Locale.ROOT)) }
+		return out.toList()
 	}
 
 	private fun dnsNameMatches(host: String, pattern: String): Boolean {

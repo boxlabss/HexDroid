@@ -469,6 +469,11 @@ data class NetConnState(
      */
     val tlsPinMismatchActualFp: String? = null,
     /**
+     * Identities the certificate claimed at the most recent hostname mismatch. Cleared on the
+     * next successful connect. Null when no mismatch is active.
+     */
+    val tlsHostnameMismatchIdentities: List<String>? = null,
+    /**
      * soju.im/FILEHOST upload endpoint from ISUPPORT, when the server offers one.
      * Non-null enables the attach button in the chat input row.
      */
@@ -2147,6 +2152,11 @@ class IrcViewModel(
      *  act on the not-validated -> validated EDGE only (the callback also fires for signal
      *  strength and bandwidth churn). Entries are dropped in onLost. */
     private val validatedNetworks = java.util.concurrent.ConcurrentHashMap<android.net.Network, Boolean>()
+
+    /** Scope for teardown work that must outlive the ViewModel. */
+    private val appScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+    )
 
     init {
         // Let KeepAliveService request a clean QUIT if the user swipes the app away while
@@ -5341,25 +5351,27 @@ fun startAddNetwork() {
      * Clean shutdown for when the user swipes the app away from recents
      * (KeepAliveService.onTaskRemoved). Only acts when background persistence is off
      *
-     * Returns true if we sent QUITs (the service should then stop). Sends QUIT and closes each
-     * socket (TLS close_notify) so the server sees an orderly disconnect rather than a ghost
-     * that lingers until its ping-timeout.
+     * Returns true if we sent QUITs; the service then stops from [onDone]. Sends QUIT and closes
+     * each socket (TLS close_notify) so the server sees an orderly disconnect rather than a ghost
+     * that lingers until its ping-timeout. Runs on IO: onTaskRemoved is called on the main thread
+     * and disconnect() blocks without observing cancellation.
      */
-    fun onTaskRemovedGracefulQuit(): Boolean {
+    fun onTaskRemovedGracefulQuit(onDone: () -> Unit): Boolean {
         if (_state.value.settings.keepAliveInBackground) return false
         val clients = runtimes.values.map { it.client }
         if (clients.isEmpty()) return false
         // Suppress auto-reconnect for teardown
         appExitRequested = true
         val reason = _state.value.settings.quitMessage.ifBlank { "Client disconnect" }
-        runCatching {
-            kotlinx.coroutines.runBlocking {
-                withTimeoutOrNull(800L) {
+        appScope.launch {
+            runCatching {
+                withTimeoutOrNull(2_000L) {
                     clients.map { c ->
                         launch(Dispatchers.IO) { runCatching { c.disconnect(reason) } }
                     }.forEach { it.join() }
                 }
             }
+            runCatching { onDone() }
         }
         return true
     }
@@ -7171,7 +7183,7 @@ fun startAddNetwork() {
                     // and "Trust this server too" buttons hide on the next render. Stashed
                     // actual-fp is dropped because it's now either in the trust set or has
                     // been superseded by a full reset.
-                    it.copy(connecting = false, connected = true, status = appContext.getString(R.string.vm_status_connected_to, ev.server), lagMs = null, tlsPinMismatch = false, tlsPinMismatchActualFp = null)
+                    it.copy(connecting = false, connected = true, status = appContext.getString(R.string.vm_status_connected_to, ev.server), lagMs = null, tlsPinMismatch = false, tlsPinMismatchActualFp = null, tlsHostnameMismatchIdentities = null)
                 }
                 // Arm chathistory marker windows for known PM-style buffers on this network.
                 // Bouncer playback delivers PRIVMSGs to query buffers without a corresponding
@@ -7193,6 +7205,15 @@ fun startAddNetwork() {
                     chathistoryMarkerArmedUntilMs.entries.removeAll { it.value < nowMsArm }
                 }
                 if (_state.value.activeNetworkId == netId) updateConnectionNotification("Connected")
+                // Burn the hostname upgrade grace on the first connect that gets this far, so it
+                // can only apply to the first attempt after updating and never sits armed.
+                if (_state.value.networks.firstOrNull { it.id == netId }?.tlsHostnameGrace == true) {
+                    viewModelScope.launch {
+                        runCatching {
+                            repo.updateNetworkProfile(netId) { p -> p.copy(tlsHostnameGrace = false) }
+                        }
+                    }
+                }
             }
             is IrcEvent.LagUpdated -> {
                 if (!AppVisibility.isForeground) {
@@ -7547,16 +7568,45 @@ fun startAddNetwork() {
             }
 
             is IrcEvent.TlsHostnameMismatch -> {
-                // Soft warning: the cert chains to a CA but its SAN list doesn't cover the
-                // host we connected to. Connection has already been allowed to proceed - the
-                // user's choice of cert-trust posture is "best-effort with TOFU as the strict
-                // option", not "refuse on every SAN typo". Surface it once per session so the
-                // user can spot it and decide whether to pin.
-                val sansStr = if (ev.sans.isEmpty()) "(none)" else ev.sans.joinToString(", ")
+                val sansStr0 = if (ev.sans.isEmpty()) "(none)" else ev.sans.joinToString(", ")
+                val profile = _state.value.networks.firstOrNull { it.id == netId }
+                // Upgrade grace. Before this release the hostname was never enforced, so a
+                // profile that has been connecting happily to a legacy or misconfigured cert
+                // would break on update with no warning. Such a profile is accepted once,
+                // recorded, and retried, so the user sees a notice rather than a dead network.
+                //
+                // Deliberately narrow: it needs a profile that predates the check
+                // (tlsHostnameGrace, set only when the stored JSON has no such key), it fires
+                // at most once, it is cleared by the first successful connect, and what it
+                // accepts is written to tlsAcceptedIdentities where the user can see and revoke
+                // it. A profile created after the upgrade never gets it, so this cannot become
+                // a permanent bypass.
+                if (profile != null && profile.tlsHostnameGrace &&
+                    profile.tlsAcceptedIdentities.isEmpty() && ev.sans.isNotEmpty()
+                ) {
+                    viewModelScope.launch {
+                        runCatching {
+                            repo.updateNetworkProfile(netId) {
+                                it.copy(tlsAcceptedIdentities = ev.sans.toSet(), tlsHostnameGrace = false)
+                            }
+                        }
+                        connectNetwork(netId, force = true, clearAuthBlock = true)
+                    }
+                    append(
+                        bufKey(netId, "*server*"), from = "TLS", isHighlight = true,
+                        text = "*** " + appContext.getString(R.string.vm_cert_hostname_grace, ev.expected, sansStr0)
+                    )
+                    return
+                }
+                // Halt auto-reconnect so a retry loop doesn't bury the alert. Cleared on the
+                // next manual reconnect.
+                authBlockedReconnect.add(netId)
+                setNetConn(netId) {
+                    it.copy(tlsHostnameMismatchIdentities = ev.sans)
+                }
                 append(
-                    bufKey(netId, "*server*"), from = "TLS",
-                    text = "*** " + appContext.getString(R.string.vm_cert_hostname_mismatch, ev.expected, sansStr),
-                    doNotify = false
+                    bufKey(netId, "*server*"), from = "TLS WARNING", isHighlight = true,
+                    text = "⚠️  " + appContext.getString(R.string.vm_cert_hostname_mismatch, ev.expected, sansStr0)
                 )
             }
 
@@ -9144,10 +9194,13 @@ if (code == "442") {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
 
-                if (!ev.isHistory) setTopic(chanKey, ev.topic)
+                // Unconditional: a replayed 332 carries the topic the server holds now, and
+                // skipping it left the bar stale after a bouncer attach.
+                setTopic(chanKey, ev.topic)
 
                 if (!st0.settings.hideTopicOnEntry) {
-                    // mIRC-style join/topic info line
+                    // mIRC-style join/topic info line, stamped locally. A replayed server-time
+                    // tag would sort it into the scrollback and collide with the logged copy.
                     val topicText = ev.topic ?: ""
                     val msg = "* " + appContext.getString(R.string.vm_ev_topic_is, ev.channel, topicText)
                     append(
@@ -9155,8 +9208,8 @@ if (code == "442") {
                         from = null,
                         text = msg,
                         isLocal = suppressUnread,
-                        timeMs = ev.timeMs,
-                        doNotify = false
+                        doNotify = false,
+                        ephemeral = true
                     )
                 }
             }
@@ -9182,8 +9235,8 @@ if (code == "442") {
                         from = null,
                         text = msg,
                         isLocal = suppressUnread,
-                        timeMs = ev.timeMs,
-                        doNotify = false
+                        doNotify = false,
+                        ephemeral = true
                     )
                 }
             }
@@ -10424,6 +10477,11 @@ if (code == "442") {
         historyBackfillTimeouts.remove(key)?.cancel()
         historyCatchupRequested.remove(key)
         draftStore.clear(key)
+        run {
+            val (netId, bufferName) = splitKey(key)
+            val netName = _state.value.networks.firstOrNull { it.id == netId }?.name ?: "network"
+            viewModelScope.launch(Dispatchers.IO) { runCatching { logs.releaseBuffer(netName, bufferName) } }
+        }
 
         // Use atomic update to prevent race conditions
         _state.update { st0: UiState ->
@@ -10479,6 +10537,37 @@ if (code == "442") {
                 .toInstant()
                 .toEpochMilli()
         }.getOrNull()
+    }
+
+    @Volatile private var statusLineFirstWordsCache: Set<String>? = null
+
+    /**
+     * First words of the server-status lines this client writes, in every shipped language.
+     */
+    private fun statusLineFirstWords(): Set<String> {
+        statusLineFirstWordsCache?.let { return it }
+        val ids = intArrayOf(
+            R.string.vm_ev_now_talking,
+            R.string.vm_ev_topic_is,
+            R.string.vm_ev_topic_set_by,
+            R.string.vm_ev_topic_changed,
+            R.string.vm_ev_topic_changed_by,
+        )
+        val out = mutableSetOf<String>()
+        for (lang in com.boxlabs.hexdroid.ui.SUPPORTED_LANGUAGES) {
+            val res = runCatching {
+                val cfg = android.content.res.Configuration(appContext.resources.configuration)
+                cfg.setLocale(java.util.Locale.forLanguageTag(lang.code))
+                appContext.createConfigurationContext(cfg).resources
+            }.getOrNull() ?: continue
+            for (id in ids) {
+                runCatching { res.getString(id) }.getOrNull()
+                    ?.substringBefore(' ')
+                    ?.takeIf { it.isNotBlank() && !it.startsWith("%") }
+                    ?.let { out.add(it) }
+            }
+        }
+        return out.also { statusLineFirstWordsCache = it }
     }
 
     private fun parseLogLineToUiMessage(line: String, fallbackTimeMs: Long): UiMessage? {
@@ -10540,10 +10629,9 @@ if (code == "442") {
             s[0].let { isValidNickChar(it, first = true) } &&
             s.all { isValidNickChar(it, first = false) }
 
-        // Exact first words that HexDroid itself writes in server-status lines that start
-        // with "* " - these must never be misidentified as action nicks from old-format logs.
-        // (e.g. "* Now talking on #channel", "* Topic for #channel is: …", "* Mode #ch +n")
-        val serverStatusFirstWords = setOf("Now", "Topic", "Mode")
+        // Resolved in every shipped language, not hardcoded in English: a translated banner's
+        // first word passes the nick test and would parse as an action nick.
+        val serverStatusFirstWords = statusLineFirstWords()
 
         if (body.startsWith("*") && body.length > 2 && body[1] != ' ' && body[1] != '*') {
             // New format: *nick* text
@@ -10662,6 +10750,11 @@ if (code == "442") {
         fromOper: Boolean = false,
         /** Bot Mode: sender is a bot (see UiMessage.fromBot). */
         fromBot: Boolean = false,
+        /**
+         * True for a client-generated banner describing state at the moment of entry (topic on
+         * join, "Now talking on"). Shown in the buffer, never written to the log.
+         */
+        ephemeral: Boolean = false,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         // A sender on this network's highlight-ignore list never highlights or alerts; the
@@ -10930,7 +11023,7 @@ if (code == "442") {
         }
 
         // logging
-        if (st.settings.loggingEnabled) {
+        if (st.settings.loggingEnabled && !ephemeral) {
             val (netId, bufferName) = splitKey(bufferKey)
             if (bufferName != "*server*" || st.settings.logServerBuffer) {
                 val netName = st.networks.firstOrNull { it.id == netId }?.name ?: "network"
@@ -12209,13 +12302,15 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
             .ifBlank { "dcc_send_" + System.currentTimeMillis() }
             .replace(' ', '_') // avoid spaces in CTCP DCC payload
 
+        // Own subdirectory so the FileProvider root can name it without exposing cacheDir.
+        val stageDir = File(appContext.cacheDir, "dcc_out").apply { mkdirs() }
         val out = run {
-            val candidate = File(appContext.cacheDir, offerName)
+            val candidate = File(stageDir, offerName)
             if (!candidate.exists()) candidate else {
                 val dot = offerName.lastIndexOf('.')
                 val stem = if (dot > 0) offerName.take(dot) else offerName
                 val ext = if (dot > 0) offerName.drop(dot) else ""
-                File(appContext.cacheDir, "${stem}_${System.currentTimeMillis()}$ext")
+                File(stageDir, "${stem}_${System.currentTimeMillis()}$ext")
             }
         }
 

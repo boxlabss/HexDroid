@@ -468,9 +468,18 @@ class HexScriptBackend : ScriptBackend {
         return jsonFlat(body, path)
     }
 
-    /** Compile a regex safely (invalid pattern -> null, caller falls back). */
-    private val reCache = HashMap<String, Regex?>()
-    private fun reOf(pattern: String): Regex? = reCache.getOrPut(pattern) { runCatching { Regex(pattern) }.getOrNull() }
+    private val RE_CACHE_MAX = 128
+
+    /**
+     * Compiled patterns keyed by source, most recently used last; an invalid pattern caches as
+     * null. Unsynchronised because HexDroidScriptHost serialises script state onto one thread.
+     */
+    private val reCache = object : LinkedHashMap<String, Regex?>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex?>) = size > RE_CACHE_MAX
+    }
+    private fun reOf(pattern: String): Regex? =
+        if (pattern.length > RE_MAX) null
+        else reCache.getOrPut(pattern) { runCatching { Regex(pattern) }.getOrNull() }
     private val RE_MAX = 20000   // cap regex input length to bound pathological patterns
 
     private fun jsonFlat(body: String, key: String): String {

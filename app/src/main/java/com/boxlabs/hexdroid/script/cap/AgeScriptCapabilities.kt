@@ -110,8 +110,19 @@ class AgeScriptCapabilities(
         return ch
     }
 
-    /** Drop the cached channel so the next access rebuilds it with the current group key (after a rekey). */
-    fun resetChannel(channel: String) { channels.remove(channel) }
+    /**
+     * Drop the cached channel so the next access rebuilds it with the current group key. The
+     * caller must replace the key first: a rebuild restarts the sequence counter at zero, so an
+     * unchanged key repeats nonces and breaks GCM. Refused rather than assumed.
+     */
+    fun resetChannel(channel: String) {
+        val existing = channels[channel] ?: return
+        val current = groupKeyFor(channel)
+        require(current == null || !existing.usesKey(current)) {
+            "resetChannel(\"$channel\") called with an unchanged group key"
+        }
+        channels.remove(channel)
+    }
 
     /** Stop accepting [fp]'s signatures on [channel] (member left). No-op if the channel isn't built. */
     fun removeMember(channel: String, fp: String) { channels[channel]?.removeMember(fp) }

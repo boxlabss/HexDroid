@@ -50,7 +50,7 @@ class DraftStore {
      * user has typed in and then cleared doesn't sit in the map forever.
      */
     fun put(bufferKey: String, text: String, cursor: Int) {
-        if (text.isEmpty()) {
+        if (text.isBlank()) {
             drafts.remove(bufferKey)
         } else {
             drafts[bufferKey] = Draft(text, cursor.coerceIn(0, text.length))

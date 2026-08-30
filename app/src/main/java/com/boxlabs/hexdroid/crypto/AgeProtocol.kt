@@ -292,8 +292,8 @@ class AgeRatchet private constructor(
  * Interactive 3-DH handshake that seeds an [AgeRatchet] (an online-friendly X3DH-lite —
  * no prekey server, since both peers are connected to IRC). Two messages:
  *
- *   A → B : HELLO  = seal_B( sign_A( A.identity ‖ EK_A_pub ) )
- *   B → A : ACK    = seal_A( sign_B( EK_B_pub ) )
+ *   A → B : HELLO  = seal_B( sign_A( A.identity ‖ EK_A_pub ‖ B.dh_pub ) )
+ *   B → A : ACK    = seal_A( sign_B( EK_B_pub ‖ A.identity ‖ EK_A_pub ‖ B.sig_pub ) )
  *
  * Shared secret (initiator A, responder B):
  *   SK = HKDF( DH(IK_A, EK_B) ‖ DH(EK_A, IK_B) ‖ DH(EK_A, EK_B) )
@@ -302,8 +302,10 @@ class AgeRatchet private constructor(
  */
 object AgeHandshake {
     private val SK_INFO = "hexdroid/+AGE/handshake/v1".encodeToByteArray()
-    private val HELLO_SIGN = "hexdroid/+AGE/hello-sign/v1".encodeToByteArray()
-    private val ACK_SIGN = "hexdroid/+AGE/ack-sign/v1".encodeToByteArray()
+    // v2: both signatures cover the full transcript, so the signed body changed shape and a
+    // v1 peer fails with "bad signature".
+    private val HELLO_SIGN = "hexdroid/+AGE/hello-sign/v2".encodeToByteArray()
+    private val ACK_SIGN = "hexdroid/+AGE/ack-sign/v2".encodeToByteArray()
     private val HELLO_AAD = "hexdroid/+AGE/hello/v1".encodeToByteArray()
     private val ACK_AAD = "hexdroid/+AGE/ack/v1".encodeToByteArray()
 
@@ -318,7 +320,8 @@ object AgeHandshake {
 
     fun buildHello(p: AgePrimitives, initiator: AgeIdentity, ekA: Ephemeral, responderDhPub: ByteArray): ByteArray {
         val body = AgeCodec.Writer()
-            .bytes(initiator.sigPub).bytes(initiator.dhPub).bytes(ekA.pub).build()
+            .bytes(initiator.sigPub).bytes(initiator.dhPub).bytes(ekA.pub)
+            .bytes(responderDhPub).build()
         val sig = p.sign(initiator.sigSeed, HELLO_SIGN + body)
         val signed = AgeCodec.Writer().bytes(body).bytes(sig).build()
         return AgeSeal.seal(p, responderDhPub, signed, HELLO_AAD)
@@ -332,26 +335,53 @@ object AgeHandshake {
         val r = AgeCodec.Reader(signed); val body = r.bytes(); val sig = r.bytes()
         val br = AgeCodec.Reader(body)
         val sigPub = br.bytes(); val dhPub = br.bytes(); val ekAPub = br.bytes()
+        val toDhPub = br.bytes()
         if (expectedInitiatorSig != null && !p.constantTimeEquals(expectedInitiatorSig, sigPub))
             throw AgeException("hello: initiator key != pinned")
         if (!p.verify(sigPub, HELLO_SIGN + body, sig)) throw AgeException("hello: bad signature")
+        if (!p.constantTimeEquals(toDhPub, responder.dhPub)) throw AgeException("hello: wrong recipient")
         return Hello(AgePublicIdentity(sigPub, dhPub), ekAPub)
     }
 
     // ---- B > A : ACK ----
 
-    fun buildAck(p: AgePrimitives, responder: AgeIdentity, ekB: Ephemeral, initiatorDhPub: ByteArray): ByteArray {
-        val body = ekB.pub
+    /** B's ACK. The signature covers the whole transcript, not just EK_B. */
+    fun buildAck(
+        p: AgePrimitives,
+        responder: AgeIdentity,
+        ekB: Ephemeral,
+        initiator: AgePublicIdentity,
+        ekAPub: ByteArray,
+    ): ByteArray {
+        val body = AgeCodec.Writer()
+            .bytes(ekB.pub)
+            .bytes(initiator.sigPub).bytes(initiator.dhPub).bytes(ekAPub)
+            .bytes(responder.sigPub).build()
         val sig = p.sign(responder.sigSeed, ACK_SIGN + body)
         val signed = AgeCodec.Writer().bytes(body).bytes(sig).build()
-        return AgeSeal.seal(p, initiatorDhPub, signed, ACK_AAD)
+        return AgeSeal.seal(p, initiator.dhPub, signed, ACK_AAD)
     }
 
     /** A opens B's ACK, verifying B's signature against B's pinned sig key. Returns EK_B_pub. */
-    fun openAck(p: AgePrimitives, initiator: AgeIdentity, blob: ByteArray, responderSigPub: ByteArray): ByteArray {
+    fun openAck(
+        p: AgePrimitives,
+        initiator: AgeIdentity,
+        blob: ByteArray,
+        responderSigPub: ByteArray,
+        ekAPub: ByteArray,
+    ): ByteArray {
         val signed = AgeSeal.open(p, initiator.dhSeed, initiator.dhPub, blob, ACK_AAD)
-        val r = AgeCodec.Reader(signed); val ekBPub = r.bytes(); val sig = r.bytes()
-        if (!p.verify(responderSigPub, ACK_SIGN + ekBPub, sig)) throw AgeException("ack: bad signature")
+        val r = AgeCodec.Reader(signed); val body = r.bytes(); val sig = r.bytes()
+        if (!p.verify(responderSigPub, ACK_SIGN + body, sig)) throw AgeException("ack: bad signature")
+        val br = AgeCodec.Reader(body)
+        val ekBPub = br.bytes()
+        val aSigPub = br.bytes(); val aDhPub = br.bytes(); val echoedEkA = br.bytes()
+        val bSigPub = br.bytes()
+        if (!p.constantTimeEquals(aSigPub, initiator.sigPub) ||
+            !p.constantTimeEquals(aDhPub, initiator.dhPub) ||
+            !p.constantTimeEquals(echoedEkA, ekAPub) ||
+            !p.constantTimeEquals(bSigPub, responderSigPub)
+        ) throw AgeException("ack: transcript mismatch")
         return ekBPub
     }
 
@@ -393,7 +423,7 @@ object AgeHandshake {
  * stops the truncated-fingerprint nonce from causing GCM (key, nonce) reuse: the nonce only
  * carries 8 bytes of senderFp, so two members with a grindable 64-bit fingerprint-prefix
  * collision would otherwise share a nonce under the one shared key. Distinct identities derive
- * distinct k_s, so a prefix collision is harmless. See [senderKey].
+ * distinct k_s, so a prefix collision is harmless. See [messageKeyFor].
  *
  * Membership: [rekey] on removal (the removed member keeps the old K_G, so anything
  * they must not read uses the new one). Re-sealing K_G to members is [AgeInvite]'s job.
@@ -409,6 +439,12 @@ class AgeChannel(
     private var key: ByteArray = groupKey.copyOf()
     private var epoch: Int = epoch
     private var sendSeq: Int = 0
+
+    /**
+     * True when [k] is the key this channel is already using. sendSeq restarts at zero on a newly
+     * constructed channel, so a rebuild on an unchanged key repeats (message key, nonce) pairs.
+     */
+    fun usesKey(k: ByteArray): Boolean = p.constantTimeEquals(key, k)
 
     /** Highest seq accepted per sender fp (monotonic replay guard). */
     private val lastSeqByFp = HashMap<String, Int>()
@@ -432,7 +468,7 @@ class AgeChannel(
         val signed = AgeCodec.Writer().bytes(inner).bytes(sig).build()
         val nonce = nonceFor(mySigFpHex, seq)
         val aad = msgAad(gameId, mySigFpHex, seq)
-        val ct = p.aesGcmSeal(senderKey(mySigFpHex), nonce, signed, aad)
+        val ct = p.aesGcmSeal(messageKeyFor(mySigFpHex), nonce, signed, aad)
         return EncMessage(gameId, mySigFpHex, epoch, seq, ct)
     }
 
@@ -445,7 +481,7 @@ class AgeChannel(
     fun decrypt(m: EncMessage): Decrypted {
         if (m.gameId != gameId) return Decrypted.Dropped("wrong game")
         if (m.epoch != epoch) return Decrypted.Dropped("stale/foreign epoch ${m.epoch}")
-        val senderKey = memberSigKeys[m.senderFpHex.lowercase()]
+        val senderSigPub = memberSigKeys[m.senderFpHex.lowercase()]
             ?: return Decrypted.Dropped("unknown sender ${m.senderFpHex}")
 
         // Everything below can throw on a hostile input: a group-key holder (any member) can
@@ -456,12 +492,12 @@ class AgeChannel(
         return try {
             val nonce = nonceFor(m.senderFpHex, m.seq)
             val aad = msgAad(m.gameId, m.senderFpHex, m.seq)
-            val signed = p.aesGcmOpen(senderKey(m.senderFpHex), nonce, m.ciphertext, aad)
+            val signed = p.aesGcmOpen(messageKeyFor(m.senderFpHex), nonce, m.ciphertext, aad)
                 ?: return Decrypted.Dropped("decrypt failed (bad tag/aad)")
 
             val r = AgeCodec.Reader(signed)
             val inner = r.bytes(); val sig = r.bytes()
-            if (!p.verify(senderKey, MSG_TAG + inner, sig)) return Decrypted.Dropped("bad signature")
+            if (!p.verify(senderSigPub, MSG_TAG + inner, sig)) return Decrypted.Dropped("bad signature")
 
             // Re-parse inner and cross-check the header fields against the signed content,
             // so a tampered cleartext header can't desync from what was actually signed.
@@ -494,7 +530,7 @@ class AgeChannel(
      *
      * fpHex is lowercased so both sides derive the same key regardless of wire-case.
      */
-    private fun senderKey(fpHex: String): ByteArray =
+    private fun messageKeyFor(fpHex: String): ByteArray =
         p.hkdfSha256(
             ikm = key,
             salt = ByteArray(0),

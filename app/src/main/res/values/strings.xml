@@ -203,6 +203,9 @@
     <string name="network_sts_forget">Forget STS policy for this host</string>
     <string name="list_retry">Retry</string>
     <string name="network_trust_extra_pinned_cert">Trust this server too (round-robin DNS)</string>
+    <string name="network_trust_cert_names">Trust these certificate names</string>
+    <string name="network_cert_names_accepted">Accepted certificate names</string>
+    <string name="network_clear_cert_names">Stop trusting these names</string>
     <string name="network_nick">Nickname</string>
     <string name="network_alt_nick">Alt nickname</string>
     <string name="network_username">Username</string>
@@ -1009,7 +1012,7 @@
     <string name="vm_halted_tls">Auto-reconnect halted: TLS error is unlikely to fix itself. Adjust certificate trust settings, then reconnect manually.</string>
     <string name="vm_halted_unreachable">Auto-reconnect halted: server unreachable (hostname doesn\'t resolve or port is closed). Check the host and port in Network Settings, then reconnect manually.</string>
     <string name="vm_tls_tofu_pinned">TLS: Certificate fingerprint learned and pinned (TOFU). Future connections will verify: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Certificate hostname mismatch: connected to %1$s but cert SANs are: %2$s. Connection allowed.</string>
+    <string name="vm_cert_hostname_mismatch">Certificate hostname mismatch! Connected to %1$s but the certificate is issued for: %2$s  - Connection refused. Auto-reconnect halted. If this is the server you meant and it simply has a misconfigured or legacy certificate, open Network Settings and tap \'Trust these certificate names\'. If you did not expect this, do not accept it: someone may be intercepting the connection.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">Ignored DCC RESUME from %1$s for %2$s — no matching send in progress.</string>
@@ -1125,6 +1128,8 @@
     <string name="core_disconnected">Disconnected</string>
     <string name="core_disconnect_server_error">Server error: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS certificate fingerprint changed</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS certificate is not valid for this host</string>
+    <string name="vm_cert_hostname_grace">Certificate hostname mismatch: connected to %1$s but the certificate is issued for: %2$s. HexDroid did not check this before, so these names have been accepted once to keep this profile working, and the connection is being retried. If you did not expect this, open Network Settings and tap \'Stop trusting these names\'.</string>
     <string name="core_disconnect_connect_failed">Connect failed: %1$s</string>
     <string name="core_disconnect_connection_error">Connection error: %1$s</string>
     <string name="core_disconnect_registration_timeout">Registration timeout</string>

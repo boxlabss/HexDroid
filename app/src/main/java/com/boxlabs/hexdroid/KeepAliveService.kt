@@ -64,7 +64,7 @@ class KeepAliveService : Service() {
          * Hook the app process registers (from IrcViewModel) so the service can request a
          * graceful QUIT when the user swipes the app away ([onTaskRemoved]).
          */
-        @Volatile var gracefulQuitOnSwipe: (() -> Boolean)? = null
+        @Volatile var gracefulQuitOnSwipe: ((onDone: () -> Unit) -> Boolean)? = null
 
         const val ACTION_UPDATE = "com.boxlabs.hexdroid.action.UPDATE"
         const val ACTION_STOP = "com.boxlabs.hexdroid.action.STOP"
@@ -229,10 +229,12 @@ class KeepAliveService : Service() {
         // The user swiped the app away from recents. If background persistence is OFF, treat
         // this as "I'm done": ask the connection layer to send a clean QUIT (TLS close_notify)
         // so the server sees an orderly disconnect.
-        val quit = runCatching { gracefulQuitOnSwipe?.invoke() }.getOrNull() ?: false
-        if (quit) {
-            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-            stopSelf()
+        // The QUIT runs off the main thread; the service stays up until it reports back.
+        runCatching {
+            gracefulQuitOnSwipe?.invoke {
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                stopSelf()
+            }
         }
         super.onTaskRemoved(rootIntent)
     }

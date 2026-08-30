@@ -534,7 +534,7 @@ class AgeScriptBridge(
         // can finish; do NOT rebuild the ratchet, which would desync our established session.
         val existingEk = s.ackEk
         if (s.ratchet != null && existingEk != null) {
-            val ack = runCatching { AgeHandshake.buildAck(p, me, existingEk, peerId.dhPub) }.getOrNull()
+            val ack = runCatching { AgeHandshake.buildAck(p, me, existingEk, peerId, opened.ekAPub) }.getOrNull()
                 ?: run { debug("onPmHello $peerNick re-buildAck FAILED"); return }
             emit(peerNick, "AGE ACK ${AgeCodec.b64(ack)}")
             debug("onPmHello $peerNick duplicate HELLO, re-sent ACK")
@@ -544,7 +544,7 @@ class AgeScriptBridge(
         s.ackEk = ek
         s.ratchet = runCatching { AgeHandshake.responderSession(p, me, ek, peerId.dhPub, opened.ekAPub) }.getOrNull()
             ?: run { debug("onPmHello $peerNick responderSession FAILED"); pmState(peerNick, "FAILED", "key agreement failed"); return }
-        val ack = runCatching { AgeHandshake.buildAck(p, me, ek, peerId.dhPub) }.getOrNull()
+        val ack = runCatching { AgeHandshake.buildAck(p, me, ek, peerId, opened.ekAPub) }.getOrNull()
             ?: run { debug("onPmHello $peerNick buildAck FAILED"); pmState(peerNick, "FAILED", "key agreement failed"); return }
         emit(peerNick, "AGE ACK ${AgeCodec.b64(ack)}")
         debug("onPmHello $peerNick ratchet up, ACK sent")
@@ -559,7 +559,7 @@ class AgeScriptBridge(
             ?: run { debug("onPmAck $peerNick no pin for peerFp"); pmState(peerNick, "FAILED", "peer identity unknown"); return }
         val blob = runCatching { AgeCodec.unb64(line.split(' ').getOrNull(2).orEmpty()) }.getOrNull()
             ?: run { debug("onPmAck $peerNick bad blob"); pmState(peerNick, "FAILED", "malformed ACK"); return }
-        val ekBPub = runCatching { AgeHandshake.openAck(p, me, blob, pub.sigPub) }.getOrNull()
+        val ekBPub = runCatching { AgeHandshake.openAck(p, me, blob, pub.sigPub, ek.pub) }.getOrNull()
             ?: run { debug("onPmAck $peerNick openAck FAILED"); pmState(peerNick, "FAILED", "couldn't verify peer identity"); return }
         s.ratchet = runCatching { AgeHandshake.initiatorSession(p, me, ek, pub.dhPub, ekBPub) }.getOrNull()
             ?: run { debug("onPmAck $peerNick initiatorSession FAILED"); pmState(peerNick, "FAILED", "key agreement failed"); return }

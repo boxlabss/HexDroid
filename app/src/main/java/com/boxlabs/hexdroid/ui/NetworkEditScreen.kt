@@ -644,6 +644,55 @@ fun NetworkEditScreen(
                     // alternative, adds the new fingerprint to the trust set without clearing
                     // the others, so a user pinning the N servers behind an irc.* rr
                     // doesn't have to choose between starting over and giving up on TOFU.
+                    val hostnameIds = state.connections[n0.id]?.tlsHostnameMismatchIdentities
+                    if (hostnameIds != null) {
+                        HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stringResource(R.string.network_cert_names_accepted),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            for (id in hostnameIds) {
+                                Text(
+                                    id,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { onSave(n0.copy(tlsAcceptedIdentities = hostnameIds.toSet()), null, false) },
+                                modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))
+                            ) {
+                                Text(stringResource(R.string.network_trust_cert_names))
+                            }
+                        }
+                    } else if (n0.tlsAcceptedIdentities.isNotEmpty()) {
+                        HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stringResource(R.string.network_cert_names_accepted),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            for (id in n0.tlsAcceptedIdentities) {
+                                Text(
+                                    id,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { onSave(n0.copy(tlsAcceptedIdentities = emptySet()), null, false) },
+                                modifier = Modifier.fillMaxWidth().focusHighlight(RoundedCornerShape(50))
+                            ) {
+                                Text(stringResource(R.string.network_clear_cert_names))
+                            }
+                        }
+                    }
+
                     val storedFp = n0.tlsTofuFingerprint
                     val extraFps = n0.tlsTofuFingerprints
                     if (storedFp != null || extraFps.isNotEmpty()) {
