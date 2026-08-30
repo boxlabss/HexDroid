@@ -9570,6 +9570,7 @@ if (code == "442") {
             is IrcEvent.HistoryBatchEnd -> {
                 // A chathistory batch closed.
                 backfillKeyForTarget(netId, ev.target)?.let { finishHistoryBackfill(it) }
+                flushChathistoryMarker(resolveBufferKey(netId, ev.target))
             }
 
             is IrcEvent.HistoryTarget -> {
@@ -10068,10 +10069,15 @@ if (code == "442") {
 
                 // Only show scrollback marker if there are actual old messages (not from current session)
                 // and there's a meaningful time gap between scrollback and live messages.
+                val sessionLines = preExisting + liveDuringLoad
+                val firstSessionTime = sessionLines.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
+                // Gap measured against startedAt, not against a session line's timestamp.
+                // preExisting can hold something stamped older than the newest log line, which
+                // made the difference negative and hid the divider outright.
                 val showMarker = cur.settings.loggingEnabled &&
                     olderLoaded.isNotEmpty() &&
-                    liveDuringLoad.isNotEmpty() &&
-                    (firstLiveTime - olderLoaded.maxOf { it.timeMs }) > 5000L  // At least 5 second gap
+                    sessionLines.isNotEmpty() &&
+                    (startedAt - olderLoaded.maxOf { it.timeMs }) > 5000L  // At least 5 second gap
 
                 val withMarker = if (showMarker) {
                     // Show the NEWEST scrollback message time (when last activity was)
@@ -10082,9 +10088,9 @@ if (code == "442") {
                             .format(Instant.ofEpochMilli(newestMs))
                     }.getOrElse { java.util.Date(newestMs).toString() }
 
-                    val markerTimeMs = if (firstLiveTime != Long.MAX_VALUE) {
-                        // Ensure the marker sorts between scrollback and the first live line.
-                        (firstLiveTime - 1L).coerceAtLeast(newestMs + 1L)
+                    val markerTimeMs = if (firstSessionTime != Long.MAX_VALUE) {
+                        // Ensure the marker sorts between scrollback and the first session line.
+                        (firstSessionTime - 1L).coerceAtLeast(newestMs + 1L)
                     } else {
                         newestMs + 1L
                     }
@@ -10096,7 +10102,7 @@ if (code == "442") {
                         text = "── " + appContext.getString(R.string.vm_scrollback_divider, newestStr) + " ──",
                         isAction = false
                     )
-                    olderLoaded + preExisting + marker + liveDuringLoad
+                    olderLoaded + marker + preExisting + liveDuringLoad
                 } else {
                     olderLoaded + preExisting + liveDuringLoad
                 }
@@ -10201,6 +10207,42 @@ if (code == "442") {
         historyBackfillTimeouts[key] = viewModelScope.launch {
             delay(HISTORY_BACKFILL_TIMEOUT_MS)
             finishHistoryBackfill(key)
+        }
+    }
+
+    /**
+     * Append the chathistory marker for [bufferKey] if one is pending.
+     *
+     * The divider is normally emitted by [append] just before the first live message after a
+     * catch-up. When nothing is said afterwards that never happens, so this closes the batch
+     * with the divider as the last line instead.
+     */
+    private fun flushChathistoryMarker(bufferKey: String) {
+        val pending = pendingChathistoryMarkerMs[bufferKey] ?: return
+        val armedUntil = chathistoryMarkerArmedUntilMs[bufferKey] ?: 0L
+        if (armedUntil < System.currentTimeMillis()) {
+            pendingChathistoryMarkerMs.remove(bufferKey)
+            return
+        }
+        pendingChathistoryMarkerMs.remove(bufferKey)
+        val newestStr = runCatching {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .withZone(ZoneId.systemDefault())
+                .format(Instant.ofEpochMilli(pending))
+        }.getOrElse { java.util.Date(pending).toString() }
+        val marker = UiMessage(
+            id = nextUiMsgId.getAndIncrement(),
+            timeMs = pending + 1L,
+            from = null,
+            text = appContext.getString(R.string.vm_history_divider, newestStr),
+        )
+        _state.update { st ->
+            val buf = st.buffers[bufferKey] ?: return@update st
+            // Nothing to divide if the batch delivered nothing.
+            if (buf.messages.isEmpty()) return@update st
+            val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000) + buf.extraScrollback
+            val merged = (buf.messages + marker).takeLast(maxLines).toPersistentList()
+            st.copy(buffers = st.buffers + (bufferKey to buf.copy(messages = merged)))
         }
     }
 
@@ -10401,13 +10443,18 @@ if (code == "442") {
         if (!historyCatchupRequested.add(key)) return
 
         val buf = _state.value.buffers[key]
-        val newest = buf?.messages?.lastOrNull { it.from != null }
+        // By timestamp, not by list position. Assembled as scrollback + session lines.
+        val newest = buf?.messages?.filter { it.from != null }?.maxByOrNull { it.timeMs }
         // With nothing on record locally there is no gap to describe, so fall back to the
         // server's own idea of recent rather than inventing an anchor.
         val afterTs = newest?.let {
             runCatching { historyAnchorTimestamp(it.timeMs) }.getOrNull()
         }
 
+        // Deliberately NOT collected into historyBackfills. That collector returns before
+        // append's pendingChathistoryMarkerMs bookkeeping, so routing catch-up through it stops
+        // the chat-history divider ever arming. Ordering is handled by anchoring correctly
+        // above rather than by re-sorting afterwards.
         viewModelScope.launch {
             runCatching {
                 if (afterTs != null) {
