@@ -9208,8 +9208,7 @@ if (code == "442") {
                         from = null,
                         text = msg,
                         isLocal = suppressUnread,
-                        doNotify = false,
-                        ephemeral = true
+                        doNotify = false
                     )
                 }
             }
@@ -9235,8 +9234,7 @@ if (code == "442") {
                         from = null,
                         text = msg,
                         isLocal = suppressUnread,
-                        doNotify = false,
-                        ephemeral = true
+                        doNotify = false
                     )
                 }
             }
@@ -10019,7 +10017,7 @@ if (code == "442") {
             val resolved = stamps.map { st -> st?.also { carried = it } ?: carried }
             val loaded = lines.mapIndexedNotNull { idx, line ->
                 parseLogLineToUiMessage(line, fallbackTimeMs = resolved[idx])
-            }
+            }.filterNot { isStaleTopicBanner(it) }
             if (loaded.isEmpty()) return@launch
 
             withContext(Dispatchers.Main) {
@@ -10539,20 +10537,29 @@ if (code == "442") {
         }.getOrNull()
     }
 
-    @Volatile private var statusLineFirstWordsCache: Set<String>? = null
-
     /**
-     * First words of the server-status lines this client writes, in every shipped language.
+     * Every "* "-prefixed status line this client writes. Kept next to [statusLineFirstWords],
+     * which is its only consumer; add new banners here.
      */
-    private fun statusLineFirstWords(): Set<String> {
-        statusLineFirstWordsCache?.let { return it }
-        val ids = intArrayOf(
-            R.string.vm_ev_now_talking,
-            R.string.vm_ev_topic_is,
-            R.string.vm_ev_topic_set_by,
-            R.string.vm_ev_topic_changed,
-            R.string.vm_ev_topic_changed_by,
-        )
+    private val STATUS_LINE_BANNERS = intArrayOf(
+        R.string.vm_deleted_message, R.string.vm_ev_back, R.string.vm_ev_has_joined,
+        R.string.vm_ev_has_left, R.string.vm_ev_has_quit, R.string.vm_ev_host_now,
+        R.string.vm_ev_invited_you, R.string.vm_ev_kicked, R.string.vm_ev_logged_out,
+        R.string.vm_ev_nick_logged_in_as, R.string.vm_ev_now_away, R.string.vm_ev_now_away_msg,
+        R.string.vm_ev_now_known_as, R.string.vm_ev_now_talking, R.string.vm_ev_realname_changed,
+        R.string.vm_ev_topic_changed, R.string.vm_ev_topic_changed_by, R.string.vm_ev_topic_is,
+        R.string.vm_ev_topic_set_by, R.string.vm_ev_you_kicked, R.string.vm_ev_you_left,
+        R.string.vm_ev_you_logged_in_as, R.string.vm_ev_you_logged_out,
+        R.string.vm_ev_you_now_known_as, R.string.vm_ev_your_host_now,
+        R.string.vm_ev_your_realname_now, R.string.vm_invited_here, R.string.vm_mode_change,
+    )
+
+    @Volatile private var topicBannerPrefixesCache: Set<String>? = null
+
+    /** Literal lead-ins of the channel-entry topic banners, in every shipped language. */
+    private fun topicBannerPrefixes(): Set<String> {
+        topicBannerPrefixesCache?.let { return it }
+        val ids = intArrayOf(R.string.vm_ev_topic_is, R.string.vm_ev_topic_set_by)
         val out = mutableSetOf<String>()
         for (lang in com.boxlabs.hexdroid.ui.SUPPORTED_LANGUAGES) {
             val res = runCatching {
@@ -10561,6 +10568,46 @@ if (code == "442") {
                 appContext.createConfigurationContext(cfg).resources
             }.getOrNull() ?: continue
             for (id in ids) {
+                runCatching { res.getString(id) }.getOrNull()
+                    ?.substringBefore('%')
+                    ?.trim()
+                    // vm_ev_topic_changed_by starts with the nick, so its prefix is empty and it
+                    // is skipped here: a mid-session topic change is real history and stays.
+                    ?.takeIf { it.length >= 3 }
+                    ?.let { out.add(it) }
+            }
+        }
+        return out.also { topicBannerPrefixesCache = it }
+    }
+
+    /**
+     * True for a channel-entry topic banner this client wrote in an earlier session. Kept in the
+     * log as a record of what the topic was then, but not replayed into scrollback: the live
+     * banner at the top of this session is the current one.
+     */
+    private fun isStaleTopicBanner(m: UiMessage): Boolean =
+        m.from == null && topicBannerPrefixes().any { m.text.startsWith("* $it") }
+
+    @Volatile private var statusLineFirstWordsCache: Set<String>? = null
+
+    /**
+     * First words of the server-status lines this client writes, in every shipped language.
+     *
+     * Every banner id is passed in and the ones whose translation opens with a format specifier
+     * fall out on their own, so a new banner or a translator reordering a string is covered
+     * without anyone maintaining a list. The previous hardcoded set was English-only and also
+     * missed You/Your, so "* You have left channel #foo" parsed back as an action by "You".
+     */
+    private fun statusLineFirstWords(): Set<String> {
+        statusLineFirstWordsCache?.let { return it }
+        val out = mutableSetOf<String>()
+        for (lang in com.boxlabs.hexdroid.ui.SUPPORTED_LANGUAGES) {
+            val res = runCatching {
+                val cfg = android.content.res.Configuration(appContext.resources.configuration)
+                cfg.setLocale(java.util.Locale.forLanguageTag(lang.code))
+                appContext.createConfigurationContext(cfg).resources
+            }.getOrNull() ?: continue
+            for (id in STATUS_LINE_BANNERS) {
                 runCatching { res.getString(id) }.getOrNull()
                     ?.substringBefore(' ')
                     ?.takeIf { it.isNotBlank() && !it.startsWith("%") }
@@ -10750,11 +10797,6 @@ if (code == "442") {
         fromOper: Boolean = false,
         /** Bot Mode: sender is a bot (see UiMessage.fromBot). */
         fromBot: Boolean = false,
-        /**
-         * True for a client-generated banner describing state at the moment of entry (topic on
-         * join, "Now talking on"). Shown in the buffer, never written to the log.
-         */
-        ephemeral: Boolean = false,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
         // A sender on this network's highlight-ignore list never highlights or alerts; the
@@ -11023,7 +11065,7 @@ if (code == "442") {
         }
 
         // logging
-        if (st.settings.loggingEnabled && !ephemeral) {
+        if (st.settings.loggingEnabled) {
             val (netId, bufferName) = splitKey(bufferKey)
             if (bufferName != "*server*" || st.settings.logServerBuffer) {
                 val netName = st.networks.firstOrNull { it.id == netId }?.name ?: "network"
