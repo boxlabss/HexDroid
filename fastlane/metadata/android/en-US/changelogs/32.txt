@@ -1,0 +1,4 @@
+Improvements: Ability to draw over other apps. Tap the menu and "Float"
+New privacy setting to stop answering CTCP requests. Halt replies to VERSION, TIME, PING and similar. The setting is in Settings > Privacy.
+Higher-quality sampling for network icons and avatars: Remote images are decoded at their source size and drawn at 16 to 24dp, so the reduction now uses better filtering.
+UI improvements for IRCv3 servers
