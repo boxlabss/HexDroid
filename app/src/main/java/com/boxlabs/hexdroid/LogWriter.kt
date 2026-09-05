@@ -28,54 +28,102 @@ import java.io.File
 import java.io.FileWriter
 import java.util.concurrent.ConcurrentHashMap
 
+private const val MAX_OPEN_WRITERS = 32
+
 /**
- * Simple line-based log writer.
+ * Access-ordered cache of open handles, holding at most [max] of them.
+ *
+ * A handle is marked in use for the length of a write and is not evicted while it is, so a
+ * write cannot have its handle closed underneath it. [onEvict] runs for each key dropped.
+ */
+private class HandleCache<T : java.io.Closeable>(
+    private val max: Int,
+    private val onEvict: (String) -> Unit = {},
+) {
+    private val open = LinkedHashMap<String, T>(64, 0.75f, true)
+    private val inUse = HashSet<String>()
+    private val lock = Any()
+
+    /** The handle for [key], created by [create] if absent, marked in use. */
+    fun acquire(key: String, create: () -> T): T = synchronized(lock) {
+        val handle = open.getOrPut(key, create)
+        inUse.add(key)
+        evictIdle()
+        handle
+    }
+
+    /** The handle for [key] if one is open, marked in use. */
+    fun acquireExisting(key: String): T? = synchronized(lock) {
+        val handle = open[key] ?: return@synchronized null
+        inUse.add(key)
+        handle
+    }
+
+    /** Mark the handle for [key] no longer in use. */
+    fun release(key: String) {
+        synchronized(lock) { inUse.remove(key) }
+    }
+
+    /** The handle for [key] if one is open, without marking it. */
+    fun peek(key: String): T? = synchronized(lock) { open[key] }
+
+    /** Remove the handle for [key] and return it. The caller closes it. */
+    fun take(key: String): T? = synchronized(lock) {
+        inUse.remove(key)
+        open.remove(key)
+    }
+
+    /** A snapshot of every open handle. */
+    fun snapshot(): List<Pair<String, T>> = synchronized(lock) { open.map { it.key to it.value } }
+
+    /** A snapshot of the open keys. */
+    fun keys(): List<String> = synchronized(lock) { open.keys.toList() }
+
+    /** Remove every handle and return them. The caller closes them. */
+    fun drain(): List<Pair<String, T>> = synchronized(lock) {
+        val all = open.map { it.key to it.value }
+        open.clear()
+        inUse.clear()
+        all
+    }
+
+    private fun evictIdle() {
+        if (open.size <= max) return
+        val entries = open.entries.iterator()
+        while (open.size > max && entries.hasNext()) {
+            val entry = entries.next()
+            val key = entry.key
+            if (key in inUse) continue
+            runCatching { entry.value.close() }
+            entries.remove()
+            onEvict(key)
+        }
+    }
+}
+
+/**
+ * Line-based log writer, one file per buffer.
  *
  * Storage layout:
  *   Internal:  <filesDir>/logs/<network>/<buffer>.txt
  *   SAF:       <treeUri>/<network>/<buffer>.txt
  *
- * One file per buffer
- * Examples: #afternet, ##channel, server, Nick
- *
- * Internal log files are kept open via a per-file [BufferedWriter] cache
- * instead of reopening on every message. Call [closeAll] when the app exits or logging
- * is toggled off to flush and release file handles.
+ * Both paths keep a bounded set of handles open rather than reopening per message. Call
+ * [closeAll] when the app exits or logging is turned off to flush and release them.
  */
-private const val MAX_OPEN_WRITERS = 32
-
 class LogWriter(private val ctx: Context) {
 
-    // Track the last time each log file was explicitly flushed to disk.
-    // We flush eagerly on background transition and periodically (every FLUSH_INTERVAL_MS)
-    // rather than after every single line — one fewer kernel write call per message.
+    // Last time each log file was flushed to disk. Flushing periodically rather than per line
+    // costs one fewer write call per message; flushAll() covers the process being killed.
     private val lastFlushMs = ConcurrentHashMap<String, Long>()
     private val FLUSH_INTERVAL_MS = 5_000L
 
-    // Cache open BufferedWriters for internal log files to avoid open/close on every line.
-    // Bounded and access-ordered; each entry holds a file descriptor and an 8 KB buffer, so
-    // eviction closes the writer.
-    private val openWriters = object : LinkedHashMap<String, BufferedWriter>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BufferedWriter>): Boolean {
-            if (size <= MAX_OPEN_WRITERS) return false
-            runCatching { eldest.value.close() }
-            lastFlushMs.remove(eldest.key)
-            return true
-        }
-    }
+    // Open handles for internal log files, so a line does not reopen the file.
+    private val openWriters = HandleCache<BufferedWriter>(MAX_OPEN_WRITERS) { lastFlushMs.remove(it) }
 
-    // LinkedHashMap is not thread safe and reorders on read, so every touch of openWriters goes
-    // through this monitor. The per-file locks below still serialise the writes.
-    private val writersLock = Any()
-
-    private fun writerFor(cacheKey: String, f: File): BufferedWriter = synchronized(writersLock) {
-        openWriters.getOrPut(cacheKey) { BufferedWriter(FileWriter(f, /* append = */ true), 8192) }
-    }
-
-    private fun closeWriter(cacheKey: String) = synchronized(writersLock) {
-        openWriters.remove(cacheKey)?.runCatching { close() }
+    private fun closeWriter(cacheKey: String) {
+        openWriters.take(cacheKey)?.runCatching { close() }
         lastFlushMs.remove(cacheKey)
-        Unit
     }
 
     /** Close and forget the writer for [key]'s log file, if one is open. */
@@ -83,30 +131,17 @@ class LogWriter(private val ctx: Context) {
         closeWriter(logFileInternal(networkName, buffer).absolutePath)
     }
 
-    // Per-key write locks so two coroutines writing to the same buffer file cannot
-    // interleave lines. ConcurrentHashMap.getOrPut is NOT atomic for the writer
-    // itself — two threads can both pass the "not present" check and try to create
-    // a writer for the same file, leading to a double-open and interleaved writes.
-    // A striped lock (one per cache key) gives fine-grained protection with low
-    // contention: buffers on different networks/channels lock independently.
+    // One lock per log file, so two coroutines writing the same buffer cannot interleave
+    // lines. computeIfAbsent, not getOrPut, because only the former is atomic here.
     private val writeLocks = ConcurrentHashMap<String, Any>()
-    // computeIfAbsent is used here rather than Kotlin's getOrPut extension because
-    // getOrPut on ConcurrentHashMap is NOT atomic — two threads can both pass the
-    // "key absent" check and each receive a different Any() object, defeating the lock.
-    // computeIfAbsent is guaranteed by ConcurrentHashMap to call the lambda at most once
-    // and return the same object to all concurrent callers for the same key.
     private fun writeLockFor(key: String): Any = writeLocks.computeIfAbsent(key) { Any() }
 
-    // Cache resolved SAF file URIs to avoid repeated directory scans on every message.
-    // Key is "$treeUri|$netDir|$fileName". Cleared when a write to that URI fails, so a
-    // user-deleted file is re-resolved on the next write instead of failing forever.
+    // Resolved SAF file URIs, keyed "$treeUri|$netDir|$fileName", so a message does not
+    // rescan the directory tree. Dropped when a write to that URI fails.
     private val safFileCache = ConcurrentHashMap<String, Uri>()
 
-    // Cache open SAF OutputStreams (wrapped in BufferedOutputStream) to avoid reopening
-    // the document on every message — mirrors the openWriters strategy for internal files.
-    // Key matches safFileCache: "$treeUri|$netDir|$fileName".
-    // Evicted (closed) on any write failure so a user-deleted file is re-created on the next call.
-    private val safWriters = ConcurrentHashMap<String, java.io.BufferedOutputStream>()
+    // Open handles for SAF log documents, keyed as safFileCache is.
+    private val safWriters = HandleCache<java.io.BufferedOutputStream>(MAX_OPEN_WRITERS)
 
     private fun internalRoot(): File = File(ctx.filesDir, "logs").apply { mkdirs() }
 
@@ -127,29 +162,24 @@ class LogWriter(private val ctx: Context) {
         dir.mkdirs()
         val f = File(dir, safeBufferFileName(buffer))
         val cacheKey = f.absolutePath
-        // Synchronise on a per-file lock so two coroutines writing to the same buffer
-        // cannot interleave lines. ConcurrentHashMap.getOrPut is not atomic for the
-        // writer itself, so we need an explicit guard around the get-or-create + write.
         synchronized(writeLockFor(cacheKey)) {
-            // Recreate a log file that was deleted whilst the app is running.
-            // if the user (or a cleanup tool) deletes the file,
-            // that inode is merely unlinked, so writes through the stale writer keep "succeeding"
-            // into the now-orphaned inode and the file is never recreated at its path.
+            // A file deleted while the app runs is only unlinked, so the old writer keeps
+            // succeeding into an orphaned inode. Drop it and let the path be recreated.
             if (!f.exists()) {
                 closeWriter(cacheKey)
                 dir.mkdirs()
             }
-            val writer = writerFor(cacheKey, f)
-            writer.write(line)
-            writer.newLine()
-            // Throttled flush: flush immediately if we haven't flushed this file within
-            // FLUSH_INTERVAL_MS, otherwise let the BufferedWriter accumulate more data.
-            // flushAll() is called on background transition to ensure no lines are lost
-            // when the process might be killed, so crash safety is preserved.
-            val now = System.currentTimeMillis()
-            if (now - (lastFlushMs[cacheKey] ?: 0L) >= FLUSH_INTERVAL_MS) {
-                writer.flush()
-                lastFlushMs[cacheKey] = now
+            val writer = openWriters.acquire(cacheKey) { BufferedWriter(FileWriter(f, /* append = */ true), 8192) }
+            try {
+                writer.write(line)
+                writer.newLine()
+                val now = System.currentTimeMillis()
+                if (now - (lastFlushMs[cacheKey] ?: 0L) >= FLUSH_INTERVAL_MS) {
+                    writer.flush()
+                    lastFlushMs[cacheKey] = now
+                }
+            } finally {
+                openWriters.release(cacheKey)
             }
         }
     }
@@ -161,15 +191,14 @@ class LogWriter(private val ctx: Context) {
      */
     fun flushAll() {
         val now = System.currentTimeMillis()
-        for ((key, writer) in synchronized(writersLock) { openWriters.entries.toList() }) {
+        for ((key, writer) in openWriters.snapshot()) {
             synchronized(writeLockFor(key)) {
                 runCatching { writer.flush() }
                 lastFlushMs[key] = now
             }
         }
-        // Lock SAF flushes the same way appendSaf is locked - otherwise a concurrent
-        // appendSaf() and flush() race the BufferedOutputStream's internal state.
-        for ((key, stream) in safWriters) {
+        // Locked as appendSaf is, so a flush cannot race a write on the same stream.
+        for ((key, stream) in safWriters.snapshot()) {
             synchronized(writeLockFor(key)) {
                 runCatching { stream.flush() }
             }
@@ -178,24 +207,15 @@ class LogWriter(private val ctx: Context) {
 
     /** Flush and close all open log file handles (internal and SAF). Call when logging is disabled or app exits. */
     fun closeAll() {
-        // Snapshot both maps before clearing them so a concurrent appendInternal() that
-        // slips in after clear() but before close() cannot create a writer that is then
-        // immediately orphaned.  The snapshot holds the only remaining references, so
-        // close() below is guaranteed to run on every writer that existed at call time.
-        val internalSnapshot = synchronized(writersLock) {
-            val snap = openWriters.entries.toList()
-            openWriters.clear()
-            snap
-        }
+        // Take the handles out of the caches before closing them, so a write racing this
+        // call finds an empty cache and opens a tracked handle rather than a leaked one.
+        // writeLocks is deliberately kept: a write in flight holds a lock from it, and a
+        // fresh object for the same key would let two threads interleave a line.
+        val internalSnapshot = openWriters.drain()
         lastFlushMs.clear()
-        // writeLocks is deliberately not cleared: an in-flight appendInternal holds a lock from
-        // it, and a fresh object for the same key would let two threads interleave a line.
-        // Close after clearing so appendInternal() racing here finds an empty map and
-        // creates a new, tracked writer rather than a leaked one.
         for ((_, writer) in internalSnapshot) runCatching { writer.close() }
 
-        val safSnapshot = safWriters.entries.toList()
-        safWriters.clear()
+        val safSnapshot = safWriters.drain()
         safFileCache.clear()
         for ((_, stream) in safSnapshot) runCatching { stream.close() }
     }
@@ -215,12 +235,9 @@ class LogWriter(private val ctx: Context) {
                      safeBufferFileName(buffer)
         )
         if (!f.exists() || !f.isFile) return emptyList()
-            // Flush any buffered writer for this file before reading so the tail is up-to-date.
-            // Lock to match the appendInternal write side - BufferedWriter is not thread-safe,
-            // and a flush() concurrent with a write() can corrupt the writer's internal buffer
-            // counter and produce malformed log output.
+            // Flush this file's writer first, under the write lock, so the tail is current.
             val absPath = f.absolutePath
-            synchronized(writersLock) { openWriters[absPath] }?.let { w ->
+            openWriters.peek(absPath)?.let { w ->
                 synchronized(writeLockFor(absPath)) { runCatching { w.flush() } }
             }
             return f.inputStream().use { readTailFromStream(it, maxLines) }
@@ -231,8 +248,7 @@ class LogWriter(private val ctx: Context) {
         val netDirName = safeNetworkDirName(networkName)
         val fileName = safBufferFileName(buffer)
         val cacheKey = "$treeUri|$netDirName|$fileName"
-        // Same locking rationale as readTailInternal above.
-        safWriters[cacheKey]?.let { s ->
+        safWriters.peek(cacheKey)?.let { s ->
             synchronized(writeLockFor(cacheKey)) { runCatching { s.flush() } }
         }
 
@@ -288,31 +304,34 @@ class LogWriter(private val ctx: Context) {
         val netDirs = queryChildren(resolver, treeUri, rootDocId)
         for ((netDocId, _, netMime) in netDirs) {
             if (netMime != Document.MIME_TYPE_DIR) continue
-                val files = queryChildren(resolver, treeUri, netDocId)
-                for ((fileDocId, _, _) in files) {
+            val files = queryChildren(resolver, treeUri, netDocId)
+            for ((fileDocId, _, _) in files) {
+                // Per file, so one document the provider objects to does not end the sweep.
+                runCatching {
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, fileDocId)
-                    // Query last-modified time for the document.
                     val modMs = runCatching {
                         resolver.query(
                             fileUri,
                             arrayOf(Document.COLUMN_LAST_MODIFIED),
-                                       null, null, null
+                            null, null, null
                         )?.use { c ->
                             if (c.moveToFirst()) c.getLong(0) else null
                         }
                     }.getOrNull()
                     if (modMs != null && modMs < cutoffMs) {
-                        // Look up the writer key BEFORE evicting from safFileCache — once the
-                        // cache entry is removed, safFileCache[key] == fileUri will never match.
-                        val writerKey = safWriters.keys.firstOrNull { safFileCache[it] == fileUri }
-                        safWriters.remove(writerKey)?.runCatching { close() }
-                        // Also drop the corresponding writeLocks entry so the lock map can't
-                        // grow unboundedly across long sessions that churn through many files.
-                        if (writerKey != null) writeLocks.remove(writerKey)
-                            safFileCache.entries.removeIf { it.value == fileUri }
-                            runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
+                        // Resolve the writer key before dropping the URI from safFileCache,
+                        // which is what the lookup matches on. Most expired files have no
+                        // open handle, so no key is the normal case.
+                        val writerKey = safWriters.keys().firstOrNull { safFileCache[it] == fileUri }
+                        if (writerKey != null) {
+                            safWriters.take(writerKey)?.runCatching { close() }
+                            writeLocks.remove(writerKey)
+                        }
+                        safFileCache.entries.removeIf { it.value == fileUri }
+                        runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
                     }
                 }
+            }
         }
     }
 
@@ -323,25 +342,25 @@ class LogWriter(private val ctx: Context) {
         val fileName = safBufferFileName(buffer)
         val cacheKey = "$treeUri|$netDirName|$fileName"
 
-        // Per-file lock: SAF writes are NOT thread-safe at the OutputStream level - two
-        // coroutines writing the same line concurrently can interleave bytes mid-message,
-        // produce garbled logs, and corrupt the cached BufferedOutputStream's internal
-        // state. We use the same writeLockFor() map as the internal path; the keys live
-        // in distinct namespaces (absolute paths vs "$treeUri|…" composites) so there's
-        // no cross-collision.
+        // Per-file lock, shared with the internal path. The two key namespaces are distinct
+        // (absolute paths against "$treeUri|…" composites) so they cannot collide.
         synchronized(writeLockFor(cacheKey)) {
-            // Fast path: use cached stream if available.
-            safWriters[cacheKey]?.let { cached ->
-                val writeOk = runCatching {
-                    val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
-                    cached.write(bytes)
-                    cached.flush()
-                }.isSuccess
+            // Fast path: write through the open stream.
+            val cached = safWriters.acquireExisting(cacheKey)
+            if (cached != null) {
+                val writeOk = try {
+                    runCatching {
+                        cached.write((line + "\n").toByteArray(Charsets.UTF_8))
+                        cached.flush()
+                    }.isSuccess
+                } finally {
+                    safWriters.release(cacheKey)
+                }
                 if (writeOk) return
-                    // Write failed (file likely deleted externally); close, evict both caches and
-                    // fall through to re-resolve so the file is re-created on the next call.
-                    safWriters.remove(cacheKey)?.runCatching { close() }
-                    safFileCache.remove(cacheKey)
+                // The document was probably deleted externally. Drop it and re-resolve, which
+                // recreates the file.
+                safWriters.take(cacheKey)?.runCatching { close() }
+                safFileCache.remove(cacheKey)
             }
 
             // Slow path: resolve (or create) the document URI, open and cache a new stream.
@@ -353,13 +372,18 @@ class LogWriter(private val ctx: Context) {
                 ?.let { java.io.BufferedOutputStream(it, 8192) }
             }.getOrNull() ?: return  // couldn't open; drop this line
 
-            safWriters[cacheKey] = stream
-
-            val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
-            val writeOk = runCatching { stream.write(bytes); stream.flush() }.isSuccess
+            safWriters.acquire(cacheKey) { stream }
+            val writeOk = try {
+                runCatching {
+                    stream.write((line + "\n").toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                }.isSuccess
+            } finally {
+                safWriters.release(cacheKey)
+            }
             if (!writeOk) {
-                // Opening succeeded but the first write failed — evict so next call retries.
-                safWriters.remove(cacheKey)?.runCatching { close() }
+                // Opened but the first write failed, so drop it and let the next call retry.
+                safWriters.take(cacheKey)?.runCatching { close() }
                 safFileCache.remove(cacheKey)
             }
         }

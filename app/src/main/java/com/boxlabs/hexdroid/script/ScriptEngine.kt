@@ -45,6 +45,32 @@ class ScriptEngine(
         try { return block() } finally { curNet = pn; curBuf = pb }
     }
 
+    /**
+     * Run [block], and never let a script's failure reach the app.
+     *
+     * Every call into a script passes through here. A script is user-written and may divide
+     * by zero, recurse until the stack goes, or hit any other fault the interpreter does not
+     * anticipate; without this the exception unwinds through the event handler and takes the
+     * process with it, which would count against the app's own crash rate.
+     *
+     * Errors are surfaced to the script log so the author can see them. Error and its
+     * subclasses other than StackOverflowError are left alone: OutOfMemoryError and the rest
+     * say the process is no longer healthy and swallowing them hides a real fault.
+     */
+    private inline fun <T> guarded(what: String, fallback: T, block: () -> T): T =
+        try {
+            block()
+        } catch (e: StackOverflowError) {
+            host.echo(curNet, curBuf, null, "*** script $what: too deeply nested")
+            fallback
+        } catch (e: Error) {
+            throw e
+        } catch (e: Throwable) {
+            host.echo(curNet, curBuf, null,
+                "*** script $what: ${e.message ?: e.javaClass.simpleName}")
+            fallback
+        }
+
     /** File extension scripts use for this backend (so ScriptStore can filter). */
     val scriptExtension: String get() = backend.scriptExtension
 
@@ -83,14 +109,18 @@ class ScriptEngine(
         val name = if (ev.isAction) "ACTION" else "TEXT"
         val handlers = eventHandlers[name] ?: return TextResult(ev.text, false)
         if (handlers.isEmpty()) return TextResult(ev.text, false)
-        return withCtx(ev.network, ev.buffer) {
-            backend.dispatchTransform(
-                handlers,
-                EventData(
-                    network = ev.network, buffer = ev.buffer, from = ev.from, text = ev.text,
-                    isAction = ev.isAction, isPrivate = ev.isPrivate, isMine = ev.isMine,
-                ),
-            )
+        // The message is passed through unchanged when a handler fails, so a broken script
+        // cannot silently swallow what someone said.
+        return guarded("text handler", TextResult(ev.text, false)) {
+            withCtx(ev.network, ev.buffer) {
+                backend.dispatchTransform(
+                    handlers,
+                    EventData(
+                        network = ev.network, buffer = ev.buffer, from = ev.from, text = ev.text,
+                        isAction = ev.isAction, isPrivate = ev.isPrivate, isMine = ev.isMine,
+                    ),
+                )
+            }
         }
     }
 
@@ -98,11 +128,13 @@ class ScriptEngine(
         if (!started) return TextResult(ev.text, false)
         val handlers = eventHandlers["INPUT"] ?: return TextResult(ev.text, false)
         if (handlers.isEmpty()) return TextResult(ev.text, false)
-        return withCtx(ev.network, ev.buffer) {
-            backend.dispatchTransform(
-                handlers,
-                EventData(network = ev.network, buffer = ev.buffer, text = ev.text),
-            )
+        return guarded("input handler", TextResult(ev.text, false)) {
+            withCtx(ev.network, ev.buffer) {
+                backend.dispatchTransform(
+                    handlers,
+                    EventData(network = ev.network, buffer = ev.buffer, text = ev.text),
+                )
+            }
         }
     }
 
@@ -117,7 +149,7 @@ class ScriptEngine(
 
     fun runCommand(name: String, args: String, network: String?, buffer: String?): Boolean {
         val h = commandHandlers[name.lowercase()] ?: return false
-        withCtx(network, buffer) { backend.runCommand(h, args, network, buffer) }
+        guarded("/$name", Unit) { withCtx(network, buffer) { backend.runCommand(h, args, network, buffer) } }
         return true
     }
 
@@ -126,7 +158,9 @@ class ScriptEngine(
         if (!started) return
         val handlers = eventHandlers[eventName.uppercase()] ?: return
         if (handlers.isEmpty()) return
-        withCtx(event.network, event.buffer) { backend.dispatchNotify(handlers, event) }
+        guarded("$eventName handler", Unit) {
+            withCtx(event.network, event.buffer) { backend.dispatchNotify(handlers, event) }
+        }
     }
 
     // ---- the host API as the backend sees it --------------------------------

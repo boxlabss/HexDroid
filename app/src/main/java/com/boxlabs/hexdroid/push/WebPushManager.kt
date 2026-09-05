@@ -105,7 +105,13 @@ object WebPushManager {
      * The endpoint arrives asynchronously at [HexPushService.onNewEndpoint].
      */
     fun register(ctx: Context, vapid: String?) {
-        if (UnifiedPush.getAckDistributor(ctx) == null) return
+        if (UnifiedPush.getAckDistributor(ctx) == null) {
+            // Nothing acked yet. The settings screen only offers a choice when more than one
+            // distributor is installed, so with exactly one there is nothing to have chosen
+            // and returning here left the subscription never requested at all.
+            val only = UnifiedPush.getDistributors(ctx).singleOrNull() ?: return
+            runCatching { UnifiedPush.saveDistributor(ctx, only) }
+        }
         prefs(ctx).edit().putString(KEY_VAPID, vapid).apply()
         runCatching { UnifiedPush.register(ctx, vapid = vapid) }
     }

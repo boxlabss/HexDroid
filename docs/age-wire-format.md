@@ -232,7 +232,6 @@ inner  := str(gameId) || u32(epoch) || u32(seq) || str(senderFp) || field(move)
 sig    := Ed25519_sign(senderSigSeed, "hexdroid/+AGE/msg-sign/v1" || inner)
 signed := field(inner) || field(sig)
 k_s    := HKDF-SHA256(ikm=K_G, salt=0^32, info="hexdroid/+AGE/msg-key/v1" || lower(senderFp) || u32_be(epoch), L=32)
-          ; AgeChannel.messageKeyFor()
 nonce  := senderFp[0:8] || u32_be(seq)                 # 12 bytes; unique per (sender, seq)
 aad    := "hexdroid/+AGE/msg/v1" || gameId || senderFp || u32_be(seq)    # raw concat
 ct     := AES-256-GCM(k_s, nonce, signed, aad)
@@ -272,54 +271,17 @@ a fresh `K_G'`, re-seals it to each *remaining* member, and announces `AGE REKEY
 `K_G'`. Rekeying resets the per-sender `seq` space for the new epoch. At poker-table
 sizes (≤ ~8) this O(N) re-seal is trivial; MLS-style TreeKEM is unnecessary here.
 
-### Implementation status: `epoch` is not yet live
-
-The above describes the design. As implemented, `epoch` is **always 0** on the wire:
-`AgeChannel` is only ever constructed with the default epoch, `AgeChannel.rekey()` has no
-callers, and the inbound `AGE REKEY` handler is a no-op. Rotation happens instead by minting
-a fresh `K_G`, distributing it by invite, and rebuilding the channel object on the new key.
-
-That rotation is still sound, but for a narrower reason than the design gives. The nonce is
-`senderFp[0:8] || be32(seq)` and a rebuilt channel restarts `seq` at 0, so freshness rests
-**entirely** on `k_s` changing, which rests entirely on `K_G` having changed. Rebuilding a
-channel on an unchanged key would repeat `(k_s, nonce)` pairs and break GCM outright.
-
-`AgeScriptCapabilities.resetChannel` therefore refuses a reset whose group key has not
-changed, rather than trusting callers to check. Anything reintroducing an unconditional
-reset must derive a fresh key first. Making `epoch` real (incrementing it per rotation and
-threading it into the constructor) would remove that fragility, since `epoch` is already
-mixed into `k_s`, and would give the `epoch` mismatch drop and the `seq`-space reset
-something to actually do.
-
 ## 1:1 handshake and double ratchet (forward secrecy)
 
 Private messages use a two-message X3DH-style handshake to seed a Double Ratchet. Both
 handshake messages are sealed and signed:
 
 ```
-A → B  HELLO = seal_B( field(body) || field(sig) )
-               body = field(A.sigPub)||field(A.dhPub)||field(EK_A_pub)||field(B.dhPub)
-               sig  = sign(A.sigSeed, "hexdroid/+AGE/hello-sign/v2" || body)
-               aad  = "hexdroid/+AGE/hello/v1"
-B → A  ACK   = seal_A( field(body) || field(sig) )
-               body = field(EK_B_pub)||field(A.sigPub)||field(A.dhPub)||field(EK_A_pub)||field(B.sigPub)
-               sig  = sign(B.sigSeed, "hexdroid/+AGE/ack-sign/v2" || body)
-               aad  = "hexdroid/+AGE/ack/v1"
+A → B  HELLO = seal_B( field(body) || field(sig) ),  body = field(A.sigPub)||field(A.dhPub)||field(EK_A_pub)
+               sig = sign(A.sigSeed, "hexdroid/+AGE/hello-sign/v1" || body),  aad = "hexdroid/+AGE/hello/v1"
+B → A  ACK   = seal_A( field(EK_B_pub) || field(sig) )
+               sig = sign(B.sigSeed, "hexdroid/+AGE/ack-sign/v1" || EK_B_pub),  aad = "hexdroid/+AGE/ack/v1"
 ```
-
-Both signatures cover the **whole transcript**, not just the signer's own keys. The seal is
-anonymous (fresh ephemeral sender key per seal), so a signature over a bare public key can be
-re-sealed to a different recipient and will verify there. `openHello` therefore checks that
-the echoed `B.dhPub` is its own, and `openAck` checks all four echoed fields constant-time
-against what it sent, rejecting `ack: transcript mismatch` on any difference.
-
-A lifted ACK never leaks key material: the attacker does not hold `EK_B`'s private half, so
-the victim derives an `SK` the real responder cannot, and the session simply fails. The
-consequence is a wedged session against a peer you have handshaked with before, not
-compromise. It is closed because transcript binding costs nothing.
-
-The `v2` sign labels are a **wire break**. A `v1` peer fails with `bad signature`; both ends
-must be on the same version. The seal AADs are unchanged, so only the signature preimage moved.
 
 Shared secret from three DHs (the same three on both sides, in this order):
 
@@ -361,8 +323,6 @@ forthcoming.
 | Stale or foreign `epoch`                        | Drop                                            |
 | Unknown sender fingerprint (not a member)      | Drop                                            |
 | Invite expired / replayed / invitee not listed | Reject                                          |
-| HELLO recipient key ≠ ours                     | Reject (`hello: wrong recipient`)               |
-| ACK echoed transcript ≠ what we sent           | Reject (`ack: transcript mismatch`)             |
 | Ratchet AEAD open fails                         | Reject **and roll back** ratchet state          |
 | Skipped-key store would exceed `MAX_SKIP`      | Reject (bounded to stop memory DoS)             |
 | Malformed base64 / truncated TLV               | Reject                                          |

@@ -99,6 +99,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.SendToMobile
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Block
@@ -194,6 +195,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -313,6 +315,7 @@ private val IRC_COMMANDS = listOf(
     // User & nick
     IrcCommand("nick", "/nick <new nick>", R.string.cmd_nick),
     IrcCommand("away", "/away [message]", R.string.cmd_away),
+    IrcCommand("back", "/back", R.string.cmd_back),
     IrcCommand("whois", "/whois <nick>", R.string.cmd_whois),
     IrcCommand("who", "/who <mask>", R.string.cmd_who),
     IrcCommand("ignore", "/ignore [nick]", R.string.cmd_ignore),
@@ -1083,10 +1086,11 @@ private fun ReplyQuote(
     msgIdToText: Map<String, Pair<String?, String>>,
     canScroll: Boolean,
     onTap: () -> Unit,
+    onFetch: (() -> Unit)? = null,
 ) {
     val entry = msgIdToText[replyToMsgId]  // O(1)
     val label = when {
-        entry == null          -> "↩ (original message not in window)"
+        entry == null          -> "↩ " + stringResource(R.string.chat_reply_not_loaded)
         entry.first != null    -> "↩ ${entry.first}: ${stripIrcFormatting(entry.second).take(80)}"
         else                   -> "↩ ${stripIrcFormatting(entry.second).take(80)}"
     }
@@ -1099,7 +1103,11 @@ private fun ReplyQuote(
         modifier = Modifier
             .fillMaxWidth()
             .focusHighlight(RoundedCornerShape(4.dp))
-            .clickable(enabled = canScroll, onClick = onTap)
+            // Jumps to the original, or fetches it when outside the loaded window.
+            .clickable(
+                enabled = canScroll || (entry == null && onFetch != null),
+                onClick = if (canScroll) onTap else (onFetch ?: {}),
+            )
             .background(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 RoundedCornerShape(4.dp)
@@ -1198,6 +1206,8 @@ fun ChatScreen(
     onDisconnect: () -> Unit,
     onReconnect: () -> Unit,
     onExit: () -> Unit,
+    /** Open the resizable overlay, asking for the permission first if it is missing. */
+    onEnterFloating: (() -> Unit)? = null,
     onToggleBufferList: () -> Unit,
     onToggleNickList: () -> Unit,
     onToggleChannelsOnly: () -> Unit,
@@ -1363,6 +1373,7 @@ fun ChatScreen(
                         Image(
                             bitmap = it,
                             contentDescription = null,
+                            filterQuality = FilterQuality.High,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .padding(end = 6.dp)
@@ -1503,6 +1514,12 @@ fun ChatScreen(
 
     val isChannel = selBufName.startsWith("#") || selBufName.startsWith("&")
 
+    /** True for a one-to-one conversation: not a channel, server or DCC pseudo buffer. */
+    val isPrivateMessage = !isChannel &&
+        selBufName.isNotBlank() &&
+        !selBufName.startsWith("*") &&
+        !selBufName.startsWith("DCCCHAT:")
+
     // "Harden" the nicklist: whenever the nicklist becomes visible, ask the server for a fresh
     // snapshot (throttled in the ViewModel to avoid spamming).
     LaunchedEffect(isWide, state.showNickList, state.selectedBuffer, isChannel) {
@@ -1531,6 +1548,18 @@ fun ChatScreen(
     }
 
     val myNick = state.connections[selNetId]?.myNick ?: state.myNick
+
+    /**
+     * Nicks offered by Tab and by the @ hint bar: a channel's member list, or the two people
+     * in a private message, which has no member list of its own.
+     */
+    val completionNicks = remember(isChannel, isPrivateMessage, nicklist, selBufName, myNick) {
+        when {
+            isChannel -> nicklist
+            isPrivateMessage -> listOf(selBufName, myNick).filter { it.isNotBlank() }.distinct()
+            else -> emptyList()
+        }
+    }
     val myDisplay = nicklist.firstOrNull { baseNick(it).equals(myNick, ignoreCase = true) }
     val myPrefix = myDisplay?.let { nickPrefix(it) }
     val canKick  = isChannel && myPrefix in listOf('~', '&', '@', '%')
@@ -1641,6 +1670,8 @@ fun ChatScreen(
     var selectedNick by remember { mutableStateOf("") }
     /** Message long-pressed: shown in a small context sheet with Copy / Reply options. */
     var longPressedMessage by remember { mutableStateOf<UiMessage?>(null) }
+    /** msgid awaiting a typed reaction, or null when the prompt is closed. */
+    var customReactionFor by remember { mutableStateOf<String?>(null) }
 
     /** When true, message rows show checkboxes for multi-message copy selection. */
     var copyRangeMode by remember { mutableStateOf(false) }
@@ -1846,8 +1877,12 @@ fun ChatScreen(
 			}
 		}
 
+		// The pane starts at the left edge of the screen, and a television crops a little of
+		// the picture there, so on one it is held further in. Applied here rather than as a
+		// margin around the whole app, which showed as a border on every side.
+		val edgeInset = if (isTvDevice()) 20.dp else 0.dp
 		Column(
-			mod.padding(horizontal = 16.dp, vertical = 8.dp),
+			mod.padding(start = 16.dp + edgeInset, end = 16.dp, top = 8.dp, bottom = 8.dp),
 			verticalArrangement = Arrangement.spacedBy(4.dp)
 		) {
 			// Sidepanel toolbar: collapse-all, mark-all-read, search-current-buffer.
@@ -2078,6 +2113,7 @@ fun ChatScreen(
 												Image(
 													bitmap = it,
 													contentDescription = null,
+													filterQuality = FilterQuality.High,
 													contentScale = ContentScale.Crop,
 													modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
 												)
@@ -2366,6 +2402,7 @@ fun ChatScreen(
                                 Image(
                                     bitmap = bmp,
                                     contentDescription = null,
+                                    filterQuality = FilterQuality.High,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
                                         .padding(end = avatarGap)
@@ -2374,6 +2411,24 @@ fun ChatScreen(
                                         .alpha(if (isAway) 0.6f else 1f),
                                 )
                             } ?: Spacer(Modifier.width(avatarSize + avatarGap))
+                        } else if (state.settings.showNickIcons) {
+                            // No avatar, so the slot carries presence instead of standing
+                            // empty: red for away, green for here.
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = avatarGap)
+                                    .size(avatarSize),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(avatarSize * 0.5f)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isAway) Color(0xFFD05A5A) else Color(0xFF5AB77B)
+                                        )
+                                )
+                            }
                         } else if (metadataAvatars.isNotEmpty()) {
                             Spacer(Modifier.width(avatarSize + avatarGap))
                         }
@@ -2391,27 +2446,26 @@ fun ChatScreen(
                             // Fade an away nick a touch further, on top of the row tint.
                             modifier = Modifier.alpha(if (isAway) 0.6f else 1f),
                         )
-                        // Display name never replaces the nick here, for the same
-                        // impersonation reason as the message rows.
-                        if (nickDisplayName != null) {
-                            Text(
-                                " ($nickDisplayName)",
-                                color = Color.Gray,
-                                fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp,
-                                // Same reason as the nick above: an unset lineHeight here
-                                // would set the row's height on its own.
-                                lineHeight = ((nickFontSp - 2f).coerceAtLeast(8f) * 1.15f).sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        // Bot Mode: a small chip marks bot users.
+//                         if (nickDisplayName != null) {
+//                             Text(
+//                                 " ($nickDisplayName)",
+//                                 color = Color.Gray,
+//                                 fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp,
+//                                 lineHeight = ((nickFontSp - 2f).coerceAtLeast(8f) * 1.15f).sp,
+//                                 maxLines = 1,
+//                                 overflow = TextOverflow.Ellipsis,
+//                             )
+//                         }
+                        // Bot Mode: a robot icon marks bot users.
                         if (isBot) {
-                            Text(
-                                " [bot]",
-                                color = Color(0xFF7E9CD8),
-                                fontSize = (nickFontSp - 3f).coerceAtLeast(8f).sp,
-                                maxLines = 1,
+                            Icon(
+                                painter = painterResource(R.drawable.ic_robot_2),
+                                contentDescription = stringResource(R.string.chat_bot_prefix),
+                                tint = Color(0xFF7E9CD8),
+                                modifier = Modifier
+                                    .padding(start = (nickFontSp * 0.2f).dp)
+                                    .size((nickFontSp - 1f).coerceAtLeast(9f).dp)
+                                    .alpha(if (isAway) 0.6f else 1f),
                             )
                         }
                     }
@@ -2442,30 +2496,31 @@ fun ChatScreen(
         }
     }
 
-    // Older-history state for the selected buffer. The control is offered only when the
-    // server can actually answer (chathistory negotiated) and hasn't already told us it
-    // has nothing older, so the user is never shown a button that can only fail.
+    // Offered whenever the server can answer and has not said it has nothing older. Not
+    // conditional on the buffer holding a message: with nothing to anchor on the ViewModel
+    // asks for the server's most recent page instead.
     val selectedBufferHistoryLoading = state.buffers[selected]?.historyLoading ?: false
     val historyBackfillAvailable = run {
         val buf = state.buffers[selected]
         buf != null &&
             !buf.historyExhausted &&
-            buf.messages.any { it.from != null } &&
             viewModel?.supportsChatHistory(selected) == true
     }
 
-    // Auto-load when the top of the list comes into view, so scrolling back simply keeps
-    // going rather than stopping at a button. The header item is the last index in the
-    // reversed layout; requesting is idempotent, so a repeated trigger while a request is
-    // already in flight is harmless.
+    // Auto-load when the top scrolls into view. Derived from the layout rather than a
+    // snapshotFlow over visibleItemsInfo, which recomputes every frame. Requesting is
+    // idempotent, so a repeat trigger mid-request is harmless.
+    val atOldestLoaded by remember(selected) {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            info.totalItemsCount > 0 &&
+                info.visibleItemsInfo.lastOrNull()?.index == info.totalItemsCount - 1
+        }
+    }
     LaunchedEffect(selected, historyBackfillAvailable) {
         if (!historyBackfillAvailable) return@LaunchedEffect
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key }
-            .collect { lastKey ->
-                if (lastKey == "history-load-older") {
-                    onLoadOlderHistory(selected)
-                }
-            }
+        snapshotFlow { atOldestLoaded }
+            .collect { atTop -> if (atTop) onLoadOlderHistory(selected) }
     }
 
     // True once the user has jumped/scrolled to the unread marker this session.
@@ -2832,24 +2887,21 @@ fun ChatScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(barSpacing)
                 ) {
+                    // A Box rather than an IconButton: IconButton enforces a 48dp minimum
+                    // touch target, which overflows a bar shorter than that and is clipped
+                    // by it, taking the top and bottom of the focus ring with it.
                     if (isWide) {
-                        IconButton(
+                        BarIconButton(
+                            size = iconBtnSize,
                             onClick = onToggleBufferList,
-                            modifier = Modifier
-                                .size(iconBtnSize)
-                                .tvInitialFocus()
-                                .focusHighlight()
-                                .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
+                            modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON),
                         ) { Text("☰") }
                     } else if (!state.settings.networkTabsAtBottom) {
                         // The bottom bar replaces the drawer in this mode, so drop the opener.
-                        IconButton(
+                        BarIconButton(
+                            size = iconBtnSize,
                             onClick = { scope.launch { drawerState.open() } },
-                            modifier = Modifier
-                                .size(iconBtnSize)
-                                .tvInitialFocus()
-                                .focusHighlight()
-                                .tourTarget(TourTarget.CHAT_DRAWER_BUTTON)
+                            modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON),
                         ) { Text("☰") }
                     }
 
@@ -2989,9 +3041,10 @@ fun ChatScreen(
 
                     if (scriptLaunchers.isNotEmpty()) {
                         Box {
-                            IconButton(
+                            BarIconButton(
+                                size = iconBtnSize,
                                 onClick = { launcherExpanded = true },
-                                modifier = Modifier.size(iconBtnSize).focusHighlight()
+                                initialFocus = false,
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.IntegrationInstructions,
@@ -3017,12 +3070,11 @@ fun ChatScreen(
                     }
 
                     Box {
-                        IconButton(
+                        BarIconButton(
+                            size = iconBtnSize,
                             onClick = { overflowExpanded = true },
-                            modifier = Modifier
-                                .size(iconBtnSize)
-                                .focusHighlight()
-                                .tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON)
+                            modifier = Modifier.tourTarget(TourTarget.CHAT_OVERFLOW_BUTTON),
+                            initialFocus = false,
                         ) { Text("⋮") }
                         DropdownMenu(
                             expanded = overflowExpanded,
@@ -3071,6 +3123,9 @@ fun ChatScreen(
                                     add(MenuEntry(stringResource(R.string.menu_ircop_tools)) { overflowExpanded = false; showIrcOpTools = true })
                                 }
                                 add(MenuEntry(stringResource(R.string.menu_about)) { overflowExpanded = false; onAbout() })
+                                if (onEnterFloating != null) {
+                                    add(MenuEntry(stringResource(R.string.menu_float)) { overflowExpanded = false; onEnterFloating() })
+                                }
                                 add(MenuEntry(
                                     stringResource(R.string.menu_reconnect),
                                     enabled = state.networks.isNotEmpty() && !state.connecting
@@ -3440,6 +3495,18 @@ fun ChatScreen(
                             listState = listState,
                             msgIdToDisplayIdx = msgIdToDisplayIdxHoisted,
                             msgStrToDisplayIdx = msgStrToDisplayIdxHoisted,
+                            onFetchReplyContext = viewModel?.let { vm ->
+                                { parentId: String -> vm.loadMessageContext(selected, parentId) }
+                            },
+                            myNick = myNick,
+                            onToggleReaction = viewModel?.let { vm ->
+                                { id: String, text: String, mine: Boolean ->
+                                    vm.sendReaction(id, text, remove = mine)
+                                }
+                            },
+                            onAddReaction = if (hasReactionSupport) {
+                                { id: String -> customReactionFor = id }
+                            } else null,
                             msgIdToText = msgIdToTextHoisted,
                             scope = scope,
                             chatTextStyle = chatTextStyle,
@@ -3509,9 +3576,12 @@ fun ChatScreen(
                         )
                         TextButton(
                             onClick = {
+                                // Buffer order, not timestamp order. Logs are placed as a
+                                // block above the session whatever their dates, so sorting
+                                // by time here handed back a different arrangement from the
+                                // one on screen, with the two dividers swapped.
                                 val toCopy = messages
                                     .filter { it.id in selectedMsgIds }
-                                    .sortedBy { it.timeMs }
                                     .joinToString("\n") { msg ->
                                         buildString {
                                             if (msg.from != null) append("<${msg.from}> ")
@@ -3746,7 +3816,7 @@ fun ChatScreen(
          * Returns false when there is nothing to complete.
          */
         fun completeNick(backwards: Boolean): Boolean {
-            if (!isChannel || nicklist.isEmpty()) return false
+            if (completionNicks.isEmpty()) return false
 
             fun bare(n: String) = n.trimStart('~', '&', '@', '%', '+')
 
@@ -3783,7 +3853,7 @@ fun ChatScreen(
                 hadAt = word.startsWith("@")
                 val prefix = if (hadAt) word.substring(1) else word
                 if (prefix.isEmpty()) return false
-                matches = nicklist
+                matches = completionNicks
                     .map { bare(it) }
                     .filter { it.startsWith(prefix, ignoreCase = true) }
                     .distinct()
@@ -3805,8 +3875,8 @@ fun ChatScreen(
 
         // Nick-hint query: non-null when the word at cursor starts with "@" and has ≥1 char after it.
         // Only active in channel buffers (not server buffers or DCC chat).
-        val nickQuery = remember(input.text, isChannel) {
-            if (!isChannel) return@remember null
+        val nickQuery = remember(input.text, completionNicks) {
+            if (completionNicks.isEmpty()) return@remember null
             val t = input.text
             // Find the last "@" that starts a word token before the cursor
             val atIdx = t.lastIndexOf('@')
@@ -3885,6 +3955,7 @@ fun ChatScreen(
                                                     Image(
                                                         bitmap = it,
                                                         contentDescription = null,
+                                                        filterQuality = FilterQuality.High,
                                                         contentScale = ContentScale.Crop,
                                                         modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
                                                     )
@@ -3926,7 +3997,7 @@ fun ChatScreen(
             if (nickQuery != null && cmdQuery == null && subCmdQuery == null) {
                 NickHints(
                     prefix = nickQuery,
-                    nicks = nicklist,
+                    nicks = completionNicks,
                     inputText = input.text,
                     onPick = { completion ->
                         // Replace the @prefix token at the end of input with the chosen completion
@@ -4200,8 +4271,10 @@ fun ChatScreen(
                                     true
                                 }
                                 Key.Tab -> {
-                                    // Consumed in a channel even when nothing matched
-                                    completeNick(backwards = ev.isShiftPressed) || isChannel
+                                    // Consumed even when nothing matched, so Tab does not
+                                    // move focus out of the input mid-word.
+                                    completeNick(backwards = ev.isShiftPressed) ||
+                                        completionNicks.isNotEmpty()
                                 }
                                 Key.DirectionUp -> {
                                     // Up-arrow recalls input history. Only intercepted when the
@@ -5830,6 +5903,52 @@ fun ChatScreen(
         )
     }
 
+    // Typed reaction: draft/react carries arbitrary text, not just emoji.
+    customReactionFor?.let { reactMsgId ->
+        var reactionText by remember(reactMsgId) { mutableStateOf("") }
+        val focusRequester = remember { FocusRequester() }
+        LaunchedEffect(reactMsgId) { runCatching { focusRequester.requestFocus() } }
+
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { customReactionFor = null },
+            title = { Text(stringResource(R.string.chat_react_custom)) },
+            text = {
+                OutlinedTextField(
+                    value = reactionText,
+                    onValueChange = {
+                        // A reaction is a label, not a reply.
+                        reactionText = it.replace("\n", "").take(32)
+                    },
+                    label = { Text(stringResource(R.string.chat_react_custom_hint)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        val t = reactionText.trim()
+                        if (t.isNotEmpty()) onSendReaction(reactMsgId, t, false)
+                        customReactionFor = null
+                    }),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = reactionText.isNotBlank(),
+                    onClick = {
+                        onSendReaction(reactMsgId, reactionText.trim(), false)
+                        customReactionFor = null
+                    },
+                ) { Text(stringResource(R.string.chat_react_send)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { customReactionFor = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     // Topic quick-edit dialog appears when an op long-presses the topic bar.
     if (showTopicQuickEdit && canTopic) {
         var editTopicText by remember(topic) { mutableStateOf(topic ?: "") }
@@ -5917,6 +6036,31 @@ fun ChatScreen(
                                     .padding(8.dp),
                             )
                         }
+
+                        // Opens the keyboard: draft/react takes arbitrary text.
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = stringResource(R.string.chat_react_custom),
+                            modifier = Modifier
+                                .focusHighlight(RoundedCornerShape(24.dp))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = ripple(bounded = false, radius = 24.dp),
+                                ) {
+                                    if (hasReactionSupport) {
+                                        customReactionFor = ctxMsg.msgId
+                                        longPressedMessage = null
+                                    } else {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "This server doesn't support reactions",
+                                                duration = androidx.compose.material3.SnackbarDuration.Short,
+                                            )
+                                        }
+                                    }
+                                }
+                                .padding(12.dp),
+                        )
                     }
                 }
                 HorizontalDivider()
@@ -6068,6 +6212,7 @@ fun ChatScreen(
                                 Image(
                                     bitmap = it,
                                     contentDescription = null,
+                                    filterQuality = FilterQuality.High,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.size(44.dp).clip(CircleShape),
                                 )
@@ -6418,6 +6563,14 @@ private fun SingleMessageItem(
     msgIdToDisplayIdx: Map<Long, Int>,
     /** IRCv3 msgid (String) → display index — used for O(1) reply-quote scroll. */
     msgStrToDisplayIdx: Map<String, Int>,
+    /** Fetch the messages around a reply's parent when it is older than the loaded window. */
+    onFetchReplyContext: ((String) -> Unit)? = null,
+    /** Our nick, so a reaction we are part of is drawn as ours. */
+    myNick: String? = null,
+    /** Add or remove our own reaction: msgid, reaction text, whether it is currently ours. */
+    onToggleReaction: ((String, String, Boolean) -> Unit)? = null,
+    /** Open the typed-reaction prompt for a message that already has reactions. */
+    onAddReaction: ((String) -> Unit)? = null,
     /** IRCv3 msgid (String) → (from, text) — used for O(1) reply label rendering. */
     msgIdToText: Map<String, Pair<String?, String>>,
     scope: CoroutineScope,
@@ -6468,6 +6621,23 @@ private fun SingleMessageItem(
         com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH -> "\uD83D\uDD13" // 🔓 (legacy)
         null                                           -> ""
     }
+    val botInline: Map<String, InlineTextContent> = if (!m.fromBot) emptyMap() else mapOf(
+        BOT_INLINE_ID to InlineTextContent(
+            Placeholder(
+                width = 1.3.em,
+                height = 1.0.em,
+                placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            )
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_robot_2),
+                contentDescription = null,
+                tint = Color(0xFF7E9CD8),
+                modifier = Modifier.fillMaxHeight().aspectRatio(1f),
+            )
+        }
+    )
+
     val encInline: Map<String, InlineTextContent> = encScheme?.let { scheme ->
         mapOf(
             ENC_INLINE_ID to InlineTextContent(
@@ -6494,6 +6664,8 @@ private fun SingleMessageItem(
             }
         )
     } ?: emptyMap()
+
+    val inlineBadges = encInline + botInline
 
     // Collapse multiline messages to the first COLLAPSE_LINES and offer to expand.
     val bodyLineCount = remember(m.text) { m.text.count { it == '\n' } + 1 }
@@ -6532,6 +6704,7 @@ private fun SingleMessageItem(
                 replyToMsgId = m.replyToMsgId,
                 msgIdToText = msgIdToText,
                 canScroll = replyDisplayIdx >= 0,
+                onFetch = onFetchReplyContext?.let { fetch -> { fetch(m.replyToMsgId) } },
                 onTap = {
                     // O(1): index already resolved above via msgStrToDisplayIdx.
                     if (replyDisplayIdx >= 0) {
@@ -6676,8 +6849,8 @@ private fun SingleMessageItem(
                         appendTimestamp(ts, timestampColor); append("* ")
                         // draft/oper-tag: amber star marks messages from IRC operators.
                         if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
-                        // Bot Mode: a muted [bot] tag marks messages from bots.
-                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append(botPrefix) }
+                        // Bot Mode: a robot icon marks messages from bots.
+                        if (m.fromBot) { appendInlineContent(BOT_INLINE_ID, botPrefix); }
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
                             append(fromDisplay)
@@ -6690,7 +6863,7 @@ private fun SingleMessageItem(
                         appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
-                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = encInline)
+                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = inlineBadges)
             } else {
                 val fromDisplay = displayNick(fromNick)
                 val fromBase = baseNick(fromDisplay)
@@ -6703,8 +6876,8 @@ private fun SingleMessageItem(
                         appendTimestamp(ts, timestampColor); append(nickStyle.open)
                         // draft/oper-tag: amber star marks messages from IRC operators.
                         if (m.fromOper) withStyle(SpanStyle(color = Color(0xFFE0A030))) { append("\u2605") }
-                        // Bot Mode: a muted [bot] tag marks messages from bots.
-                        if (m.fromBot) withStyle(SpanStyle(color = Color(0xFF7E9CD8))) { append(botPrefix) }
+                        // Bot Mode: a robot icon marks messages from bots.
+                        if (m.fromBot) { appendInlineContent(BOT_INLINE_ID, botPrefix); }
                         pushStringAnnotation(tag = ANN_NICK, annotation = fromBase)
                         withStyle(SpanStyle(color = if (colorizeNicks) nickColor(fromBase) else Color.Unspecified)) {
                             append(fromDisplay)
@@ -6717,7 +6890,7 @@ private fun SingleMessageItem(
                         appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
                     }
                 }
-                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = encInline)
+                AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = inlineBadges)
             }
         } // end Box
 
@@ -6747,10 +6920,101 @@ private fun SingleMessageItem(
                 InlinePreview(url = previewUrl, previewsEnabled = true, wifiOnly = imagePreviewsWifiOnly)
             }
         }
+        if (m.reactions.isNotEmpty()) {
+            ReactionRow(
+                reactions = m.reactions,
+                myNick = myNick,
+                onToggle = m.msgId?.let { id -> { text: String, mine: Boolean -> onToggleReaction?.invoke(id, text, mine) } },
+                onAdd = m.msgId?.let { id -> onAddReaction?.let { add -> { add(id) } } },
+            )
+        }
+
         if (!m.isMotd || selBufName != "*server*") {
             Spacer(Modifier.height(4.dp))
         }
     } // end Column
+}
+
+/**
+ * The reactions on a message, as chips beneath it. Sized to their content, since draft/react
+ * takes a short word as readily as an emoji, and truncated so one cannot take the row. A chip
+ * the user is part of is filled, and tapping toggles their own reaction.
+ */
+@Composable
+private fun ReactionRow(
+    reactions: Map<String, Set<String>>,
+    myNick: String?,
+    onToggle: ((String, Boolean) -> Unit)?,
+    onAdd: (() -> Unit)? = null,
+) {
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp, top = 2.dp, end = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        // Stable order, so a chip does not move under the user's finger.
+        val ordered = reactions.entries.sortedWith(
+            compareByDescending<Map.Entry<String, Set<String>>> { it.value.size }.thenBy { it.key }
+        )
+        for ((text, nicks) in ordered) {
+            val mine = myNick != null && nicks.any { it.equals(myNick, ignoreCase = true) }
+            val shape = RoundedCornerShape(10.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(shape)
+                    .background(
+                        if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                    )
+                    .then(
+                        if (onToggle == null) Modifier
+                        else Modifier
+                            .focusHighlight(shape)
+                            .clickable { onToggle(text, mine) }
+                    )
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    text = text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.widthIn(max = 120.dp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                // Always shown, so a chip does not resize when someone joins it.
+                Text(
+                    text = " ${nicks.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        // Add another without going through the message menu.
+        if (onAdd != null) {
+            val shape = RoundedCornerShape(10.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(shape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                    .focusHighlight(shape)
+                    .clickable(onClick = onAdd)
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.chat_react_custom),
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 /** Messages longer than this many lines collapse behind a "show more" toggle. */
@@ -6760,6 +7024,35 @@ private const val ANN_URL = "URL"
 private const val ANN_CHAN = "CHAN"
 private const val ANN_NICK = "NICK"
 private const val ENC_INLINE_ID = "encbadge"
+
+/** Inline slot for the robot badge on a bot's messages. */
+/**
+ * An icon button that is exactly [size], for placing in a bar shorter than 48dp.
+ *
+ * Material's IconButton enforces a 48dp minimum touch target and reports that size to its
+ * parent, so in a shorter bar it is clipped and the focus ring loses its top and bottom.
+ */
+@Composable
+private fun BarIconButton(
+    size: Dp,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    initialFocus: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .then(if (initialFocus) Modifier.tvInitialFocus() else Modifier)
+            .focusHighlight(CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
+
+private const val BOT_INLINE_ID = "botbadge"
+
 
 private val urlRegex = Regex("https?://\\S+")
 private val chanRegex = Regex("#\\S+")

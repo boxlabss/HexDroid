@@ -111,7 +111,7 @@ data class CapPrefs(
      */
     val sojuRead: Boolean = true,
     /**
-     * WHOX: send WHO #chan %uhsnfar,42 on join to obtain full ident/host/account for all
+     * WHOX: send WHO #chan %tuhsnfar,42 on join to obtain full ident/host/account for all
      * members. Only sent when the server advertises WHOX in ISUPPORT (005).
      */
     val whox: Boolean = true,
@@ -215,6 +215,8 @@ data class IrcConfig(
      * so the server marks the user as away from session start.
      */
     val initialAwayMessage: String? = null,
+    /** Answer CTCP queries. ACTION and DCC are unaffected: neither sends a reply. */
+    val ctcpRepliesEnabled: Boolean = true,
     /**
      * Trust-On-First-Use (TOFU) certificate fingerprint (SHA-256 hex, lowercase, colon-separated).
      *
@@ -687,6 +689,13 @@ sealed class IrcEvent {
         val multiline: Boolean = false,
         val timeMs: Long? = null,
         val isHistory: Boolean = false,
+        /**
+         * draft/chathistory-context: a related message the server volunteered alongside the
+         * history that was asked for. The spec says these "MUST NOT be counted towards the
+         * message limit", so they take no part in deciding whether a page was empty or in
+         * anchoring the next request.
+         */
+        val isChathistoryContext: Boolean = false,
         /** draft/oper-tag: true when the server marked the sender as an IRC operator. */
         val fromOper: Boolean = false,
         /** bot message tag (Bot Mode spec): true when the sender is flagged as a bot. */
@@ -838,7 +847,20 @@ data class Notice(
      */
     data class TryAgain(val command: String, val message: String?) : IrcEvent()
 
-    data class NickChanged(val oldNick: String, val newNick: String, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
+    data class NickChanged(
+        val oldNick: String,
+        val newNick: String,
+        val timeMs: Long? = null,
+        val isHistory: Boolean = false,
+        /**
+         * Channel this was replayed for, set only inside a CHATHISTORY batch.
+         *
+         * A nick change is broadcast to every channel the person shares, so a replayed one
+         * has to be told which room it came from: the member lists say where they are now,
+         * not where they were then.
+         */
+        val historyChannel: String? = null,
+    ) : IrcEvent()
 
     // LagUpdated is defined above with a nullable value so callers can clear lag on disconnect.
 
@@ -903,7 +925,15 @@ data class Notice(
      * Applied on receipt only - the server echoes our own REDACTs back, so a rejected
      * redact (FAIL REDACT ...) never leaves the local buffer disagreeing with the channel.
      */
-    data class MessageRedacted(val fromNick: String, val target: String, val msgId: String, val reason: String?, val timeMs: Long?) : IrcEvent()
+    data class MessageRedacted(
+        val fromNick: String,
+        val target: String,
+        val msgId: String,
+        val reason: String?,
+        val timeMs: Long?,
+        /** True when replayed from history rather than happening now. */
+        val isHistory: Boolean = false,
+    ) : IrcEvent()
     /**
      * draft/metadata-2: a metadata key changed on [target] (a nick or channel).
      * [value] is null when the key was removed / is not set. [visibility] is "*" for
@@ -1005,7 +1035,7 @@ data class Notice(
 
     /**
      * WHOX reply (354) for a nick: provides enriched ident/host/account data.
-     * Emitted after a WHO #chan %uhsnfar,42 query sent on channel join (when WHOX is
+     * Emitted after a WHO #chan %tuhsnfar,42 query sent on channel join (when WHOX is
      * advertised in ISUPPORT 005).  The UI can use this to enrich the nicklist with
      * full hostname and services account information.
      */
@@ -1045,7 +1075,9 @@ data class Notice(
         val reaction: String,
         val msgId: String?,
         val adding: Boolean,
-        val timeMs: Long? = null
+        val timeMs: Long? = null,
+        /** True when replayed from history rather than happening now. */
+        val isHistory: Boolean = false,
     ) : IrcEvent()
 
     /**
@@ -1084,10 +1116,47 @@ data class Notice(
      * history message belongs to an explicit backfill request (and so must be spliced
      * in above the existing scrollback) rather than appended as catch-up.
      */
-    data class HistoryBatchStart(val target: String) : IrcEvent()
+    /**
+     * A CHATHISTORY request was rejected with a standard-replies FAIL.
+     *
+     * [target] is the buffer the request named, present for the codes the spec gives a
+     * target context to (INVALID_TARGET, MESSAGE_ERROR, INVALID_MSGREFTYPE) and absent for
+     * INVALID_PARAMS. [code] is the machine-readable code.
+     */
+    data class HistoryRequestFailed(
+        val target: String?,
+        val code: String,
+        val description: String,
+    ) : IrcEvent()
+
+    /**
+     * Our own away state changed because we asked for it.
+     *
+     * [message] is null when returning from away.
+     */
+    data class SelfAwayChanged(val message: String?) : IrcEvent()
+
+    data class HistoryBatchStart(
+        val target: String,
+        val label: String? = null,
+        /**
+         * True when the batch opener carried draft/chathistory-end, meaning the server has
+         * nothing older for this target. Null when it said nothing either way.
+         */
+        val complete: Boolean? = null,
+    ) : IrcEvent()
 
     /** The CHATHISTORY reply batch for [target] closed. See [HistoryBatchStart]. */
-    data class HistoryBatchEnd(val target: String) : IrcEvent()
+    /**
+     * @param lines how many lines the batch carried, whatever their type. This is what "the
+     *   server returned an empty batch" means: counting only the lines that become visible
+     *   messages reads a batch of nothing but JOIN and PART events as empty.
+     */
+    data class HistoryBatchEnd(
+        val target: String,
+        val label: String? = null,
+        val lines: Int = 0,
+    ) : IrcEvent()
 
     /**
      * One entry of a CHATHISTORY TARGETS reply: a buffer the server holds history for.
@@ -1668,6 +1737,12 @@ class IrcClient(val config: IrcConfig) {
         private val CRLF = "\r\n".toByteArray(Charsets.US_ASCII)
 
         /**
+         * How many open batches to track at once, bounding a server that never closes them.
+         * Eviction is by oldest, so tracking keeps working rather than shutting off.
+         */
+        private const val MAX_TRACKED_BATCHES = 64
+
+        /**
          * CHATHISTORY selector timestamp format. See [historyTimestamp].
          */
         private val HISTORY_TS_FORMAT: java.time.format.DateTimeFormatter =
@@ -1819,7 +1894,24 @@ class IrcClient(val config: IrcConfig) {
      * CHATHISTORY selectors (e.g. "timestamp", "msgid"). Empty = token absent, in which
      * case both are assumed per the spec default.
      */
-    @Volatile private var msgRefTypes: Set<String> = emptySet()
+    @Volatile private var msgRefTypes: List<String> = emptyList()
+
+    /**
+     * The selector type used by the most recent CHATHISTORY request.
+     *
+     * A server that rejects one with INVALID_MSGREFTYPE is telling us it does not accept
+     * that type, so it is dropped and the next request falls to the other.
+     */
+    @Volatile private var lastHistoryRefType: String? = null
+
+    /**
+     * Reference types the server has rejected with INVALID_MSGREFTYPE.
+     *
+     * Held apart from [msgRefTypes], where an empty list is the sentinel for "the token was
+     * absent, assume both are accepted": removing the last entry there would read as a
+     * server that never restricted anything.
+     */
+    @Volatile private var refusedRefTypes: Set<String> = emptySet()
 
     /** Clamp a desired CHATHISTORY count to the server's advertised limit, if any. */
     private fun clampHistoryLimit(requested: Int): Int =
@@ -1827,11 +1919,17 @@ class IrcClient(val config: IrcConfig) {
 
     /** True when timestamp= selectors are usable (token absent means "assume yes"). */
     private fun historyTimestampOk(): Boolean =
-        msgRefTypes.isEmpty() || "timestamp" in msgRefTypes
+        "timestamp" !in refusedRefTypes && (msgRefTypes.isEmpty() || "timestamp" in msgRefTypes)
 
     /** True when msgid= selectors are usable (token absent means "assume yes"). */
     private fun historyMsgidOk(): Boolean =
-        msgRefTypes.isEmpty() || "msgid" in msgRefTypes
+        "msgid" !in refusedRefTypes && (msgRefTypes.isEmpty() || "msgid" in msgRefTypes)
+
+    /**
+     * Whether a CHATHISTORY selector on this server may carry a timestamp. False means an
+     * anchor must be a message the server itself sent, since only those have a msgid.
+     */
+    fun acceptsHistoryTimestamps(): Boolean = historyTimestampOk()
 
     /**
      * Format an instant as a CHATHISTORY timestamp selector value.
@@ -1953,11 +2051,19 @@ class IrcClient(val config: IrcConfig) {
      * prefixed with "h" so they're valid as IRC parameter tokens.
      */
     private val labelCounter = java.util.concurrent.atomic.AtomicLong(0)
-    // CTCP flood protection: track last reply time per nick so we respond at most
-    // once per CTCP_RATE_LIMIT_MS per sender. This prevents a remote user from
-    // causing a K-line by flooding CTCP requests at us.
+    // CTCP flood protection: last reply time per nick, so we answer at most once per
+    // CTCP_RATE_LIMIT_MS per sender and cannot be flooded into a K-line.
     private val ctcpLastReplyMs = mutableMapOf<String, Long>()
     private val CTCP_RATE_LIMIT_MS = 5_000L
+
+    /**
+     * Drop reply times that are past the rate-limit window, so a flood from rotating nicks
+     * cannot grow the map for the life of the connection.
+     */
+    private fun pruneCtcpReplyTimes(now: Long) {
+        if (ctcpLastReplyMs.size < 64) return
+        ctcpLastReplyMs.entries.removeAll { now - it.value >= CTCP_RATE_LIMIT_MS }
+    }
 
     /**
      * Accumulator for IRCv3 MONITOR list entries (732 RPL_MONLIST). Per the spec, the
@@ -2187,6 +2293,9 @@ class IrcClient(val config: IrcConfig) {
     /** Open IRCv3 znc.in/playback batch IDs — messages tagged with these are historical. */
     private val openPlaybackBatches = mutableSetOf<String>()
 
+    /** Lines seen so far inside each open chathistory batch, keyed by batch id. */
+    private val chathistoryBatchLines = mutableMapOf<String, Int>()
+
     /**
      * Target channel of each open playback batch. A replayed QUIT carries no channel of its
      * own (QUIT never does), and the live path infers the affected channels from the current
@@ -2208,6 +2317,12 @@ class IrcClient(val config: IrcConfig) {
      * ViewModel needs it to know which buffer a batch is filling.
      */
     private val chathistoryBatchTargets = mutableMapOf<String, String>()
+
+    /**
+     * Labeled-response label per open batch, inherited by nested batches. Lets the ViewModel
+     * tell its own CHATHISTORY reply from an unrelated batch for the same target.
+     */
+    private val batchLabels = mutableMapOf<String, String>()
 
     /** Open netsplit/netjoin batch IDs → "netsplit" / "netjoin". */
     private val openNetsplitBatches = mutableMapOf<String, String>()
@@ -2286,6 +2401,28 @@ class IrcClient(val config: IrcConfig) {
     private fun isPlaybackHistory(tags: Map<String, String?>): Boolean {
         val batch = tags["batch"]
         return batch != null && openPlaybackBatches.contains(batch)
+    }
+
+    /**
+     * True when this line is being replayed rather than happening now: either inside a
+     * chathistory batch, or inside a znc.in/playback one.
+     */
+    private fun isReplayedLine(tags: Map<String, String?>): Boolean {
+        val batch = tags["batch"]
+        return isPlaybackHistory(tags) || (batch != null && chathistoryBatchTargets.containsKey(batch))
+    }
+
+    /**
+     * Count a line against the chathistory batch it belongs to, if any.
+     *
+     * Context lines are excluded: the spec says they "MUST NOT be counted towards the
+     * message limit", so a batch of nothing but context carries no history.
+     */
+    private fun countChathistoryLine(tags: Map<String, String?>) {
+        val batch = tags["batch"] ?: return
+        if (!chathistoryBatchTargets.containsKey(batch)) return
+        if (tags.containsKey("draft/chathistory-context")) return
+        chathistoryBatchLines[batch] = (chathistoryBatchLines[batch] ?: 0) + 1
     }
 
     /**
@@ -2574,7 +2711,7 @@ class IrcClient(val config: IrcConfig) {
 						val old = msg.prefixNick()
 						val newNick = (msg.trailing ?: msg.params.firstOrNull())
 						if (old != null && newNick != null) {
-							send(IrcEvent.NickChanged(old, newNick, timeMs = serverTimeMs, isHistory = playbackHistory))
+							send(IrcEvent.NickChanged(old, newNick, timeMs = serverTimeMs, isHistory = playbackHistory, historyChannel = playbackChannelFor(msg.tags)))
 						}
 						if (old != null && newNick != null && nickEquals(old, currentNick)) {
 							currentNick = newNick
@@ -2739,12 +2876,18 @@ class IrcClient(val config: IrcConfig) {
 								// so a flood of CTCP requests cannot get us K-lined.
 								// ACTION and DCC are never rate-limited (they don't generate replies).
 								val now = System.currentTimeMillis()
+								pruneCtcpReplyTimes(now)
 								val senderKey = safeSender.lowercase()
 								val lastReply = ctcpLastReplyMs[senderKey] ?: 0L
-								val rateLimited = ctcpCmd != "ACTION" && ctcpCmd != "DCC"
-									&& (now - lastReply) < CTCP_RATE_LIMIT_MS
+								val answerable = ctcpCmd != "ACTION" && ctcpCmd != "DCC"
+								val rateLimited = answerable && (now - lastReply) < CTCP_RATE_LIMIT_MS
 								if (rateLimited) {
 									send(IrcEvent.Status(tr(R.string.core_ctcp_ratelimited, ctcpCmd, safeSender)))
+									return
+								}
+								// The request is still reported, so the user sees who asked.
+								if (answerable && !config.ctcpRepliesEnabled) {
+									send(IrcEvent.Status(tr(R.string.core_ctcp_reply_disabled, ctcpCmd, safeSender)))
 									return
 								}
 
@@ -2894,6 +3037,7 @@ class IrcClient(val config: IrcConfig) {
 								isAction = isAction,
 								timeMs = serverTimeMs,
 								isHistory = (playbackHistory || isHeuristicHistory(buf, serverTimeMs, nowMs)),
+								isChathistoryContext = msg.tags.containsKey("draft/chathistory-context"),
 								msgId = msg.tags["msgid"],
 								// IRCv3 +draft/reply / +reply tag: msgid of message being replied to.
 								replyToMsgId = msg.tags["+draft/reply"] ?: msg.tags["+reply"],
@@ -3145,14 +3289,14 @@ class IrcClient(val config: IrcConfig) {
 							}
 
 							// WHOX: on joining a channel, query the full user/host/account info
-							// for all members using WHO #chan %uhsnfar,42. The query type "42"
+							// for all members using WHO #chan %tuhsnfar,42. The query type "42"
 							// is an arbitrary cookie used to identify WHOX replies (354) vs
 							// regular WHO replies (352).  We only do this if the server advertises
 							// WHOX in ISUPPORT(005) to avoid sending a WHO that returns nothing
 							// useful on non-WHOX servers.
 							if (nickEquals(nick, currentNick) && whoxSupported && config.capPrefs.whox && !chanHist) {
 								// %u=ident %h=host %s=server %n=nick %f=flags %a=account %r=realname
-								sendRaw("WHO $chan %uhsnfar,42")
+								sendRaw("WHO $chan %tuhsnfar,42")
 							}
 						}
 					}
@@ -3453,7 +3597,8 @@ class IrcClient(val config: IrcConfig) {
 								reaction = emoji,
 								msgId = replyMsgId,
 								adding = adding,
-								timeMs = serverTimeMs
+								timeMs = serverTimeMs,
+								isHistory = isReplayedLine(msg.tags),
 							))
 						}
 					}
@@ -3520,7 +3665,8 @@ class IrcClient(val config: IrcConfig) {
 							target = target,
 							msgId = redactId,
 							reason = reason,
-							timeMs = serverTimeMs
+							timeMs = serverTimeMs,
+							isHistory = isReplayedLine(msg.tags),
 						))
 					}
 
@@ -3657,6 +3803,21 @@ class IrcClient(val config: IrcConfig) {
 							val recent = lastMultilineSend
 								?.takeIf { System.currentTimeMillis() - it.second < 60_000L }
 							send(IrcEvent.MultilineSendFailed(recent?.first, srCode, srDesc))
+						}
+						// A rejected CHATHISTORY never produces a reply batch, so without this the
+						// request sits open until its watchdog expires. Per the spec the target is
+						// the second context item, after the subcommand, for every code that names
+						// one; INVALID_PARAMS carries no target.
+						if (msg.command == "FAIL" && srCmd.equals("CHATHISTORY", true)) {
+							val code = srCode.uppercase(Locale.ROOT)
+							// FAIL <command> <code> <the_given_command> [<the_given_target>] :<desc>
+							val target = if (code == "INVALID_PARAMS") null else msg.params.getOrNull(3)
+							// The server does not take the reference type we used, so record it and
+							// let the next request fall through to the other one.
+							if (code == "INVALID_MSGREFTYPE") {
+								lastHistoryRefType?.let { bad -> refusedRefTypes = refusedRefTypes + bad }
+							}
+							send(IrcEvent.HistoryRequestFailed(target, code, srDesc))
 						}
 						// Feed account-registration failures to the guided dialog too, so it
 						// can show the error inline instead of only in the server buffer.
@@ -3817,6 +3978,22 @@ class IrcClient(val config: IrcConfig) {
     fun supportsChatHistory(): Boolean = hasChathistoryCap()
 
     /**
+     * A CHATHISTORY request on the wire. [label] is what the reply batch will carry, null
+     * without labeled-response. [limit] is the count sent after the server's ceiling, which
+     * a short reply is measured against.
+     */
+    data class HistoryRequest(val label: String?, val limit: Int)
+
+    /**
+     * Re-query the member list of [target] for away status and account changes. WHOX where
+     * the server has it, plain WHO otherwise; the away flag is in the flags field of both.
+     */
+    suspend fun refreshChannelWho(target: String) {
+        if (whoxSupported && config.capPrefs.whox) sendRaw("WHO $target %tuhsnfar,42")
+        else sendRaw("WHO $target")
+    }
+
+    /**
      * Request older history for [target] using IRCv3 CHATHISTORY BEFORE.
      *
      * Servers that support `draft/chathistory` will send back at most [limit] messages
@@ -3830,15 +4007,88 @@ class IrcClient(val config: IrcConfig) {
         beforeTimestamp: String?,
         beforeMsgId: String? = null,
         limit: Int = 50
-    ) {
-        if (!hasChathistoryCap()) return
-        val anchor = when {
-            beforeTimestamp != null && historyTimestampOk() -> "timestamp=$beforeTimestamp"
-            beforeMsgId != null && historyMsgidOk() -> "msgid=$beforeMsgId"
-            else -> return
-        }
-        sendRaw("${labelTag()}CHATHISTORY BEFORE $target $anchor ${clampHistoryLimit(limit)}")
+    ): HistoryRequest? {
+        if (!hasChathistoryCap()) return null
+        val anchor = historySelector(beforeTimestamp, beforeMsgId) ?: return null
+        return sendHistory("BEFORE", target, anchor, null, limit)
     }
+
+    /**
+     * Build a CHATHISTORY message selector, following the server's stated preference.
+     *
+     * MSGREFTYPES lists types "in order of decreasing preference"; msgid leads where the
+     * server states none. The spec notes servers provide a determinate message order so
+     * that "BEFORE, AFTER, and BETWEEN queries that use msgids for pagination function as
+     * expected", which a timestamp cannot do for two messages sharing one.
+     */
+    private fun historySelector(timestamp: String?, msgId: String?): String? {
+        val preference = msgRefTypes.ifEmpty { listOf("msgid", "timestamp") }
+        return preference.firstNotNullOfOrNull { type ->
+            when (type) {
+                "msgid" -> msgId?.takeIf { historyMsgidOk() }?.let { lastHistoryRefType = "msgid"; "msgid=$it" }
+                "timestamp" -> timestamp?.takeIf { historyTimestampOk() }
+                    ?.let { lastHistoryRefType = "timestamp"; "timestamp=$it" }
+                else -> null
+            }
+        }
+    }
+
+    /** Write one CHATHISTORY subcommand and report what went out. */
+    private suspend fun sendHistory(
+        sub: String,
+        target: String,
+        first: String,
+        second: String?,
+        limit: Int,
+    ): HistoryRequest? {
+        val effective = clampHistoryLimit(limit)
+        if (effective <= 0) return null
+        val label = if (hasCap("labeled-response")) nextLabel() else null
+        val tag = if (label != null) "@label=$label " else ""
+        val mid = if (second != null) "$first $second" else first
+        sendRaw("${tag}CHATHISTORY $sub $target $mid $effective")
+        return HistoryRequest(label, effective)
+    }
+
+    /**
+     * Request messages either side of an anchor (CHATHISTORY AROUND).
+     *
+     * The server decides how to split [limit] between before and after. Useful for opening
+     * on a single message, such as the target of a reply that is not in the loaded window.
+     */
+    suspend fun requestChatHistoryAround(
+        target: String,
+        timestamp: String? = null,
+        msgId: String? = null,
+        limit: Int = 50,
+    ): HistoryRequest? {
+        if (!hasChathistoryCap()) return null
+        val anchor = historySelector(timestamp, msgId) ?: return null
+        return sendHistory("AROUND", target, anchor, null, limit)
+    }
+
+    /**
+     * Request the messages between two anchors (CHATHISTORY BETWEEN).
+     *
+     * Counting starts from and excludes the first selector and finishes on and excludes the
+     * second, in either direction. This is what the spec recommends for filling a known gap,
+     * such as between the last message of a previous session and the earliest of this one.
+     */
+    suspend fun requestChatHistoryBetween(
+        target: String,
+        fromTimestamp: String? = null,
+        fromMsgId: String? = null,
+        toTimestamp: String? = null,
+        toMsgId: String? = null,
+        limit: Int = 50,
+    ): HistoryRequest? {
+        if (!hasChathistoryCap()) return null
+        val a = historySelector(fromTimestamp, fromMsgId) ?: return null
+        val b = historySelector(toTimestamp, toMsgId) ?: return null
+        return sendHistory("BETWEEN", target, a, b, limit)
+    }
+
+
 
     /**
      * Request the unread history for [target] using CHATHISTORY AFTER, anchored on
@@ -3849,13 +4099,13 @@ class IrcClient(val config: IrcConfig) {
      */
     suspend fun requestChatHistoryAfter(
         target: String,
-        afterTimestamp: String,
+        afterTimestamp: String?,
+        afterMsgId: String? = null,
         limit: Int = 100
-    ) {
-        if (!hasChathistoryCap()) return
-        // AFTER needs a concrete anchor; without timestamp support we can't express it.
-        if (!historyTimestampOk()) return
-        sendRaw("${labelTag()}CHATHISTORY AFTER $target timestamp=$afterTimestamp ${clampHistoryLimit(limit)}")
+    ): HistoryRequest? {
+        if (!hasChathistoryCap()) return null
+        val anchor = historySelector(afterTimestamp, afterMsgId) ?: return null
+        return sendHistory("AFTER", target, anchor, null, limit)
     }
 
     /** True if either the draft or soju's vendored webpush cap is enabled. */
@@ -3899,11 +4149,11 @@ class IrcClient(val config: IrcConfig) {
     /**
      * Request the most recent [limit] messages for [target] (CHATHISTORY LATEST *).
      */
-    suspend fun requestChatHistoryLatest(target: String, limit: Int = 50) {
-        if (!hasChathistoryCap()) return
-        val lim = clampHistoryLimit(limit)
-        if (lim <= 0) return
-        sendRaw("${labelTag()}CHATHISTORY LATEST $target * $lim")
+    suspend fun requestChatHistoryLatest(target: String, limit: Int = 50): HistoryRequest? {
+        if (!hasChathistoryCap()) return null
+        // "*" means no restriction, so LATEST needs no reference type and works on a server
+        // that accepts neither.
+        return sendHistory("LATEST", target, "*", null, limit)
     }
 
     /**
@@ -4156,22 +4406,6 @@ class IrcClient(val config: IrcConfig) {
         if (!hasCap("draft/message-redaction") && !hasCap("message-redaction")) return
         val tail = reason?.trim()?.takeIf { it.isNotEmpty() }?.let { " :$it" } ?: ""
         sendRaw("REDACT $target $msgId$tail")
-    }
-
-    /**
-     * Request messages around a specific message ID using CHATHISTORY AROUND.
-     *
-     * Useful for providing context when jumping to a linked or referenced message.
-     * [aroundMsgId] is the IRCv3 msgid of the pivot message.
-     */
-    suspend fun requestChatHistoryAround(
-        target: String,
-        aroundMsgId: String,
-        limit: Int = 50
-    ) {
-        if (!hasChathistoryCap()) return
-        if (!historyMsgidOk()) return
-        sendRaw("CHATHISTORY AROUND $target msgid=$aroundMsgId ${clampHistoryLimit(limit)}")
     }
 
     /**
@@ -4562,8 +4796,16 @@ class IrcClient(val config: IrcConfig) {
                 commandEvents.send(IrcEvent.Status(tr(R.string.core_ctcp_clientinfo_sent, target)))
             }
             "away" -> {
+                // Always sets away; /back is how to return.
                 val msg = parts.drop(1).joinToString(" ").trim()
-                sendRaw(if (msg.isBlank()) "AWAY" else "AWAY :${clampLen(msg, "AWAYLEN")}")
+                    .ifBlank { tr(R.string.core_away_default) }
+                sendRaw("AWAY :${clampLen(msg, "AWAYLEN")}")
+                // Reported so it can be restored next connection.
+                commandEvents.trySend(IrcEvent.SelfAwayChanged(msg))
+            }
+            "back" -> {
+                sendRaw("AWAY")
+                commandEvents.trySend(IrcEvent.SelfAwayChanged(null))
             }
 			"setname" -> {
 				// IRCv3 SETNAME: change your own realname (requires setname CAP).
@@ -5150,10 +5392,14 @@ class IrcClient(val config: IrcConfig) {
         extbanTypes = null
         accountExtban = null
         chatHistoryLimit = 0
-        msgRefTypes = emptySet()
+        lastHistoryRefType = null
+        msgRefTypes = emptyList()
+        refusedRefTypes = emptySet()
         vapidPublicKey = null
         vapidBecameReady = false
         chathistoryBatchTargets.clear()
+        batchLabels.clear()
+        chathistoryBatchLines.clear()
         lengthLimits.clear()
         knockSupported = false
         chanLimits.clear()
@@ -5306,7 +5552,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                     "EXTBAN" -> { extbanPrefix = null; extbanTypes = null }
                     "ACCOUNTEXTBAN" -> accountExtban = null
                     "CHATHISTORY" -> chatHistoryLimit = 0
-                    "MSGREFTYPES" -> msgRefTypes = emptySet()
+                    "MSGREFTYPES" -> msgRefTypes = emptyList()
                     "VAPID" -> vapidPublicKey = null
                     "TOPICLEN", "KICKLEN", "AWAYLEN", "QUITLEN", "NICKLEN", "MAXNICKLEN",
                     "CHANNELLEN", "NAMELEN" -> lengthLimits.remove(k.drop(1))
@@ -5354,9 +5600,10 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
                     if (changed) vapidBecameReady = true
                 }
                 // MSGREFTYPES=<csv>: which reference types CHATHISTORY selectors may use.
+                // Order matters: the spec lists these "in order of decreasing preference".
                 "MSGREFTYPES" -> msgRefTypes =
-                    v?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
-                        ?: emptySet()
+                    v?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }
+                        ?: emptyList()
                 // Server-advertised length limits; stored for input validation and for
                 // clamping free-text command payloads before they're sent.
                 "TOPICLEN", "KICKLEN", "AWAYLEN", "QUITLEN", "NICKLEN", "MAXNICKLEN",
@@ -5560,8 +5807,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         send(IrcEvent.NamesEnd(chan))
     },
 
-    // WHOX reply (354): response to WHO #chan %uhsnfar,42
-    // Params depend on the %fields requested. With %uhsnfar,42:
+    // WHOX reply (354): response to WHO #chan %tuhsnfar,42
+    // Params depend on the %fields requested. With %tuhsnfar,42:
     //   <me> 42 <ident> <host> <server> <nick> <flags> <account> :<realname>
     //   The query type (42) is in params[1]; we skip this numeric if it doesn't match ours.
     "354" to handler@{ msg, _, _, _ ->
@@ -5578,6 +5825,24 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         val isBot = botModeChar?.let { bc -> flags?.contains(bc) == true } ?: false
         send(IrcEvent.WhoxReply(nick = nick, ident = ident, host = host, account = account, isAway = isAway, isBot = isBot))
     },
+
+    // RPL_WHOREPLY (352): the plain WHO reply, for servers without WHOX.
+    //   <me> <channel> <username> <host> <server> <nick> <flags> :<hopcount> <realname>
+    // Per the modern spec's WHO section. Flags carry 'H' (here) or 'G' (gone/away), and may
+    // be followed by '*' for an operator and channel membership prefixes. No account field,
+    // so account stays null and only away and bot status come from this.
+    "352" to handler@{ msg, _, _, _ ->
+        val ident = msg.params.getOrNull(2) ?: return@handler
+        val host  = msg.params.getOrNull(3) ?: return@handler
+        val nick  = msg.params.getOrNull(5) ?: return@handler
+        val flags = msg.params.getOrNull(6)
+        val isAway = flags?.firstOrNull { it == 'H' || it == 'G' }?.let { it == 'G' }
+        val isBot = botModeChar?.let { bc -> flags?.contains(bc) == true } ?: false
+        send(IrcEvent.WhoxReply(nick = nick, ident = ident, host = host, account = null, isAway = isAway, isBot = isBot))
+    },
+
+    // RPL_ENDOFWHO (315): <me> <mask> :End of WHO list. Consumed so it is not printed raw.
+    "315" to handler@{ _, _, _, _ -> },
 
     // ERR_NOTONCHANNEL
     "442" to handler@{ msg, _, _, _ ->
@@ -5825,6 +6090,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				send(IrcEvent.ServerLine(line))
 				val msg = parser.parse(line) ?: continue
 
+				// Count the line against its chathistory batch before anything decides
+				// whether to display it. Whether a batch was empty is a fact about the wire,
+				// not about how many of its lines we chose to show.
+				countChathistoryLine(msg.tags)
+
 				if (msg.command == "PING") {
 					val payload = msg.trailing ?: msg.params.firstOrNull() ?: ""
 					writeLine("PONG :$payload")
@@ -5928,11 +6198,30 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						// A CHATHISTORY batch names its target in param 2, which may be a nick
 						// as readily as a channel. Recorded and announced so the ViewModel can
 						// tell an explicit backfill's reply from ordinary catch-up replay.
+						// A server wrapping its reply in a labeled-response batch puts the label
+						// on the wrapper, so the inner batch looks up to its parent.
+						val batchLabel = msg.tags["label"]?.takeIf { it.isNotBlank() }
+							?: msg.tags["batch"]?.let { batchLabels[it] }
+						if (batchLabel != null) {
+							if (batchLabels.size >= MAX_TRACKED_BATCHES) {
+								batchLabels.remove(batchLabels.keys.first())
+							}
+							batchLabels[id] = batchLabel
+						}
 						if (type.contains("chathistory", ignoreCase = true)) {
 							val histTarget = msg.allParams.getOrNull(2)?.takeIf { it.isNotBlank() }
-							if (histTarget != null && chathistoryBatchTargets.size < 64) {
+							if (histTarget != null) {
+								// Evict rather than refuse: refusing left the close event unsent.
+								if (chathistoryBatchTargets.size >= MAX_TRACKED_BATCHES) {
+									chathistoryBatchTargets.remove(chathistoryBatchTargets.keys.first())
+								}
 								chathistoryBatchTargets[id] = histTarget
-								send(IrcEvent.HistoryBatchStart(histTarget))
+								// draft/chathistory-end on the opener means this page is the last
+								// one. Servers that probe limit+1 to detect truncation send a
+								// complete final page of exactly the requested size, so page
+								// length alone cannot tell the client when to stop asking.
+								val complete = if (msg.tags.containsKey("draft/chathistory-end")) true else null
+								send(IrcEvent.HistoryBatchStart(histTarget, batchLabel, complete))
 							}
 						}
 						// Batches nest, and playback-ness is inherited. A multiline message
@@ -5978,7 +6267,11 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						val id = idToken.drop(1)
 						openPlaybackBatches.remove(id)
 						playbackBatchTargets.remove(id)
-						chathistoryBatchTargets.remove(id)?.let { send(IrcEvent.HistoryBatchEnd(it)) }
+						val closingLabel = batchLabels.remove(id)
+						val closingLines = chathistoryBatchLines.remove(id) ?: 0
+						chathistoryBatchTargets.remove(id)?.let {
+							send(IrcEvent.HistoryBatchEnd(it, closingLabel, closingLines))
+						}
 						// Flush a closing multiline batch as a single ChatMessage / Notice
 						// event with the joined body. Per spec: lines without
 						// +draft/multiline-concat get a "\n" separator; lines WITH it get
@@ -6140,7 +6433,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 						// 324/329 are the MODE-query pair.
 						"324","329",
 						"332","333",
-						"353","354","366",
+						"352","353","354","366",
 						"367","368",
 						"346","347",
 						"348","349",
@@ -7083,7 +7376,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		// 900 (RPL_LOGGEDIN), 901 (RPL_LOGGEDOUT), and 902 (ERR_NICKLOCKED) are NOT
 		// handled by IrcSession, so they fall through to the generic ServerText path.
 		if (code in setOf(
-				"001","005","321","322","323","324","332","333","353","366","367","368","381",
+				"001","005","315","321","322","323","324","332","333","352","353","366","367","368","381",
 				"433","442","471","472","473","474","475","476","477",
 				// draft/metadata-2 numerics: handled by dedicated handlers (761/766 update the
 				// nick display silently; 770/771/772 emit a friendly status line; 774 retries).

@@ -121,6 +121,13 @@
     <string name="setting_enable_dcc">Enable DCC</string>
     <string name="setting_open_app_settings">Open app settings</string>
     <string name="setting_battery_optimization">Battery optimization list</string>
+    <string name="setting_ctcp_replies">Answer CTCP requests</string>
+    <string name="setting_ctcp_replies_desc">Disable replies to VERSION, TIME, PING and similar.</string>
+    <string name="setting_show_nick_icons">Show nick icons</string>
+    <string name="setting_webpush">Push notifications</string>
+    <string name="setting_webpush_desc">Let servers that support it deliver messages through a push distributor, so you can be notified without keeping a connection open.</string>
+    <string name="setting_webpush_no_distributor">No push distributor installed. Install one (for example ntfy) to use this.</string>
+    <string name="setting_webpush_distributor_current">%1$s (in use)</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Chat &amp; Messages</string>
@@ -178,6 +185,10 @@
     <string name="chat_kick">Kick</string>
     <string name="chat_ban">Ban</string>
     <string name="chat_kick_ban_btn">Kick+Ban</string>
+    <string name="chat_react_custom">Custom reaction</string>
+    <string name="chat_react_custom_hint">Emoji or word</string>
+    <string name="chat_react_send">React</string>
+    <string name="chat_reply_not_loaded">Replying to an earlier message</string>
 
     <!-- Network screens -->
     <string name="networks_title">Networks</string>
@@ -253,7 +264,6 @@
     <string name="lang_zh" translatable="false">中文</string>
 
     <string name="network_edit_advanced_caps">Advanced IRCv3 caps</string>
-    <string name="core_nick_change_refused">The server will not let you change nick: %1$s</string>
     <string name="settings_raw_log">Raw protocol log</string>
     <string name="settings_raw_log_desc">Show every line sent and received in a Raw buffer per network. Passwords are hidden. For debugging.</string>
     <string name="chat_show_less">Show less</string>
@@ -450,6 +460,8 @@
     <string name="menu_reconnect">Reconnect</string>
     <string name="menu_disconnect">Disconnect</string>
     <string name="menu_exit">Exit</string>
+    <string name="menu_float">Float</string>
+    <string name="float_needs_permission">Allow HexDroid to display over other apps to use the floating window</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Launch scripts</string>
@@ -940,6 +952,9 @@
     <string name="core_nick_in_use_alt">Nick in use; trying alt nick: %1$s</string>
     <string name="core_nick_in_use_next">Nick in use; trying: %1$s</string>
     <string name="core_netsplit">%1$s%2$s — %3$s affected</string>
+    <string name="core_nick_change_refused">The server will not let you change nick: %1$s</string>
+    <string name="core_ctcp_reply_disabled">Ignored CTCP %1$s from %2$s (replies are off)</string>
+    <string name="push_invite">%1$s invited you to %2$s</string>
 
     <!-- IrcViewModel command/feedback status -->
     <string name="vm_no_matches">No matches for \"%1$s\"</string>
@@ -1377,6 +1392,7 @@
     <string name="vm_ev_message_deleted">(message deleted by %1$s)</string>
     <string name="vm_ev_message_deleted_reason">(message deleted by %1$s: %2$s)</string>
     <string name="vm_history_divider">── Chat history • Last message: %1$s ──</string>
+    <string name="vm_history_gap">── Some older messages are still missing. Reopen this conversation to keep loading them ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">%1$d networks: %2$s</string>
@@ -1423,11 +1439,6 @@
     <string name="chat_unread_divider">"  unread  "</string>
     <string name="chat_history_load_older">Load older messages</string>
     <string name="chat_history_loading">Loading older messages…</string>
-    <string name="push_invite">%1$s invited you to %2$s</string>
-    <string name="setting_webpush">Push notifications</string>
-    <string name="setting_webpush_desc">Let servers that support it deliver messages through a push distributor, so you can be notified without keeping a connection open.</string>
-    <string name="setting_webpush_no_distributor">No push distributor installed. Install one (for example ntfy) to use this.</string>
-    <string name="setting_webpush_distributor_current">%1$s (in use)</string>
     <string name="chat_fmt_bold">B</string>
     <string name="chat_fmt_italic">I</string>
     <string name="chat_fmt_underline">U</string>
@@ -1497,7 +1508,8 @@
     <string name="cmd_gsearch">Search messages across all buffers on this network</string>
     <string name="cmd_gfind">Alias for /gsearch</string>
     <string name="cmd_nick">Change your nickname</string>
-    <string name="cmd_away">Set away; /away with no args clears it</string>
+    <string name="cmd_away">Mark as away [reason]</string>
+    <string name="cmd_back">Return from away</string>
     <string name="cmd_whois">Query detailed info about a user</string>
     <string name="cmd_who">Query users matching a mask</string>
     <string name="cmd_ignore">Ignore a user (no args = list ignored)</string>

@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        Draws the floating chat window over other apps. Granted by the user in system
+        settings rather than a dialog, and only used when they ask for the window.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -126,6 +131,8 @@
                     android:name=".MainActivity"
                     android:exported="true"
                     android:launchMode="singleTask"
+                    android:resizeableActivity="true"
+                    android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
                     android:windowSoftInputMode="adjustResize">
                     <intent-filter>
                         <action android:name="android.intent.action.MAIN" />

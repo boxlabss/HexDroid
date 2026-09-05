@@ -753,15 +753,21 @@ fun SettingsScreen(
                             modifier = Modifier.widthIn(min = 40.dp).focusHighlight(RoundedCornerShape(50))
                         ) { Text("+") }
                     }
-                    Slider(
-                        value = currentIdx.toFloat(),
-                        onValueChange = { v ->
-                            val idx = v.toInt().coerceIn(0, fontSteps.lastIndex)
-                            onUpdate { copy(fontScale = fontSteps[idx]) }
-                        },
-                        valueRange = 0f..(fontSteps.lastIndex.toFloat()),
-                        steps = fontSteps.lastIndex - 1,
-                    )
+                    // Not on TV. A Slider consumes D-pad left and right to change its value
+                    // and centre does nothing, so focus lands on it and cannot be moved off
+                    // again. The minus and plus buttons above cover the same ground with the
+                    // remote, so the slider is simply not offered there.
+                    if (!isTvDevice()) {
+                        Slider(
+                            value = currentIdx.toFloat(),
+                            onValueChange = { v ->
+                                val idx = v.toInt().coerceIn(0, fontSteps.lastIndex)
+                                onUpdate { copy(fontScale = fontSteps[idx]) }
+                            },
+                            valueRange = 0f..(fontSteps.lastIndex.toFloat()),
+                            steps = fontSteps.lastIndex - 1,
+                        )
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         Text("60%", style = MaterialTheme.typography.labelSmall,
@@ -879,6 +885,7 @@ fun SettingsScreen(
             if (current == SettingsCategory.CHAT) {
             item {
                 SettingToggle(stringResource(R.string.setting_colorise_nicks), s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
+                SettingToggle(stringResource(R.string.setting_show_nick_icons), s.showNickIcons) { onUpdate { copy(showNickIcons = !showNickIcons) } }
             }
 
             // Own nick colour: Auto (hash-based) or Custom (colour wheel)
@@ -1513,6 +1520,15 @@ fun SettingsScreen(
                         onUpdate { copy(receiveTypingIndicator = !receiveTypingIndicator) }
                     }
                     Text(stringResource(R.string.setting_receive_typing_desc), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                }
+            }
+
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_ctcp_replies), s.ctcpRepliesEnabled) {
+                        onUpdate { copy(ctcpRepliesEnabled = !ctcpRepliesEnabled) }
+                    }
+                    Text(stringResource(R.string.setting_ctcp_replies_desc), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
                 }
             }
 

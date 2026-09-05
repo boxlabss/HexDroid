@@ -92,6 +92,8 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         descRes = R.string.setting_nicklist_font_desc, keywords = "nicklist font size"),
 
     // Chat and messages
+    SettingsSearchEntry(R.string.setting_show_nick_icons, SettingsCategory.CHAT,
+        keywords = "nick icon avatar presence dot away bot"),
     SettingsSearchEntry(R.string.setting_colorise_nicks, SettingsCategory.CHAT,
         keywords = "nick colour color"),
     SettingsSearchEntry(R.string.setting_own_nick_colour_title, SettingsCategory.CHAT,
@@ -207,6 +209,8 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         descRes = R.string.setting_send_typing_desc, keywords = "typing indicator"),
     SettingsSearchEntry(R.string.setting_receive_typing, SettingsCategory.PRIVACY,
         descRes = R.string.setting_receive_typing_desc, keywords = "typing indicator"),
+    SettingsSearchEntry(R.string.setting_ctcp_replies, SettingsCategory.PRIVACY,
+        descRes = R.string.setting_ctcp_replies_desc, keywords = "ctcp version time ping finger clientinfo source"),
 
     // Server-side history
     SettingsSearchEntry(R.string.setting_history_limit, SettingsCategory.HISTORY,

@@ -111,6 +111,9 @@ android {
         compose = true
     }
     androidResources {
+        // PNG is already deflate-compressed internally, so packing it again gains almost
+        // nothing and costs a decompression on every read. Storing it lets the file be
+        // mapped straight from the APK.
         noCompress += "png"
     }
     packaging {

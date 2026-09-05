@@ -80,7 +80,12 @@ class NotificationReplyReceiver : BroadcastReceiver() {
 
         if (hasLiveConnection) {
             vm.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
-            if (notifId >= 0) runCatching { NotificationManagerCompat.from(ctx).cancel(notifId) }
+            // Cancel by tag as well as id: message notifications are posted under a
+            // per-buffer tag, and an untagged cancel matches nothing.
+            if (notifId >= 0) runCatching {
+                NotificationManagerCompat.from(ctx)
+                    .cancel(NotificationHelper.notifTagFor(netId, buffer), notifId)
+            }
         } else {
             // No live connection. show an error notification so the reply is not lost silently.
             if (notifId >= 0) {
@@ -92,7 +97,12 @@ class NotificationReplyReceiver : BroadcastReceiver() {
                     .setContentText("Open HexDroid and reconnect to send your reply to $buffer")
                     .setAutoCancel(true)
                     .build()
-                runCatching { NotificationManagerCompat.from(ctx).notify(notifId, errorNotif) }
+                // Same tag as the notification it replaces, so opening the conversation
+                // clears the failure alongside the message that prompted it.
+                runCatching {
+                    NotificationManagerCompat.from(ctx)
+                        .notify(NotificationHelper.notifTagFor(netId, buffer), notifId, errorNotif)
+                }
             }
         }
     }

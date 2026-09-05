@@ -55,8 +55,10 @@ class HexPushService : PushService() {
             auth = keys.auth,
             p256dh = keys.pubKey,
         )
-        // Networks pick the new endpoint up on their next registration; nothing is sent
-        // from here because this service has no connections of its own.
+        // Tell the connected servers now. Waiting for the next registration meant enabling
+        // push, or switching distributor, did nothing until the user reconnected.
+        val vm = (applicationContext as? com.boxlabs.hexdroid.HexDroidApp)?.ircViewModelOrNull
+        runCatching { vm?.onPushEndpointChanged() }
     }
 
     override fun onMessage(message: PushMessage, instance: String) {
@@ -73,8 +75,6 @@ class HexPushService : PushService() {
         val msg = parser.parse(line) ?: return
 
         val from = msg.prefixNick() ?: return
-        val target = msg.params.getOrNull(0) ?: return
-        val body = msg.trailing?.takeIf { it.isNotBlank() } ?: return
 
         // The spec allows servers to strip tags to fit the payload but never the msgid,
         // Correlate a pushed message with the same message seen over a connection.
@@ -86,8 +86,17 @@ class HexPushService : PushService() {
         if (!policy.notificationsEnabled) return
 
         when (msg.command.uppercase()) {
-            "PRIVMSG", "NOTICE" -> notifyMessage(from, target, body, anchor, policy)
-            "INVITE" -> notifyInvite(from, body)
+            "PRIVMSG", "NOTICE" -> {
+                val target = msg.params.getOrNull(0) ?: return
+                val body = msg.trailing?.takeIf { it.isNotBlank() } ?: return
+                notifyMessage(from, target, body, anchor, policy)
+            }
+            // Read through allParams: the channel is a trailing parameter only when the
+            // server wrote it with a colon, and RFC 2812 does not.
+            "INVITE" -> {
+                val channel = msg.allParams.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return
+                notifyInvite(from, channel)
+            }
             else -> Unit
         }
     }

@@ -70,8 +70,9 @@ import com.boxlabs.hexdroid.ui.tour.buildIntroTour
 @Composable
 fun AppRoot(
     vm: IrcViewModel,
-    onExit: () -> Unit = {}
+    onExit: () -> Unit = {},
 ) {
+    val mainActivity = LocalContext.current as? com.boxlabs.hexdroid.MainActivity
     val state by vm.state.collectAsStateWithLifecycle()
     val scriptLaunchers by vm.scriptLaunchers.collectAsState()
     val mountedScriptView by vm.scriptView.collectAsState()
@@ -205,13 +206,8 @@ fun AppRoot(
             fontChoice = state.settings.fontChoice,
             customFontPath = state.settings.customFontPath
         ) {
-        val tvInset = if (isTvDevice()) 20.dp else 0.dp
-
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = tvInset, vertical = tvInset / 2)
-        ) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
 
         // Welcome screen gate: shown before everything else on first launch.
         if (showWelcome) {
@@ -279,6 +275,7 @@ fun AppRoot(
                     onDisconnect = vm::disconnectActive,
                     onReconnect = vm::reconnectActive,
                     onExit = onExit,
+                    onEnterFloating = mainActivity?.let { act -> { act.toggleFloatingWindow() } },
                     onToggleBufferList = vm::toggleBufferList,
                     onToggleNickList = vm::toggleNickList,
                     onToggleChannelsOnly = vm::toggleChannelsOnly,
@@ -501,6 +498,7 @@ fun AppRoot(
 }
 
         } // end else (welcome completed)
+        } // end Box (TV safe-area inset)
         }
         }
     }

@@ -363,6 +363,8 @@ class SettingsRepository(private val ctx: Context) {
                 quitMessage = o.optString("quitMessage", UiSettings().quitMessage),
                 partMessage = o.optString("partMessage", UiSettings().partMessage),
                 colorizeNicks = o.optBoolean("colorizeNicks", true),
+                showNickIcons = o.optBoolean("showNickIcons", true),
+                ctcpRepliesEnabled = o.optBoolean("ctcpRepliesEnabled", true),
                 ownNickColorInt = o.opt("ownNickColorInt")?.let { (it as? Int) ?: (it as? Long)?.toInt() },
                 mircColorsEnabled = o.optBoolean("mircColorsEnabled", true),
                 ansiColorsEnabled = o.optBoolean("ansiColorsEnabled", true),
@@ -466,6 +468,8 @@ class SettingsRepository(private val ctx: Context) {
         o.put("quitMessage", s.quitMessage)
         o.put("partMessage", s.partMessage)
         o.put("colorizeNicks", s.colorizeNicks)
+        o.put("showNickIcons", s.showNickIcons)
+        o.put("ctcpRepliesEnabled", s.ctcpRepliesEnabled)
         if (s.ownNickColorInt != null) o.put("ownNickColorInt", s.ownNickColorInt) else o.remove("ownNickColorInt")
         o.put("mircColorsEnabled", s.mircColorsEnabled)
         o.put("ansiColorsEnabled", s.ansiColorsEnabled)

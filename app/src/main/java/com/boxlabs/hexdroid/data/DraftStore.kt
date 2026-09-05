@@ -62,6 +62,16 @@ class DraftStore {
         drafts.remove(bufferKey)
     }
 
+    /**
+     * Move the draft for [from] onto [to], for when a buffer is renamed under the user. An
+     * existing draft at [to] wins, being the more recent thing typed there.
+     */
+    fun rename(from: String, to: String) {
+        if (from == to) return
+        val moving = drafts.remove(from) ?: return
+        drafts.putIfAbsent(to, moving)
+    }
+
     /** Discard every draft belonging to [netId], for when a network's buffers go away. */
     fun clearNetwork(netId: String) {
         val prefix = "$netId::"

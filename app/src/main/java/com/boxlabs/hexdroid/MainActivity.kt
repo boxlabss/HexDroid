@@ -28,6 +28,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import com.boxlabs.hexdroid.ui.AppRoot
+import com.boxlabs.hexdroid.ui.FloatingWindow
 
 class MainActivity : ComponentActivity() {
 
@@ -81,11 +82,44 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            AppRoot(vm, onExit = {
-                vm.exitApp()
-                stopKeepAliveAndExitHard()
-            })
+            AppRoot(
+                vm,
+                onExit = {
+                    vm.exitApp()
+                    stopKeepAliveAndExitHard()
+                },
+            )
         }
+    }
+
+    /**
+     * Put the floating overlay up, or take it down if it is already there. Sends the user to
+     * grant the permission when it is missing.
+     *
+     * The overlay is added to the application context so it survives this activity going
+     * away, which is the point: it stays up while other apps are in front. Nothing handed to
+     * it may capture the activity, or the activity is held for as long as the window is.
+     */
+    fun toggleFloatingWindow() {
+        val app = applicationContext
+        if (FloatingWindow.isShowing) {
+            FloatingWindow.hide(app)
+            return
+        }
+        if (!FloatingWindow.hasPermission(this)) {
+            android.widget.Toast.makeText(
+                this, getString(R.string.float_needs_permission), android.widget.Toast.LENGTH_LONG
+            ).show()
+            FloatingWindow.requestPermission(this)
+            return
+        }
+        FloatingWindow.show(app, vm) {
+            app.startActivity(
+                android.content.Intent(app, MainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+        moveTaskToBack(true)
     }
 
     @Suppress("DEPRECATION")

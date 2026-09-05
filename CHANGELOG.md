@@ -1,6 +1,14 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
+## [1.7.4] - 2026-09-06
+- **Ability to draw over other apps** Tap the menu and "Float"
+- **New privacy setting to stop answering CTCP requests.** Halt replies to VERSION, TIME, PING and similar. The setting is in Settings > Privacy.
+- **Higher-quality sampling for network icons and avatars.** Remote images are decoded at their source size and drawn at 16 to 24dp, so the reduction now uses better filtering. 
+- **`/away` always marks you away, and `/back` returns.**
+- **Away state now survives a reconnect.** 
+- **Reactions now show a count, and the row ends with a button to add another.** No need to go back through the message menu.
+
 ## [1.7.3] - 2026-08-22
 - **Chathistory** Ability to load older messages for servers that support `chathistory before`, with `chathistory targets` support so conversations that happened while you were offline are picked up when you connect
 - **Input** Text typed in the message field on one channel and left unsent stays there when you switch away, and comes back when you return with the cursor where you left it.

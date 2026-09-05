@@ -21,17 +21,21 @@ package com.boxlabs.hexdroid.ui
 import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -46,6 +50,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 /**
  * True when running on an Android TV / leanback device (UiModeManager reports
@@ -100,10 +105,19 @@ fun Modifier.tvInitialFocus(): Modifier {
  *     Modifier.focusHighlight().clickable { ... }
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun Modifier.focusHighlight(shape: Shape = RoundedCornerShape(8.dp)): Modifier {
     var focused by remember { mutableStateOf(false) }
     val color = MaterialTheme.colorScheme.primary
-    val base = this.onFocusChanged { focused = it.isFocused }
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    val base = this
+        .bringIntoViewRequester(requester)
+        .onFocusChanged {
+            focused = it.isFocused
+            // Border included: a container stops as soon as the element's bounds are visible.
+            if (it.isFocused) scope.launch { runCatching { requester.bringIntoView() } }
+        }
     return if (focused) {
         base
             .border(2.dp, color, shape)

@@ -130,6 +130,23 @@ data class UiMessage(
      */
     val failed: Boolean = false,
     /**
+     * Marks the separator drawn where this session begins, so a second scrollback load for
+     * the same buffer does not draw another one.
+     */
+    val isSessionDivider: Boolean = false,
+    /** True for a line read back from the on-disk log rather than received from a server. */
+    val fromLog: Boolean = false,
+    /** True for a line the server replayed rather than one that happened while we watched. */
+    val fromHistory: Boolean = false,
+    /**
+     * Reactions attached to this message, keyed by the reaction text and holding the nicks
+     * who gave it.
+     *
+     * The text is whatever the sender chose. draft/react does not require an emoji and a
+     * short word is a normal thing to send, so nothing here assumes a single glyph.
+     */
+    val reactions: Map<String, Set<String>> = emptyMap(),
+    /**
      * True when the message arrived as (or was sent as) a single draft/multiline BATCH.
      * Only these fold behind "show more": a long MOTD or ASCII art is naturally multi-line
      * and folding it would hide content the sender laid out deliberately.
@@ -142,7 +159,13 @@ data class UiMessage(
 )
 data class UiBuffer(
     val name: String,
-    val messages: PersistentList<UiMessage> = persistentListOf(),
+    /**
+     * The buffer's messages together with the indices that recognise a repeat delivery.
+     *
+     * Every change to the message list goes through [BufferLog], which owns ordering,
+     * deduplication and trimming as one unit. Reads still use [messages].
+     */
+    val log: BufferLog = BufferLog(),
     val unread: Int = 0,
     val highlights: Int = 0,
     val topic: String? = null,
@@ -165,60 +188,28 @@ data class UiBuffer(
      * Cleared when the typing nick sends a message or emits "done" typing state.
      */
     val typingNicks: Set<String> = emptySet(),
-    /**
-     * O(1) msgId deduplication index.
-     *
-     * The previous implementation called `buf.messages.any { it.msgId == msgId }` on every
-     * incoming message, an O(n) linear scan that could visit up to 5,000 entries at max
-     * scrollback on a busy channel replaying history.
-     *
-     * This set mirrors the msgIds present in [messages] and is kept in sync with the
-     * scrollback trim in [append]: when [messages] is trimmed via `takeLast(maxLines)`, the
-     * set is rebuilt from the retained messages so evicted entries don't accumulate forever.
-     *
-     * Not part of equals/hashCode (it is derived from [messages]) and excluded from Compose
-     * stability checks - it is an internal performance cache, not observable UI state.
-     */
-    val seenMsgIds: PersistentSet<String> = persistentSetOf(),
-
-    /**
-     * Content-fingerprint dedup for messages whose msgid path can't dedupe.
-     *
-     * [seenMsgIds] handles the modern path (IRCv3 message-tags `msgid=…`) but several real-world
-     * cases break it: ZNC's `*playback` module replays buffered messages with `time=` tags but
-     * no `msgid`; modern bouncers replay the same message via two paths (e.g. their automatic
-     * buffer dump on connect plus a subsequent CHATHISTORY LATEST) which can carry different
-     * msgids; and our own isHistory heuristic doesn't always classify the first delivery of a
-     * replayed line as history. Without a content-level dedup the user sees the same message
-     * twice with the same timestamp.
-     *
-     * Each entry is `"${timeMs}|${from}|${text.hashCode()}"`. Computed for every message with a
-     * sender — live messages too, because the millisecond `ts` resolution makes false collisions
-     * effectively impossible on real human-typed traffic, and this way replays dedupe against
-     * the original delivery regardless of which path delivered it.
-     *
-     * Sized identically to [seenMsgIds] and rebuilt the same way on scrollback trim.
-     */
-    val seenHistoryFingerprints: PersistentSet<String> = persistentSetOf(),
-
     /** True while a CHATHISTORY BEFORE request for this buffer is in flight. Drives the spinner. */
     val historyLoading: Boolean = false,
 
     /**
-     * True once the server has answered a backfill request with nothing new, i.e. we have
-     * reached the start of its stored history for this buffer. Hides The "load older" control
+     * True once the server has answered a backfill with a short page, meaning its stored
+     * history for this buffer has run out. Hides the "load older" control.
+     *
+     * A full page that deduplicates away to nothing does NOT set this. That happens whenever
+     * disk logs already cover the range the anchor pointed at, and the user must still be
+     * able to walk further back from a new anchor.
      */
     val historyExhausted: Boolean = false,
 
     /**
-     * How many backfilled messages this buffer holds beyond the normal scrollback cap.
-     *
-     * The cap trims from the front, so without this a backfill into a buffer already at
-     * maxScrollbackLines would evict the messages it had just fetched. The effective cap
-     * for a buffer is maxScrollbackLines + this, bounded by [MAX_BACKFILL_EXTRA]
+     * True when a catch-up stopped with messages still missing between what this buffer
+     * holds and the live conversation. Resumed the next time the buffer is opened.
      */
-    val extraScrollback: Int = 0
-)
+    val historyGapOpen: Boolean = false,
+) {
+    /** The buffer's messages, oldest first. */
+    val messages: PersistentList<UiMessage> get() = log.messages
+}
 
 enum class FontChoice { OPEN_SANS, INTER, MONOSPACE, CUSTOM }
 
@@ -396,6 +387,16 @@ data class UiSettings(
     val partMessage: String = "Leaving",
 
     val colorizeNicks: Boolean = true,
+    /**
+     * Show a presence dot in the member list for nicks with no avatar, filling the space
+     * their avatar would occupy. Red when away, green otherwise.
+     */
+    val showNickIcons: Boolean = true,
+    /**
+     * Answer CTCP VERSION, TIME, PING and the rest. Off means they are shown but never
+     * replied to, so a stranger cannot learn the client, the platform or the clock.
+     */
+    val ctcpRepliesEnabled: Boolean = true,
     /**
      * Custom colour for your own nick, stored as ARGB int (e.g. 0xFF_FF6600.toInt()).
      * Null means "Auto" - let [NickColors.colorForNick] pick a colour from the hash,
@@ -713,56 +714,41 @@ class IrcViewModel(
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
     // Start time of scrollback loading, used to insert an end-of-scrollback marker before any live messages that arrived during load.
+    /**
+     * Timestamp of the newest line the on-disk log already holds for each buffer.
+     *
+     * The log is append-only and in order, so a replay stamped at or before this is already
+     * in the file. Seeded from the scrollback load, advanced by each write; absent means
+     * nothing is known yet and nothing is suppressed.
+     */
+    /**
+     * Away message per network, restored on the next connection. Away is per-session on the
+     * server, so it is otherwise lost on any disconnect.
+     */
+    private val awayMessages: MutableMap<String, String> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    private val lastLoggedTimeMs: MutableMap<String, Long> =
+        java.util.concurrent.ConcurrentHashMap()
+
     private val scrollbackLoadStartedAtMs: MutableMap<String, Long> =
         java.util.concurrent.ConcurrentHashMap()
 
     /**
-     * CHATHISTORY BEFORE backfills, keyed by buffer.
+     * CHATHISTORY requests in flight, the divider windows, and the catch-up throttle.
      *
-     * While an entry exists, history messages for that buffer are diverted out of [append]
+     * Everything to do with asking a server for history and recognising the reply lives here.
+     * The ViewModel keeps the parts that need its state and its IO: choosing an anchor,
+     * sending, and merging a finished page into the buffer.
      */
-    private val historyBackfills: MutableMap<String, MutableList<UiMessage>> =
-        java.util.concurrent.ConcurrentHashMap()
+    private val chatHistory: ChatHistoryController by lazy {
+        ChatHistoryController(
+            scope = viewModelScope,
+            onFinished = { result -> onBackfillFinished(result) },
+            onCatchupPage = { page -> onCatchupPage(page) },
+        )
+    }
 
-    /** Watchdogs that close a backfill whose reply batch never arrives (or never closes). */
-    private val historyBackfillTimeouts: MutableMap<String, Job> =
-        java.util.concurrent.ConcurrentHashMap()
-
-    /**
-     * Buffers whose unread catch-up (CHATHISTORY AFTER) has been requested this session,
-     * so a reconnect storm can't fire the same request repeatedly.
-     */
-    private val historyCatchupRequested: MutableSet<String> =
-        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
-
-    /**
-     * Per-buffer "newest server-history message timestamp seen since the last live message".
-     *
-     * Populated as messages with `isHistory = true` flow through [append]. Read on the FIRST
-     * subsequent live (`isHistory = false`) message for the same buffer: if a meaningful gap
-     * exists between the newest history line and the live one, [append] inserts a "── Chat
-     * history • Last message: <ts> ──" separator just before the live message and clears the
-     * entry. Mirrors the [scrollbackLoadStartedAtMs]-driven scrollback marker, but for
-     * server-replayed history (CHATHISTORY, znc.in/playback, soju buffer playback) instead of
-     * disk logs — the user gets the same visual cue at both kinds of catch-up boundary.
-     *
-     * ConcurrentHashMap because [append] runs on Main but isHistory updates can race with
-     * dispatcher-bounded log loads that also touch other parts of [append].
-     */
-    private val pendingChathistoryMarkerMs: MutableMap<String, Long> =
-        java.util.concurrent.ConcurrentHashMap()
-
-    /**
-     * "Catch-up window" for the chathistory marker, keyed by buffer. Set when a self-JOIN
-     * fires (or the bouncer playback batch on a fresh connect), holding the wall-clock
-     * deadline by which the marker must fire, after that, it's discarded silently and any
-     * subsequent live message in that buffer renders without a separator.
-     *
-     * Window length matches the upstream history-expect window (15 s for znc.in/playback,
-     * 7 s for IRCv3 CHATHISTORY) plus a 30 s grace for the first live message to arrive.
-     */
-    private val chathistoryMarkerArmedUntilMs: MutableMap<String, Long> =
-        java.util.concurrent.ConcurrentHashMap()
 
     @SuppressLint("StaticFieldLeak")
     private val appContext: Context = context.applicationContext
@@ -791,40 +777,6 @@ class IrcViewModel(
         /** Minimum gap between streaming LIST UI flushes. See [_channelListLastFlushMs]. */
         const val CHANNEL_LIST_FLUSH_INTERVAL_MS = 300L
         /** How many older messages one "load older" request asks the server for. */
-        const val HISTORY_BACKFILL_PAGE = 50
-        /**
-         * How many seconds either side of a message to accept as "the same message" when
-         * comparing a disk-log copy with a replayed one.
-         */
-        val DEDUP_WINDOW_SECONDS = -3L..3L
-        /** Selector timestamp format for CHATHISTORY anchors. See [historyAnchorTimestamp]. */
-        val HISTORY_ANCHOR_FORMAT: DateTimeFormatter =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
-                .withZone(java.time.ZoneOffset.UTC)
-        /**
-         * How long to wait for a backfill's reply batch before giving up on it.
-         *
-         * A server that supports chathistory but holds nothing older answers with an empty
-         * batch, which closes immediately, so this only fires when the server ignores the
-         * request outright or the connection stalls mid-batch. The buffer is released for
-         * another attempt rather than being left with a spinner that never stops.
-         */
-        const val HISTORY_BACKFILL_TIMEOUT_MS = 12_000L
-        /**
-         * Ceiling on how far past the normal scrollback cap repeated backfills may grow a
-         * single buffer. See [UiBuffer.extraScrollback].
-         */
-        const val MAX_BACKFILL_EXTRA = 5000
-        /**
-         * Ceiling on CHATHISTORY catch-up requests fired from one CHATHISTORY TARGETS reply.
-         *
-         * TARGETS can name every buffer the bouncer has ever stored, and each one turns into
-         * a request. Bouncer connections are exempt from outbound flood pacing, so without a
-         * cap an account with a long history sends that whole burst back to back on connect.
-         * Beyond this, buffers are still opened; they just fill from local logs and from
-         * "load older" when the user actually looks at them.
-         */
-        const val MAX_CATCHUP_TARGETS = 40
         /**
          * Default upper user-count bound for ELIST range queries when the user hasn't set a max
          * (see requestList).
@@ -884,6 +836,24 @@ class IrcViewModel(
             "\\$\\$|\\$(channel|chan|network|net|server|nick|me|\\*|[1-9])(?![A-Za-z0-9])",
             RegexOption.IGNORE_CASE,
         )
+
+        /**
+         * Minimum gap between the newest logged line and the start of this session before a
+         * scrollback divider is worth drawing.
+         */
+        const val SCROLLBACK_DIVIDER_MIN_GAP_MS = 5_000L
+
+        /**
+         * How often the visible channel is re-queried for away status.
+         *
+         * away-notify carries the transitions on servers that have it, so this is a safety
+         * net rather than the primary source and does not need to be frequent.
+         */
+        const val AWAY_POLL_INTERVAL_MS = 120_000L
+
+        /** Channels larger than this are not polled: the reply is too big to be worth it. */
+        const val AWAY_POLL_MAX_MEMBERS = 300
+
 
         /** Max chained alias expansions before we give up (alias-invokes-alias loop guard). */
         const val MAX_ALIAS_DEPTH = 8
@@ -1081,6 +1051,14 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap()
     private var ownMetadataLoaded = false
 
+    /**
+     * Guards hydration and persistence of [ownMetadataStore].
+     *
+     * The editor saves one key per coroutine, so several run at once against a store that is
+     * still being read from disk and a persisted blob covering every network.
+     */
+    private val ownMetadataLock = Mutex()
+
     private val stsPolicies: MutableMap<String, StsPolicyEntry> =
         java.util.concurrent.ConcurrentHashMap()
     private var stsPoliciesLoaded = false
@@ -1163,12 +1141,25 @@ class IrcViewModel(
         }
     }
 
-    /** Hydrate STS policies from DataStore (lazy, once), dropping expired entries. */
+    /**
+     * Hydrate our own stored metadata from DataStore, once.
+     *
+     * The flag is only set after the read completes, under the lock: setting it first let a
+     * second caller past while the store was still empty, so it saved against nothing and
+     * persisted a blob missing every other network. Values already in memory win, being
+     * newer than the file.
+     */
     private suspend fun ensureOwnMetadataLoaded() {
         if (ownMetadataLoaded) return
-        ownMetadataLoaded = true
-        val stored = runCatching { repo.readOwnMetadata() }.getOrDefault(emptyMap())
-        stored.forEach { (netId, keys) -> ownMetadataStore[netId] = keys.toMutableMap() }
+        ownMetadataLock.withLock {
+            if (ownMetadataLoaded) return
+            val stored = runCatching { repo.readOwnMetadata() }.getOrDefault(emptyMap())
+            stored.forEach { (netId, keys) ->
+                val target = ownMetadataStore.getOrPut(netId) { java.util.concurrent.ConcurrentHashMap() }
+                keys.forEach { (k, v) -> target.putIfAbsent(k, v) }
+            }
+            ownMetadataLoaded = true
+        }
     }
 
     /** Re-send our stored own metadata to the server so it survives a reconnect. */
@@ -1608,6 +1599,53 @@ class IrcViewModel(
         setNetConn(netId) { st -> if (st.awayNicks.isEmpty()) st else st.copy(awayNicks = emptySet()) }
     }
 
+    /**
+     * Forget the draft/metadata-2 values held for [nick] on [netId].
+     *
+     * Metadata is keyed by nick, but a nick is only ever on loan: once its holder quits, the
+     * next person to take it inherits whatever the last one had set. Called when a nick is
+     * given up rather than carried to a new one.
+     */
+    private fun dropMetadataForNick(netId: String, nick: String) {
+        val key = nick.lowercase()
+        setNetConn(netId) { st ->
+            if (key !in st.displayNames && key !in st.avatarUrls && key !in st.nickColors &&
+                key !in st.statuses && key !in st.extraMetadata
+            ) return@setNetConn st
+            st.copy(
+                displayNames = st.displayNames - key,
+                avatarUrls = st.avatarUrls - key,
+                nickColors = st.nickColors - key,
+                statuses = st.statuses - key,
+                extraMetadata = st.extraMetadata - key,
+            )
+        }
+    }
+
+    /**
+     * Carry [from]'s metadata to [to], for the same person changing nick.
+     *
+     * Pure, because the nick-change handler assembles a whole [UiState] and assigns it at the
+     * end. A write of its own in the middle of that would be discarded by the assignment.
+     */
+    private fun withMetadataMovedForNick(st: NetConnState, from: String, to: String): NetConnState {
+        val a = from.lowercase()
+        val b = to.lowercase()
+        if (a == b) return st
+        if (a !in st.displayNames && a !in st.avatarUrls && a !in st.nickColors &&
+            a !in st.statuses && a !in st.extraMetadata
+        ) return st
+        fun <V> move(m: Map<String, V>): Map<String, V> =
+            m[a]?.let { (m - a) + (b to it) } ?: (m - a)
+        return st.copy(
+            displayNames = move(st.displayNames),
+            avatarUrls = move(st.avatarUrls),
+            nickColors = move(st.nickColors),
+            statuses = move(st.statuses),
+            extraMetadata = move(st.extraMetadata),
+        )
+    }
+
     /** Record a nick as a bot (from WHO/WHOX flags or a `bot` message tag). */
     private fun markBotInState(netId: String, nick: String) {
         val key = nick.lowercase()
@@ -1724,7 +1762,10 @@ class IrcViewModel(
 
     private fun formatLogLine(timeMs: Long, from: String?, text: String, isAction: Boolean): String {
         val ts = Instant.ofEpochMilli(timeMs).atZone(ZoneId.systemDefault()).format(logTimeFormatter)
-        val t = stripIrcFormatting(text)
+        // One log line per message. A multiline message otherwise spills across several
+        // physical lines, and everything after the first is read back as a fragment with no
+        // timestamp and no sender, which can never be matched against the server's copy.
+        val t = stripIrcFormatting(text).replace("\r\n", "\n").replace('\r', '\n').replace("\n", " ")
         val body = when {
             from == null -> t
             // *nick* text - asterisk-wrapped nick is unambiguous: server-status lines always
@@ -1735,20 +1776,6 @@ class IrcViewModel(
         }
         return "$ts\t$body"
     }
-
-    /**
-     * Signature for matching one message against a copy of itself that reached us by a different route.
-     */
-    private fun dedupSigAt(sec: Long, from: String?, strippedLowerText: String): String =
-        "$sec|${from?.lowercase() ?: "*"}|$strippedLowerText"
-
-    /** Normalise a message body for [dedupSigAt]. */
-    private fun dedupText(text: String): String =
-        stripIrcFormatting(text).take(100).lowercase()
-
-    /** [dedupSigAt] for a message whose time is known in milliseconds. */
-    private fun dedupSig(timeMs: Long, from: String?, text: String): String =
-        dedupSigAt(timeMs / 1000, from, dedupText(text))
 
     private data class SentSig(val bufferKey: String, val text: String, val isAction: Boolean, val ts: Long)
     private val pendingSendsByNet: MutableMap<String, ArrayDeque<SentSig>> =
@@ -1761,9 +1788,9 @@ class IrcViewModel(
      * The problem this solves: a local echo is appended with `timeMs = local clock`,
      * but when a bouncer (ZNC / soju) replays that same message via CHATHISTORY or
      * buffer playback after a reconnect, it carries the SERVER's `time=` tag. The
-     * content-fingerprint dedup ([UiBuffer.seenHistoryFingerprints]) keys on
-     * `"$ts|$from|$hash"`, so the differing timestamps mean the replay never matches
-     * the echo and the user sees their last few messages twice.
+     * content signature the log keys on includes the timestamp, so the differing clocks
+     * mean the replay never matches the echo and the user sees their last few messages
+     * twice.
      *
      * The echo-message dedup deque ([pendingSendsByNet]) can't help either: it's
      * pruned to an 8-second window because it exists to catch the near-instant
@@ -1888,15 +1915,17 @@ class IrcViewModel(
 
         if (candidates.isEmpty()) return bufKey(netId, name)
 
-        val chosen = when {
-            st0.selectedBuffer in candidates -> st0.selectedBuffer
-            else -> candidates.maxByOrNull { st0.buffers[it]?.messages?.size ?: 0 } ?: candidates.first()
-        }
+        if (candidates.size == 1) return candidates[0]
 
-        if (candidates.size > 1) {
-            mergeDuplicateBuffers(chosen, candidates.filter { it != chosen })
-        }
+        // Deterministic, and deliberately not influenced by which buffer is on screen.
+        // Preferring the selected one made resolution depend on the user's position: two
+        // buffers differing only by case resolved to whichever was in front, so each switch
+        // flipped the winner and merged the other into it, moving the selection again.
+        val chosen = candidates.sortedWith(
+            compareByDescending<String> { st0.buffers[it]?.messages?.size ?: 0 }.thenBy { it }
+        ).first()
 
+        mergeDuplicateBuffers(chosen, candidates.filter { it != chosen })
         return chosen
     }
 
@@ -1912,14 +1941,14 @@ class IrcViewModel(
 
         val maxLines = st0.settings.maxScrollbackLines.coerceIn(100, 5000)
 
-        var mergedMsgs: List<UiMessage> = keepBuf0.messages
+        var mergedLog: BufferLog = keepBuf0.log
         var unread = keepBuf0.unread
         var highlights = keepBuf0.highlights
         var topic = keepBuf0.topic
 
         for (k in dropKeys) {
             val b = st0.buffers[k] ?: continue
-            if (b.messages.isNotEmpty()) mergedMsgs = mergedMsgs + b.messages
+            mergedLog = mergedLog.mergedWith(b.log, maxLines, ChatHistoryController.MAX_BACKFILL_EXTRA)
             unread += b.unread
             highlights += b.highlights
             if (topic == null) topic = b.topic
@@ -1937,17 +1966,7 @@ class IrcViewModel(
             }
         }
 
-        val merged = mergedMsgs
-            .distinctBy { it.id }
-            .sortedWith(compareBy<UiMessage> { it.timeMs }.thenBy { it.id })
-            .takeLast(maxLines)
-            .toPersistentList()
-
-        // Rebuild seenMsgIds from the retained messages so the O(1) dedup index stays
-        // consistent with the actual message list after a merge/rename operation.
-        val mergedSeenMsgIds: PersistentSet<String> = merged.mapNotNull { it.msgId }.toPersistentSet()
-
-        val keepBuf = keepBuf0.copy(messages = merged, seenMsgIds = mergedSeenMsgIds, unread = unread, highlights = highlights, topic = topic)
+        val keepBuf = keepBuf0.copy(log = mergedLog, unread = unread, highlights = highlights, topic = topic)
 
         fun <T> adoptIfMissing(map: Map<String, T>): Map<String, T> {
             var out = map
@@ -1965,7 +1984,10 @@ class IrcViewModel(
         }
 
         scrollbackRequested.removeAll(dropKeys.toSet())
-        for (k in dropKeys) pendingChathistoryMarkerMs.remove(k)
+        for (k in dropKeys) {
+            chatHistory.rename(k, keepKey)
+            draftStore.rename(k, keepKey)
+        }
 
         var newBuffers = st0.buffers + (keepKey to keepBuf)
         for (k in dropKeys) newBuffers = newBuffers - k
@@ -2086,6 +2108,21 @@ class IrcViewModel(
         while (dq.size > 30) dq.removeFirst()
     }
 
+    /**
+     * True when [echoed] is the server's rendering of the message we sent as [sent].
+     *
+     * The echo-message spec allows a server to change a message before echoing it: "If
+     * servers apply any modifications to these messages, they MUST send the final version of
+     * the message back", with formatting codes being stripped as the worked example. Exact
+     * comparison therefore fails on any network that filters, and the echo is then taken for
+     * someone else's message and drawn beside our own copy of it.
+     *
+     * Only used where labeled-response is unavailable; a label identifies an echo exactly and
+     * is tried first.
+     */
+    private fun echoTextMatches(sent: String, echoed: String): Boolean =
+        sent == echoed || stripIrcFormatting(sent) == stripIrcFormatting(echoed)
+
     private fun consumeEchoIfMatch(netId: String, bufferKey: String, text: String, isAction: Boolean): Boolean {
         val now = System.currentTimeMillis()
         val dq = pendingDeque(netId)
@@ -2094,7 +2131,9 @@ class IrcViewModel(
         while (dq.isNotEmpty() && now - dq.first().ts > 20_000) dq.removeFirst()
 
         // Last match wins so sending the same message twice dedupes correctly.
-        val matchIdx = dq.indexOfLast { it.bufferKey == bufKeyLower && it.text == text && it.isAction == isAction }
+        val matchIdx = dq.indexOfLast {
+            it.bufferKey == bufKeyLower && it.isAction == isAction && echoTextMatches(it.text, text)
+        }
         if (matchIdx < 0) return false
 
         dq.removeAt(matchIdx)
@@ -2163,6 +2202,7 @@ class IrcViewModel(
         // background persistence is off (see onTaskRemovedGracefulQuit). Cleared in onCleared.
         KeepAliveService.gracefulQuitOnSwipe = ::onTaskRemovedGracefulQuit
         launchExpandedNetworkIdsSync()
+        startAwayPolling()
         // Hydrate flap-paused state from DataStore before any connections start.
         // This must be a suspend call, so we run it in viewModelScope. It completes almost
         // instantly (single DataStore read) and sets flapPausedLoaded=true so the lazy guard
@@ -2705,9 +2745,22 @@ class IrcViewModel(
         }
     }
 
-    fun openBuffer(key: String) {
+    fun openBuffer(key: String) = openBuffer(key, switchToChat = true)
+
+    /**
+     * Select [key] without bringing the chat screen forward, for the floating window: the
+     * user is looking at another app, and the screen they left the app on should still be
+     * there when they come back.
+     */
+    fun openBufferInBackground(key: String) = openBuffer(key, switchToChat = false)
+
+    private fun openBuffer(key: String, switchToChat: Boolean) {
         ensureBuffer(key)
-        val (netId, _) = splitKey(key)
+        val (netId, bufName) = splitKey(key)
+
+        // Opening the conversation is the user reading it, so anything pending in the
+        // shade for it has served its purpose.
+        notifier.cancelBuffer(netId, bufName)
 
         val actualConnected = runtimes[netId]?.client?.isConnectedNow() == true
         val conn0 = _state.value.connections[netId]
@@ -2763,7 +2816,11 @@ class IrcViewModel(
                 buffers = buffers + (key to afterOpen.copy(unread = 0, highlights = 0))
             }
 
-            st.copy(buffers = buffers, selectedBuffer = key, screen = AppScreen.CHAT)
+            st.copy(
+                buffers = buffers,
+                selectedBuffer = key,
+                screen = if (switchToChat) AppScreen.CHAT else st.screen,
+            )
         }
 
         // Send MARKREAD once, after the state update has settled.
@@ -2777,6 +2834,7 @@ class IrcViewModel(
             }
         }
         // The read marker for the opening buffer is stamped when the user reaches the bottom, not here.
+        resumeHistoryGap(key)
     }
 
     /**
@@ -2787,9 +2845,18 @@ class IrcViewModel(
     private fun stampReadMarker(key: String) {
         val st = _state.value
         val buf = st.buffers[key] ?: return
-        val lastMsg = buf.messages.lastOrNull() ?: return
-        // +1ms so the separator check (timeMs > lastReadMs) works even at second granularity.
-        val ts = java.time.Instant.ofEpochMilli(lastMsg.timeMs + 1L).toString()
+        // The spec requires the timestamp to "correspond to a previous message time tag", so
+        // it is a message's own time, not that time nudged forward. Locally generated system
+        // lines have no server timestamp to quote, so the newest real message is used.
+        val lastMsg = buf.messages.lastOrNull { it.from != null } ?: buf.messages.lastOrNull() ?: return
+        val ts = markReadStamp(lastMsg.timeMs)
+
+        // "The last read timestamp of a target MUST only ever increase." Sending a value at
+        // or below what the server already holds makes it answer with its own stored value,
+        // which is a wasted exchange that also drags the local marker backwards.
+        val known = buf.lastReadTimestamp?.let { parseMarkReadMs(it) }
+        if (known != null && lastMsg.timeMs <= known) return
+
         _state.value = st.copy(buffers = st.buffers + (key to buf.copy(lastReadTimestamp = ts)))
         val (netId, bufferName) = splitKey(key)
         val rt = runtimes[netId] ?: return
@@ -2797,6 +2864,19 @@ class IrcViewModel(
             viewModelScope.launch { rt.client.sendRaw("MARKREAD $bufferName timestamp=$ts") }
         }
     }
+
+    /**
+     * Format [timeMs] the way the read-marker spec asks for: the server-time format, to
+     * millisecond precision, in UTC.
+     */
+    private fun markReadStamp(timeMs: Long): String =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+            .withZone(java.time.ZoneOffset.UTC)
+            .format(Instant.ofEpochMilli(timeMs))
+
+    /** Parse a read-marker timestamp back to epoch millis, or null if it is "*" or malformed. */
+    private fun parseMarkReadMs(ts: String): Long? =
+        runCatching { Instant.parse(ts).toEpochMilli() }.getOrNull()
 
     fun toggleBufferList() {
         val st = _state.value
@@ -2924,13 +3004,22 @@ class IrcViewModel(
                 // also builds a single well-formed tag group (@label=…;+draft/reply=…).
                 hasReplyTagCap && msgId != null -> {
                     val sanitised = text.replace("\r", "").replace("\n", " ")
-                    val lbl = client.privmsg(buffer, sanitised, replyToMsgId = msgId)
-                    // Record so incoming echo-message is consumed rather than shown twice.
-                    // Dedup is content-based (buffer + decrypted text), so recording the
-                    // plaintext matches the decrypted echo regardless of wire encryption.
-                    recordLocalSend(networkId, key, sanitised, isAction = false)
-                    // Exact echo correlation on labeled-response servers (falls back to content).
-                    recordSentLabel(networkId, lbl)
+                    // The reply tag goes on the first piece only: that is what the far
+                    // side's quote points at.
+                    val pieces = outgoingChunks(networkId, buffer, sanitised)
+                    pieces.forEachIndexed { idx, chunk ->
+                        val lbl = client.privmsg(
+                            buffer,
+                            chunk,
+                            replyToMsgId = if (idx == 0) msgId else null,
+                        )
+                        // Record so incoming echo-message is consumed rather than shown twice.
+                        // Dedup is content-based (buffer + decrypted text), so recording the
+                        // plaintext matches the decrypted echo regardless of wire encryption.
+                        recordLocalSend(networkId, key, chunk, isAction = false)
+                        // Exact echo correlation on labeled-response servers (falls back to content).
+                        recordSentLabel(networkId, lbl)
+                    }
                     sanitised
                 }
                 // Channel without reply-tag support: prepend "Nick: (quote..) - reply"
@@ -2952,9 +3041,12 @@ class IrcViewModel(
 
             // For all non-tag paths, use privmsg() which handles echo-message + label correctly.
             if (!(hasReplyTagCap && msgId != null)) {
-                val lbl = client.privmsg(buffer, outText)
-                recordLocalSend(networkId, key, outText, isAction = false)
-                recordSentLabel(networkId, lbl)
+                // The quote prefix above adds length, so this overflows more readily.
+                for (chunk in outgoingChunks(networkId, buffer, outText)) {
+                    val lbl = client.privmsg(buffer, chunk)
+                    recordLocalSend(networkId, key, chunk, isAction = false)
+                    recordSentLabel(networkId, lbl)
+                }
             }
 
             // Pass replyToMsgId so our own local echo shows the reply quote UI,
@@ -3359,8 +3451,7 @@ fun startAddNetwork() {
         recentJoinAtMs.keys.filter { it.startsWith(chanPrefix) }.toList()
             .forEach { recentJoinAtMs.remove(it) }
         // Same per-network sweep for the chathistory marker armed window.
-        chathistoryMarkerArmedUntilMs.keys.filter { it.startsWith(chanPrefix) }.toList()
-            .forEach { chathistoryMarkerArmedUntilMs.remove(it) }
+        chatHistory.forgetNetwork(netId)
         // Flap-detection history (pingTimeoutTimestamps) and the exponential-backoff
         // counter (reconnectAttempts) MUST survive a transient disconnect, because the
         // whole point of both is to accumulate state across a connect>Drop>reconnect
@@ -3463,9 +3554,8 @@ fun startAddNetwork() {
                         if (idxInTail < 0) return@update st
                             val realIdx = tailStart + idxInTail
                             val updated = buf.messages[realIdx].copy(text = newText)
-                            val newMessages = buf.messages.replacingAt(realIdx, updated)
                             collapsed = true
-                            st.copy(buffers = st.buffers + (bufferKey to buf.copy(messages = newMessages)))
+                            st.copy(buffers = st.buffers + (bufferKey to buf.copy(log = buf.log.replaceAt(realIdx, updated))))
                     }
                     if (collapsed) {
                         lastConnStatusLine[netId] = prev.copy(count = newCount, lastSeenMs = now)
@@ -3573,9 +3663,11 @@ fun startAddNetwork() {
         // (cleanupNetworkMaps clears per-channel maps but deliberately doesn't touch
         // _state, since most of its callers want to keep buffer history across reconnects.)
         val prefix = "$id::"
+        chatHistory.forgetNetwork(id)
+        // The profile is gone, so its away message has nothing left to be restored onto.
+        awayMessages.remove(id)
         _state.update { st ->
             val orphanKeys = st.buffers.keys.filter { it.startsWith(prefix) }
-            for (k in orphanKeys) pendingChathistoryMarkerMs.remove(k)
             val newBuffers = if (orphanKeys.isEmpty()) st.buffers else st.buffers - orphanKeys.toSet()
             val newConns = if (st.connections.containsKey(id)) st.connections - id else st.connections
             val newSelected = if (st.selectedBuffer.startsWith(prefix)) "" else st.selectedBuffer
@@ -3665,9 +3757,9 @@ fun startAddNetwork() {
                             everRegisteredThisSession.remove(id)
                             cleanupNetworkMaps(id, resetReconnectState = true)
                             val prefix = "$id::"
+                            chatHistory.forgetNetwork(id)
                             _state.update { st ->
                                 val orphanKeys = st.buffers.keys.filter { it.startsWith(prefix) }
-                                for (k in orphanKeys) pendingChathistoryMarkerMs.remove(k)
                                 val newBuffers = if (orphanKeys.isEmpty()) st.buffers
                                                  else st.buffers - orphanKeys.toSet()
                                 val newConns = if (st.connections.containsKey(id)) st.connections - id
@@ -4385,10 +4477,8 @@ fun startAddNetwork() {
         _state.update { st ->
             val buf = st.buffers[key] ?: return@update st
             if (buf.messages.none { it.pending }) return@update st
-            val newMessages = buf.messages
-                .map { if (it.pending) it.copy(pending = false) else it }
-                .toPersistentList()
-            st.copy(buffers = st.buffers + (key to buf.copy(messages = newMessages)))
+            val newLog = buf.log.mapMessages { if (it.pending) it.copy(pending = false) else it }
+            st.copy(buffers = st.buffers + (key to buf.copy(log = newLog)))
         }
     }
 
@@ -4526,7 +4616,12 @@ fun startAddNetwork() {
     fun scriptSendMessage(network: String?, buffer: String, text: String) {
         val net = network ?: _state.value.activeNetworkId ?: return
         val rt = runtimes[net] ?: return
-        viewModelScope.launch { runCatching { rt.client.privmsg(buffer, text) } }
+        // Script output is generated rather than typed, so it often runs long.
+        viewModelScope.launch {
+            runCatching {
+                for (chunk in outgoingChunks(net, buffer, text)) rt.client.privmsg(buffer, chunk)
+            }
+        }
     }
     fun scriptSendRaw(network: String?, line: String) {
         val net = network ?: _state.value.activeNetworkId
@@ -4929,7 +5024,9 @@ fun startAddNetwork() {
                         proxyPasswordOverride = proxyPassword,
                         tlsClientCert = tlsCert
                     ).copy(
-                        historyLimit = st.settings.ircHistoryLimit
+                        historyLimit = st.settings.ircHistoryLimit,
+                        initialAwayMessage = awayMessages[netId],
+                        ctcpRepliesEnabled = st.settings.ctcpRepliesEnabled,
                     )
 
         // IRCv3 STS enforcement. A one-shot upgrade port (from an insecure CAP LS
@@ -5703,7 +5800,7 @@ fun startAddNetwork() {
      * Passing an explicit [timestamp] overrides the last-message lookup (used for server-driven
      * read marker updates, e.g. from a bouncer).
      */
-    fun markBufferRead(bufferKey: String, timestamp: String? = null) {
+    fun markBufferRead(bufferKey: String, timestamp: String? = null, fromServer: Boolean = false) {
         if (timestamp != null) {
             // Explicit timestamp from server - apply directly.
             val (netId, bufferName) = splitKey(bufferKey)
@@ -5713,6 +5810,9 @@ fun startAddNetwork() {
             if (buf != null) {
                 _state.value = st.copy(buffers = st.buffers + (bufferKey to buf.copy(lastReadTimestamp = timestamp)))
             }
+            // A value the server gave us needs no echoing back: it already holds it, and the
+            // spec has it ignore anything not newer than what it has.
+            if (fromServer) return
             if (rt.client.hasCap("draft/read-marker") && !isPseudoBuffer(bufferName)) {
                 viewModelScope.launch { rt.client.sendRaw("MARKREAD $bufferName timestamp=$timestamp") }
             }
@@ -5802,6 +5902,16 @@ fun startAddNetwork() {
     }
 
     fun consumeUnreadOnForeground() {
+        // Returning to the app with a conversation already on screen is reading it, so its
+        // notifications go too. Same condition as the unread reset below: only on the chat
+        // screen, since Settings or Networks means the messages have not been seen.
+        _state.value.let { st ->
+            val key = st.selectedBuffer
+            if (key.isNotBlank() && st.screen == AppScreen.CHAT) {
+                val (netId, bufName) = splitKey(key)
+                notifier.cancelBuffer(netId, bufName)
+            }
+        }
         _state.update { st ->
             val key = st.selectedBuffer
             if (key.isBlank()) return@update st
@@ -5889,15 +5999,60 @@ fun startAddNetwork() {
      * touch the server or disk logs. Also clears the dedup indexes so a later chathistory replay
      * of those same lines isn't silently swallowed as a "duplicate" of messages we just removed.
      */
+    /**
+     * Empty [bufferKey] and stop the view refilling it.
+     *
+     * An emptied buffer puts the top of the scrollback on screen, which is the same signal
+     * the view uses to fetch older history, so without marking it exhausted /clear
+     * immediately asked the server for the messages it had just discarded. Reconnecting
+     * clears the flag again, as does asking for history explicitly.
+     */
+    /**
+     * Poll the visible channel's member list so away status stays current.
+     *
+     * away-notify reports transitions, but only where the server offers it. Polling covers
+     * the rest, which is how clients tracked away before the capability existed.
+     *
+     * Only while the member list is actually open, in the foreground, on the chat screen,
+     * and for the channel being looked at. Away status has no other reader, so polling with
+     * the list closed is a WHO a minute that changes nothing anyone can see.
+     */
+    private fun startAwayPolling() {
+        viewModelScope.launch {
+            while (true) {
+                delay(AWAY_POLL_INTERVAL_MS)
+                if (!AppVisibility.isForeground) continue
+                val st = _state.value
+                if (st.screen != AppScreen.CHAT) continue
+                // The presence dots are the only reader, so nothing to do when hidden.
+                if (!st.showNickList || !st.settings.showNickIcons) continue
+                val key = st.selectedBuffer.takeIf { it.isNotBlank() } ?: continue
+                val (netId, chan) = splitKey(key)
+                if (!isChannelOnNet(netId, chan)) continue
+                if (st.connections[netId]?.connected != true) continue
+                // A sweep of a very large channel is a lot of traffic for a status column.
+                if ((st.nicklists[key]?.size ?: 0) > AWAY_POLL_MAX_MEMBERS) continue
+                val rt = runtimes[netId] ?: continue
+                runCatching { rt.client.refreshChannelWho(chan) }
+            }
+        }
+    }
+
     fun clearBuffer(bufferKey: String) {
+        chatHistory.forget(bufferKey)
+        historyAnchors.remove(bufferKey)
+        sessionFirstLive.remove(bufferKey)
+        catchupAnchorMs.remove(bufferKey)
+        gapMarkers.remove(bufferKey)
         _state.update { s ->
             val buf = s.buffers[bufferKey] ?: return@update s
             s.copy(buffers = s.buffers + (bufferKey to buf.copy(
-                messages = persistentListOf(),
-                seenMsgIds = persistentSetOf(),
-                seenHistoryFingerprints = persistentSetOf(),
+                log = buf.log.cleared(),
                 unread = 0,
                 highlights = 0,
+                historyLoading = false,
+                historyExhausted = true,
+                historyGapOpen = false,
             )))
         }
     }
@@ -6215,11 +6370,13 @@ fun startAddNetwork() {
                         val fromNick = st.connections[netId]?.myNick ?: st.myNick
                         // If we're in a channel/query and connected, send it as a normal message.
                         if (!isPseudoBuffer(bufferName) && c != null) {
-                            val siLabel = c.privmsg(bufferName, line)
                             val enc = e2eKeyStore.get(netId, bufferName)?.scheme
-                            append(currentKey, from = fromNick, text = line, isLocal = true, encryption = enc)
-                            recordLocalSend(netId, currentKey, line, isAction = false)
-                            recordSentLabel(netId, siLabel)
+                            for (chunk in outgoingChunks(netId, bufferName, line)) {
+                                val siLabel = c.privmsg(bufferName, chunk)
+                                append(currentKey, from = fromNick, text = chunk, isLocal = true, encryption = enc)
+                                recordLocalSend(netId, currentKey, chunk, isAction = false)
+                                recordSentLabel(netId, siLabel)
+                            }
                         } else {
                             append(currentKey, from = fromNick, text = line, isLocal = true)
                         }
@@ -6442,10 +6599,15 @@ fun startAddNetwork() {
                         // for /me lines only - a particularly confusing partial-failure
                         // for anyone debugging "why does my chat message look encrypted
                         // but my /me line doesn't?".
-                        c.ctcp(target, "ACTION $msg").also { recordSentLabel(netId, it) }
                         val actionEnc = e2eKeyStore.get(netId, target)?.scheme
-                        append(currentKey, from = st.connections[netId]?.myNick ?: st.myNick, text = msg, isAction = true, isLocal = true, encryption = actionEnc)
-                        recordLocalSend(netId, currentKey, msg, isAction = true)
+                        val meNick = st.connections[netId]?.myNick ?: st.myNick
+                        // "ACTION " and the CTCP framing ride inside the payload.
+                        val actionBudget = (outgoingByteBudget(netId, target) - 9).coerceAtLeast(64)
+                        for (chunk in splitMessageByLength(msg, actionBudget)) {
+                            c.ctcp(target, "ACTION $chunk").also { recordSentLabel(netId, it) }
+                            append(currentKey, from = meNick, text = chunk, isAction = true, isLocal = true, encryption = actionEnc)
+                            recordLocalSend(netId, currentKey, chunk, isAction = true)
+                        }
                         return@launch
                     }
 
@@ -6823,39 +6985,9 @@ fun startAddNetwork() {
                 return@launch
             }
 
-            // Calculate max message length for PRIVMSG
-            // Format: ":nick!user@host PRIVMSG <target> :<message>\r\n"
-            // We derive the limit from the server's LINELEN ISUPPORT token when available.
-            // LINELEN covers the full wire line including CRLF; subtract the overhead of
-            // the longest plausible sender prefix + "PRIVMSG <target> :" to get the safe
-            // payload budget. We cap the overhead estimate conservatively at 100 bytes
-            // (64 max nick + ident + host + "!@" + " PRIVMSG " + channel + " :" + "\r\n").
             val myNick = st.connections[netId]?.myNick ?: st.myNick
-            val serverLimit = runtimes[netId]?.support?.linelen ?: 512
-            val baseBudget = (serverLimit - 100).coerceIn(200, serverLimit - 10)
-
-            // When a key is configured, the wire line carries the *encrypted* form,
-            // which is larger than the plaintext: AES-GCM prepends a version byte +
-            // 12-byte nonce and appends a 16-byte tag, then the whole thing is base64'd
-            // (~+33%) behind a "+AGM " prefix; Blowfish prepends an 8-byte IV and
-            // zero-pads to the block size before base64 behind "+OK *". Splitting on the
-            // plaintext budget would let the encrypted line blow past the server limit
-            // and get truncated, which corrupts the tag and breaks decryption on the
-            // far side. So shrink the plaintext budget
-            // to leave headroom for the expansion. The formulas invert
-            // "prefix + base64(overhead + P) <= baseBudget" for P, minus a 2-byte margin.
             val sendEncryption = e2eKeyStore.get(netId, bufferName)?.scheme
-            val maxMsgLen = when (sendEncryption) {
-                com.boxlabs.hexdroid.crypto.E2eScheme.AGM ->
-                    ((baseBudget - 5) * 3 / 4) - 29 - 2          // "+AGM " + base64(1+12+P+16)
-                com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH ->
-                    ((baseBudget - 5) * 3 / 4) - 15 - 2          // "+OK *" + base64(8 IV + P + ≤7 pad)
-                com.boxlabs.hexdroid.crypto.E2eScheme.AGE ->
-                    ((baseBudget - 5) * 3 / 4) - 29 - 2          // unreachable: +AGE is framed/chunked by
-                                                                 // AgeChannel, never sent via this PSK split
-                                                                 // path; conservative fallback (mirrors AGM).
-                null -> baseBudget
-            }.coerceAtLeast(64)
+            val maxMsgLen = outgoingByteBudget(netId, bufferName)
 
             // Cancel pending typing-done timer and send "done" immediately on send.
             typingDoneJob?.cancel()
@@ -6897,6 +7029,38 @@ fun startAddNetwork() {
             }
         }
     }
+
+    /**
+     * The payload budget in UTF-8 bytes for one PRIVMSG to [bufferName] on [netId].
+     *
+     * The server's LINELEN less a conservative estimate of ":nick!user@host PRIVMSG
+     * <target> :" and CRLF. A keyed target carries the larger encrypted form, so the
+     * formulas invert "prefix + base64(overhead + P) <= budget" for P: splitting on the
+     * plaintext budget would truncate the ciphertext and break decryption entirely.
+     */
+    private fun outgoingByteBudget(netId: String, bufferName: String): Int {
+        val serverLimit = runtimes[netId]?.support?.linelen ?: 512
+        val baseBudget = (serverLimit - 100).coerceIn(200, serverLimit - 10)
+        return when (e2eKeyStore.get(netId, bufferName)?.scheme) {
+            com.boxlabs.hexdroid.crypto.E2eScheme.AGM ->
+                ((baseBudget - 5) * 3 / 4) - 29 - 2          // "+AGM " + base64(1+12+P+16)
+            com.boxlabs.hexdroid.crypto.E2eScheme.BLOWFISH ->
+                ((baseBudget - 5) * 3 / 4) - 15 - 2          // "+OK *" + base64(8 IV + P + <=7 pad)
+            com.boxlabs.hexdroid.crypto.E2eScheme.AGE ->
+                ((baseBudget - 5) * 3 / 4) - 29 - 2          // +AGE is framed by AgeChannel and never
+                                                             // reaches this path; mirrors AGM as a
+                                                             // conservative fallback
+            null -> baseBudget
+        }.coerceAtLeast(64)
+    }
+
+    /**
+     * Split [text] into pieces that each fit one PRIVMSG to [bufferName]. Every path sending
+     * user text goes through this: an over-long line is silently truncated by the server,
+     * and on a keyed target that loses the whole message rather than its tail.
+     */
+    private fun outgoingChunks(netId: String, bufferName: String, text: String): List<String> =
+        splitMessageByLength(text, outgoingByteBudget(netId, bufferName))
 
     /**
      * Split a message into chunks that don't exceed [maxLen] bytes (UTF-8).
@@ -7193,17 +7357,12 @@ fun startAddNetwork() {
                 // Channel buffers don't need arming here: the bouncer replays our prior
                 // session's JOINs, which fire the JOIN handler's arm. 45 s window matches
                 // the upstream history-expect ceiling.
-                val nowMsArm = System.currentTimeMillis()
-                val armDeadline = nowMsArm + 45_000L
                 val chantypes = runtimes[netId]?.support?.chantypes ?: "#&+!"
                 val pmKeys = _state.value.buffers.keys.filter { k ->
                     val (nid, bn) = splitKey(k)
                     nid == netId && !isPseudoBuffer(bn) && (bn.firstOrNull() !in chantypes.toSet())
                 }
-                for (k in pmKeys) chathistoryMarkerArmedUntilMs[k] = armDeadline
-                if (chathistoryMarkerArmedUntilMs.size > 64) {
-                    chathistoryMarkerArmedUntilMs.entries.removeAll { it.value < nowMsArm }
-                }
+                for (k in pmKeys) chatHistory.armDivider(k, ChatHistoryController.DIVIDER_WINDOW_MS)
                 if (_state.value.activeNetworkId == netId) updateConnectionNotification("Connected")
                 // Burn the hostname upgrade grace on the first connect that gets this far, so it
                 // can only apply to the first attempt after updating and never sits armed.
@@ -7455,8 +7614,8 @@ fun startAddNetwork() {
                         val me = st.connections[netId]?.myNick ?: st.myNick
                         val idx = buf.messages.indexOfLast { it.from == me && !it.failed }
                         if (idx < 0) return@update st
-                        val updated = buf.messages.replacingAt(idx, buf.messages[idx].copy(failed = true))
-                        st.copy(buffers = st.buffers + (key to buf.copy(messages = updated)))
+                        val updated = buf.messages[idx].copy(failed = true)
+                        st.copy(buffers = st.buffers + (key to buf.copy(log = buf.log.replaceAt(idx, updated))))
                     }
                 }
                 append(
@@ -8144,6 +8303,10 @@ if (code == "442") {
 
                 val targets = when {
                     affectedChannels.isNotEmpty() -> affectedChannels
+                    // Member lists describe where they are now, not where they were, so a
+                    // replay uses the channel its batch named and nothing else.
+                    ev.historyChannel != null -> listOf(resolveBufferKey(netId, ev.historyChannel))
+                    ev.isHistory -> emptyList()
                     allChannelTargets.isNotEmpty() -> allChannelTargets
                     else -> emptyList()
                 }
@@ -8156,6 +8319,7 @@ if (code == "442") {
                         text = lineColoured,
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
+                        isHistory = ev.isHistory,
                         doNotify = false
                     )
                 }
@@ -8168,6 +8332,7 @@ if (code == "442") {
                         text = lineColoured,
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
+                        isHistory = ev.isHistory,
                         doNotify = false
                     )
                 }
@@ -8195,11 +8360,15 @@ if (code == "442") {
                         awayMap.remove(oldFold)?.let { awayMap[newFold] = it }
                     }
 
-                    val updatedNicklists = st1.nicklists.mapValues { (k, list) ->
-                        val (kid, _) = splitKey(k)
-                        if (kid != netId) list
-                        else rebuildNicklist(netId, k)
-                    }
+                    // Rebuild from the channel membership maps, not from the lists that
+                    // happen to exist already. mapValues only visits keys it is given, so a
+                    // channel whose list had not been built yet was skipped and kept showing
+                    // the old nick until something else rebuilt it, which is why a nick could
+                    // be present in one channel and missing in another.
+                    val rebuilt = chanNickCase.keys
+                        .filter { it.startsWith("$netId::") }
+                        .associateWith { rebuildNicklist(netId, it) }
+                    val updatedNicklists = st1.nicklists + rebuilt
 
                     // Drop the old nick's typing indicator from all channel buffers on this network.
                     // The new nick hasn't sent a TAGMSG typing event yet, so don't carry it over.
@@ -8209,11 +8378,27 @@ if (code == "442") {
                         else buf
                     }
 
-                    var next = st1.copy(nicklists = updatedNicklists, buffers = updatedBufs)
+                    // Metadata belongs to the person, not the name, so it follows them.
+                    // Folded into the value being assembled rather than written separately:
+                    // this handler ends with a plain assignment, which would drop it.
+                    val movedConns = st1.connections[netId]
+                        ?.let { withMetadataMovedForNick(it, ev.oldNick, ev.newNick) }
+                    val updatedConns =
+                        if (movedConns == null) st1.connections
+                        else st1.connections + (netId to movedConns)
+
+                    var next = st1.copy(
+                        nicklists = updatedNicklists,
+                        buffers = updatedBufs,
+                        connections = updatedConns,
+                    )
+
                     // Rename private-message buffer key if present.
                     val oldKey = bufKey(netId, ev.oldNick)
                     val newKey = bufKey(netId, ev.newNick)
-                    if (next.buffers.containsKey(oldKey) && !next.buffers.containsKey(newKey)) {
+                    val hadOld = next.buffers.containsKey(oldKey)
+                    val collides = next.buffers.containsKey(newKey)
+                    if (hadOld && !collides) {
                         val b = next.buffers[oldKey]
                         if (b != null) next = next.copy(
                             buffers = (next.buffers - oldKey) + (newKey to b.copy(name = newKey)),
@@ -8222,6 +8407,13 @@ if (code == "442") {
                     }
 
                     _state.value = syncActiveNetworkSummary(next)
+
+                    if (hadOld) {
+                        renameBufferState(oldKey, newKey)
+                        // A conversation with the new nick already open means two buffers for
+                        // one person, so fold them together.
+                        if (collides) mergeDuplicateBuffers(newKey, listOf(oldKey))
+                    }
                 }
             }
 
@@ -8454,7 +8646,7 @@ if (code == "442") {
                     // We deliberately drop this echo (it's a duplicate of our local echo), but the
                     // server echo is the ONLY copy that carries the message's msgid. Two things to
                     // do with it:
-                    //  1. Record it in seenMsgIds so a *second* echo of the same message (e.g. ZNC
+                    //  1. Record the id on the log so a *second* echo of the same message (e.g. ZNC
                     //     reflecting via both server-time and legacy paths) is caught by append()'s
                     //     O(1) msgid dedup instead of slipping through as a visible duplicate.
                     //  2. Back-fill it onto our local echo, which we displayed without an id. Without
@@ -8465,17 +8657,24 @@ if (code == "442") {
                     val mid = ev.msgId
                     if (!mid.isNullOrBlank()) {
                         _state.update { s ->
-                            val buf = s.buffers[targetKey] ?: UiBuffer(targetKey)
+                            // Only annotate a buffer that already exists. This attaches a
+                            // msgid to a line we have already drawn, so with no buffer there
+                            // is nothing to attach it to, and creating one here opened an
+                            // empty conversation for the target of anything sent as a
+                            // PRIVMSG under the hood, /ctcp included.
+                            val buf = s.buffers[targetKey] ?: return@update s
                             val idx = buf.messages.indexOfLast {
-                                it.msgId == null && it.isAction == ev.isAction && it.text == ev.text &&
+                                it.msgId == null && it.isAction == ev.isAction &&
+                                    echoTextMatches(it.text, ev.text) &&
                                     it.from != null && it.from.equals(my, ignoreCase = true)
                             }
-                            val newMessages = if (idx >= 0)
-                                buf.messages.replacingAt(idx, buf.messages[idx].copy(msgId = mid))
-                            else buf.messages
-                            val newSeen = if (buf.seenMsgIds.contains(mid)) buf.seenMsgIds else buf.seenMsgIds.adding(mid)
-                            if (idx < 0 && newSeen === buf.seenMsgIds) s
-                            else s.copy(buffers = s.buffers + (targetKey to buf.copy(messages = newMessages, seenMsgIds = newSeen)))
+                            if (idx >= 0) {
+                                val newLog = buf.log.replaceAt(idx, buf.messages[idx].copy(msgId = mid))
+                                return@update s.copy(buffers = s.buffers + (targetKey to buf.copy(log = newLog)))
+                            }
+                            val seen = buf.log.seenIds.adding(mid)
+                            if (seen === buf.log.seenIds) return@update s
+                            s.copy(buffers = s.buffers + (targetKey to buf.copy(log = buf.log.copy(seenIds = seen))))
                         }
                     }
                     return
@@ -8496,7 +8695,7 @@ if (code == "442") {
                 // live messages, since history replays on reconnect must not re-fire it. No-op until the
                 // script engine is started and only if a TEXT handler is registered.
                 val dupByMsgId = !ev.msgId.isNullOrBlank() &&
-                    (_state.value.buffers[targetKey]?.seenMsgIds?.contains(ev.msgId) == true)
+                    (_state.value.buffers[targetKey]?.log?.seenIds?.contains(ev.msgId) == true)
                 val shownText: String = if (!ev.isHistory && !dupByMsgId) {
                     val r = runCatching {
                         scriptEngine.onText(
@@ -8526,6 +8725,7 @@ if (code == "442") {
                     msgId = ev.msgId,
                     replyToMsgId = ev.replyToMsgId,
                     isHistory = ev.isHistory,
+                    isChathistoryContext = ev.isChathistoryContext,
                     encryption = ev.encryption,
                     fromOper = ev.fromOper,
                     fromBot = ev.fromBot,
@@ -8649,12 +8849,36 @@ if (code == "442") {
                     return if (matches.size == 1) matches.single() else null
                 }
 
+                // The buffer holding the message this notice replies to. Services answer a
+                // command with a notice carrying that command's msgid, which places the
+                // answer beside the question with no guessing.
+                fun replyParentBufferKey(): String? {
+                    val parent = ev.replyToMsgId ?: return null
+                    return st.buffers.entries.firstOrNull { (k, b) ->
+                        k.startsWith("$netId::") && b.log.seenIds.contains(parent)
+                    }?.key
+                }
+
+                // An open conversation with the sender. Services reply to our nick rather
+                // than into the conversation, so there is no target to route on.
+                fun senderPrivateBufferKey(): String? {
+                    val sender = ev.from.takeIf { it.isNotBlank() } ?: return null
+                    val fold = casefoldText(netId, sender)
+                    return st.buffers.keys.firstOrNull { k ->
+                        val (nid, bn) = splitKey(k)
+                        nid == netId && !isPseudoBuffer(bn) && !isChannelOnNet(netId, bn) &&
+                            casefoldText(netId, bn) == fold
+                    }
+                }
+
                 val destKey = when {
                     ev.isServer -> bufKey(netId, "*server*")
                     targetIsServerBuffer -> bufKey(netId, "*server*")
                     isChanTarget -> resolveBufferKey(netId, normTarget)
                     else -> {
-                        firstMentionedKnownChannelKey()
+                        replyParentBufferKey()
+                            ?: firstMentionedKnownChannelKey()
+                            ?: senderPrivateBufferKey()
                             ?: recentlyJoinedChannelKey()
                             ?: run {
                                 val sel = st.selectedBuffer
@@ -8695,6 +8919,7 @@ if (code == "442") {
                     text = rendered,
                     isLocal = suppressUnread,
                     timeMs = ev.timeMs,
+                    isHistory = ev.isHistory,
                     doNotify = false,
                     msgId = ev.msgId,
                     replyToMsgId = ev.replyToMsgId,
@@ -8735,7 +8960,7 @@ if (code == "442") {
                 val suppressUnread = ev.isHistory && !st.settings.ircHistoryCountsAsUnread
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
-                append(chanKey, from = null, text = ev.line, isLocal = suppressUnread, timeMs = ev.timeMs, doNotify = false)
+                append(chanKey, from = null, text = ev.line, isLocal = suppressUnread, timeMs = ev.timeMs, doNotify = false, isHistory = ev.isHistory)
             }
 
             is IrcEvent.Names -> {
@@ -8814,6 +9039,7 @@ if (code == "442") {
                         text = colorEvent(msg, 3),  // green
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
+                        isHistory = ev.isHistory,
                         doNotify = false
                     )
                 }
@@ -8858,11 +9084,7 @@ if (code == "442") {
                     // eventually types something. Window matches upstream history-expect
                     // (15 s for znc.in/playback, 7 s for IRCv3 CHATHISTORY) plus a 30 s
                     // grace for the first live message after the burst.
-                    chathistoryMarkerArmedUntilMs[chanKey] = now + 45_000L
-                    // Cap map size for the same reason recentJoinAtMs is capped.
-                    if (chathistoryMarkerArmedUntilMs.size > 64) {
-                        chathistoryMarkerArmedUntilMs.entries.removeAll { it.value < now }
-                    }
+                    chatHistory.armDivider(chanKey, ChatHistoryController.DIVIDER_WINDOW_MS)
                 }
 
                 if (isMeNow || shouldAffectLiveState(ev.isHistory, ev.timeMs)) {
@@ -8915,15 +9137,25 @@ if (code == "442") {
                     // which is what suppressAutoJoinSwitchUntilMs guards. An explicit user join
                     // always wins, even inside the suppression window.
                     val rtForSwitch = runtimes[netId]
+                    // A replayed join is a record of something that already happened, not a
+                    // request to go anywhere. Only a live one can move the user.
+                    //
+                    // The suppression window below was carrying this on its own, which works
+                    // for the rejoin burst right after a reconnect but not for a server whose
+                    // history replies carry our own JOIN: every request for older messages
+                    // delivered one, and each arrived long after the window had closed, so
+                    // the view jumped to that channel each time.
+                    val isLiveSelfJoin = isMe && !ev.isHistory
                     // Consume the intent only on an actual self-join so a JOIN by someone else
                     // never clears it.
                     val userRequestedJoin =
-                        isMe && rtForSwitch?.pendingUserJoinSwitch?.remove(casefoldText(netId, ev.channel)) == true
+                        isLiveSelfJoin &&
+                            rtForSwitch?.pendingUserJoinSwitch?.remove(casefoldText(netId, ev.channel)) == true
                     val autoSwitchSuppressed =
                         rtForSwitch != null &&
                             System.currentTimeMillis() < rtForSwitch.suppressAutoJoinSwitchUntilMs
                     val shouldSwitch =
-                        isMe &&
+                        isLiveSelfJoin &&
                             st1.activeNetworkId == netId &&
                             (st1.screen == AppScreen.CHAT || st1.screen == AppScreen.NETWORKS) &&
                             (userRequestedJoin || !autoSwitchSuppressed)
@@ -8963,6 +9195,7 @@ if (code == "442") {
                             text = "*** " + appContext.getString(R.string.vm_left_channel, ev.channel),
                             isLocal = suppressUnread,
                             timeMs = ev.timeMs,
+                            isHistory = ev.isHistory,
                             doNotify = false
                         )
                         return
@@ -8985,6 +9218,7 @@ if (code == "442") {
                         text = colorEvent(msg, 7),  // orange
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
+                        isHistory = ev.isHistory,
                         doNotify = false
                     )
                 }
@@ -9036,6 +9270,7 @@ if (code == "442") {
                         text = colorEvent(msg, 4),  // red
                         isLocal = suppressUnread,
                         timeMs = ev.timeMs,
+                        isHistory = ev.isHistory,
                         doNotify = false
                     )
                 }
@@ -9135,6 +9370,7 @@ if (code == "442") {
                             text = coloured,
                             isLocal = suppressUnread,
                             timeMs = ev.timeMs,
+                            isHistory = ev.isHistory,
                             doNotify = false
                         )
                     }
@@ -9153,6 +9389,10 @@ if (code == "442") {
                 val st1 = _state.value
                 val mutatedKeys = mutableListOf<String>()
                 if (affectLive) {
+                    // The nick is back in the pool, so whatever draft/metadata-2 values it
+                    // carried describe someone who is no longer here. Left behind, they are
+                    // shown as the next holder's display name, avatar and colour.
+                    dropMetadataForNick(netId, ev.nick)
                     val keys = st1.nicklists.keys.filter { it.startsWith("$netId::") }
                     for (k in keys) {
                         removeNickFromChannel(netId, k, ev.nick)
@@ -9253,7 +9493,7 @@ if (code == "442") {
                         "* " + appContext.getString(R.string.vm_ev_topic_changed_by, ev.setter, topicText)
                     else
                         "* " + appContext.getString(R.string.vm_ev_topic_changed, topicText)
-                    append(chanKey, from = null, text = line, doNotify = false, timeMs = ev.timeMs)
+                    append(chanKey, from = null, text = line, doNotify = false, timeMs = ev.timeMs, isHistory = ev.isHistory)
                 }
             }
             is IrcEvent.ChannelUserMode -> {
@@ -9429,10 +9669,13 @@ if (code == "442") {
                         }
                     }
                 } else {
-                    // Nick returned from away.
+                    // Nick returned from away. The state is cleared whether or not we had
+                    // recorded them as away: an AWAY with no message means "not away", and
+                    // gating the clear on our own bookkeeping left the marker stuck on
+                    // whenever the two disagreed. Only the announcement needs a transition.
+                    awayMap.remove(fold)
+                    markAwayInState(netId, ev.nick, false)
                     if (wasAway) {
-                        awayMap.remove(fold)
-                        markAwayInState(netId, ev.nick, false)
                         if (!suppressAnnouncement) {
                             val msg = "* " + appContext.getString(R.string.vm_ev_back, ev.nick)
                             val affected = _state.value.nicklists
@@ -9548,29 +9791,56 @@ if (code == "442") {
             }
 
             is IrcEvent.ReadMarker -> {
-                // Server confirmed a read marker update. Store it so the UI can show
-                // unread-message separators when catching up after reconnect.
+                // Server's view of the read marker, stored so the unread separator survives a
+                // reconnect. A literal "*" means the server has none, which is not a
+                // timestamp and must not be stored as one. The value only ever moves forward,
+                // so a stale reply cannot drag the separator back over messages already read.
                 val targetKey = resolveBufferKey(netId, ev.target)
-                _state.update { st ->
-                    val buf = st.buffers[targetKey] ?: return@update st
-                    st.copy(buffers = st.buffers + (targetKey to buf.copy(
-                        lastReadTimestamp = ev.timestamp
-                    )))
+                val incoming = ev.timestamp.takeIf { it != "*" }?.let { parseMarkReadMs(it) }
+                if (incoming != null) {
+                    _state.update { st ->
+                        val buf = st.buffers[targetKey] ?: return@update st
+                        val known = buf.lastReadTimestamp?.let { parseMarkReadMs(it) }
+                        if (known != null && incoming <= known) return@update st
+                        st.copy(buffers = st.buffers + (targetKey to buf.copy(
+                            lastReadTimestamp = ev.timestamp
+                        )))
+                    }
                 }
             }
 
+            is IrcEvent.HistoryRequestFailed -> {
+                // No reply batch follows a rejection, so the request is closed here rather
+                // than left for its watchdog. INVALID_TARGET means this buffer cannot be
+                // queried at all, so the control is retired; the other codes may be
+                // transient or specific to the selector used, and stay retryable.
+                val key = ev.target?.let { resolveBufferKey(netId, it) }
+                    ?: chatHistory.soleOutstanding(netId)
+                if (key != null) {
+                    chatHistory.finish(key, BackfillOutcome.ABANDONED)
+                    if (ev.code == "INVALID_TARGET") {
+                        setHistoryFlags(key, loading = false, exhausted = true)
+                    }
+                }
+            }
+
+            is IrcEvent.SelfAwayChanged -> {
+                if (ev.message == null) awayMessages.remove(netId)
+                else awayMessages[netId] = ev.message
+            }
+
             is IrcEvent.HistoryBatchStart -> {
-                // append() already routes history messages into the backfill collector for
-                // as long as one exists for that buffer, so there is no state to open here.
-                // The watchdog is restarted, though: it was armed when the request went out
-                // and would otherwise be counting the transfer as well as the round trip.
-                backfillKeyForTarget(netId, ev.target)?.let { armHistoryBackfillWatchdog(it) }
+                // Messages inside this batch are captured by the controller rather than added
+                // one at a time, so the page can be merged once its full extent is known.
+                chatHistory.onBatchOpen(resolveBufferKey(netId, ev.target), ev.label, ev.complete)
             }
 
             is IrcEvent.HistoryBatchEnd -> {
-                // A chathistory batch closed.
-                backfillKeyForTarget(netId, ev.target)?.let { finishHistoryBackfill(it) }
-                flushChathistoryMarker(resolveBufferKey(netId, ev.target))
+                val key = resolveBufferKey(netId, ev.target)
+                chatHistory.onBatchClose(key, ev.label, ev.lines)
+                // A replay that nothing followed still gets its boundary drawn. When this
+                // batch was a backfill the merge does it instead, so nothing is pending here.
+                flushTrailingDivider(key)
             }
 
             is IrcEvent.HistoryTarget -> {
@@ -9730,14 +10000,39 @@ if (code == "442") {
             // Surface as a brief status line in the target buffer.
             is IrcEvent.MessageReaction -> {
                 val bufKey = resolveBufferKey(netId, ev.target)
-                // Whole sentence, so word order is the translator's to choose.
+
+                // Attach to the message it is about, so it renders beneath it.
+                var attached = false
+                val parentId = ev.msgId
+                if (parentId != null) {
+                    _state.update { st ->
+                        val buf = st.buffers[bufKey] ?: return@update st
+                        val idx = buf.messages.indexOfLast { it.msgId == parentId }
+                        if (idx < 0) return@update st
+                        val target = buf.messages[idx]
+                        val who = target.reactions[ev.reaction].orEmpty()
+                        val nextWho = if (ev.adding) who + ev.fromNick else who - ev.fromNick
+                        val nextReactions =
+                            if (nextWho.isEmpty()) target.reactions - ev.reaction
+                            else target.reactions + (ev.reaction to nextWho)
+                        if (nextReactions == target.reactions) return@update st
+                        attached = true
+                        st.copy(buffers = st.buffers + (bufKey to buf.copy(
+                            log = buf.log.replaceAt(idx, target.copy(reactions = nextReactions))
+                        )))
+                    }
+                }
+                if (attached) return
+
+                // Nothing loaded to attach to, so say it in words.
                 val line = appContext.getString(
                     if (ev.adding) R.string.reaction_added else R.string.reaction_removed,
                     ev.fromNick, ev.reaction)
-                val refStr = ev.msgId?.let { " " + appContext.getString(R.string.vm_ref, it) } ?: ""
+                val refStr = parentId?.let { " " + appContext.getString(R.string.vm_ref, it) } ?: ""
                 append(bufKey, from = null,
                     text = "* $line$refStr",
-                    timeMs = ev.timeMs, doNotify = false, isLocal = true)
+                    timeMs = ev.timeMs, doNotify = false, isLocal = true,
+                    isHistory = ev.isHistory)
             }
 
             is IrcEvent.MetadataChanged -> {
@@ -9836,12 +10131,13 @@ if (code == "442") {
                         appContext.getString(R.string.vm_ev_message_deleted, ev.fromNick)
                     else
                         appContext.getString(R.string.vm_ev_message_deleted_reason, ev.fromNick, ev.reason)
-                    val newMsgs = buf.messages.replacingAt(idx, victim.copy(text = tombstone))
-                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(messages = newMsgs))) }
+                    val newLog = buf.log.replaceAt(idx, victim.copy(text = tombstone))
+                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(log = newLog))) }
                 } else {
                     append(chanKey, from = null,
                         text = "* " + appContext.getString(R.string.vm_deleted_message, ev.fromNick),
-                        timeMs = ev.timeMs, doNotify = false, isLocal = true)
+                        timeMs = ev.timeMs, doNotify = false, isLocal = true,
+                        isHistory = ev.isHistory)
                 }
             }
 
@@ -10022,283 +10318,445 @@ if (code == "442") {
             if (loaded.isEmpty()) return@launch
 
             withContext(Dispatchers.Main) {
-                val cur = _state.value
-                val buf = cur.buffers[key] ?: return@withContext
-
-                // Merge scrollback with any live messages that may have arrived since we started loading.
-                // We keep a start timestamp so we can place an "end of scrollback" marker before any
-                // post-connect lines, and avoid obvious duplicates.
                 val startedAt = scrollbackLoadStartedAtMs.remove(key) ?: loadStartMs
 
-                val preExisting = buf.messages.filter { it.timeMs < startedAt }
-                val liveDuringLoad = buf.messages.filter { it.timeMs >= startedAt }
-                val firstLiveTime = liveDuringLoad.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
+                _state.update { st ->
+                    val buf = st.buffers[key] ?: return@update st
 
-                // Build a set of message signatures for deduplication against what is ALREADY
-                // in the buffer. This must cover *every* message currently displayed, not just
-                // the ones that arrived after this scrollback pass started (liveDuringLoad).
-                val existingMsgIds = buf.messages.mapNotNull { it.msgId }.toHashSet()
-                // Normalised via dedupSig: the buffer holds raw text with formatting codes
-                // while the log stores it stripped, so comparing the two directly missed
-                // every formatted message.
-                val existingFuzzy = buildSet {
-                    for (msg in buf.messages) {
-                        val sec = msg.timeMs / 1000
-                        val text = dedupText(msg.text)
-                        for (delta in DEDUP_WINDOW_SECONDS) add(dedupSigAt(sec + delta, msg.from, text))
-                    }
-                }
+                    // The divider sits between logged lines and the current session, and is
+                    // only worth drawing when there is a real gap.
+                    val newestLogged = loaded.maxOf { it.timeMs }
+                    lastLoggedTimeMs.merge(key, newestLogged, ::maxOf)
 
-                // Filter loaded messages: must be older than first live, and not a duplicate.
-                // Also filter out messages that are too close to the load start time (within 2 seconds)
-                // to avoid showing messages from the current session as "scrollback".
-                val olderLoaded = loaded.filter { msg ->
-                    val isOlder = msg.timeMs < (firstLiveTime - 500L)
-                    val isTooRecent = msg.timeMs > (startedAt - 2000L)  // Within 2 seconds of buffer creation
-                    // Prefer msgid-based dedup; fall back to fuzzy ±3s window. Compared against
-                    // every message already in the buffer (preExisting + liveDuringLoad) so an
-                    // already-displayed line is never re-added regardless of when it arrived
-                    // relative to this scrollback pass.
-                    val isDupe = if (msg.msgId != null) {
-                        existingMsgIds.contains(msg.msgId)
-                    } else {
-                        existingFuzzy.contains(dedupSig(msg.timeMs, msg.from, msg.text))
-                    }
-                    isOlder && !isDupe && !isTooRecent
-                }
+                    // Lines stamped near the load start are from the session already on
+                    // screen, not from a previous one.
+                    val fromPreviousSession = loaded.filter { it.timeMs <= startedAt - 2_000L }
+                    if (fromPreviousSession.isEmpty()) return@update st
 
-                // Only show scrollback marker if there are actual old messages (not from current session)
-                // and there's a meaningful time gap between scrollback and live messages.
-                val sessionLines = preExisting + liveDuringLoad
-                val firstSessionTime = sessionLines.minOfOrNull { it.timeMs } ?: Long.MAX_VALUE
-                // Gap measured against startedAt, not against a session line's timestamp.
-                // preExisting can hold something stamped older than the newest log line, which
-                // made the difference negative and hid the divider outright.
-                val showMarker = cur.settings.loggingEnabled &&
-                    olderLoaded.isNotEmpty() &&
-                    sessionLines.isNotEmpty() &&
-                    (startedAt - olderLoaded.maxOf { it.timeMs }) > 5000L  // At least 5 second gap
+                    // One block, in the order it was read, placed where its newest line
+                    // belongs. Not woven in among the session's messages by date, but not
+                    // stacked above a page of older history already fetched either.
+                    val merged = buf.log.insertBlock(fromPreviousSession)
+                    if (merged.added == 0) return@update st
 
-                val withMarker = if (showMarker) {
-                    // Show the NEWEST scrollback message time (when last activity was)
-                    val newestMs = olderLoaded.maxOf { it.timeMs }
-                    val newestStr = runCatching {
-                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                            .withZone(ZoneId.systemDefault())
-                            .format(Instant.ofEpochMilli(newestMs))
-                    }.getOrElse { java.util.Date(newestMs).toString() }
+                    // The divider closes the block, so it goes on the end of what was added.
+                    val alreadyDivided = merged.log.messages.any { it.isSessionDivider }
+                    val withDivider =
+                        if (st.settings.loggingEnabled && !alreadyDivided) {
+                            merged.log.insertDividerAt(
+                                merged.at + merged.added,
+                                scrollbackDivider(newestLogged),
+                            )
+                        } else {
+                            merged.log
+                        }
 
-                    val markerTimeMs = if (firstSessionTime != Long.MAX_VALUE) {
-                        // Ensure the marker sorts between scrollback and the first session line.
-                        (firstSessionTime - 1L).coerceAtLeast(newestMs + 1L)
-                    } else {
-                        newestMs + 1L
-                    }
-
-                    val marker = UiMessage(
-                        id = nextUiMsgId.getAndIncrement(),
-                        timeMs = markerTimeMs,
-                        from = null,
-                        text = "── " + appContext.getString(R.string.vm_scrollback_divider, newestStr) + " ──",
-                        isAction = false
-                    )
-                    olderLoaded + marker + preExisting + liveDuringLoad
-                } else {
-                    olderLoaded + preExisting + liveDuringLoad
-                }
-
-                val merged = withMarker.takeLast(maxLines).toPersistentList()
-
-                // Rebuild seenMsgIds AND seenHistoryFingerprints from the retained messages so
-                // both O(1) dedup indices stay consistent with the actual message list after a
-                // scrollback load. Rebuilding the fingerprint set (not just seenMsgIds) matters:
-                // disk-loaded lines carry no msgid, so a subsequent live re-delivery of one of
-                // them would otherwise have no fingerprint to match against in append() and would
-                // render a second time. The key formula mirrors append()'s historyFingerprint.
-                val mergedSeenMsgIds: PersistentSet<String> = merged.mapNotNull { it.msgId }.toPersistentSet()
-                val mergedSeenFingerprints: PersistentSet<String> = merged.mapNotNull { m ->
-                    if (m.from != null) "${m.timeMs}|${m.from}|${m.text.hashCode()}" else null
-                }.toPersistentSet()
-
-                // Use atomic update to prevent race conditions
-                _state.update { currentState: UiState ->
-                    val currentBuf = currentState.buffers[key] ?: return@update currentState
-                    val newBuf = currentBuf.copy(
-                        messages = merged,
-                        seenMsgIds = mergedSeenMsgIds,
-                        seenHistoryFingerprints = mergedSeenFingerprints,
-                    )
-                    currentState.copy(buffers = currentState.buffers + (key to newBuf))
+                    st.copy(buffers = st.buffers + (key to buf.copy(log = withDivider)))
                 }
             }
         }
     }
 
-    // Chat history backfill (IRCv3 CHATHISTORY BEFORE)
+    /** Build the separator drawn where this session begins. */
+    private fun scrollbackDivider(boundaryMs: Long): UiMessage {
+        val newestStr = runCatching {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .withZone(ZoneId.systemDefault())
+                .format(Instant.ofEpochMilli(boundaryMs))
+        }.getOrElse { java.util.Date(boundaryMs).toString() }
+        return UiMessage(
+            id = nextUiMsgId.getAndIncrement(),
+            timeMs = boundaryMs,
+            from = null,
+            isSessionDivider = true,
+            text = "── " + appContext.getString(R.string.vm_scrollback_divider, newestStr) + " ──",
+        )
+    }
+
+    // Chat history (IRCv3 CHATHISTORY)
 
     /**
-     * Format [timeMs] as a CHATHISTORY selector timestamp.
+     * Oldest message of the last page each buffer received, used to anchor the next request.
      *
-     * ISO_INSTANT drops the fractional seconds entirely when the millisecond field is
-     * zero, which leaves the spec's `YYYY-MM-DDThh:mm:ss.sssZ` grammar. The pattern is
-     * pinned so an anchor is well formed whatever the message's timestamp happens to be.
+     * The chathistory spec pages from the earliest message of the previous *reply*, not from
+     * the earliest message on screen. The two differ whenever a page deduplicates away to
+     * nothing: the buffer is unchanged, so anchoring on it re-sends the same selector and
+     * receives the same page, forever.
      */
-    private fun historyAnchorTimestamp(timeMs: Long): String =
-        HISTORY_ANCHOR_FORMAT.format(Instant.ofEpochMilli(timeMs))
+    private val historyAnchors: MutableMap<String, UiMessage> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Oldest message each buffer saw arrive live this session, which is the far end of any
+     * gap a catch-up has to fill. Dropped with the rest of a network's history state on
+     * registration, since it describes the connection that ended.
+     */
+    private val sessionFirstLive: MutableMap<String, UiMessage> =
+        java.util.concurrent.ConcurrentHashMap()
 
     /**
      * Fetch the page of messages immediately older than the top of [key]'s scrollback.
      *
-     * Called when the user reaches the top of the chat view.
+     * Called when the user reaches the top of the chat view. With no message to anchor on,
+     * the server is asked for its most recent page instead, so a channel that is quiet and
+     * has no local logs can still be filled.
      */
     fun loadOlderHistory(key: String) {
         val st = _state.value
         val buf = st.buffers[key] ?: return
         if (buf.historyLoading || buf.historyExhausted) return
-        if (historyBackfills.containsKey(key)) return
+        if (chatHistory.isBackfilling(key)) return
 
         val (netId, bufferName) = splitKey(key)
-        if (bufferName == "*server*" || isDccChatBufferName(bufferName)) return
+        if (isPseudoBuffer(bufferName) || isDccChatBufferName(bufferName)) return
         val rt = runtimes[netId] ?: return
         if (!rt.client.supportsChatHistory()) return
 
-        // Anchor on the oldest message that actually came from the server.
-        val oldest = buf.messages.firstOrNull { it.from != null } ?: return
-        val anchorTs = runCatching {
-            historyAnchorTimestamp(oldest.timeMs)
-        }.getOrNull()
-        if (anchorTs == null && oldest.msgId == null) return
-
-        historyBackfills[key] = mutableListOf()
-        _state.update { s ->
-            val b = s.buffers[key] ?: return@update s
-            s.copy(buffers = s.buffers + (key to b.copy(historyLoading = true)))
+        // Anchor on the oldest message of the previous page where there was one, otherwise
+        // on the oldest the buffer holds. System lines are generated locally, so their
+        // timestamps and absent msgids mean nothing to the server.
+        //
+        // A server that takes no timestamp selector can only be anchored on a message it
+        // sent, so lines read back from the log files are no use. With none to anchor on the
+        // request below falls through to LATEST, whose reply carries msgids to page from.
+        val needsMsgId = !rt.client.acceptsHistoryTimestamps()
+        val usable = { m: UiMessage -> m.from != null && (!needsMsgId || m.msgId != null) }
+        val oldest = historyAnchors[key]?.takeIf(usable) ?: buf.messages.firstOrNull(usable)
+        val anchorTs = oldest?.let {
+            runCatching { ChatHistoryController.anchorTimestamp(it.timeMs) }.getOrNull()
         }
 
-        // A server that holds nothing older answers with an empty batch, which closes
-        // straight away; this watchdog is for the case where no batch arrives at all.
-        armHistoryBackfillWatchdog(key)
+        // Before sending: the send suspends and a reply can arrive before it resumes.
+        if (!chatHistory.begin(key, BackfillKind.OLDER)) return
+        setHistoryFlags(key, loading = true, exhausted = false)
 
         viewModelScope.launch {
-            val sent = runCatching {
-                rt.client.requestChatHistoryBefore(
-                    target = bufferName,
-                    beforeTimestamp = anchorTs,
-                    beforeMsgId = oldest.msgId,
-                    limit = HISTORY_BACKFILL_PAGE,
-                )
+            val request = runCatching {
+                if (oldest == null) {
+                    rt.client.requestChatHistoryLatest(bufferName, ChatHistoryController.PAGE_SIZE)
+                } else {
+                    rt.client.requestChatHistoryBefore(
+                        target = bufferName,
+                        beforeTimestamp = anchorTs,
+                        beforeMsgId = oldest.msgId,
+                        limit = ChatHistoryController.PAGE_SIZE,
+                    )
+                }
+            }.getOrNull()
+
+            if (request == null) {
+                // Nothing went out, so nothing comes back. Abandoned, not exhausted.
+                chatHistory.finish(key, BackfillOutcome.ABANDONED)
+                return@launch
             }
-            if (sent.isFailure) finishHistoryBackfill(key)
+            chatHistory.attach(key, request.label, request.limit)
         }
     }
 
     /**
-     * (Re)start the watchdog that closes [key]'s backfill if the reply stalls.
+     * Fetch the messages either side of [msgId] in [key].
      *
-     * Armed when the request goes out and restarted when the reply batch opens, because
-     * the timer otherwise measures round-trip plus transfer: a slow link can deliver a
-     * full page over more than [HISTORY_BACKFILL_TIMEOUT_MS], and firing mid-batch
-     * releases the collector, so every message still in flight falls through to the
-     * normal append path and lands at the bottom of the buffer instead of above the
-     * scrollback.
+     * For a reply whose parent is older than the loaded window: the quote has nothing to
+     * point at, so the surrounding stretch is fetched and merged into place. Registered as a
+     * request in its own right so it does not disturb where paging had reached.
      */
-    private fun armHistoryBackfillWatchdog(key: String) {
-        historyBackfillTimeouts.remove(key)?.cancel()
-        historyBackfillTimeouts[key] = viewModelScope.launch {
-            delay(HISTORY_BACKFILL_TIMEOUT_MS)
-            finishHistoryBackfill(key)
+    fun loadMessageContext(key: String, msgId: String) {
+        val st = _state.value
+        val buf = st.buffers[key] ?: return
+        if (buf.historyLoading || chatHistory.isBackfilling(key)) return
+
+        val (netId, bufferName) = splitKey(key)
+        if (isPseudoBuffer(bufferName) || isDccChatBufferName(bufferName)) return
+        val rt = runtimes[netId] ?: return
+        if (!rt.client.supportsChatHistory()) return
+
+        if (!chatHistory.begin(key, BackfillKind.CONTEXT)) return
+        setHistoryFlags(key, loading = true, exhausted = buf.historyExhausted)
+
+        viewModelScope.launch {
+            val request = runCatching {
+                rt.client.requestChatHistoryAround(
+                    bufferName,
+                    msgId = msgId,
+                    limit = ChatHistoryController.PAGE_SIZE,
+                )
+            }.getOrNull()
+            if (request == null) {
+                chatHistory.finish(key, BackfillOutcome.ABANDONED)
+                return@launch
+            }
+            chatHistory.attach(key, request.label, request.limit)
+        }
+    }
+
+    /** Set [key]'s history flags in one update. */
+    private fun setHistoryFlags(key: String, loading: Boolean, exhausted: Boolean) {
+        _state.update { st ->
+            val buf = st.buffers[key] ?: return@update st
+            if (buf.historyLoading == loading && buf.historyExhausted == exhausted) return@update st
+            st.copy(
+                buffers = st.buffers + (key to buf.copy(
+                    historyLoading = loading,
+                    historyExhausted = exhausted,
+                ))
+            )
         }
     }
 
     /**
-     * Append the chathistory marker for [bufferKey] if one is pending.
-     *
-     * The divider is normally emitted by [append] just before the first live message after a
-     * catch-up. When nothing is said afterwards that never happens, so this closes the batch
-     * with the divider as the last line instead.
+     * Merge a completed backfill into its buffer. Ordering and deduplication are the log's
+     * job. A page that deduplicates away is not exhaustion: the anchor pointed into a range
+     * the disk logs already covered, and the next request anchors above it.
      */
-    private fun flushChathistoryMarker(bufferKey: String) {
-        val pending = pendingChathistoryMarkerMs[bufferKey] ?: return
-        val armedUntil = chathistoryMarkerArmedUntilMs[bufferKey] ?: 0L
-        if (armedUntil < System.currentTimeMillis()) {
-            pendingChathistoryMarkerMs.remove(bufferKey)
-            return
+    private fun onBackfillFinished(result: BackfillResult) {
+        val key = result.bufferKey
+        _state.update { st ->
+            val buf = st.buffers[key] ?: return@update st
+            val baseCap = st.settings.maxScrollbackLines.coerceIn(100, 5000)
+            // Recognised on arrival: identity recorded, not shown.
+            // Remember where this page started so the next request pages on from it, whether
+            // or not any of it was new to the buffer. Only for a request that was walking
+            // backwards: fetching a specific stretch says nothing about where paging is.
+            if (result.kind == BackfillKind.OLDER) {
+                (result.messages + result.suppressed)
+                    .filterNot { it.id in result.contextIds }
+                    .minByOrNull { it.timeMs }
+                    ?.let { historyAnchors[key] = it }
+            }
+
+            val base = buf.log.remembering(result.suppressed)
+            val merged = base.merge(
+                incoming = result.messages,
+                baseCap = baseCap,
+                maxExtra = ChatHistoryController.MAX_BACKFILL_EXTRA,
+                growCapacity = true,
+            )
+            // Nothing more to gain once the buffer has grown as far as it may.
+            val capped = merged.log.extraCapacity >= ChatHistoryController.MAX_BACKFILL_EXTRA
+            st.copy(
+                buffers = st.buffers + (key to buf.copy(
+                    log = merged.log,
+                    historyLoading = false,
+                    historyExhausted =
+                        if (result.kind == BackfillKind.OLDER) result.exhausted || capped
+                        else buf.historyExhausted,
+                ))
+            )
         }
-        pendingChathistoryMarkerMs.remove(bufferKey)
+        flushTrailingDivider(key)
+    }
+
+    /**
+     * Draw the history divider as the last line of a replay that nothing followed, since the
+     * usual trigger is the first live message after a catch-up.
+     */
+    private fun flushTrailingDivider(bufferKey: String) {
+        val pending = chatHistory.claimTrailingDivider(bufferKey) ?: return
+        _state.update { st ->
+            val buf = st.buffers[bufferKey] ?: return@update st
+            if (buf.messages.isEmpty()) return@update st
+            // After the last replayed line: a catch-up reply arrives once the join, topic
+            // and member list are already printed.
+            val lastReplay = buf.messages.indexOfLast { it.fromHistory }
+            if (lastReplay < 0) return@update st
+            st.copy(
+                buffers = st.buffers + (bufferKey to buf.copy(
+                    log = buf.log.insertDividerAt(lastReplay + 1, historyDivider(pending))
+                ))
+            )
+        }
+    }
+
+    /** Build the "chat history" separator line for a boundary at [newestReplayMs]. */
+    private fun historyDivider(newestReplayMs: Long): UiMessage {
         val newestStr = runCatching {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(ZoneId.systemDefault())
-                .format(Instant.ofEpochMilli(pending))
-        }.getOrElse { java.util.Date(pending).toString() }
-        val marker = UiMessage(
+                .format(Instant.ofEpochMilli(newestReplayMs))
+        }.getOrElse { java.util.Date(newestReplayMs).toString() }
+        return UiMessage(
             id = nextUiMsgId.getAndIncrement(),
-            timeMs = pending + 1L,
+            timeMs = newestReplayMs + 1L,
             from = null,
             text = appContext.getString(R.string.vm_history_divider, newestStr),
         )
-        _state.update { st ->
-            val buf = st.buffers[bufferKey] ?: return@update st
-            // Nothing to divide if the batch delivered nothing.
-            if (buf.messages.isEmpty()) return@update st
-            val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000) + buf.extraScrollback
-            val merged = (buf.messages + marker).takeLast(maxLines).toPersistentList()
-            st.copy(buffers = st.buffers + (bufferKey to buf.copy(messages = merged)))
+    }
+
+    /**
+     * True when [key]'s network negotiated chathistory, so a backfill request would actually
+     * be answered. Read by the chat view to decide whether to offer the control at all.
+     */
+    fun supportsChatHistory(key: String?): Boolean {
+        if (key == null) return false
+        val (netId, bufferName) = splitKey(key)
+        if (isPseudoBuffer(bufferName) || isDccChatBufferName(bufferName)) return false
+        return runtimes[netId]?.client?.supportsChatHistory() == true
+    }
+
+    /**
+     * Ask for the messages [key] gained while we were disconnected (CHATHISTORY AFTER).
+     *
+     * Anchored on the newest message held, so the reply carries only the gap.
+     *
+     * Not a backfill: its messages belong at the bottom, and collecting them would stop the
+     * divider arming. Registered with the controller so its batch cannot close a backfill.
+     */
+    private fun requestHistoryCatchup(
+        netId: String,
+        key: String,
+        target: String,
+        round: Int = 0,
+        claimSlot: Boolean = true,
+    ) {
+        val rt = runtimes[netId] ?: return
+        if (!rt.client.supportsChatHistory()) return
+        if (claimSlot &&
+            !chatHistory.claimCatchup(netId, key, ChatHistoryController.MAX_CATCHUP_TARGETS)
+        ) return
+
+        val buf = _state.value.buffers[key]
+        // A server that takes no timestamp selector can only be anchored on a message it
+        // sent, since only those carry a msgid.
+        val needsMsgId = !rt.client.acceptsHistoryTimestamps()
+        val usable = { m: UiMessage -> m.from != null && (!needsMsgId || m.msgId != null) }
+
+        // The near end of the gap: the newest message already held. By timestamp, not list
+        // position, since disk logs and session lines are interleaved.
+        val from = buf?.messages?.filter(usable)?.maxByOrNull { it.timeMs }
+        // The far end: the oldest message this session saw arrive live, which bounds the
+        // gap on both sides. Absent until traffic arrives, which is usually a moment after
+        // connecting, and absent for a buffer whose catch-up beat the first message to it.
+        val to = sessionFirstLive[key]
+            ?.takeIf { usable(it) && from != null && it.timeMs > from.timeMs }
+
+        catchupAnchorMs[key] = from?.timeMs ?: 0L
+        val fromTs = from?.let { runCatching { ChatHistoryController.anchorTimestamp(it.timeMs) }.getOrNull() }
+        val toTs = to?.let { runCatching { ChatHistoryController.anchorTimestamp(it.timeMs) }.getOrNull() }
+        val limit = ChatHistoryController.PAGE_SIZE
+
+        viewModelScope.launch {
+            val request = runCatching {
+                when {
+                    // Nothing to anchor on, so ask for the most recent page instead.
+                    from == null -> rt.client.requestChatHistoryLatest(target, limit)
+                    // Bounded at both ends, which is what the spec recommends for a gap.
+                    to != null -> rt.client.requestChatHistoryBetween(
+                        target = target,
+                        fromTimestamp = fromTs,
+                        fromMsgId = from.msgId,
+                        toTimestamp = toTs,
+                        toMsgId = to.msgId,
+                        limit = limit,
+                    )
+                    else -> rt.client.requestChatHistoryAfter(target, fromTs, from.msgId, limit)
+                }
+            }.getOrNull()
+            if (request != null) {
+                chatHistory.expectCatchup(key, target, request.label, request.limit, round)
+            }
         }
     }
 
     /**
-     * Merge a completed backfill into the front of [key]'s scrollback.
+     * Decide whether a catch-up page closed the gap it was filling, and ask for the next one
+     * when it did not.
+     *
+     * A page shorter than the request, or one the server marked as the end, means everything
+     * that was missing has arrived. A full page means there is more: AFTER and BETWEEN both
+     * return the messages nearest the near end, so a long absence from a busy channel needs
+     * several. The run is capped rather than left to walk as far as it must, and what is
+     * still missing is marked in the buffer instead of being dropped silently.
      */
-    private fun finishHistoryBackfill(key: String) {
-        historyBackfillTimeouts.remove(key)?.cancel()
-        val collected = historyBackfills.remove(key) ?: return
+    private fun onCatchupPage(page: CatchupPage) {
+        if (page.complete || page.lines < page.requested) {
+            clearHistoryGap(page.bufferKey)
+            return
+        }
+        // A full page that left the buffer's newest message where it was means the requests
+        // are going in circles, which a server that answers BETWEEN from the far end does.
+        val newest = _state.value.buffers[page.bufferKey]?.messages
+            ?.filter { it.from != null }?.maxOfOrNull { it.timeMs } ?: 0L
+        val advanced = newest > (catchupAnchorMs[page.bufferKey] ?: 0L)
+        if (!advanced || page.round + 1 >= ChatHistoryController.MAX_CATCHUP_ROUNDS) {
+            markHistoryGap(page.bufferKey)
+            return
+        }
+        val (netId, _) = splitKey(page.bufferKey)
+        requestHistoryCatchup(netId, page.bufferKey, page.target, page.round + 1, claimSlot = false)
+    }
 
+    /** Where each buffer's last catch-up request was anchored, to tell progress from a loop. */
+    private val catchupAnchorMs: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
+
+    /** The line marking each buffer's unfilled gap, so it can be taken out again. */
+    private val gapMarkers: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
+
+    /** Say in the buffer that messages between what it holds and the live conversation are missing. */
+    private fun markHistoryGap(key: String) {
         _state.update { st ->
             val buf = st.buffers[key] ?: return@update st
-            val exhausted = buf.copy(historyLoading = false, historyExhausted = true)
-
-            if (collected.isEmpty()) {
-                return@update st.copy(buffers = st.buffers + (key to exhausted))
-            }
-
-            // Drop anything already on screen. msgid first, falling back to a normalised
-            // time|sender|text signature so a server without message-ids still dedupes a
-            // backfill against lines already loaded from the disk logs.
-            val shownFingerprints = buildSet {
-                for (m in buf.messages) {
-                    val sec = m.timeMs / 1000
-                    val text = dedupText(m.text)
-                    for (delta in DEDUP_WINDOW_SECONDS) add(dedupSigAt(sec + delta, m.from, text))
-                }
-            }
-            val fresh = collected
-                .filter { m ->
-                    val byId = m.msgId != null && buf.seenMsgIds.contains(m.msgId)
-                    val byFp = shownFingerprints.contains(dedupSig(m.timeMs, m.from, m.text))
-                    !byId && !byFp
-                }
-                .distinctBy { it.msgId ?: "${it.timeMs}|${it.from}|${it.text.hashCode()}" }
-                .sortedWith(compareBy<UiMessage> { it.timeMs }.thenBy { it.id })
-
-            if (fresh.isEmpty()) {
-                return@update st.copy(buffers = st.buffers + (key to exhausted))
-            }
-
-            val extra = (buf.extraScrollback + fresh.size).coerceAtMost(MAX_BACKFILL_EXTRA)
-            val cap = st.settings.maxScrollbackLines.coerceIn(100, 5000) + extra
-            val merged = (fresh + buf.messages).takeLast(cap).toPersistentList()
-
-            val newBuf = buf.copy(
-                messages = merged,
-                seenMsgIds = merged.mapNotNull { it.msgId }.toPersistentSet(),
-                seenHistoryFingerprints = merged.mapNotNull { m ->
-                    if (m.from != null) "${m.timeMs}|${m.from}|${m.text.hashCode()}" else null
-                }.toPersistentSet(),
-                historyLoading = false,
-                historyExhausted = false,
-                extraScrollback = extra,
+            if (buf.historyGapOpen) return@update st
+            val marker = UiMessage(
+                id = nextUiMsgId.getAndIncrement(),
+                timeMs = buf.messages.lastOrNull()?.timeMs ?: System.currentTimeMillis(),
+                from = null,
+                text = appContext.getString(R.string.vm_history_gap),
             )
-            st.copy(buffers = st.buffers + (key to newBuf))
+            gapMarkers[key] = marker.id
+            st.copy(
+                buffers = st.buffers + (key to buf.copy(
+                    log = buf.log.insertDividerAt(buf.messages.size, marker),
+                    historyGapOpen = true,
+                ))
+            )
+        }
+    }
+
+    /** Take the gap marker back out, for a catch-up that reached the live conversation. */
+    private fun clearHistoryGap(key: String) {
+        val markerId = gapMarkers.remove(key)
+        _state.update { st ->
+            val buf = st.buffers[key] ?: return@update st
+            if (!buf.historyGapOpen) return@update st
+            val log = if (markerId == null) buf.log
+            else buf.log.retaining(buf.messages.map { it.id }.filterNot { it == markerId }.toSet())
+            st.copy(buffers = st.buffers + (key to buf.copy(log = log, historyGapOpen = false)))
+        }
+    }
+
+    /**
+     * Pick up a catch-up that stopped with messages still missing. Called when the buffer is
+     * opened, so the gap fills as the user reaches the conversations they care about rather
+     * than all at once on connect.
+     */
+    private fun resumeHistoryGap(key: String) {
+        val buf = _state.value.buffers[key] ?: return
+        if (!buf.historyGapOpen) return
+        val (netId, bufferName) = splitKey(key)
+        if (isPseudoBuffer(bufferName) || isDccChatBufferName(bufferName)) return
+        requestHistoryCatchup(netId, key, bufferName, round = 0, claimSlot = false)
+    }
+
+    /**
+     * Drop this network's history bookkeeping on registration. "Exhausted" described the
+     * previous connection, so buffers get another chance rather than hiding the control.
+     */
+    private fun clearHistoryStateFor(netId: String) {
+        chatHistory.forgetNetwork(netId)
+        val prefix = "$netId::"
+        historyAnchors.keys.filter { it.startsWith(prefix) }.toList().forEach { historyAnchors.remove(it) }
+        sessionFirstLive.keys.filter { it.startsWith(prefix) }.toList().forEach { sessionFirstLive.remove(it) }
+        catchupAnchorMs.keys.filter { it.startsWith(prefix) }.toList().forEach { catchupAnchorMs.remove(it) }
+        _state.update { st ->
+            var changed = false
+            var bufs = st.buffers
+            for ((k, b) in st.buffers) {
+                if (!k.startsWith(prefix)) continue
+                if (!b.historyLoading && !b.historyExhausted) continue
+                bufs = bufs + (k to b.copy(historyLoading = false, historyExhausted = false))
+                changed = true
+            }
+            if (changed) st.copy(buffers = bufs) else st
         }
     }
 
@@ -10355,6 +10813,17 @@ if (code == "442") {
         viewModelScope.launch {
             runCatching { client.webPushRegister(sub.endpoint, sub.auth, sub.p256dh) }
         }
+    }
+
+    /**
+     * Hand the newly issued push endpoint to every connected server that wants one.
+     *
+     * The distributor answers [WebPushManager.register] asynchronously, so the endpoint does
+     * not exist yet when the request is made. Called by the push service when it arrives.
+     */
+    fun onPushEndpointChanged() {
+        if (!_state.value.settings.webPushEnabled) return
+        for (netId in runtimes.keys.toList()) maybeRegisterWebPush(netId)
     }
 
     /**
@@ -10418,93 +10887,31 @@ if (code == "442") {
     }
 
     /**
-     * True when [key]'s network negotiated chathistory, so a backfill request would
-     * actually be answered. Read by the chat view to decide whether to offer the
-     * "load older messages" control at all.
-     */
-    fun supportsChatHistory(key: String?): Boolean {
-        if (key == null) return false
-        val (netId, bufferName) = splitKey(key)
-        if (bufferName == "*server*" || isDccChatBufferName(bufferName)) return false
-        return runtimes[netId]?.client?.supportsChatHistory() == true
-    }
-
-    /**
-     * Ask for the messages [key] gained while we were disconnected (CHATHISTORY AFTER).
+     * Move every piece of per-buffer bookkeeping from [from] to [to].
      *
-     * Anchored on the newest message we already hold, so the reply carries only the gap
-     * rather than a fixed replay window we would then have to dedupe.
+     * A conversation is keyed by the other person's nick, so their changing nick renames the
+     * buffer. The message list moves with the buffer; everything keyed by the same string
+     * has to move with it.
      */
-    private fun requestHistoryCatchup(netId: String, key: String, target: String) {
-        val rt = runtimes[netId] ?: return
-        if (!rt.client.supportsChatHistory()) return
-        val prefix = "$netId::"
-        if (historyCatchupRequested.count { it.startsWith(prefix) } >= MAX_CATCHUP_TARGETS) return
-        if (!historyCatchupRequested.add(key)) return
-
-        val buf = _state.value.buffers[key]
-        // By timestamp, not by list position. Assembled as scrollback + session lines.
-        val newest = buf?.messages?.filter { it.from != null }?.maxByOrNull { it.timeMs }
-        // With nothing on record locally there is no gap to describe, so fall back to the
-        // server's own idea of recent rather than inventing an anchor.
-        val afterTs = newest?.let {
-            runCatching { historyAnchorTimestamp(it.timeMs) }.getOrNull()
+    private fun renameBufferState(from: String, to: String) {
+        if (from == to) return
+        draftStore.rename(from, to)
+        chatHistory.rename(from, to)
+        if (scrollbackRequested.remove(from)) scrollbackRequested.add(to)
+        scrollbackLoadStartedAtMs.remove(from)?.let { scrollbackLoadStartedAtMs[to] = it }
+        lastLoggedTimeMs.remove(from)?.let { lastLoggedTimeMs.merge(to, it, ::maxOf) }
+        recentSelfSends.remove(from)?.let { moving ->
+            // Merge: both keys can hold pending echoes if messaged under each nick.
+            val dq = recentSelfSends.getOrPut(to) { ArrayDeque(16) }
+            synchronized(dq) { moving.forEach { dq.addLast(it) } }
         }
-
-        // Deliberately NOT collected into historyBackfills. That collector returns before
-        // append's pendingChathistoryMarkerMs bookkeeping, so routing catch-up through it stops
-        // the chat-history divider ever arming. Ordering is handled by anchoring correctly
-        // above rather than by re-sorting afterwards.
-        viewModelScope.launch {
-            runCatching {
-                if (afterTs != null) {
-                    rt.client.requestChatHistoryAfter(target, afterTs, HISTORY_BACKFILL_PAGE)
-                } else {
-                    rt.client.requestChatHistoryLatest(target, HISTORY_BACKFILL_PAGE)
-                }
+        recentJoinAtMs.remove(from)?.let { recentJoinAtMs[to] = it }
+        pendingCloseAfterPart.remove(from).let { if (it) pendingCloseAfterPart.add(to) }
+        // Typing jobs are keyed "$bufferKey/$nick", so they are matched by prefix.
+        receivedTypingExpiryJobs.keys.filter { it.startsWith("$from/") }.toList().forEach { k ->
+            receivedTypingExpiryJobs.remove(k)?.let { job ->
+                receivedTypingExpiryJobs["$to/${k.substringAfter("$from/")}"] = job
             }
-        }
-    }
-
-    /**
-     * Drop this network's backfill bookkeeping.
-     *
-     * Called on each registration. An in-flight request cannot be answered across a
-     * reconnect, and "exhausted" was a statement about the previous connection: the
-     * server may well hold more history than it was willing or able to give us then, so
-     * the buffers get another chance rather than permanently hiding the control.
-     */
-    private fun clearHistoryStateFor(netId: String) {
-        val prefix = "$netId::"
-        for (k in historyBackfills.keys.filter { it.startsWith(prefix) }) {
-            historyBackfills.remove(k)
-            historyBackfillTimeouts.remove(k)?.cancel()
-        }
-        historyCatchupRequested.removeAll { it.startsWith(prefix) }
-        _state.update { st ->
-            var changed = false
-            var bufs = st.buffers
-            for ((k, b) in st.buffers) {
-                if (!k.startsWith(prefix)) continue
-                if (!b.historyLoading && !b.historyExhausted) continue
-                bufs = bufs + (k to b.copy(historyLoading = false, historyExhausted = false))
-                changed = true
-            }
-            if (changed) st.copy(buffers = bufs) else st
-        }
-    }
-
-    /**
-     * Resolve a CHATHISTORY batch target to the buffer key of an in-flight backfill.
-     *
-     * The server echoes the target as it knows it, which can differ in case from the
-     * buffer name we hold, so the match is case-folded per the network's CASEMAPPING.
-     */
-    private fun backfillKeyForTarget(netId: String, target: String): String? {
-        val fold = casefoldText(netId, target)
-        return historyBackfills.keys.firstOrNull { k ->
-            val (nid, bn) = splitKey(k)
-            nid == netId && casefoldText(netId, bn) == fold
         }
     }
 
@@ -10517,10 +10924,12 @@ if (code == "442") {
 
         scrollbackRequested.remove(key)
         scrollbackLoadStartedAtMs.remove(key)
-        pendingChathistoryMarkerMs.remove(key)
-        historyBackfills.remove(key)
-        historyBackfillTimeouts.remove(key)?.cancel()
-        historyCatchupRequested.remove(key)
+        lastLoggedTimeMs.remove(key)
+        historyAnchors.remove(key)
+        sessionFirstLive.remove(key)
+        catchupAnchorMs.remove(key)
+        gapMarkers.remove(key)
+        chatHistory.forget(key)
         draftStore.clear(key)
         run {
             val (netId, bufferName) = splitKey(key)
@@ -10768,6 +11177,7 @@ if (code == "442") {
             from = from,
             text = text,
             isAction = isAction,
+            fromLog = true,
         )
     }
 
@@ -10831,6 +11241,8 @@ if (code == "442") {
          * messages skip that path entirely.
          */
         isHistory: Boolean = false,
+        /** draft/chathistory-context: volunteered alongside the history that was asked for. */
+        isChathistoryContext: Boolean = false,
         /**
          * E2E scheme the wire payload arrived under. Propagated into the resulting
          * UiMessage so the chat renderer can draw a per-scheme padlock icon. Null
@@ -10854,6 +11266,7 @@ if (code == "442") {
         val msg = UiMessage(
             id = nextUiMsgId.getAndIncrement(),
             timeMs = ts,
+            fromHistory = isHistory,
             from = from,
             text = text,
             isAction = isAction,
@@ -10867,208 +11280,69 @@ if (code == "442") {
             fromBot = fromBot,
         )
 
-        // Explicit backfill: while a CHATHISTORY BEFORE reply is being received for this
-        // buffer, its messages are older than everything on screen, so appending them to
-        // the end would both misorder them and put them first in line for the front trim.
-        // They are collected instead and spliced in above the scrollback by
-        // [finishHistoryBackfill] when the reply batch closes.
-        run {
-            val backfill = historyBackfills[bufferKey] ?: return@run
-            val oldestShown = _state.value.buffers[bufferKey]?.messages?.firstOrNull()?.timeMs
-            val belongsAbove = isHistory || (oldestShown != null && ts < oldestShown)
-            if (!belongsAbove) return@run
-            if (backfill.size < MAX_BACKFILL_EXTRA) backfill.add(msg)
-            return
-        }
+        val origin = if (isHistory) MessageOrigin.REPLAY else MessageOrigin.LIVE
 
-        // Content-fingerprint dedup. `time=` is server-stamped on replayed messages so two
-        // replays of the same line produce identical fingerprints. The hashCode of text is
-        // sufficient — these are best-effort dedup keys, not a security boundary, and the
-        // false-collision odds (same epoch ms, same nick, same text-hashCode, same buffer,
-        // different real text) are vanishingly small in practice.
-        //
-        // We compute this for every message with a sender, NOT just messages we've classified
-        // as history. Reason: bouncer replays don't always carry markers we recognise — ZNC's
-        // legacy `*playback` module dumps stamped lines without a BATCH wrapper, and our
-        // isHistory heuristic returns false for them when [historyExpectUntil] hasn't been set
-        // (which it isn't, on a fresh JOIN before our own CHATHISTORY request fires). Without
-        // a fingerprint on that first delivery, the subsequent CHATHISTORY reply for the same
-        // line — which IS classified as history — has nothing to match against, and the user
-        // sees the same `[03:13:52] <nick> message` twice.
-        //
-        // Live messages register a fingerprint too. They effectively never collide because the
-        // local-now `ts` has millisecond resolution and human typing can't produce two messages
-        // in the same millisecond.
-        //
-        // System lines (from == null) are fingerprinted too. draft/event-playback replays
-        // JOIN/PART/QUIT through CHATHISTORY, and those render as system lines, so gating
-        // this on `from != null` left every replayed join/part/quit with nothing to match
-        // against and the user saw each one twice. The set is per-buffer
-        // (UiBuffer.seenHistoryFingerprints), so a QUIT fanned out to several channels at
-        // once still appears in all of them.
-        val historyFingerprint: String? = "$ts|${from ?: "*"}|${text.hashCode()}"
-
-        // Self-echo replay dedup. The fingerprint above keys on the timestamp, which
-        // works for replay-vs-replay (both carry the server `time=`) but NOT for
-        // local-echo-vs-replay: our own outgoing message was echoed locally with the
-        // device clock, while the bouncer replays it on reconnect with the server
-        // clock, so the fingerprints differ and the replay slips through as a visible
-        // duplicate (the classic "my last few messages appear twice after reconnect"
-        // bug). We catch it with a content+sender match against the recentSelfSends
-        // tracker, independent of timestamp. Only applied to history/replay lines
-        // attributed to our own nick; a live message or a message from anyone else is
-        // never affected. Computed outside the _state.update block because it consumes
-        // a tracker entry (a side effect that must not run on a CAS retry).
+        // Self-echo replay dedup. Signatures key on the timestamp, so a local echo (device
+        // clock) never matches its own replay (server clock). Matched on content and sender
+        // instead. Outside the state update: a match consumes a tracker entry.
         val (selfNetId, _) = splitKey(bufferKey)
         val myNick = _state.value.connections[selfNetId]?.myNick ?: runtimes[selfNetId]?.myNick
-        // Accept the current nick OR any nick we've recently held, after a reconnect onto a
-        // fallback nick, our chathistory-replayed lines still carry the nick we sent them under.
         val isFromMe = from != null && (
             (myNick != null && from.equals(myNick, ignoreCase = true)) || isRecentOwnNick(selfNetId, from)
         )
         val isSelfEchoReplayDuplicate =
             isFromMe && isHistory && consumeSelfSendIfMatch(bufferKey, text, isAction)
 
-        // Chathistory marker: when the FIRST live message for this buffer arrives after one
-        // or more isHistory=true messages, emit a "── Chat history • Last message: <ts> ──"
-        // separator just before it. Mirrors the scrollback marker (which marks the boundary
-        // between disk logs and the current session) — same visual cue at both kinds of
-        // catch-up boundary.
-        //
-        // The 5 s gap requirement avoids false-firing during the rare race where a live PRIVMSG
-        // arrives mid-replay. In that case the live ts is essentially the same as the latest
-        // history ts and inserting a marker would put the rest of the still-arriving history
-        // *after* the boundary — confusing.
-        //
-        // Computed outside the state.update block so the read of pendingChathistoryMarkerMs
-        // doesn't get re-run on a state.update retry. The map is cleared lazily inside the
-        // update only if we actually emit the marker.
-        val markerToEmit: UiMessage? = run {
-            if (isHistory) return@run null
-            val pending = pendingChathistoryMarkerMs[bufferKey] ?: return@run null
-            // Only emit when the buffer is currently in its "catch-up" window — armed by
-            // a self-JOIN or by Connected (for bouncer-playback PMs). Outside that window,
-            // a pending history timestamp is from an unrelated catch-up that already
-            // happened and should not insert a marker into the user's typing flow.
-            val armedUntil = chathistoryMarkerArmedUntilMs[bufferKey] ?: 0L
-            val nowMs = System.currentTimeMillis()
-            if (armedUntil < nowMs) {
-                // Window expired: discard the stale pending timestamp so a future arm
-                // (re-join, reconnect) starts clean.
-                pendingChathistoryMarkerMs.remove(bufferKey)
-                return@run null
-            }
-            if (ts <= pending + 5_000L) return@run null
-            val newestStr = runCatching {
-                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                    .withZone(ZoneId.systemDefault())
-                    .format(Instant.ofEpochMilli(pending))
-            }.getOrElse { java.util.Date(pending).toString() }
-            UiMessage(
-                id = nextUiMsgId.getAndIncrement(),
-                timeMs = (pending + 1L).coerceAtMost(ts - 1L),
-                from = null,
-                text = appContext.getString(R.string.vm_history_divider, newestStr),
-            )
-        }
+        // A backfill captures replayed messages so the page merges at once; they take no
+        // part in unread counts, logging or notifications. After the self-echo check, not
+        // before: a page reaching back to the user's own recent lines needs the tracker.
+        // Suppressed messages still count toward the page length.
+        if (isHistory && chatHistory.collect(bufferKey, msg, isSelfEchoReplayDuplicate, isChathistoryContext)) return
 
-        // Atomic update, then read the committed state for logging/notifications.
         var msgWasDuplicate = false
         _state.update { st: UiState ->
+            msgWasDuplicate = false
             val buf = st.buffers[bufferKey] ?: UiBuffer(bufferKey)
+            val cap = st.settings.maxScrollbackLines.coerceIn(100, 5000)
 
-            // Self-echo replay dedup (computed above, outside the update so the tracker
-            // consume runs exactly once). A history line that matched a message we
-            // already showed as a local echo is dropped here.
-            if (isSelfEchoReplayDuplicate) {
+            val result = buf.log.insert(
+                msg = msg,
+                origin = origin,
+                cap = cap,
+                knownDuplicate = isSelfEchoReplayDuplicate,
+            )
+
+            // A rejected message leaves its identity behind for a third-route copy.
+            if (result is BufferLog.Insert.Duplicate) {
                 msgWasDuplicate = true
-                return@update st
+                if (result.log === buf.log) return@update st
+                return@update st.copy(buffers = st.buffers + (bufferKey to buf.copy(log = result.log)))
             }
 
-            // Deduplicate by msgId using the O(1) seenMsgIds HashSet
-            if (msgId != null && buf.seenMsgIds.contains(msgId)) {
-                msgWasDuplicate = true
-                return@update st
-            }
-            // Fallback content-fingerprint dedup for history messages without msgid.
-            // Catches the ZNC *playback + chathistory overlap that the msgid path misses.
-            if (historyFingerprint != null && buf.seenHistoryFingerprints.contains(historyFingerprint)) {
-                msgWasDuplicate = true
-                return@update st
-            }
 
-            // A buffer is only "selected" (suppressing unread tracking) when the user can
-            // actually see it: right screen, right buffer, AND the app is in the foreground.
-            // Without the foreground check, messages arriving while the app is backgrounded
-            // mark themselves as read and advance lastReadTimestamp, so the unread bar never
-            // appears when the user returns - even though a notification fired for the message.
+            // A buffer only counts as seen when the user can actually see it: right screen,
+            // right buffer, and the app in the foreground. Without the foreground check a
+            // message arriving in the background marks itself read and the unread bar never
+            // appears, even though a notification fired for it.
             val isSelected = (bufferKey == st.selectedBuffer
                 && st.screen == AppScreen.CHAT
                 && AppVisibility.isForeground)
             val unreadInc = if (!isSelected && !isLocal) 1 else 0
             val highlightInc = if (!isSelected && effectiveHighlight && !isLocal) 1 else 0
 
-            // Backfilled buffers keep the extra depth the user explicitly asked for, so an
-            // incoming message doesn't trim away the older history they just loaded.
-            val maxLines = st.settings.maxScrollbackLines.coerceIn(100, 5000) + buf.extraScrollback
-            // Splice in the chathistory marker (if any) before the new live message, in a
-            // single state update. The marker is a system line (from = null) and does not
-            // affect dedup — it is inserted directly rather than going through this path.
-            val toAppend: List<UiMessage> = if (markerToEmit != null) listOf(markerToEmit, msg) else listOf(msg)
-            // addAll on a PersistentList is O(log n) with structural sharing rather than the
-            // O(n) copy that `list + list` performed. The trim still drops from the front to
-            // bound scrollback; front removal can't be done in better than O(retained) on an
-            // immutable list, so on trim we rebuild the tail as a persistent list (only when the
-            // buffer is over the cap — the steady-state full-buffer case).
-            val combined: PersistentList<UiMessage> = buf.messages.addingAll(toAppend)
-            val newMessages: PersistentList<UiMessage> =
-                if (combined.size > maxLines) combined.subList(combined.size - maxLines, combined.size).toPersistentList()
-                else combined
-
-            // Maintain seenMsgIds. On the common non-trim path we .add() the new id —
-            // O(log n) with structural sharing on a PersistentSet, versus the previous
-            // O(n) full-set copy (`set + element` allocated a fresh HashSet every message,
-            // making a 5000-line history replay O(n²)). On trim we still rebuild from the
-            // retained messages so evicted ids don't linger; semantics are unchanged.
-            val newSeenMsgIds: PersistentSet<String> = when {
-                msgId == null && combined.size <= maxLines -> buf.seenMsgIds
-                msgId != null && combined.size <= maxLines -> buf.seenMsgIds.adding(msgId)
-                else -> newMessages.mapNotNull { it.msgId }.toPersistentSet()
-            }
-
-            // Content fingerprints: only added when we computed one for this message; rebuilt
-            // from scratch on trim. The set is bounded by maxLines (one entry per retained
-            // message with a sender) and is cleared whenever the buffer is.
-            val newSeenHistoryFingerprints: PersistentSet<String> = when {
-                historyFingerprint == null && combined.size <= maxLines -> buf.seenHistoryFingerprints
-                historyFingerprint != null && combined.size <= maxLines -> buf.seenHistoryFingerprints.adding(historyFingerprint)
-                else -> {
-                    // After a trim we recompute fingerprints for the retained messages. The gate
-                    // here mirrors the gate at the top of [append] — every message with a sender
-                    // gets a fingerprint, so a future replay of any retained line dedupes against
-                    // it regardless of which path delivered the original.
-                    newMessages.mapNotNull { m ->
-                        if (m.from != null) "${m.timeMs}|${m.from}|${m.text.hashCode()}"
-                        else null
-                    }.toPersistentSet()
-                }
-            }
-
-            // Advance lastReadTimestamp for every message on the selected buffer so the
-            // unread separator never appears for messages the user is actively watching.
             val newLastRead = if (isSelected)
                 java.time.Instant.ofEpochMilli(ts + 1L).toString()
             else
                 buf.lastReadTimestamp
-            val newBuf = buf.copy(
-                messages = newMessages,
-                seenMsgIds = newSeenMsgIds,
-                seenHistoryFingerprints = newSeenHistoryFingerprints,
-                unread = buf.unread + unreadInc,
-                highlights = buf.highlights + highlightInc,
-                lastReadTimestamp = newLastRead
+
+            st.copy(
+                buffers = st.buffers + (bufferKey to buf.copy(
+                    log = result.log,
+                    unread = buf.unread + unreadInc,
+                    highlights = buf.highlights + highlightInc,
+                    lastReadTimestamp = newLastRead,
+                ))
             )
-            st.copy(buffers = st.buffers + (bufferKey to newBuf))
         }
         val st = _state.value
         if (msgWasDuplicate) return
@@ -11085,34 +11359,19 @@ if (code == "442") {
             recordOwnNick(selfNetId, from)
         }
 
-        // Maintain the chathistory marker tracker. Done after a non-duplicate state update so a
-        // dedup'd replay doesn't move the "last history" pointer forward — only newly committed
-        // history messages do. Order matters: clear-on-emit must run BEFORE the isHistory write
-        // so a history message that arrives with a still-pending marker (rare, but possible if a
-        // mixed batch interleaves) doesn't immediately re-arm the marker for itself.
-        if (markerToEmit != null) {
-            // We just inserted the separator; the boundary it marked is now drawn. Also
-            // disarm the window so a second history burst from the same catch-up doesn't
-            // re-arm and fire again on the next live message after that.
-            pendingChathistoryMarkerMs.remove(bufferKey)
-            chathistoryMarkerArmedUntilMs.remove(bufferKey)
-        }
-        if (isHistory) {
-            // Only track the newest history ts when the buffer's marker window is armed.
-            // Armed = "user just joined this channel" or "we're in the bouncer playback
-            // window after Connected" — i.e. a known catch-up, not a delayed playback
-            // burst hours later. Without this gate, any history-flagged message at any
-            // time would arm the marker, and the next live message (the user typing)
-            // would fire it. That was the "marker randomly appears whilst typing" bug.
-            val armedUntil = chathistoryMarkerArmedUntilMs[bufferKey] ?: 0L
-            if (armedUntil >= System.currentTimeMillis()) {
-                val prev = pendingChathistoryMarkerMs[bufferKey] ?: 0L
-                if (ts > prev) pendingChathistoryMarkerMs[bufferKey] = ts
-            }
-        }
+        // Advance the boundary only for a committed replay: a deduplicated one would
+        // describe a message the user cannot see.
+        if (isHistory) chatHistory.noteReplay(bufferKey, ts)
 
-        // logging
-        if (st.settings.loggingEnabled) {
+        // The upper end of any gap this session has to fill. Only a message the server sent
+        // will do: a local line has no msgid and a clock the server never saw.
+        if (!isHistory && !isLocal && from != null) sessionFirstLive.putIfAbsent(bufferKey, msg)
+
+        // Logging. A replay is written only when newer than the last line already on disk;
+        // in-memory dedup cannot cover this alone, since the scrollback load runs on IO and
+        // a fast replay can beat it.
+        val alreadyOnDisk = isHistory && (lastLoggedTimeMs[bufferKey]?.let { ts <= it } == true)
+        if (st.settings.loggingEnabled && !alreadyOnDisk) {
             val (netId, bufferName) = splitKey(bufferKey)
             if (bufferName != "*server*" || st.settings.logServerBuffer) {
                 val netName = st.networks.firstOrNull { it.id == netId }?.name ?: "network"
@@ -11133,6 +11392,7 @@ if (code == "442") {
                 // file is updated a fraction of a second later) for guaranteed
                 // off-Main I/O - logs are eventually-consistent anyway and this is
                 // the same trade-off that every other Android logger makes.
+                lastLoggedTimeMs.merge(bufferKey, ts, ::maxOf)
                 viewModelScope.launch(Dispatchers.IO) {
                     val err = runCatching {
                         logs.append(netName, bufferName, logLine, logFolderUri)
@@ -12511,13 +12771,17 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     fun setOwnMetadata(netId: String, key: String, value: String?) {
         viewModelScope.launch {
             runCatching { runtimes[netId]?.client?.setOwnMetadata(key, value) }
-            // Persist so the value can be re-applied on reconnect.
+            // Persist so the value can be re-applied on reconnect. Under the lock: the whole
+            // store is written as one blob, so two saves racing would each persist a snapshot
+            // taken before the other's change.
             runCatching {
                 ensureOwnMetadataLoaded()
-                val map = ownMetadataStore.getOrPut(netId) { java.util.concurrent.ConcurrentHashMap() }
-                val v = value?.trim()
-                if (v.isNullOrEmpty()) map.remove(key) else map[key] = v
-                repo.writeOwnMetadata(ownMetadataStore.mapValues { it.value.toMap() })
+                ownMetadataLock.withLock {
+                    val map = ownMetadataStore.getOrPut(netId) { java.util.concurrent.ConcurrentHashMap() }
+                    val v = value?.trim()
+                    if (v.isNullOrEmpty()) map.remove(key) else map[key] = v
+                    repo.writeOwnMetadata(ownMetadataStore.mapValues { it.value.toMap() })
+                }
             }
         }
     }

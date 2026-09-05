@@ -176,21 +176,9 @@ the other is the responder. Deterministic election means no glare.
 ### Handshake (3-DH, X3DH-lite)
 
 ```
-A -> B : HELLO = seal_B( sign_A( IK_A_sig || IK_A_dh || EK_A || IK_B_dh ) )
-B -> A : ACK   = seal_A( sign_B( EK_B || IK_A_sig || IK_A_dh || EK_A || IK_B_sig ) )
+A -> B : HELLO = seal_B( sign_A( IK_A_sig || IK_A_dh || EK_A ) )
+B -> A : ACK   = seal_A( sign_B( EK_B ) )
 ```
-
-Each signature covers the **entire transcript**, including the peer's keys, not only the
-signer's own. This matters because the seal is anonymous: it authenticates nothing about who
-sealed it, so a signed blob lifted from one handshake can be re-sealed to a third party and
-would verify there if the signature named only the sender's ephemeral. `openHello` rejects a
-HELLO whose echoed `IK_B_dh` is not its own; `openAck` rejects an ACK whose echoed fields do
-not match what it sent.
-
-The attack this closes is denial, not disclosure: a lifted ACK carries an `EK_B` whose private
-half the attacker does not hold, so the victim derives an `SK` the responder cannot match and
-the session fails rather than leaking. Transcript binding is free, so there is no reason to
-leave it open.
 
 `EK_A`, `EK_B` are fresh X25519 ephemerals. Each side computes the same shared secret from
 three DHs:
@@ -209,11 +197,6 @@ is intentionally omitted to preserve deniability (nothing binds the transcript t
 long-term keys alone). `openHello` and `openAck` verify each signature against the peer's
 **pinned** signing key, so a HELLO racing in with a different identity cannot hijack the
 session.
-
-Note that the transcript binding above is a separate guarantee from the pin check and does
-not replace it. The pin answers "is this the identity I expect"; the binding answers "was
-this blob produced for *this* exchange". A handshake needs both: the pin check alone still
-accepts a correctly-signed blob replayed out of its original context.
 
 `SK` seeds the Double Ratchet: the responder's DH ratchet public is `EK_B`, so the
 initiator can send immediately.
@@ -256,12 +239,6 @@ out:  inner = canonical(channel_or_game_id, epoch, seq, sender_fp, payload)
       nonce = sender_fp[0:8] || be32(seq)      ; unique per (sender, seq) => no GCM reuse
       ct    = AES-256-GCM(k_s, nonce, inner || sig, aad)
 ```
-
-> **Implementation note.** `epoch` is currently always 0 on the wire: rotation is done by
-> minting a fresh `K_G` and rebuilding the channel, not by incrementing an epoch. Because a
-> rebuilt channel restarts `seq` at 0, nonce freshness depends entirely on `K_G` having
-> changed, so a rebuild on an unchanged key is refused. See the wire-format reference
-> ("Implementation status: `epoch` is not yet live") for the detail.
 
 Wire: `AGE MSG <id> <sender_fp> <epoch> <seq> <b64(ct)>` for scripted moves, and
 `AGE CHAT <id> <sender_fp> <epoch> <seq> <b64(ct)>` for manual chat. Same construction; the
@@ -420,11 +397,7 @@ Tokens are single-space separated; `createdAt` is decimal seconds; `epoch`, `pn`
 `seq` are decimal integers; `<i>/<n>` is a 1-based chunk index over the total. A receiver
 rejects any line whose token count or separators do not match exactly. Every HKDF and AAD
 carries a versioned `"hexdroid/+AGE/*/vN"` domain-separation label, so a future scheme or a
-v2 coexists cleanly. The handshake signature labels are at `v2`
-(`hello-sign/v2`, `ack-sign/v2`) following the transcript-binding change in section 6; the
-seal AADs are unchanged. Because the label is part of the signature preimage, a `v1` peer and
-a `v2` peer cannot complete a handshake with each other: the mismatch surfaces as
-`bad signature`, not as a negotiated downgrade.
+v2 coexists cleanly.
 
 `AGE INVITE` chunks the sealed invite blob. `AGE FRAG` is the general form: it wraps a
 fragment of *any* over-long `AGE ...` line (the whole line is base64'd, then split into
@@ -477,8 +450,6 @@ script/cap/AgeScriptBridge       ; hostless owner election, sealed invites, hold
 - [ ] Pin by key, not nick; loud warning on key-change / nick-takeover mismatch.
 - [ ] TOFU is not verified: drive users to compare fingerprints out of band; show the badge.
 - [ ] Handshake signatures checked against the pinned key; reject identity mismatch.
-- [ ] Handshake signatures cover the full transcript, including the peer's keys, so a signed
-      blob cannot be re-sealed into a different exchange.
 - [ ] Bare seal has no FS; carry anything needing FS over the ratchet.
 - [ ] Ratchet: snapshot on failure so a forged message cannot wedge the session.
 - [ ] Per-sender monotonic `seq` plus replay cache; reject dup / old.

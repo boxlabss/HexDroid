@@ -164,7 +164,11 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
 
     fun capValue(name: String): String? = capValues[name.lowercase()]
 
-    fun hasCap(name: String): Boolean = enabledCaps.contains(name)
+    /**
+     * True when [name] was negotiated. Folded, because names are folded on the way in from
+     * CAP LS, ACK and NEW.
+     */
+    fun hasCap(name: String): Boolean = enabledCaps.contains(name.lowercase())
     private var scram: ScramSha256Client? = null
 
     // Buffer for incoming SASL AUTHENTICATE payloads (servers may split into 400-byte chunks).
@@ -265,6 +269,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 .filter { it.isNotBlank() }
             serverCaps.removeAll(delCaps.toSet())
             enabledCaps.removeAll(delCaps.toSet())
+            // Values too: a re-advertisement without one would inherit the stale value.
+            delCaps.forEach { capValues.remove(it) }
             out += IrcAction.EmitStatus(tr(R.string.session_cap_del, delCaps.joinToString(" ")))
             out += IrcAction.EmitCapDel(delCaps)
             return out

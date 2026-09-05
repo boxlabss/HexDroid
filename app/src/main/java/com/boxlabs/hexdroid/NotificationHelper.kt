@@ -75,6 +75,12 @@ class NotificationHelper(private val ctx: Context) {
 
         fun cancelAll(ctx: Context) { NotificationManagerCompat.from(ctx).cancelAll() }
 
+        /**
+         * Tag identifying every notification raised for one buffer, so they can be taken
+         * down together once the user has seen the conversation.
+         */
+        fun notifTagFor(networkId: String, buffer: String): String = "$networkId::$buffer"
+
         // Monotonically-increasing notification ID counter.
         // Using System.currentTimeMillis() % 100000 causes two problems:
         //   1. Two notifications within the same millisecond silently replace each other.
@@ -319,6 +325,24 @@ class NotificationHelper(private val ctx: Context) {
 
     fun cancelConnection() { NotificationManagerCompat.from(ctx).cancel(NOTIF_ID_CONNECTION) }
 
+    /**
+     * Take down every notification raised for one buffer.
+     *
+     * Ids are allocated from a counter so that separate messages stack rather than
+     * replacing each other, which means they cannot be cancelled by id after the fact. The
+     * per-buffer tag is what groups them, and the active list is what turns the tag back
+     * into the ids to cancel.
+     */
+    fun cancelBuffer(networkId: String, buffer: String) {
+        val tag = notifTagFor(networkId, buffer)
+        val mgr = NotificationManagerCompat.from(ctx)
+        runCatching {
+            for (sbn in mgr.activeNotifications) {
+                if (sbn.tag == tag) mgr.cancel(sbn.tag, sbn.id)
+            }
+        }
+    }
+
     /** Post a highlight notification. Returns false when this message has already been notified. */
     fun notifyHighlight(networkId: String, buffer: String, text: String, playSound: Boolean, msgId: Long = -1L, displayTitle: String = buffer, from: String = "", originalText: String = "", msgAnchor: String? = null, networkName: String = ""): Boolean {
         // One message, one ping: a Web Push and the live connection can both surface the
@@ -340,7 +364,7 @@ class NotificationHelper(private val ctx: Context) {
         if (networkId.isNotBlank()) {
             buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
         }
-        NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
+        NotificationManagerCompat.from(ctx).notify(notifTagFor(networkId, buffer), notifId, builder.build())
         return true
     }
 
@@ -377,7 +401,7 @@ class NotificationHelper(private val ctx: Context) {
         if (networkId.isNotBlank()) {
             buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
         }
-        NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
+        NotificationManagerCompat.from(ctx).notify(notifTagFor(networkId, buffer), notifId, builder.build())
         return true
     }
 
