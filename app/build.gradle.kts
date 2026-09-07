@@ -121,6 +121,12 @@ android {
             excludes += "META-INF/version-control-info.textproto"
         }
     }
+    dependenciesInfo {
+        // Disables dependency metadata when building APKs (for IzzyOnDroid/F-Droid)
+        includeInApk = false
+        // Disables dependency metadata when building Android App Bundles (for Google Play)
+        includeInBundle = false
+    }
 }
 // Kotlin 2.3
 kotlin {
