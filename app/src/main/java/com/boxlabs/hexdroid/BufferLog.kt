@@ -250,7 +250,8 @@ data class BufferLog(
      * The block itself is not woven in by timestamp: disk logs and server history overlap,
      * and interleaving them by date leaves the divider between them with nothing to divide.
      * Where the block sits is still decided by time, so a log read that finishes after a
-     * page of older history was fetched lands below that page rather than on top of it.
+     * page of older history was fetched lands below that page rather than on top of it,
+     * while a replay covering the same stretch as the block ends up below the block.
      */
     fun insertBlock(incoming: List<UiMessage>, skewSeconds: Long = SIGNATURE_SKEW_SECONDS): Merge {
         if (incoming.isEmpty()) return Merge(this, 0)
@@ -268,8 +269,13 @@ data class BufferLog(
         if (fresh.isEmpty()) return Merge(copy(seenIds = ids, seenSigs = sigs), 0)
 
         val newest = fresh.maxOf { it.timeMs }
+        val oldest = fresh.minOf { it.timeMs }
         var at = messages.size
         while (at > 0 && messages[at - 1].timeMs > newest) at--
+        // Server playback that landed before the read finished covers ground this block
+        // covers, so the block goes above it rather than below. Bounded by the block's own
+        // span, which leaves a page of genuinely older history where it is.
+        while (at > 0 && messages[at - 1].fromHistory && messages[at - 1].timeMs >= oldest) at--
 
         val builder = messages.builder()
         builder.addAll(at, fresh)

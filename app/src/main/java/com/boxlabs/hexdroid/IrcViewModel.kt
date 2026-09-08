@@ -51,6 +51,7 @@ import kotlinx.collections.immutable.toPersistentSet
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -735,6 +736,20 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap()
 
     /**
+     * Replayed lines held while a buffer's disk scrollback is still being read.
+     *
+     * Server playback follows a join within milliseconds and the read does not, so without
+     * this the playback fills an empty buffer and the log block is placed under it. Held
+     * here, the log arrives first and the playback deduplicates and sorts against it.
+     */
+    private val deferredReplays: MutableMap<String, MutableList<(String) -> Unit>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /** Releases a buffer's held replays if its scrollback read never finishes. */
+    private val deferredReplayTimeouts: MutableMap<String, Job> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
      * CHATHISTORY requests in flight, the divider windows, and the catch-up throttle.
      *
      * Everything to do with asking a server for history and recognising the reply lives here.
@@ -776,6 +791,10 @@ class IrcViewModel(
     private companion object {
         /** Minimum gap between streaming LIST UI flushes. See [_channelListLastFlushMs]. */
         const val CHANNEL_LIST_FLUSH_INTERVAL_MS = 300L
+        /** How many replayed lines one buffer holds while its scrollback is being read. */
+        const val MAX_DEFERRED_REPLAYS = 400
+        /** How long held replays wait for a scrollback read that has not reported back. */
+        const val DEFERRED_REPLAY_TIMEOUT_MS = 4_000L
         /** How many older messages one "load older" request asks the server for. */
         /**
          * Default upper user-count bound for ELIST range queries when the user hasn't set a max
@@ -10271,90 +10290,129 @@ if (code == "442") {
         scrollbackLoadStartedAtMs[key] = loadStartMs
 
         viewModelScope.launch(Dispatchers.IO) {
-            // Outer try around the whole scrollback pipeline. A throw here lands in
-            // viewModelScope's default uncaught-exception handler, which on Android
-            // re-throws and crashes the process. Concrete trigger we've seen in the
-            // wild: LogWriter.readTail -> readTailSaf -> findChild -> ContentResolver
-            // .query, which throws SecurityException when the saved logFolderUri came
-            // from a previous install via backup-restore and the SAF permission grant
-            // didn't transfer with the data. LogWriter now catches that at the source,
-            // but parseLogLineToUiMessage, the dedup arithmetic, and the merge into
-            // state are all I/O- and parse-heavy code paths that could plausibly throw
-            // on a partially-corrupted log file, so the belt-and-braces catch stays.
-            // Any failure here just means "no scrollback preload" - the user can still
-            // chat normally; live messages aren't affected.
-            val lines = try {
-                logs.readTail(netName, bufferName, maxLines, st.settings.logFolderUri)
-            } catch (t: Throwable) {
-                android.util.Log.w("IrcViewModel", "Scrollback preload failed for $key", t)
-                scrollbackRequested.remove(key)
-                scrollbackLoadStartedAtMs.remove(key)
-                return@launch
-            }
-            if (lines.isEmpty()) {
-                // Allow a later retry if a log is created after the buffer exists.
-                scrollbackRequested.remove(key)
+            try {
+                // Outer try around the whole scrollback pipeline. A throw here lands in
+                // viewModelScope's default uncaught-exception handler, which on Android
+                // re-throws and crashes the process. Concrete trigger we've seen in the
+                // wild: LogWriter.readTail -> readTailSaf -> findChild -> ContentResolver
+                // .query, which throws SecurityException when the saved logFolderUri came
+                // from a previous install via backup-restore and the SAF permission grant
+                // didn't transfer with the data. LogWriter now catches that at the source,
+                // but parseLogLineToUiMessage, the dedup arithmetic, and the merge into
+                // state are all I/O- and parse-heavy code paths that could plausibly throw
+                // on a partially-corrupted log file, so the belt-and-braces catch stays.
+                // Any failure here just means "no scrollback preload" - the user can still
+                // chat normally; live messages aren't affected.
+                val lines = try {
+                    logs.readTail(netName, bufferName, maxLines, st.settings.logFolderUri)
+                } catch (t: Throwable) {
+                    android.util.Log.w("IrcViewModel", "Scrollback preload failed for $key", t)
+                    scrollbackRequested.remove(key)
+                    return@launch
+                }
+                if (lines.isEmpty()) {
+                    // Allow a later retry if a log is created after the buffer exists.
+                    scrollbackRequested.remove(key)
 
-                scrollbackLoadStartedAtMs.remove(key)
+                    // Nick tracking is live state - empty scrollback (logging off, new buffer) must not clear it.
+                    return@launch
+                }
 
-                // Nick tracking is live state - empty scrollback (logging off, new buffer) must not clear it.
-                return@launch
-            }
+                // A line whose timestamp doesn't parse used to fall back to a now-anchored ramp
+                // (now - n + idx seconds). The display sorts by timeMs, so those landed in the
+                // middle of the current session instead of above it, and the ones nearest the end
+                // were then discarded by the "older than first live" filter below. Instead, carry
+                // the last real timestamp forward, so an unparseable line stays next to the line
+                // it actually followed in the log. Lines before ANY parseable timestamp inherit
+                // the first one found, which keeps them at the top where they belong.
+                val stamps = lines.map { parseLogLineTimeMs(it) }
+                val firstReal = stamps.firstOrNull { it != null }
+                var carried = firstReal ?: (System.currentTimeMillis() - lines.size.toLong() * 1000L)
+                val resolved = stamps.map { st -> st?.also { carried = it } ?: carried }
+                val loaded = lines.mapIndexedNotNull { idx, line ->
+                    parseLogLineToUiMessage(line, fallbackTimeMs = resolved[idx])
+                }.filterNot { isStaleTopicBanner(it) }
+                if (loaded.isEmpty()) return@launch
 
-            // A line whose timestamp doesn't parse used to fall back to a now-anchored ramp
-            // (now - n + idx seconds). The display sorts by timeMs, so those landed in the
-            // middle of the current session instead of above it, and the ones nearest the end
-            // were then discarded by the "older than first live" filter below. Instead, carry
-            // the last real timestamp forward, so an unparseable line stays next to the line
-            // it actually followed in the log. Lines before ANY parseable timestamp inherit
-            // the first one found, which keeps them at the top where they belong.
-            val stamps = lines.map { parseLogLineTimeMs(it) }
-            val firstReal = stamps.firstOrNull { it != null }
-            var carried = firstReal ?: (System.currentTimeMillis() - lines.size.toLong() * 1000L)
-            val resolved = stamps.map { st -> st?.also { carried = it } ?: carried }
-            val loaded = lines.mapIndexedNotNull { idx, line ->
-                parseLogLineToUiMessage(line, fallbackTimeMs = resolved[idx])
-            }.filterNot { isStaleTopicBanner(it) }
-            if (loaded.isEmpty()) return@launch
+                withContext(Dispatchers.Main) {
+                    _state.update { st ->
+                        val buf = st.buffers[key] ?: return@update st
 
-            withContext(Dispatchers.Main) {
-                val startedAt = scrollbackLoadStartedAtMs.remove(key) ?: loadStartMs
+                        // The divider sits between logged lines and the current session, and is
+                        // only worth drawing when there is a real gap.
+                        val newestLogged = loaded.maxOf { it.timeMs }
+                        lastLoggedTimeMs.merge(key, newestLogged, ::maxOf)
 
-                _state.update { st ->
-                    val buf = st.buffers[key] ?: return@update st
+                        // Lines stamped near the load start are from the session already on
+                        // screen, not from a previous one.
+                        val fromPreviousSession = loaded.filter { it.timeMs <= loadStartMs - 2_000L }
+                        if (fromPreviousSession.isEmpty()) return@update st
 
-                    // The divider sits between logged lines and the current session, and is
-                    // only worth drawing when there is a real gap.
-                    val newestLogged = loaded.maxOf { it.timeMs }
-                    lastLoggedTimeMs.merge(key, newestLogged, ::maxOf)
+                        // One block, in the order it was read, placed where its newest line
+                        // belongs. Not woven in among the session's messages by date, but not
+                        // stacked above a page of older history already fetched either.
+                        val merged = buf.log.insertBlock(fromPreviousSession)
+                        if (merged.added == 0) return@update st
 
-                    // Lines stamped near the load start are from the session already on
-                    // screen, not from a previous one.
-                    val fromPreviousSession = loaded.filter { it.timeMs <= startedAt - 2_000L }
-                    if (fromPreviousSession.isEmpty()) return@update st
+                        // The divider closes the block, so it goes on the end of what was added.
+                        val alreadyDivided = merged.log.messages.any { it.isSessionDivider }
+                        val withDivider =
+                            if (st.settings.loggingEnabled && !alreadyDivided) {
+                                merged.log.insertDividerAt(
+                                    merged.at + merged.added,
+                                    scrollbackDivider(newestLogged),
+                                )
+                            } else {
+                                merged.log
+                            }
 
-                    // One block, in the order it was read, placed where its newest line
-                    // belongs. Not woven in among the session's messages by date, but not
-                    // stacked above a page of older history already fetched either.
-                    val merged = buf.log.insertBlock(fromPreviousSession)
-                    if (merged.added == 0) return@update st
-
-                    // The divider closes the block, so it goes on the end of what was added.
-                    val alreadyDivided = merged.log.messages.any { it.isSessionDivider }
-                    val withDivider =
-                        if (st.settings.loggingEnabled && !alreadyDivided) {
-                            merged.log.insertDividerAt(
-                                merged.at + merged.added,
-                                scrollbackDivider(newestLogged),
-                            )
-                        } else {
-                            merged.log
-                        }
-
-                    st.copy(buffers = st.buffers + (key to buf.copy(log = withDivider)))
+                        st.copy(buffers = st.buffers + (key to buf.copy(log = withDivider)))
+                    }
+                }
+            } finally {
+                // However the read ended, the buffer is no longer waiting on it.
+                withContext(NonCancellable + Dispatchers.Main.immediate) {
+                    scrollbackLoadStartedAtMs.remove(key)
+                    flushDeferredReplays(key)
                 }
             }
         }
+    }
+
+    /**
+     * Hold [deliver] until [key]'s scrollback read finishes, returning true when it was
+     * held and the caller should stop. Falls through once the queue is full, so a bouncer
+     * dumping a long playback is not buffered without limit.
+     */
+    private fun deferReplay(key: String, deliver: (String) -> Unit): Boolean {
+        if (!scrollbackLoadStartedAtMs.containsKey(key)) return false
+        // A backfill collects its own page and closes on the batch, which will not wait.
+        if (chatHistory.isBackfilling(key)) return false
+        val queue = deferredReplays.getOrPut(key) { mutableListOf() }
+        if (queue.size >= MAX_DEFERRED_REPLAYS) return false
+        queue.add(deliver)
+        if (!deferredReplayTimeouts.containsKey(key)) {
+            deferredReplayTimeouts[key] = viewModelScope.launch {
+                delay(DEFERRED_REPLAY_TIMEOUT_MS)
+                deferredReplayTimeouts.remove(key)
+                scrollbackLoadStartedAtMs.remove(key)
+                flushDeferredReplays(key)
+            }
+        }
+        return true
+    }
+
+    /** Deliver everything held for [key], in the order it arrived. */
+    private fun flushDeferredReplays(key: String) {
+        deferredReplayTimeouts.remove(key)?.cancel()
+        val queue = deferredReplays.remove(key) ?: return
+        queue.forEach { it(key) }
+    }
+
+    /** Drop everything held for [key] without delivering it. */
+    private fun dropDeferredReplays(key: String) {
+        deferredReplayTimeouts.remove(key)?.cancel()
+        deferredReplays.remove(key)
     }
 
     /** Build the separator drawn where this session begins. */
@@ -10899,6 +10957,10 @@ if (code == "442") {
         chatHistory.rename(from, to)
         if (scrollbackRequested.remove(from)) scrollbackRequested.add(to)
         scrollbackLoadStartedAtMs.remove(from)?.let { scrollbackLoadStartedAtMs[to] = it }
+        // Delivered under the new key rather than moved: the read that would have released
+        // them reports the old one.
+        deferredReplayTimeouts.remove(from)?.cancel()
+        deferredReplays.remove(from)?.forEach { it(to) }
         lastLoggedTimeMs.remove(from)?.let { lastLoggedTimeMs.merge(to, it, ::maxOf) }
         recentSelfSends.remove(from)?.let { moving ->
             // Merge: both keys can hold pending echoes if messaged under each nick.
@@ -10924,6 +10986,7 @@ if (code == "442") {
 
         scrollbackRequested.remove(key)
         scrollbackLoadStartedAtMs.remove(key)
+        dropDeferredReplays(key)
         lastLoggedTimeMs.remove(key)
         historyAnchors.remove(key)
         sessionFirstLive.remove(key)
@@ -11258,6 +11321,35 @@ if (code == "442") {
         fromBot: Boolean = false,
     ) {
         val ts = timeMs ?: System.currentTimeMillis()
+
+        // Playback for a buffer still reading its log waits for it, so the logged lines land
+        // above and this line deduplicates and sorts against them.
+        if (isHistory && deferReplay(bufferKey) { target ->
+                append(
+                    bufferKey = target,
+                    from = from,
+                    text = text,
+                    isAction = isAction,
+                    isHighlight = isHighlight,
+                    isPrivate = isPrivate,
+                    isLocal = isLocal,
+                    timeMs = ts,
+                    doNotify = doNotify,
+                    isMotd = isMotd,
+                    multiline = multiline,
+                    isError = isError,
+                    msgId = msgId,
+                    replyToMsgId = replyToMsgId,
+                    isHistory = true,
+                    isChathistoryContext = isChathistoryContext,
+                    encryption = encryption,
+                    pending = pending,
+                    fromOper = fromOper,
+                    fromBot = fromBot,
+                )
+            }
+        ) return
+
         // A sender on this network's highlight-ignore list never highlights or alerts; the
         // message still gets appended. effectiveHighlight is used everywhere below in place
         // of the raw isHighlight so the badge, colour intent, and tray alert all agree.
