@@ -7149,6 +7149,10 @@ private fun appendLinkified(builder: AnnotatedString.Builder, text: String, link
 private data class MircStyleState(
     var fg: Int? = null,
     var bg: Int? = null,
+    /** 24-bit foreground from \u0004, as 0xAARRGGBB. Takes precedence over [fg]. */
+    var fgHex: Int? = null,
+    /** 24-bit background from \u0004, as 0xAARRGGBB. Takes precedence over [bg]. */
+    var bgHex: Int? = null,
     var bold: Boolean = false,
     var italic: Boolean = false,
     var underline: Boolean = false,
@@ -7157,15 +7161,32 @@ private data class MircStyleState(
     fun reset() {
         fg = null
         bg = null
+        fgHex = null
+        bgHex = null
         bold = false
         italic = false
         underline = false
         reverse = false
     }
 
-    fun snapshot(): MircStyleState = MircStyleState(fg, bg, bold, italic, underline, reverse)
+    /** Set the palette foreground, dropping any 24-bit one it replaces. */
+    fun setFg(code: Int?) { fg = code; fgHex = null }
 
-    fun hasAnyStyle(): Boolean = fg != null || bg != null || bold || italic || underline || reverse
+    /** Set the palette background, dropping any 24-bit one it replaces. */
+    fun setBg(code: Int?) { bg = code; bgHex = null }
+
+    /** Set the 24-bit foreground, dropping any palette one it replaces. */
+    fun setFgHex(argb: Int?) { fgHex = argb; fg = null }
+
+    /** Set the 24-bit background, dropping any palette one it replaces. */
+    fun setBgHex(argb: Int?) { bgHex = argb; bg = null }
+
+    fun snapshot(): MircStyleState =
+        MircStyleState(fg, bg, fgHex, bgHex, bold, italic, underline, reverse)
+
+    fun hasAnyStyle(): Boolean =
+        fg != null || bg != null || fgHex != null || bgHex != null ||
+            bold || italic || underline || reverse
 }
 
 private data class MircRun(val text: String, val style: MircStyleState)
@@ -7317,8 +7338,10 @@ private const val MIRC_COLOR_COUNT = 99
 private fun MircStyleState.toSpanStyle(): SpanStyle {
     val fgCode = if (reverse) bg else fg
     val bgCode = if (reverse) fg else bg
-    val fgColor = fgCode?.let(::mircColor) ?: Color.Unspecified
-    val bgColor = bgCode?.let(::mircColor) ?: Color.Unspecified
+    val fgArgb = if (reverse) bgHex else fgHex
+    val bgArgb = if (reverse) fgHex else bgHex
+    val fgColor = fgArgb?.let { Color(it) } ?: fgCode?.let(::mircColor) ?: Color.Unspecified
+    val bgColor = bgArgb?.let { Color(it) } ?: bgCode?.let(::mircColor) ?: Color.Unspecified
 
     return SpanStyle(
         color = fgColor,
@@ -7356,6 +7379,22 @@ private fun parseMircRuns(input: String): List<MircRun> {
         return (first.toString().toIntOrNull() to i)
     }
 
+    fun isHexDigit(c: Char): Boolean = c.isDigit() || c.lowercaseChar() in 'a'..'f'
+
+    /**
+     * Read up to six hex digits, returning the opaque colour they spell and the index after
+     * them. Fewer than six is not a colour, but the digits are still consumed so this stays
+     * in step with stripIrcFormatting, which the width measurement and the logs go through.
+     */
+    fun parseHexColor(startIndex: Int): Pair<Int?, Int> {
+        var i = startIndex
+        var n = 0
+        while (i < input.length && n < 6 && isHexDigit(input[i])) { i++; n++ }
+        if (n < 6) return (null to i)
+        val rgb = input.substring(i - 6, i).toIntOrNull(16) ?: return (null to i)
+        return ((0xFF shl 24) or rgb to i)
+    }
+
     var i = 0
     while (i < input.length) {
         when (val c = input[i]) {
@@ -7364,23 +7403,43 @@ private fun parseMircRuns(input: String): List<MircRun> {
                 i++
                 val (fg, ni) = parseOneOrTwoDigits(i)
                 i = ni
-                if (fg == null) {
-                    // \x03 alone resets colours.
-                    st.fg = null
-                    st.bg = null
-                } else {
-                    st.fg = fg
-                    // Optional ,bg; only consume the comma when at least one
-                    // digit follows it. The original code consumed the comma unconditionally,
-                    // so text like "\x035,word" would silently drop the comma from output,
-                    // rendering "helloworld" instead of "hello,world".
-                    if (i < input.length && input[i] == ',' &&
-                        i + 1 < input.length && input[i + 1].isDigit()) {
-                        i++ // consume comma only when a digit follows
-                        val (bg, n2) = parseOneOrTwoDigits(i)
-                        i = n2
-                        st.bg = bg
-                    }
+                // Optional ,bg; only consume the comma when at least one digit follows it,
+                // so text like "\x035,word" keeps its comma. Read whether or not a
+                // foreground was given: art sets the background on its own with "\x03,15",
+                // and leaving that form unconsumed prints the digits into the picture.
+                var sawBg = false
+                if (i < input.length && input[i] == ',' &&
+                    i + 1 < input.length && input[i + 1].isDigit()) {
+                    i++
+                    val (bg, n2) = parseOneOrTwoDigits(i)
+                    i = n2
+                    st.setBg(bg)
+                    sawBg = true
+                }
+                when {
+                    fg != null -> st.setFg(fg)
+                    // \x03 on its own resets colours; \x03,bg leaves the foreground alone.
+                    !sawBg -> { st.setFg(null); st.setBg(null) }
+                }
+            }
+
+            '\u0004' -> { // 24-bit colour: \x04RRGGBB[,RRGGBB]
+                flush()
+                i++
+                val (fgHex, ni) = parseHexColor(i)
+                i = ni
+                var sawBg = false
+                if (i < input.length && input[i] == ',' &&
+                    i + 1 < input.length && isHexDigit(input[i + 1])) {
+                    i++
+                    val (bgHex, n2) = parseHexColor(i)
+                    i = n2
+                    st.setBgHex(bgHex)
+                    sawBg = true
+                }
+                when {
+                    fgHex != null -> st.setFgHex(fgHex)
+                    !sawBg -> { st.setFgHex(null); st.setBgHex(null) }
                 }
             }
 
