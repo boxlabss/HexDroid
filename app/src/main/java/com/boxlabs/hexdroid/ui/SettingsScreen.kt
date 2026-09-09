@@ -1120,7 +1120,9 @@ fun SettingsScreen(
                         cleanName.none { it.isWhitespace() || it == '/' }
                     Button(
                         onClick = {
-                            onUpdate { copy(commandAliases = commandAliases + (cleanName to newExpansion.trim())) }
+                            val name = cleanName
+                            val expansion = newExpansion.trim()
+                            onUpdate { copy(commandAliases = commandAliases + (name to expansion)) }
                             newName = ""
                             newExpansion = ""
                         },

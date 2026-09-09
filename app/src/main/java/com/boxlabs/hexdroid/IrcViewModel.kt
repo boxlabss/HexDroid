@@ -3134,6 +3134,12 @@ class IrcViewModel(
         return netId to (st.networks.firstOrNull { it.id == netId }?.name ?: "")
     }
 
+    /**
+     * Apply [update] to the settings and persist the result.
+     *
+     * [update] runs twice: once against the in-memory copy for an immediate UI change, and
+     * once inside the DataStore write against whatever is stored.
+     */
     fun updateSettings(update: UiSettings.() -> UiSettings) {
         // Apply immediately; DataStore confirms shortly after.
         val st = _state.value
