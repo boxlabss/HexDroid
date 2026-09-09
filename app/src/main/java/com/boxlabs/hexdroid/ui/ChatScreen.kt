@@ -7170,16 +7170,16 @@ private data class MircStyleState(
     }
 
     /** Set the palette foreground, dropping any 24-bit one it replaces. */
-    fun setFg(code: Int?) { fg = code; fgHex = null }
+    fun applyFg(code: Int?) { fg = code; fgHex = null }
 
     /** Set the palette background, dropping any 24-bit one it replaces. */
-    fun setBg(code: Int?) { bg = code; bgHex = null }
+    fun applyBg(code: Int?) { bg = code; bgHex = null }
 
     /** Set the 24-bit foreground, dropping any palette one it replaces. */
-    fun setFgHex(argb: Int?) { fgHex = argb; fg = null }
+    fun applyFgHex(argb: Int?) { fgHex = argb; fg = null }
 
     /** Set the 24-bit background, dropping any palette one it replaces. */
-    fun setBgHex(argb: Int?) { bgHex = argb; bg = null }
+    fun applyBgHex(argb: Int?) { bgHex = argb; bg = null }
 
     fun snapshot(): MircStyleState =
         MircStyleState(fg, bg, fgHex, bgHex, bold, italic, underline, reverse)
@@ -7413,13 +7413,13 @@ private fun parseMircRuns(input: String): List<MircRun> {
                     i++
                     val (bg, n2) = parseOneOrTwoDigits(i)
                     i = n2
-                    st.setBg(bg)
+                    st.applyBg(bg)
                     sawBg = true
                 }
                 when {
-                    fg != null -> st.setFg(fg)
+                    fg != null -> st.applyFg(fg)
                     // \x03 on its own resets colours; \x03,bg leaves the foreground alone.
-                    !sawBg -> { st.setFg(null); st.setBg(null) }
+                    !sawBg -> { st.applyFg(null); st.applyBg(null) }
                 }
             }
 
@@ -7434,12 +7434,12 @@ private fun parseMircRuns(input: String): List<MircRun> {
                     i++
                     val (bgHex, n2) = parseHexColor(i)
                     i = n2
-                    st.setBgHex(bgHex)
+                    st.applyBgHex(bgHex)
                     sawBg = true
                 }
                 when {
-                    fgHex != null -> st.setFgHex(fgHex)
-                    !sawBg -> { st.setFgHex(null); st.setBgHex(null) }
+                    fgHex != null -> st.applyFgHex(fgHex)
+                    !sawBg -> { st.applyFgHex(null); st.applyBgHex(null) }
                 }
             }
 
