@@ -3138,7 +3138,8 @@ class IrcViewModel(
      * Apply [update] to the settings and persist the result.
      *
      * [update] runs twice: once against the in-memory copy for an immediate UI change, and
-     * once inside the DataStore write against whatever is stored.
+     * once inside the DataStore write against whatever is stored. It must therefore read
+     * only captured values, never mutable state that the caller goes on to change.
      */
     fun updateSettings(update: UiSettings.() -> UiSettings) {
         // Apply immediately; DataStore confirms shortly after.
@@ -7861,7 +7862,28 @@ fun startAddNetwork() {
                     bufKey(netId, "*server*")
                 }
                 val isMotdLine = code == "372"
-                append(targetKey, from = null, text = ev.text, doNotify = false, isMotd = isMotdLine)
+                // Script NUMERIC hook: lets a script rewrite or drop server output before it
+                // is printed, which is how a user filters the WHOIS numerics they don't want.
+                // Only the printing is skipped on halt; the bookkeeping below still runs.
+                val scripted = runCatching {
+                    scriptEngine.onNumeric(
+                        com.boxlabs.hexdroid.script.NumericEvent(
+                            network = netId,
+                            buffer = splitKey(targetKey).second,
+                            code = code.orEmpty(),
+                            text = ev.text,
+                        ),
+                    )
+                }.getOrNull()
+                if (scripted?.halted != true) {
+                    append(
+                        targetKey,
+                        from = null,
+                        text = scripted?.text ?: ev.text,
+                        doNotify = false,
+                        isMotd = isMotdLine,
+                    )
+                }
 
 if (code == "442") {
     // Not on channel. If this was triggered by the UI close-buffer flow, remove the buffer anyway.
