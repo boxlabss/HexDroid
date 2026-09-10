@@ -6383,8 +6383,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				// Route WHOIS numerics back to the buffer where the WHOIS was invoked.
 				val whoisTargetBuffer: String? = run {
 					val whoisCodes = setOf(
-						"301","311","312","313","317","318","319","320","330",
-						"335","338","378","379","760",
+						"276","301","307","310","311","312","313","317","318","319","320","330",
+						"335","337","338","339","344","350","378","379","760",
 						"616",
 						"401","406",
 						"671","672","673","674","675"
@@ -7532,6 +7532,16 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				val nick = p(1) ?: return null
 				t ?: return null
 				"$nick $t"
+			}
+			"276", "310", "337", "339", "344", "350" -> {
+				// Whois lines this client has no special layout for: certificate fingerprint,
+				// helpop, free text, marks, country, gateway. Rendered like the rest of the
+				// whois reply rather than through the numeric-prefixed fallback.
+				val nick = p(1) ?: return null
+				val rest = (msg.params.drop(2).map { stripIrcFormatting(it) } + listOfNotNull(t))
+					.filter { it.isNotBlank() }.joinToString(" ")
+				if (rest.isBlank()) return null
+				"$nick $rest"
 			}
 			"616" -> {
 				// RPL_WHOISCERTFP: <client> <nick> [<fp>] :has client certificate fingerprint <fp>
