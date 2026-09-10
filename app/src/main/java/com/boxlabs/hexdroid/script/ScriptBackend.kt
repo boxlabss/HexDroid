@@ -88,8 +88,16 @@ interface EngineCallbacks {
      * the Main thread, and guarantees [onResult] is invoked back **on Main**, so the
      * backend can re-enter its interpreter safely to call the script callback.
      */
-    fun httpGet(url: String, onResult: (HttpResult) -> Unit)
-    fun httpPost(url: String, body: String, onResult: (HttpResult) -> Unit)
+    fun httpGet(url: String, headers: Map<String, String> = emptyMap(), onResult: (HttpResult) -> Unit)
+
+    /** [contentType] null lets the host infer one from the body's shape. */
+    fun httpPost(
+        url: String,
+        body: String,
+        contentType: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        onResult: (HttpResult) -> Unit,
+    )
 
     // --- added for the .hex backend (generally useful; backends may call them) ---
 
@@ -137,7 +145,14 @@ data class EventData(
 )
 
 /** Neutral HTTP result handed to a script callback. */
-data class HttpResult(val ok: Boolean, val status: Int, val body: String, val error: String?)
+data class HttpResult(
+    val ok: Boolean,
+    val status: Int,
+    val body: String,
+    val error: String?,
+    /** Location header, which is where upload endpoints answering 201 put the new URL. */
+    val location: String? = null,
+)
 
 /** Result of a transforming dispatch. */
 data class TextResult(val text: String, val halted: Boolean)

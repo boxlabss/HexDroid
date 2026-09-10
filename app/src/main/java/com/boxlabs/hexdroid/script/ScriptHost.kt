@@ -104,7 +104,8 @@ data class ScriptHttpRequest(
     val url: String,
     val method: String,          // "GET" or "POST"
     val body: String? = null,
-    val contentType: String = "application/json; charset=utf-8",
+    /** Null lets the host infer a type from the body's shape. */
+    val contentType: String? = null,
     val headers: Map<String, String> = emptyMap(),
 )
 
@@ -114,4 +115,6 @@ data class ScriptHttpResponse(
     val status: Int,
     val body: String,
     val error: String? = null,
+    /** Location header of the final response, which 201 Created uses to name the new resource. */
+    val location: String? = null,
 )

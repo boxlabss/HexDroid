@@ -266,11 +266,43 @@ class HexScriptBackend : ScriptBackend {
         cb.scheduleSignal(ms, a[1].uppercase(), a.drop(2))
     }
 
-    /** http.get <url> <signal> [ctx...]   /   http.post <url> <body> <signal> [ctx...] */
+    /**
+     * http.get [flags] <url> <signal> [ctx...]
+     * http.post [flags] <url> <body> <signal> [ctx...]
+     * http.post [flags] -b %var <url> <signal> [ctx...]
+     *
+     * Flags come first and are read before expansion, so `%var` in one is the variable's
+     * whole value rather than tokens the splitter would then break apart:
+     *   -t <type>        Content-Type for the body
+     *   -h <name:value>  request header, repeatable
+     *   -b %var          body taken whole from a variable, spaces and quotes included
+     */
     private fun doHttp(raw: String, env: Env, post: Boolean) {
-        val parts = expand(raw, env).trim().split(' ')
-        if (post && parts.size < 3) return
-        if (!post && parts.size < 2) return
+        var rest = raw.trim()
+        var contentType: String? = null
+        var bodyVar: String? = null
+        val headers = LinkedHashMap<String, String>()
+        while (rest.startsWith("-")) {
+            val flag = rest.substringBefore(' ')
+            if (flag !in setOf("-t", "-h", "-b")) break
+            val after = rest.substringAfter(' ', "").trimStart()
+            if (after.isEmpty()) return
+            val token = after.substringBefore(' ')
+            val value = flagValue(token, env)
+            when (flag) {
+                "-t" -> contentType = value
+                "-h" -> {
+                    val name = value.substringBefore(':').trim()
+                    if (name.isNotEmpty()) headers[name] = value.substringAfter(':', "").trim()
+                }
+                "-b" -> bodyVar = value
+            }
+            rest = after.substringAfter(' ', "").trimStart()
+        }
+        val hasInlineBody = post && bodyVar == null
+        val parts = expand(rest, env).trim().split(' ')
+        if (hasInlineBody && parts.size < 3) return
+        if (!hasInlineBody && parts.size < 2) return
         val url = parts[0]
         // Capture the ORIGINATING network/buffer now; the async reply must dispatch under the
         // network the request was made on, not whatever network is active when it lands. Passed
@@ -279,15 +311,28 @@ class HexScriptBackend : ScriptBackend {
         val srcBuf = env.fields["buffer"] ?: ""
         val onDone: (HttpResult) -> Unit = { res ->
             // raised on Main by the engine; surface body/status + passthrough ctx as $1-
-            val ctxStart = if (post) 3 else 2
-            val sigName = (if (post) parts[2] else parts[1]).uppercase()
+            val ctxStart = if (hasInlineBody) 3 else 2
+            val sigName = (if (hasInlineBody) parts[2] else parts[1]).uppercase()
             val fields = mapOf(
                 "httpok" to res.ok.toString(), "httpstatus" to res.status.toString(), "httpbody" to res.body,
+                "httplocation" to res.location.orEmpty(),
                 "__net" to srcNet, "__buf" to srcBuf,
             )
             cb.raiseEvent("SIGNAL:$sigName", fields, parts.drop(ctxStart))
         }
-        if (post) cb.httpPost(url, parts[1], onDone) else cb.httpGet(url, onDone)
+        if (post) {
+            cb.httpPost(url, bodyVar ?: parts[1], contentType, headers, onDone)
+        } else {
+            cb.httpGet(url, headers, onDone)
+        }
+    }
+
+    /** Resolve a flag argument: `%var` reads the variable whole, anything else expands. */
+    private fun flagValue(token: String, env: Env): String {
+        if (token.length > 1 && token[0] == '%') {
+            return varRef(varName(token), env)?.asStr() ?: ""
+        }
+        return expand(token, env)
     }
 
     // ---- conditions ---------------------------------------------------------

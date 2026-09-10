@@ -114,14 +114,15 @@ class HexDroidScriptHost(
                         req.headers.forEach { (k, v) -> setRequestProperty(k, v) }
                         if (method == "POST" && body != null) {
                             doOutput = true
-                            // Pick the content-type from the body shape: a JSON object/array stays JSON,
-                            // but a `key=val&key=val` body (e.g. translate.hex's LibreTranslate call) must
-                            // go out as form-urlencoded or the server rejects it as malformed JSON.
+                            // An explicit type from the script wins. Otherwise pick from the body
+                            // shape: a JSON object/array stays JSON, but a `key=val&key=val` body
+                            // (e.g. translate.hex's LibreTranslate call) must go out as
+                            // form-urlencoded or the server rejects it as malformed JSON.
                             val trimmed = body.trimStart()
-                            val ct = when {
+                            val ct = req.contentType ?: when {
                                 trimmed.startsWith("{") || trimmed.startsWith("[") -> "application/json; charset=utf-8"
                                 trimmed.contains("=") && !trimmed.contains(' ') -> "application/x-www-form-urlencoded; charset=utf-8"
-                                else -> req.contentType
+                                else -> "text/plain; charset=utf-8"
                             }
                             setRequestProperty("Content-Type", ct)
                             outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
@@ -151,7 +152,16 @@ class HexDroidScriptHost(
                     }
                     val stream = if (status in 200..299) conn.inputStream else conn.errorStream
                     val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-                    onResult(ScriptHttpResponse(ok = status in 200..299, status = status, body = text))
+                    // Upload endpoints answer 201 with the new URL in Location and often an empty
+                    // body, so it is carried through rather than read off the body.
+                    onResult(
+                        ScriptHttpResponse(
+                            ok = status in 200..299,
+                            status = status,
+                            body = text,
+                            location = conn.getHeaderField("Location"),
+                        )
+                    )
                     return@execute
                 } catch (t: Throwable) {
                     onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = t.message ?: "http error"))

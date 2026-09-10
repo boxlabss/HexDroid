@@ -124,6 +124,23 @@ class ScriptEngine(
         }
     }
 
+    fun onNumeric(ev: NumericEvent): TextResult {
+        if (!started) return TextResult(ev.text, false)
+        val handlers = eventHandlers["NUMERIC"] ?: return TextResult(ev.text, false)
+        if (handlers.isEmpty()) return TextResult(ev.text, false)
+        return guarded("numeric handler", TextResult(ev.text, false)) {
+            withCtx(ev.network, ev.buffer) {
+                backend.dispatchTransform(
+                    handlers,
+                    EventData(
+                        network = ev.network, buffer = ev.buffer, text = ev.text,
+                        fields = mapOf("code" to ev.code),
+                    ),
+                )
+            }
+        }
+    }
+
     fun onInput(ev: InputEvent): TextResult {
         if (!started) return TextResult(ev.text, false)
         val handlers = eventHandlers["INPUT"] ?: return TextResult(ev.text, false)
@@ -182,10 +199,25 @@ class ScriptEngine(
         override fun nick(): String? = host.nick(curNet)
         override fun log(message: String) = host.logDebug(curNet, message)
 
-        override fun httpGet(url: String, onResult: (HttpResult) -> Unit) =
-            doHttp(ScriptHttpRequest(url = url, method = "GET"), onResult)
-        override fun httpPost(url: String, body: String, onResult: (HttpResult) -> Unit) =
-            doHttp(ScriptHttpRequest(url = url, method = "POST", body = body), onResult)
+        override fun httpGet(
+            url: String,
+            headers: Map<String, String>,
+            onResult: (HttpResult) -> Unit,
+        ) = doHttp(ScriptHttpRequest(url = url, method = "GET", headers = headers), onResult)
+
+        override fun httpPost(
+            url: String,
+            body: String,
+            contentType: String?,
+            headers: Map<String, String>,
+            onResult: (HttpResult) -> Unit,
+        ) = doHttp(
+            ScriptHttpRequest(
+                url = url, method = "POST", body = body,
+                contentType = contentType, headers = headers,
+            ),
+            onResult,
+        )
 
         override fun raiseEvent(eventName: String, fields: Map<String, String>, args: List<String>) {
             // Re-enter the normal dispatch path so SIGNAL handlers run like any event. The
@@ -244,7 +276,7 @@ class ScriptEngine(
         }
         host.httpRequest(req) { resp ->
             host.runOnScriptThread {
-                onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error))
+                onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
             }
         }
     }
@@ -259,6 +291,18 @@ data class TextEvent(
     val isAction: Boolean,
     val isPrivate: Boolean,
     val isMine: Boolean,
+)
+
+/**
+ * Server line presented to NUMERIC handlers. [code] is the three digit numeric, or empty
+ * for server output that carries none. [buffer] is where the line was about to be printed,
+ * which for a WHOIS reply is the buffer the WHOIS was run from.
+ */
+data class NumericEvent(
+    val network: String,
+    val buffer: String,
+    val code: String,
+    val text: String,
 )
 
 /** Outgoing line presented to INPUT handlers. */
