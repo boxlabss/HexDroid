@@ -396,6 +396,12 @@ data class BufferLog(
          * Insert [msg] at the position its timestamp asks for. Live messages append unless
          * stamped well before the tail, which means an unrecognised replay. Scans backwards
          * because both cases almost always belong near the end.
+         *
+         * A replay stops at the newest line read from the disk log rather than sinking past
+         * it. Server history reaches further back than the loaded window, so a line the log
+         * does not cover would otherwise become the top of the buffer, dated days before
+         * everything the user has. Requested pages of older history do not come through
+         * here; they are woven in by [merge], which is what puts them above the log.
          */
         private fun place(
             list: PersistentList<UiMessage>,
@@ -408,8 +414,9 @@ data class BufferLog(
             if (origin == MessageOrigin.LIVE && msg.timeMs > newest - LIVE_REORDER_TOLERANCE_MS) {
                 return list.adding(msg)
             }
+            val floorAtLog = origin == MessageOrigin.REPLAY
             var at = list.size
-            while (at > 0 && list[at - 1].timeMs > msg.timeMs) at--
+            while (at > 0 && list[at - 1].timeMs > msg.timeMs && !(floorAtLog && list[at - 1].fromLog)) at--
             return list.addingAt(at, msg)
         }
 
