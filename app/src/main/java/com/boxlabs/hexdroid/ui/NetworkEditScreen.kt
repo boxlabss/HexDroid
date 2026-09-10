@@ -20,6 +20,7 @@ package com.boxlabs.hexdroid.ui
 
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -62,20 +63,24 @@ import androidx.compose.ui.res.stringResource
 import com.boxlabs.hexdroid.R
 
 /**
- * One page of the network editor. Order here is the order shown in the rail and tabs.
+ * One page of the network editor. Order here is the order shown in the rail and hub.
  */
-enum class NetEditSection(val titleRes: Int, val icon: ImageVector) {
-    CONNECTION(R.string.network_section_connection, Icons.Filled.Dns),
-    IDENTITY(R.string.network_section_identity, Icons.Filled.Person),
-    AUTOCONNECT(R.string.network_section_autoconnect, Icons.Filled.PowerSettingsNew),
-    SASL(R.string.network_section_sasl, Icons.Filled.VpnKey),
-    TLS_CERT(R.string.network_section_tls_cert, Icons.Filled.Security),
-    AUTOJOIN(R.string.network_section_autojoin, Icons.Filled.Forum),
-    POSTCMDS(R.string.network_section_postcmds, Icons.Filled.Terminal),
-    PROXY(R.string.network_section_proxy, Icons.Filled.Shield),
-    ENCODING(R.string.network_section_encoding, Icons.Filled.Translate),
-    NOTIFICATIONS(R.string.network_section_notifications, Icons.Filled.Notifications),
-    IRCV3(R.string.network_section_ircv3, Icons.Filled.Extension),
+enum class NetEditSection(
+    val titleRes: Int,
+    val summaryRes: Int,
+    val icon: ImageVector,
+) {
+    CONNECTION(R.string.network_section_connection, R.string.network_section_connection_desc, Icons.Filled.Dns),
+    IDENTITY(R.string.network_section_identity, R.string.network_section_identity_desc, Icons.Filled.Person),
+    AUTOCONNECT(R.string.network_section_autoconnect, R.string.network_section_autoconnect_desc, Icons.Filled.PowerSettingsNew),
+    SASL(R.string.network_section_sasl, R.string.network_section_sasl_desc, Icons.Filled.VpnKey),
+    TLS_CERT(R.string.network_section_tls_cert, R.string.network_section_tls_cert_desc, Icons.Filled.Security),
+    AUTOJOIN(R.string.network_section_autojoin, R.string.network_section_autojoin_desc, Icons.Filled.Forum),
+    POSTCMDS(R.string.network_section_postcmds, R.string.network_section_postcmds_desc, Icons.Filled.Terminal),
+    PROXY(R.string.network_section_proxy, R.string.network_section_proxy_desc, Icons.Filled.Shield),
+    ENCODING(R.string.network_section_encoding, R.string.network_section_encoding_desc, Icons.Filled.Translate),
+    NOTIFICATIONS(R.string.network_section_notifications, R.string.network_section_notifications_desc, Icons.Filled.Notifications),
+    IRCV3(R.string.network_section_ircv3, R.string.network_section_ircv3_desc, Icons.Filled.Extension),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -262,23 +267,36 @@ fun NetworkEditScreen(
         SaslMechanism.SCRAM_SHA_256 to "SCRAM-SHA-256"
     )
 
-    // One page at a time: a rail beside the form on TV and tablets, a tab strip on phones.
+    // Two level navigation: a rail beside the form on TV and tablets, a hub page that
+    // opens one section at a time on phones.
     val railLayout = useSideRailNav()
-    var picked by rememberSaveable { mutableStateOf(NetEditSection.CONNECTION) }
+    var picked by rememberSaveable { mutableStateOf<NetEditSection?>(null) }
     val sections = NetEditSection.values().filter { it != NetEditSection.TLS_CERT || tls }
-    val section = if (picked in sections) picked else NetEditSection.CONNECTION
+    val open = picked?.takeIf { it in sections }
+    val section = if (railLayout) (open ?: NetEditSection.CONNECTION) else open
     val formScroll = rememberScrollState()
 
     LaunchedEffect(section) {
         runCatching { formScroll.scrollTo(0) }
     }
 
+    // Back closes the open section first, then the editor.
+    BackHandler(enabled = !railLayout && open != null) { picked = null }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.network_edit_title)) },
+                title = {
+                    Text(
+                        if (!railLayout && section != null) stringResource(section.titleRes)
+                        else stringResource(R.string.network_edit_title)
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onCancel, modifier = Modifier.tvInitialFocus().focusHighlight()) {
+                    IconButton(
+                        onClick = { if (!railLayout && open != null) picked = null else onCancel() },
+                        modifier = Modifier.tvInitialFocus().focusHighlight(),
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cancel))
                     }
                 },
@@ -459,33 +477,29 @@ fun NetworkEditScreen(
                 )
             }
 
-            if (!railLayout) {
-                SectionTabs(
-                    entries = sections,
-                    selected = section,
-                    label = { stringResource(it.titleRes) },
-                    onSelect = { picked = it },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
             Row(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                if (railLayout) {
+                if (railLayout || section == null) {
                     SectionRail(
                         entries = sections,
                         selected = section,
                         label = { stringResource(it.titleRes) },
+                        summary = if (railLayout) null else ({ stringResource(it.summaryRes) }),
                         icon = { it.icon },
                         onSelect = { picked = it },
-                        modifier = Modifier.width(RAIL_WIDTH).fillMaxHeight(),
+                        modifier = if (railLayout) {
+                            Modifier.width(RAIL_WIDTH).fillMaxHeight()
+                        } else {
+                            Modifier.fillMaxSize()
+                        },
                     )
-                    VerticalDivider()
+                    if (railLayout) VerticalDivider()
                 }
 
+                if (section != null) {
                 Column(
                     Modifier
                         .weight(1f)
@@ -1536,6 +1550,7 @@ fun NetworkEditScreen(
             }
 
                     Spacer(Modifier.height(32.dp))
+                }
                 }
             }
         }
