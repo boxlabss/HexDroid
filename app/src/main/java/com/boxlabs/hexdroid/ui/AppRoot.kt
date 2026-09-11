@@ -42,7 +42,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
+import com.boxlabs.hexdroid.R
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -76,6 +81,10 @@ fun AppRoot(
     val state by vm.state.collectAsStateWithLifecycle()
     val scriptLaunchers by vm.scriptLaunchers.collectAsState()
     val mountedScriptView by vm.scriptView.collectAsState()
+    val scriptFilePick by vm.scriptFilePick.collectAsState()
+    val scriptFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> vm.scriptFilePickResult(uri) }
 
 	val tourRegistry = remember { TourRegistry() }
 	var tourActive by rememberSaveable { mutableStateOf(false) }
@@ -482,6 +491,35 @@ fun AppRoot(
             onAction = { actionId ->
                 when (actionId) {
                     IntroTourActionId.ADD_AFTERNET -> vm.addAfterNetDefaults()
+                }
+            },
+        )
+    }
+
+    // A script asked for a file. The picker only opens once the user agrees here, so a script
+    // cannot put a file chooser on screen by itself, and declining answers the script with
+    // nothing rather than leaving it waiting.
+    scriptFilePick?.let { pick ->
+        AlertDialog(
+            onDismissRequest = { vm.scriptFilePickResult(null) },
+            title = { Text(stringResource(R.string.script_pick_file_title)) },
+            text = {
+                Text(
+                    if (pick.buffer.isNullOrBlank()) {
+                        stringResource(R.string.script_pick_file_body)
+                    } else {
+                        stringResource(R.string.script_pick_file_body_in, pick.buffer)
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { scriptFilePicker.launch(arrayOf(pick.mimeFilter)) }) {
+                    Text(stringResource(R.string.script_pick_file_choose))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.scriptFilePickResult(null) }) {
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )

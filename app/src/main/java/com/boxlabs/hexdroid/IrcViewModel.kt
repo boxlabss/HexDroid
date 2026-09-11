@@ -4261,7 +4261,7 @@ fun startAddNetwork() {
     fun setScriptEnabled(name: String, enabled: Boolean) { _scriptLaunchers.value = emptyList(); scriptManager.setEnabled(name, enabled); refreshScripts() }
     fun installScript(name: String, source: String) { _scriptLaunchers.value = emptyList(); scriptManager.install(name, source); refreshScripts() }
     fun removeScript(name: String) { _scriptLaunchers.value = emptyList(); scriptManager.remove(name); refreshScripts() }
-    fun reloadScripts() { _scriptLaunchers.value = emptyList(); scriptManager.reloadAll(); refreshScripts() }
+    fun reloadScripts() { _scriptLaunchers.value = emptyList(); scriptClearMediaTokens(); scriptManager.reloadAll(); refreshScripts() }
     fun readScript(name: String): String? = scriptManager.read(name)
 
     /** Reset a bundled script to its shipped default; returns the restored source (or null). */
@@ -4280,6 +4280,92 @@ fun startAddNetwork() {
         _scriptLaunchers.value = _scriptLaunchers.value.filterNot { it.id == id } + ScriptLauncher(id, label, command)
     }
     fun scriptUnregisterLauncher(id: String) { _scriptLaunchers.value = _scriptLaunchers.value.filterNot { it.id == id } }
+
+    // ---- script file picking -------------------------------------------------
+    /** An outstanding request from a script for the user to choose a file. */
+    data class ScriptFilePick(val id: String, val mimeFilter: String, val buffer: String?)
+
+    private val _scriptFilePick = kotlinx.coroutines.flow.MutableStateFlow<ScriptFilePick?>(null)
+    val scriptFilePick: kotlinx.coroutines.flow.StateFlow<ScriptFilePick?> = _scriptFilePick
+
+    private var scriptPickCallback: ((com.boxlabs.hexdroid.script.ScriptMediaRef?) -> Unit)? = null
+
+    /**
+     * Content URIs of files the user handed to scripts this session, keyed by an opaque token.
+     * Scripts get the token, never the URI, so a script cannot name a file the user did not
+     * choose. Dropped on script reload and capped, since read permission on each lasts only
+     * as long as the process.
+     */
+    private val scriptMediaTokens = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, android.net.Uri>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.net.Uri>) = size > 16
+        }
+    )
+
+    /** Called by a script through the host: queue a pick for the UI to prompt about. */
+    fun scriptMediaPick(mimeFilter: String, onResult: (com.boxlabs.hexdroid.script.ScriptMediaRef?) -> Unit) {
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            // One at a time: a second request while a prompt is up is refused rather than
+            // queued, so a looping script cannot stack dialogs over the app.
+            if (_scriptFilePick.value != null) {
+                onResult(null)
+                return@launch
+            }
+            scriptPickCallback = onResult
+            _scriptFilePick.value = ScriptFilePick(
+                id = java.util.UUID.randomUUID().toString(),
+                mimeFilter = mimeFilter.ifBlank { "*/*" },
+                buffer = splitKey(_state.value.selectedBuffer).second,
+            )
+        }
+    }
+
+    /** Called by the UI once the user has picked a file or declined. */
+    fun scriptFilePickResult(uri: android.net.Uri?) {
+        val cb = scriptPickCallback
+        scriptPickCallback = null
+        _scriptFilePick.value = null
+        if (cb == null) return
+        if (uri == null) { cb(null); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val name = queryDisplayName(uri) ?: "file"
+            val mime = runCatching { appContext.contentResolver.getType(uri) }.getOrNull()
+                ?: "application/octet-stream"
+            val size = runCatching {
+                appContext.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                        if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else -1L
+                    } else -1L
+                } ?: -1L
+            }.getOrDefault(-1L)
+            val token = java.util.UUID.randomUUID().toString()
+            scriptMediaTokens[token] = uri
+            withContext(Dispatchers.Main) {
+                cb(com.boxlabs.hexdroid.script.ScriptMediaRef(token, name, mime, size))
+            }
+        }
+    }
+
+    /** Resolve a script's token back to what the host needs to read the file. */
+    fun scriptMediaSource(token: String): Triple<android.net.Uri, String, String>? {
+        val uri = scriptMediaTokens[token] ?: return null
+        val name = queryDisplayName(uri) ?: "file"
+        val mime = runCatching { appContext.contentResolver.getType(uri) }.getOrNull()
+            ?: "application/octet-stream"
+        return Triple(uri, name, mime)
+    }
+
+    fun scriptOpenMedia(uri: android.net.Uri): java.io.InputStream? =
+        runCatching { appContext.contentResolver.openInputStream(uri) }.getOrNull()
+
+    /** Forget every handed-out file token (script reload drops the scripts that held them). */
+    fun scriptClearMediaTokens() {
+        scriptMediaTokens.clear()
+        scriptPickCallback?.invoke(null)
+        scriptPickCallback = null
+        _scriptFilePick.value = null
+    }
 
     // ---- a mounted script view (e.g. the poker table), shown as an overlay ----
     private val _scriptView = kotlinx.coroutines.flow.MutableStateFlow<com.boxlabs.hexdroid.script.ScriptView?>(null)

@@ -110,12 +110,20 @@ Register with `on <EVENT> {... }`. Event names are case-insensitive.
 | `TEXT` | an **incoming** (or your own) chat line arrives | can transform or suppress it (see below) |
 | `ACTION` | like TEXT but for `/me` actions | |
 | `INPUT` | you send a line (before it goes out) | can transform/suppress your outgoing text |
+| `NUMERIC` | a server line is about to be printed | `$code` is the numeric; can transform or suppress it |
 | `SIGNAL:<name>` | a `signal`, `timer`, or HTTP callback fires `<name>` | your own async plumbing |
 
-Optional glob filter on TEXT/ACTION: `on TEXT:*help*` only runs when the text
-matches the glob.
+Optional glob filter on TEXT/ACTION/NUMERIC: `on TEXT:*help*` only runs when the
+text matches the glob. The filter always matches against `$text`, so filter on a
+numeric by testing `$code` in the body.
 
-**Transforming / suppressing text.** In `TEXT`/`ACTION`/`INPUT` handlers:
+`NUMERIC` fires for server output such as WHOIS replies, MOTD lines and error
+numerics. `$code` holds the three digit code, or is empty for server text that
+carries none, and `$buffer` is where the line was about to be printed, which for
+a WHOIS reply is the buffer the WHOIS was run from. Suppressing a line hides it;
+the client still acts on it internally.
+
+**Transforming / suppressing text.** In `TEXT`/`ACTION`/`INPUT`/`NUMERIC` handlers:
 - `rewrite <new text>` replaces the line that will be shown/sent.
 - `halt` suppresses the line entirely (it is not shown/sent) and stops the handler.
 - returning normally leaves the line unchanged.
@@ -353,9 +361,25 @@ fires `SIGNAL:POKER_START`).
 ## 10. HTTP + JSON
 
 ```
-http.get  <url> <signal> [ctx…]
-http.post <url> <body> <signal> [ctx…]
+http.get  [flags] <url> <signal> [ctx…]
+http.post [flags] <url> <body> <signal> [ctx…]
+http.post [flags] -b %var <url> <signal> [ctx…]
 ```
+
+Flags go before the URL:
+
+| flag | effect |
+|---|---|
+| `-t <type>` | sets `Content-Type` instead of letting the body shape decide |
+| `-h <name:value>` | adds a request header; repeat for more than one |
+| `-b %var` | takes the body whole from a variable, spaces and quotes included |
+
+Flag values are read before expansion, so a `%var` in one is that variable's whole
+value rather than the tokens the argument splitter would otherwise break it into.
+That is what makes `-b` the way to send JSON: the positional body is one
+space-delimited token, so anything with a space in it has to arrive through `-b`.
+Write a header whose value has spaces the same way (`set %auth Authorization:
+Bearer $token`, then `-h %auth`).
 
 Both are **asynchronous**: they fire the request and return immediately; when it
 completes, `SIGNAL:<signal>` runs with these extra fields plus your `ctx` as
@@ -366,10 +390,27 @@ completes, `SIGNAL:<signal>` runs with these extra fields plus your `ctx` as
 | `$httpok` | `"true"` if status 200-299 |
 | `$httpstatus` | numeric HTTP status |
 | `$httpbody` | response body |
+| `$httplocation` | `Location` header, or empty; upload endpoints answering 201 Created put the new URL here rather than in the body |
 
-The POST body's `Content-Type` is inferred: a body that looks like
-`key=value&key=value` (has `=`, no spaces) is sent form-urlencoded; otherwise it's
-sent as-is. `$urlencode()` your values so the body stays space-free.
+Without `-t`, the POST body's `Content-Type` is inferred: a body starting `{` or `[`
+is sent as JSON, one that looks like `key=value&key=value` (has `=`, no spaces) is
+sent form-urlencoded, and anything else goes as `text/plain`. `$urlencode()` your
+values when using the positional body so it stays space-free.
+
+Posting JSON to an endpoint that wants a token looks like this:
+
+```
+alias paste {
+  set -l %payload $tojson($map(text, $1-, lang, irc))
+  http.post -t application/json -h %auth -b %payload https://paste.example/api paste_done $buffer
+}
+on SIGNAL:paste_done {
+  if ($httpok == true) { echo $1 pasted: $httplocation }
+  else { echo $1 paste failed ($httpstatus) }
+}
+```
+
+`-b` only sends text a script already holds. To send a file, see `media.*` below.
 
 The callback (and any `signal`/`timer` you fire from a handler) runs on the **same
 network and buffer** the originating event came from, even if you have since switched
@@ -402,6 +443,52 @@ on SIGNAL:tr_done {
 Network access is subject to the host's policy; a blocked or failed request returns
 `$httpok == false` (don't forget an `else` - a silent success-only handler is why a
 failing endpoint looks like "nothing happened").
+
+### Uploading a file
+
+```
+media.pick   [-m <mime>] <signal> [ctx…]
+media.upload [-h <name:value>] [-f <field>] [-r] <url> <token> <signal> [ctx…]
+```
+
+`media.pick` does not open anything by itself. HexDroid shows a prompt naming the
+buffer the script is running in, and only if the user agrees does the system file
+picker appear. The script is then handed a **token** for that one file, never a path,
+and can read nothing else on the device. Tokens last until scripts are reloaded.
+
+`SIGNAL:<signal>` from a pick carries:
+
+| field | meaning |
+|---|---|
+| `$mediaok` | `"true"` if a file was chosen; `"false"` if the user declined |
+| `$mediatoken` | opaque handle to pass to `media.upload` |
+| `$medianame` | file name as shown to the user |
+| `$mediamime` | MIME type |
+| `$mediasize` | size in bytes, or `-1` when the provider doesn't say |
+
+`media.upload` streams that file straight from the picker's URI to the URL: the bytes
+never pass through the script. It POSTs `multipart/form-data` under field name `file`
+by default (`-f <field>` to rename it, `-r` to send the bytes as the raw body instead),
+and answers with the same fields an `http.post` does, `$httplocation` included.
+Redirects are not followed, so a 3xx is reported rather than resending the file to a
+host the permission check never saw.
+
+```
+alias img { media.pick -m image/* img_picked $buffer }
+
+on SIGNAL:img_picked {
+  if ($mediaok != true) { return }
+  media.upload https://paste.example/img $mediatoken img_done $1
+}
+
+on SIGNAL:img_done {
+  if ($httpok == true) { msg $1 $httplocation }
+  else { echo $1 upload failed ($httpstatus) }
+}
+```
+
+Only one pick can be outstanding at a time; a second request while the prompt is up is
+answered with `$mediaok` false rather than stacking dialogs.
 
 ---
 

@@ -99,6 +99,21 @@ interface EngineCallbacks {
         onResult: (HttpResult) -> Unit,
     )
 
+    /**
+     * Ask the user to pick a file (host shows a prompt, then the system picker). [onResult]
+     * runs on Main and gets null when nothing was chosen.
+     */
+    fun mediaPick(mimeFilter: String, onResult: (MediaRef?) -> Unit)
+
+    /** Upload a picked file by its token. [field] null sends the bytes as the raw body. */
+    fun mediaUpload(
+        url: String,
+        token: String,
+        field: String?,
+        headers: Map<String, String> = emptyMap(),
+        onResult: (HttpResult) -> Unit,
+    )
+
     // --- added for the .hex backend (generally useful; backends may call them) ---
 
     /**
@@ -143,6 +158,9 @@ data class EventData(
     /** Positional args carried by a raised event (becomes `$1-` in .hex). */
     val args: List<String> = emptyList(),
 )
+
+/** Neutral handle to a file the user picked, handed to a script callback. */
+data class MediaRef(val token: String, val name: String, val mime: String, val size: Long)
 
 /** Neutral HTTP result handed to a script callback. */
 data class HttpResult(

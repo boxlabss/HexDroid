@@ -219,6 +219,32 @@ class ScriptEngine(
             onResult,
         )
 
+        override fun mediaPick(mimeFilter: String, onResult: (MediaRef?) -> Unit) {
+            host.mediaPick(mimeFilter) { ref ->
+                host.runOnScriptThread {
+                    onResult(ref?.let { MediaRef(it.token, it.name, it.mime, it.size) })
+                }
+            }
+        }
+
+        override fun mediaUpload(
+            url: String,
+            token: String,
+            field: String?,
+            headers: Map<String, String>,
+            onResult: (HttpResult) -> Unit,
+        ) {
+            if (!host.isNetworkAllowed(url)) {
+                host.runOnScriptThread { onResult(HttpResult(false, 0, "", "network not permitted: $url")) }
+                return
+            }
+            host.mediaUpload(ScriptUploadRequest(url, token, field, headers)) { resp ->
+                host.runOnScriptThread {
+                    onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
+                }
+            }
+        }
+
         override fun raiseEvent(eventName: String, fields: Map<String, String>, args: List<String>) {
             // Re-enter the normal dispatch path so SIGNAL handlers run like any event. The
             // originating network/buffer travels in reserved __net/__buf (set by async callbacks

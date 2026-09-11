@@ -212,6 +212,8 @@ class HexScriptBackend : ScriptBackend {
             "toast", "decorate", "action", "sidebar" -> cb.uiIntent(verb, expand(raw, env).trim().split(' '))
             "http.get" -> doHttp(raw, env, post = false)
             "http.post" -> doHttp(raw, env, post = true)
+            "media.pick" -> doMediaPick(raw, env)
+            "media.upload" -> doMediaUpload(raw, env)
             else -> when {
                 verb.startsWith("age.") || verb.startsWith("media.") ->
                     cb.capability(verb, expand(raw, env).trim().split(' ').filter { it.isNotEmpty() })
@@ -324,6 +326,87 @@ class HexScriptBackend : ScriptBackend {
             cb.httpPost(url, bodyVar ?: parts[1], contentType, headers, onDone)
         } else {
             cb.httpGet(url, headers, onDone)
+        }
+    }
+
+    /**
+     * media.pick [-m <mime>] <signal> [ctx...]
+     *
+     * Opens the host's file prompt. The chosen file reaches the script as a token, never a
+     * path, and `SIGNAL:<signal>` carries $mediaok, $mediatoken, $medianame, $mediamime and
+     * $mediasize.
+     */
+    private fun doMediaPick(raw: String, env: Env) {
+        var rest = raw.trim()
+        var mime = "*/*"
+        if (rest.startsWith("-m ")) {
+            val after = rest.substringAfter(' ').trimStart()
+            mime = flagValue(after.substringBefore(' '), env).ifBlank { "*/*" }
+            rest = after.substringAfter(' ', "").trimStart()
+        }
+        val parts = expand(rest, env).trim().split(' ')
+        if (parts.isEmpty() || parts[0].isBlank()) return
+        val sigName = parts[0].uppercase()
+        val ctx = parts.drop(1)
+        val srcNet = env.fields["network"] ?: ""
+        val srcBuf = env.fields["buffer"] ?: ""
+        cb.mediaPick(mime) { ref ->
+            val fields = mapOf(
+                "mediaok" to (ref != null).toString(),
+                "mediatoken" to (ref?.token ?: ""),
+                "medianame" to (ref?.name ?: ""),
+                "mediamime" to (ref?.mime ?: ""),
+                "mediasize" to (ref?.size?.toString() ?: "0"),
+                "__net" to srcNet, "__buf" to srcBuf,
+            )
+            cb.raiseEvent("SIGNAL:$sigName", fields, ctx)
+        }
+    }
+
+    /**
+     * media.upload [-h <name:value>] [-f <field>] [-r] <url> <token> <signal> [ctx...]
+     *
+     * Sends the picked file as multipart/form-data under field name `file`, or as the raw
+     * request body with -r. Answers on `SIGNAL:<signal>` with the same fields an http.post
+     * does, $httplocation included.
+     */
+    private fun doMediaUpload(raw: String, env: Env) {
+        var rest = raw.trim()
+        var field: String? = "file"
+        val headers = LinkedHashMap<String, String>()
+        while (rest.startsWith("-")) {
+            val flag = rest.substringBefore(' ')
+            if (flag == "-r") {
+                field = null
+                rest = rest.substringAfter(' ', "").trimStart()
+                continue
+            }
+            if (flag != "-h" && flag != "-f") break
+            val after = rest.substringAfter(' ', "").trimStart()
+            if (after.isEmpty()) return
+            val value = flagValue(after.substringBefore(' '), env)
+            when (flag) {
+                "-f" -> field = value.ifBlank { "file" }
+                "-h" -> {
+                    val name = value.substringBefore(':').trim()
+                    if (name.isNotEmpty()) headers[name] = value.substringAfter(':', "").trim()
+                }
+            }
+            rest = after.substringAfter(' ', "").trimStart()
+        }
+        val parts = expand(rest, env).trim().split(' ')
+        if (parts.size < 3) return
+        val srcNet = env.fields["network"] ?: ""
+        val srcBuf = env.fields["buffer"] ?: ""
+        val sigName = parts[2].uppercase()
+        val ctx = parts.drop(3)
+        cb.mediaUpload(parts[0], parts[1], field, headers) { res ->
+            val fields = mapOf(
+                "httpok" to res.ok.toString(), "httpstatus" to res.status.toString(),
+                "httpbody" to res.body, "httplocation" to res.location.orEmpty(),
+                "__net" to srcNet, "__buf" to srcBuf,
+            )
+            cb.raiseEvent("SIGNAL:$sigName", fields, ctx)
         }
     }
 

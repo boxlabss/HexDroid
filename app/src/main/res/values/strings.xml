@@ -518,7 +518,15 @@
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Clear</string>
 
-    <!-- NetworkEditScreen: section summaries -->
+
+    <!-- NetworkEditScreen: section headers -->
+    <!-- Script file picking -->
+    <string name="script_pick_file_title">Choose a file for a script?</string>
+    <string name="script_pick_file_body">A script is asking you to pick a file to upload. It only receives the file you choose, and nothing else on the device.</string>
+    <string name="script_pick_file_body_in">A script in %1$s is asking you to pick a file to upload. It only receives the file you choose, and nothing else on the device.</string>
+    <string name="script_pick_file_choose">Choose file</string>
+    <string name="network_section_connection">Connection</string>
+    <!-- Network editor section summaries -->
     <string name="network_section_connection_desc">Server address, port, TLS</string>
     <string name="network_section_identity_desc">Nick, alt nick, username, real name</string>
     <string name="network_section_autoconnect_desc">Connect on start, reconnect, server password</string>
@@ -538,8 +546,6 @@
     <string name="network_section_postcmds">Post-connect Commands</string>
     <string name="network_section_encoding">Character Encoding</string>
     <string name="network_section_ircv3">IRCv3.x Capabilities</string>
-    <!-- NetworkEditScreen: section headers -->
-    <string name="network_section_connection">Connection</string>
     <!-- NetworkEditScreen: proxy/Tor -->
     <string name="network_section_proxy">Proxy (SOCKS/Tor)</string>
     <string name="network_proxy_type_label">Proxy type</string>

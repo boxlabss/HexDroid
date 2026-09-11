@@ -1,0 +1,57 @@
+; Image upload for HexDroid
+;
+; /img  picks an image and uploads it, then puts the returned URL in the channel.
+; /imgme does the same but only shows the URL to you.
+;
+; ENDPOINT: point %ep at an upload endpoint that accepts a multipart/form-data POST.
+; %field is the form field name it expects (most want "file"). If yours takes the raw
+; bytes as the request body instead, put -r in place of -f %field below.
+;
+; %auth is optional. Fill it in as a whole header line if the endpoint needs a token:
+;   set %auth Authorization: Bearer abc123
+; Leave it empty for an endpoint that does not.
+;
+; The picker never opens on its own: HexDroid asks first, and you choose the file. The
+; script is handed a token for that one file, not a path, and can read nothing else.
+
+on LOAD {
+  set %ep https://paste.boxlabs.uk/img
+  set %field file
+  set %auth
+}
+
+alias img {
+  media.pick -m image/* img_picked $buffer public
+}
+
+alias imgme {
+  media.pick -m image/* img_picked $buffer private
+}
+
+on SIGNAL:img_picked {
+  ; $1 buffer, $2 public|private
+  if ($mediaok != true) { return }
+  toast Uploading $medianame
+  if (%auth == "") {
+    media.upload -f %field %ep $mediatoken img_done $1 $2
+  }
+  else {
+    media.upload -f %field -h %auth %ep $mediatoken img_done $1 $2
+  }
+}
+
+on SIGNAL:img_done {
+  if ($httpok != true) {
+    echo $1 *** upload failed ($httpstatus) $httpbody
+    return
+  }
+  ; 201 Created names the new file in Location; others answer with the URL as the body.
+  set -l %url $httplocation
+  if (%url == "") { set -l %url $httpbody }
+  if (%url == "") {
+    echo $1 *** upload succeeded but the server returned no URL
+    return
+  }
+  if ($2 == public) { msg $1 %url }
+  else { echo $1 %url }
+}

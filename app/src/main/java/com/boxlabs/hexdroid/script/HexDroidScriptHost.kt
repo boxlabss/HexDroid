@@ -210,6 +210,96 @@ class HexDroidScriptHost(
         else -> ""
     }
 
+    // ── media ─────────────────────────────────────────────────────────────────────
+    override fun mediaPick(mimeFilter: String, onResult: (ScriptMediaRef?) -> Unit) {
+        vm.scriptMediaPick(mimeFilter, onResult)
+    }
+
+    /**
+     * Stream a picked file to [ScriptUploadRequest.url]. The bytes never pass through the
+     * script: it holds a token, the URI behind it stays in the VM, and this reads it straight
+     * into the connection. Policy is re-checked here because a script could have been handed
+     * the token long before it called this.
+     */
+    override fun mediaUpload(req: ScriptUploadRequest, onResult: (ScriptHttpResponse) -> Unit) {
+        httpWorker.execute {
+            if (!vm.scriptNetworkAllowedResolved(req.url)) {
+                onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = "blocked by policy"))
+                return@execute
+            }
+            val source = vm.scriptMediaSource(req.token)
+            if (source == null) {
+                onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = "unknown file token"))
+                return@execute
+            }
+            val (uri, name, mime) = source
+            val input = vm.scriptOpenMedia(uri)
+            if (input == null) {
+                onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = "cannot open file"))
+                return@execute
+            }
+            var conn: HttpURLConnection? = null
+            try {
+                val boundary = "hexdroid" + java.util.UUID.randomUUID().toString().replace("-", "")
+                conn = (URL(req.url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 15_000
+                    readTimeout = 60_000
+                    // Redirects are not followed for an upload: replaying the body would need the
+                    // stream rewound, and a 3xx to another host would send the file somewhere the
+                    // policy check never saw.
+                    instanceFollowRedirects = false
+                    setChunkedStreamingMode(0)
+                    req.headers.forEach { (k, v) -> setRequestProperty(k, v) }
+                    setRequestProperty(
+                        "Content-Type",
+                        if (req.field != null) "multipart/form-data; boundary=$boundary" else mime,
+                    )
+                }
+                input.use { inp ->
+                    conn.outputStream.use { out ->
+                        if (req.field != null) {
+                            val safeName = com.boxlabs.hexdroid.FilehostUpload.sanitizeFileName(name)
+                            out.write(
+                                ("--$boundary\r\n" +
+                                    "Content-Disposition: form-data; name=\"${headerToken(req.field)}\"; " +
+                                    "filename=\"$safeName\"\r\n" +
+                                    "Content-Type: ${headerToken(mime)}\r\n\r\n").toByteArray(Charsets.UTF_8)
+                            )
+                            inp.copyTo(out)
+                            out.write("\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+                        } else {
+                            inp.copyTo(out)
+                        }
+                    }
+                }
+                val status = conn.responseCode
+                val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+                val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+                onResult(
+                    ScriptHttpResponse(
+                        ok = status in 200..299,
+                        status = status,
+                        body = text,
+                        location = conn.getHeaderField("Location"),
+                    )
+                )
+            } catch (t: Throwable) {
+                onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = t.message ?: "upload failed"))
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    /**
+     * Strip anything that could end a header or a quoted string. The form field name comes from
+     * the script and the MIME type from the content resolver, and both land inside a header.
+     */
+    private fun headerToken(raw: String): String =
+        raw.filter { it.code in 0x20..0x7e && it != '"' && it != ';' }.take(64).ifBlank { "file" }
+
     fun shutdown() { worker.shutdownNow() }
 
     private companion object { const val TAG = "HexScript" }

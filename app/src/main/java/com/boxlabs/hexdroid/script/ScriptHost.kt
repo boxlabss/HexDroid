@@ -97,7 +97,37 @@ interface ScriptHost {
 
     /** Implement host capabilities (age.*, media.*, …). The VM maps names to native code. */
     fun capability(name: String, args: List<String>): String
+
+    /**
+     * Ask the user to choose a file for a script, filtered to [mimeFilter]. The host shows a
+     * prompt naming the script's context and opens the system picker only if the user agrees,
+     * so a script cannot reach a file the user did not hand it. [onResult] gets null when the
+     * user declines or picks nothing. May be invoked on any thread.
+     */
+    fun mediaPick(mimeFilter: String, onResult: (ScriptMediaRef?) -> Unit)
+
+    /** Upload a file the user picked, addressed by the token from [mediaPick]. */
+    fun mediaUpload(req: ScriptUploadRequest, onResult: (ScriptHttpResponse) -> Unit)
 }
+
+/**
+ * A file the user chose for a script. [token] is an opaque handle the host resolves back to
+ * a content URI; scripts never see a path and cannot construct one.
+ */
+data class ScriptMediaRef(
+    val token: String,
+    val name: String,
+    val mime: String,
+    val size: Long,
+)
+
+/** Upload of a picked file. [field] null POSTs the bytes as the raw body instead of multipart. */
+data class ScriptUploadRequest(
+    val url: String,
+    val token: String,
+    val field: String? = "file",
+    val headers: Map<String, String> = emptyMap(),
+)
 
 /** Minimal HTTP request model handed to [ScriptHost.httpRequest]. */
 data class ScriptHttpRequest(
