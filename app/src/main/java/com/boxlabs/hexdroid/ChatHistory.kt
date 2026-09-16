@@ -43,6 +43,18 @@ enum class BackfillOutcome {
     ABANDONED,
 }
 
+/** What a labelled CHATHISTORY rejection answered. */
+sealed interface FailedHistoryRequest {
+    /** An open backfill, now to be closed. */
+    data class Backfill(val bufferKey: String) : FailedHistoryRequest
+
+    /** A catch-up page, now forgotten. */
+    data object Catchup : FailedHistoryRequest
+
+    /** Nothing this controller is tracking under that label. */
+    data object Unknown : FailedHistoryRequest
+}
+
 /** A finished backfill handed back to the caller for merging. */
 data class BackfillResult(
     val bufferKey: String,
@@ -84,6 +96,8 @@ data class CatchupPage(
     val complete: Boolean,
     /** Which request of this catch-up it answers, counting from zero. */
     val round: Int,
+    /** The newest message the reply carried, shown or not, where the next page starts. */
+    val newest: UiMessage? = null,
 )
 
 /**
@@ -146,6 +160,8 @@ class ChatHistoryController(
         val round: Int,
         val registeredMs: Long = System.currentTimeMillis(),
         var complete: Boolean = false,
+        var receiving: Boolean = false,
+        var newest: UiMessage? = null,
     )
 
     /** What a reply batch turned out to belong to. */
@@ -233,9 +249,23 @@ class ChatHistoryController(
                 if (complete != null) match.backfill.serverSaysComplete = complete
                 armWatchdog(match.backfill)
             }
-            is Match.Theirs -> if (complete != null) match.batch.complete = complete
+            is Match.Theirs -> {
+                match.batch.receiving = true
+                if (complete != null) match.batch.complete = complete
+            }
             Match.None -> Unit
         }
+    }
+
+    /**
+     * Note a replayed message for [bufferKey], so a catch-up page whose reply is arriving
+     * knows where it ended. Called for every replayed line, duplicates included.
+     */
+    fun noteCatchupLine(bufferKey: String, msg: UiMessage) {
+        if (msg.from == null) return
+        val batch = foreignBatches.firstOrNull { it.bufferKey == bufferKey && it.receiving } ?: return
+        val prev = batch.newest
+        if (prev == null || msg.timeMs >= prev.timeMs) batch.newest = msg
     }
 
     /**
@@ -259,6 +289,7 @@ class ChatHistoryController(
                     lines = lines,
                     complete = match.batch.complete,
                     round = match.batch.round,
+                    newest = match.batch.newest,
                 )
             )
             Match.None -> Unit
@@ -273,8 +304,26 @@ class ChatHistoryController(
      * request open guarantees a stalled spinner, so closing the single candidate is better
      * than waiting for the watchdog. With several open there is no way to tell which.
      */
-    fun soleOutstanding(netId: String): String? =
-        backfills.keys.filter { it.startsWith("$netId::") }.singleOrNull()
+    fun soleOutstanding(netId: String, unlabelledOnly: Boolean = false): String? =
+        backfills.entries
+            .filter { (key, bf) -> key.startsWith("$netId::") && !(unlabelledOnly && bf.attached && bf.label != null) }
+            .map { it.key }
+            .singleOrNull()
+
+    /**
+     * Identify the request a FAIL carrying [label] answered. A matching catch-up is dropped
+     * here, since no batch will follow to close it.
+     */
+    fun failedRequest(label: String): FailedHistoryRequest {
+        val bf = backfills.values.firstOrNull { it.attached && it.label == label }
+        if (bf != null) return FailedHistoryRequest.Backfill(bf.bufferKey)
+        val foreign = foreignBatches.indexOfFirst { it.label == label }
+        if (foreign >= 0) {
+            foreignBatches.removeAt(foreign)
+            return FailedHistoryRequest.Catchup
+        }
+        return FailedHistoryRequest.Unknown
+    }
 
     /** Close the backfill for [bufferKey] with [outcome], if one is open. */
     fun finish(bufferKey: String, outcome: BackfillOutcome) {
@@ -373,6 +422,12 @@ class ChatHistoryController(
     }
 
     // Catch-up throttling
+
+    /** Allow [bufferKey] another catch-up, for a channel we left and may rejoin. */
+    fun releaseCatchup(bufferKey: String) {
+        catchupRequested.remove(bufferKey)
+        foreignBatches.removeAll { it.bufferKey == bufferKey && !it.receiving }
+    }
 
     /**
      * Claim a catch-up slot for [bufferKey] on [netId]. CHATHISTORY TARGETS can name every
@@ -486,6 +541,9 @@ class ChatHistoryController(
     companion object {
         /** How many messages to ask for in one backfill page. */
         const val PAGE_SIZE = 50
+
+        /** How many messages to fetch around a reacted-to message that is not loaded. */
+        const val REACTION_CONTEXT_SIZE = 5
 
         /**
          * How long to wait for a reply batch before giving up. Restarted when the batch

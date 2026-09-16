@@ -72,7 +72,8 @@ class HexParser(source: String) {
             when (kw) {
                 "on" -> blocks.add(parseEvent())
                 "alias" -> blocks.add(parseAlias())
-                "" -> {}
+                // A brace outside any block. readWord stops in front of it without moving.
+                "" -> throw HexError("line ${lineAt(pos)}: unexpected '${src[pos]}' outside a block")
                 else -> throw HexError("line ${lineAt(pos)}: expected 'on' or 'alias', got '$kw'")
             }
             skipWs()

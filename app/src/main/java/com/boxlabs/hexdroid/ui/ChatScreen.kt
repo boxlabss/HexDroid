@@ -1459,7 +1459,7 @@ fun ChatScreen(
         }
     }
 
-    var input by remember(selected) {
+    val inputState = remember(selected) {
         val restored = if (selected.isBlank()) com.boxlabs.hexdroid.data.Draft.EMPTY else draftFor(selected)
         mutableStateOf(
             TextFieldValue(
@@ -1468,6 +1468,10 @@ fun ChatScreen(
             )
         )
     }
+    var input by inputState
+    /** The buffer and composer on screen now, for async results that outlive the ones they started from. */
+    val liveSelected by rememberUpdatedState(selected)
+    val liveInputState by rememberUpdatedState(inputState)
 
     // Keyed on the selected buffer because the composer state above is too
     LaunchedEffect(selected) {
@@ -4183,15 +4187,26 @@ fun ChatScreen(
                     ) { uri ->
                         if (uri != null && !uploading) {
                             uploading = true
+                            val startKey = selected
                             viewModel.uploadFileToFilehost(selNetId, uri) { url, err ->
                                 uploading = false
                                 if (url != null) {
-                                    val sep = if (input.text.isEmpty() || input.text.endsWith(" ")) "" else " "
-                                    val newText = input.text + sep + url
-                                    input = input.copy(
-                                        text = newText,
-                                        selection = TextRange(newText.length)
-                                    )
+                                    if (liveSelected == startKey) {
+                                        val target = liveInputState
+                                        val cur = target.value
+                                        val sep = if (cur.text.isEmpty() || cur.text.endsWith(" ")) "" else " "
+                                        val newText = cur.text + sep + url
+                                        target.value = cur.copy(
+                                            text = newText,
+                                            selection = TextRange(newText.length)
+                                        )
+                                    } else if (startKey.isNotBlank()) {
+                                        // The user moved on; the link goes into that buffer's draft.
+                                        val draft = draftFor(startKey)
+                                        val sep = if (draft.text.isEmpty() || draft.text.endsWith(" ")) "" else " "
+                                        val newText = draft.text + sep + url
+                                        onDraftChanged(startKey, newText, newText.length)
+                                    }
                                 } else {
                                     Toast.makeText(ctxUpload, err ?: "Upload failed", Toast.LENGTH_LONG).show()
                                 }

@@ -44,6 +44,15 @@ internal object FilehostUpload {
         val ok: Boolean get() = url != null
     }
 
+    /** Marker on [Result.error] for a body that did not match the declared Content-Length. */
+    private const val LENGTH_MISMATCH = "content-length mismatch"
+
+    /**
+     * True when [error] is the declared length disagreeing with the bytes the file actually
+     * yielded, which the caller can retry without a declared length.
+     */
+    fun isLengthMismatch(error: String?): Boolean = error != null && error.contains(LENGTH_MISMATCH)
+
     /**
      * Sanitise a display name for use inside a Content-Disposition filename
      * parameter: strip path components, quotes, backslashes and control
@@ -71,11 +80,34 @@ internal object FilehostUpload {
     }
 
     /**
+     * True when [a] and [b] plausibly belong to the same operator: equal, one a subdomain of
+     * the other, or siblings under a parent that is not a bare two-letter-TLD suffix such as
+     * co.uk. A heuristic without a public suffix list, erring towards false.
+     */
+    fun sameSite(a: String, b: String): Boolean {
+        val x = a.lowercase().trimEnd('.')
+        val y = b.lowercase().trimEnd('.')
+        if (x.isEmpty() || y.isEmpty()) return false
+        if (x == y) return true
+        if (isIpLiteral(x) || isIpLiteral(y)) return false
+        if (x.endsWith(".$y") || y.endsWith(".$x")) return true
+        val px = x.substringAfter('.', "")
+        val py = y.substringAfter('.', "")
+        if (px.isEmpty() || px != py) return false
+        val labels = px.split('.')
+        return labels.size >= 3 || (labels.size == 2 && labels[1].length > 2)
+    }
+
+    private fun isIpLiteral(host: String): Boolean =
+        host.contains(':') || host.all { it.isDigit() || it == '.' }
+
+    /**
      * Upload [input] to [uploadUrl].
      *
      * [username]/[password]: IRC connection credentials, sent as HTTP Basic
      * when both are present. For soju this is the same user[/network][@client]
-     * identity used for SASL PLAIN.
+     * identity used for SASL PLAIN. [withheldReason] says why the caller chose
+     * not to send them, and is shown if the server then asks for them.
      *
      * [connectionUsesTls]: when true, an http:// filehost URL is refused so a
      * misconfigured server cannot silently downgrade credentials and file
@@ -96,6 +128,7 @@ internal object FilehostUpload {
         contentLength: Long,
         input: InputStream,
         connectionUsesTls: Boolean,
+        withheldReason: String? = null,
         connectTimeoutMs: Int = 30_000,
         readTimeoutMs: Int = 120_000,
     ): Result {
@@ -116,6 +149,7 @@ internal object FilehostUpload {
         }
 
         var conn: HttpURLConnection? = null
+        var sent = 0L
         try {
             conn = base.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
@@ -139,42 +173,103 @@ internal object FilehostUpload {
                 conn.setChunkedStreamingMode(0)
             }
 
-            conn.outputStream.use { out ->
-                input.copyTo(out, bufferSize = 64 * 1024)
+            // A file longer than declared fails in write(). A shorter one is caught here and the
+            // stream abandoned, so the server never sees a complete request.
+            val out = conn.outputStream
+            var completed = false
+            var short = false
+            try {
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    sent += n
+                    out.write(buf, 0, n)
+                }
+                short = contentLength > 0 && sent < contentLength
+                completed = true
+            } finally {
+                if (completed && !short) out.close() else runCatching { out.close() }
+            }
+            if (short) {
+                return Result(null, "Upload failed: $LENGTH_MISMATCH (expected $contentLength bytes, read $sent)")
             }
 
             val code = conn.responseCode
             if (code !in 200..299) {
-                // Drain the error stream so the connection can be reused/closed cleanly.
-                runCatching { conn.errorStream?.use { it.skip(Long.MAX_VALUE) } }
-                return Result(
-                    null,
-                    when (code) {
-                        401, 403 -> "Upload rejected: authentication failed ($code)"
-                        413 -> "Upload rejected: file too large for this server (413)"
-                        else -> "Upload failed: HTTP $code"
+                val detail = readErrorDetail(conn)
+                // Redirects are not followed: the body is a one-shot stream and cannot be
+                // replayed, and a 3xx to another host would move the file somewhere the
+                // scheme and credential checks above never saw. Name the destination so a
+                // server that only wants a trailing slash is diagnosable rather than a
+                // bare "HTTP 301".
+                if (code in 300..399) {
+                    val to = conn.getHeaderField("Location")
+                    return Result(
+                        null,
+                        if (to.isNullOrBlank()) "Upload failed: server redirected (HTTP $code)"
+                        else "Upload failed: server redirected to $to (HTTP $code). Set the filehost URL to that address.",
+                    )
+                }
+                val summary = when (code) {
+                    401, 403 -> if (withheldReason != null) {
+                        "Upload rejected: authentication required ($code). Credentials were not sent: $withheldReason"
+                    } else {
+                        "Upload rejected: authentication failed ($code)"
                     }
-                )
+                    413 -> "Upload rejected: file too large for this server (413)"
+                    else -> "Upload failed: HTTP $code"
+                }
+                return Result(null, if (detail.isEmpty()) summary else "$summary: $detail")
             }
 
             val location = conn.getHeaderField("Location")
                 ?: return Result(null, "Upload succeeded (HTTP $code) but the server sent no Location header")
             // Location may be relative; resolve it against the upload URL.
-            val resolved = try {
-                URL(base, location).toString()
+            val resolvedUrl = try {
+                URL(base, location)
             } catch (e: Exception) {
                 return Result(null, "Server sent an unparsable Location header")
             }
+            val scheme = resolvedUrl.protocol.lowercase()
+            if (scheme != "https" && scheme != "http") {
+                return Result(null, "Server returned a file URL with scheme $scheme; only http and https links are accepted")
+            }
+            val resolved = resolvedUrl.toString()
             // The public URL must not downgrade either: a TLS connection should
             // never paste an http:// link the uploader itself will then fetch.
             if (connectionUsesTls && resolved.startsWith("http://")) {
                 return Result(null, "Server returned a plaintext http:// file URL; refusing on a TLS connection")
             }
             return Result(resolved, null)
+        } catch (e: java.io.IOException) {
+            // Only a file that outgrew its declared length is retryable. A short one is caught
+            // above without an exception, and a broken connection is not a length problem.
+            if (contentLength > 0 && sent > contentLength) {
+                return Result(null, "Upload failed: $LENGTH_MISMATCH (${e.message ?: "length"})")
+            }
+            return Result(null, "Upload failed: ${e.message ?: e.javaClass.simpleName}")
         } catch (e: Exception) {
             return Result(null, "Upload failed: ${e.message ?: e.javaClass.simpleName}")
         } finally {
             conn?.disconnect()
         }
     }
+
+    /** The start of an error body, with control characters and runs of whitespace collapsed. */
+    private fun readErrorDetail(conn: HttpURLConnection): String = runCatching {
+        conn.errorStream?.use { stream ->
+            val bytes = ByteArray(512)
+            var total = 0
+            while (total < bytes.size) {
+                val n = stream.read(bytes, total, bytes.size - total)
+                if (n < 0) break
+                total += n
+            }
+            String(bytes, 0, total, StandardCharsets.UTF_8)
+                .replace(Regex("[\\p{Cntrl}\\s]+"), " ")
+                .trim()
+                .take(200)
+        }.orEmpty()
+    }.getOrDefault("")
 }

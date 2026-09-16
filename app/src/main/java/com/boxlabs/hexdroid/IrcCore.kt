@@ -538,7 +538,9 @@ sealed class IrcEvent {
     data class ServerText(
         val text: String,
         val code: String? = null,
-        val bufferName: String? = null
+        val bufferName: String? = null,
+        /** True when the line was matched to an outstanding WHOIS. */
+        val isWhoisReply: Boolean = false,
     ) : IrcEvent()
 
     // CTCP replies
@@ -1121,12 +1123,14 @@ data class Notice(
      *
      * [target] is the buffer the request named, present for the codes the spec gives a
      * target context to (INVALID_TARGET, MESSAGE_ERROR, INVALID_MSGREFTYPE) and absent for
-     * INVALID_PARAMS. [code] is the machine-readable code.
+     * INVALID_PARAMS. [code] is the machine-readable code. [label] is the labeled-response
+     * label the FAIL carried, which names the request exactly when present.
      */
     data class HistoryRequestFailed(
         val target: String?,
         val code: String,
         val description: String,
+        val label: String? = null,
     ) : IrcEvent()
 
     /**
@@ -1165,6 +1169,13 @@ data class Notice(
      * @param timestamp  ISO 8601 time of the most recent stored message for that target.
      */
     data class HistoryTarget(val target: String, val timestamp: String) : IrcEvent()
+
+    /**
+     * We joined [channel] and its history should be fetched, up to [limit] messages when
+     * nothing is held to anchor on. The request is left to the caller, which knows what the
+     * buffer already holds and can wait for its saved log to load.
+     */
+    data class JoinHistoryWanted(val channel: String, val limit: Int) : IrcEvent()
 
     /**
      * An outgoing `/msg` or `/notice`, to be shown in the buffer the user typed it in.
@@ -1741,6 +1752,8 @@ class IrcClient(val config: IrcConfig) {
          * Eviction is by oldest, so tracking keeps working rather than shutting off.
          */
         private const val MAX_TRACKED_BATCHES = 64
+        /** Outstanding WHOIS routes kept before the oldest is dropped. */
+        private const val MAX_PENDING_WHOIS = 50
 
         /**
          * CHATHISTORY selector timestamp format. See [historyTimestamp].
@@ -1801,8 +1814,26 @@ class IrcClient(val config: IrcConfig) {
     private var registered = false
 
     // Tracks where a WHOIS was invoked from so we can route the numeric replies back
-    // to that buffer (instead of always dumping them in the server buffer).
-    private val pendingWhoisBufferByNick = mutableMapOf<String, String>()
+    // to that buffer (instead of always dumping them in the server buffer). Insertion
+    // ordered, so [rememberWhoisBuffer] can drop the oldest entry when it fills.
+    private val pendingWhoisBufferByNick = LinkedHashMap<String, String>()
+
+    /**
+     * Note that a WHOIS for [fold] was run from [buffer], so its replies go back there.
+     *
+     * Entries are only removed when the reply terminates (318, 401, 406), so a WHOIS the
+     * server never answers leaks one. The oldest is evicted at the cap rather than the map
+     * being cleared: clearing dropped every other outstanding WHOIS's route as well, which
+     * sent replies the user was waiting on to the server buffer.
+     */
+    private fun rememberWhoisBuffer(fold: String, buffer: String) {
+        // Re-inserted so a repeat WHOIS counts as the newest entry.
+        pendingWhoisBufferByNick.remove(fold)
+        if (pendingWhoisBufferByNick.size >= MAX_PENDING_WHOIS) {
+            pendingWhoisBufferByNick.remove(pendingWhoisBufferByNick.keys.first())
+        }
+        pendingWhoisBufferByNick[fold] = buffer
+    }
 
     @Volatile private var currentNick: String = config.nick
 
@@ -2585,8 +2616,7 @@ class IrcClient(val config: IrcConfig) {
             )
         )
         // Also stash the current buffer so WHOIS reply surfaces there.
-        if (pendingWhoisBufferByNick.size >= 50) pendingWhoisBufferByNick.clear()
-        pendingWhoisBufferByNick[fold] = channel
+        rememberWhoisBuffer(fold, channel)
         sendRaw("WHOIS $nick $nick")  // double-nick form gets idle + full info on most ircds
         commandEvents.send(IrcEvent.Status(tr(R.string.core_looking_up_ban, nick, type.name.lowercase())))
     }
@@ -3265,8 +3295,9 @@ class IrcClient(val config: IrcConfig) {
 							) {
 								val lim = clampHistoryLimit(config.historyLimit.coerceIn(0, 500))
 								if (lim > 0) {
-									sendRaw("${labelTag()}CHATHISTORY LATEST $chan * $lim")
-									historyExpectUntil[casefold(chan)] = nowMs + 7_000L
+									send(IrcEvent.JoinHistoryWanted(chan, lim))
+									// Long enough to cover the wait for the buffer's saved log.
+									historyExpectUntil[casefold(chan)] = nowMs + 20_000L
 								}
 							}
 
@@ -3349,6 +3380,8 @@ class IrcClient(val config: IrcConfig) {
 							)
 							if (nickEquals(nick, currentNick) && !chanHist) {
 								joinedChannelCases.remove(casefold(chan))
+								// A rejoin fetches what was missed while away.
+								historyRequested.remove(casefold(chan))
 							}
 						}
 					}
@@ -3377,6 +3410,7 @@ class IrcClient(val config: IrcConfig) {
 						)
 						if (nickEquals(victim, currentNick) && !chanHist) {
 							joinedChannelCases.remove(casefold(chan))
+							historyRequested.remove(casefold(chan))
 						}
 					}
 
@@ -3563,7 +3597,15 @@ class IrcClient(val config: IrcConfig) {
 					"TAGMSG" -> {
 						val fromNick = msg.prefixNick() ?: return
 						val rawTarget = msg.params.getOrNull(0) ?: return
-						val target = normalizeMsgTarget(rawTarget)
+						val rawConvo = normalizeMsgTarget(rawTarget)
+						// As with PRIVMSG, a PM names whoever received it, so an incoming one is
+						// addressed to us. Report the conversation instead, or a reaction or a
+						// typing notice on a PM lands in our own nick's buffer.
+						val target = when {
+							isChannelName(rawConvo) -> rawConvo
+							nickEquals(fromNick, currentNick) -> rawConvo
+							else -> fromNick
+						}
 						// draft/typing: +typing tag indicates composing status.
 						// Values: "active" (typing), "paused" (stopped briefly), "done" (cleared/sent).
 						// typing is a client-only tag
@@ -3817,7 +3859,7 @@ class IrcClient(val config: IrcConfig) {
 							if (code == "INVALID_MSGREFTYPE") {
 								lastHistoryRefType?.let { bad -> refusedRefTypes = refusedRefTypes + bad }
 							}
-							send(IrcEvent.HistoryRequestFailed(target, code, srDesc))
+							send(IrcEvent.HistoryRequestFailed(target, code, srDesc, label = msg.tags["label"]))
 						}
 						// Feed account-registration failures to the guided dialog too, so it
 						// can show the error inline instead of only in the server buffer.
@@ -4621,11 +4663,10 @@ class IrcClient(val config: IrcConfig) {
             }
             "whois" -> {
                 val arg = parts.drop(1).joinToString(" ").trim()
-                val nick = parts.getOrNull(1)?.trim()
-                if (arg.isBlank() || nick.isNullOrBlank()) return
-                // Cap to prevent unanswered WHOIS requests from accumulating indefinitely.
-                if (pendingWhoisBufferByNick.size >= 50) pendingWhoisBufferByNick.clear()
-                pendingWhoisBufferByNick[casefold(nick)] = currentBuffer
+                // WHOIS [<server>] <nick>[,<nick>...]: the nicks are the last argument.
+                val nicks = parts.drop(1).lastOrNull { it.isNotBlank() }?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
+                if (arg.isBlank() || nicks.isNullOrEmpty()) return
+                for (n in nicks) rememberWhoisBuffer(casefold(n), currentBuffer)
                 sendRaw("WHOIS $arg")
             }
             "who" -> {
@@ -4768,8 +4809,11 @@ class IrcClient(val config: IrcConfig) {
 
             "ctcp" -> {
                 val target = parts.getOrNull(1) ?: return
-                val payload = parts.drop(2).joinToString(" ").trim().uppercase()
-                if (payload.isBlank()) return
+                // Only the CTCP command is case-insensitive; its arguments are sent as typed.
+                val rawPayload = parts.drop(2).joinToString(" ").trim()
+                if (rawPayload.isBlank()) return
+                val payload = rawPayload.substringBefore(' ').uppercase() +
+                    rawPayload.substringAfter(' ', "").let { if (it.isEmpty()) "" else " $it" }
 
                 // For PING, add timestamp if not provided
                 val actualPayload = if (payload == "PING") {
@@ -5531,7 +5575,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
             if (tok.isBlank()) continue
             val parts = tok.split("=", limit = 2)
             val k = parts[0].trim().uppercase(Locale.ROOT)
-            val v = parts.getOrNull(1)?.trim()
+            val v = parts.getOrNull(1)?.trim()?.let(::unescapeIsupportValue)
             // RPL_ISUPPORT negation ("-KEY"): the server withdraws a previously
             // advertised key (used by extended-isupport updates, legal in plain 005
             // too). Reset the tracked keys to their defaults. CHANTYPES, CASEMAPPING
@@ -6297,6 +6341,15 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 								val account = mlState.openTags["account"]
 								val replyTo = mlState.openTags["+draft/reply"] ?: mlState.openTags["+reply"]
 								val isChan = isChannelName(mlState.target)
+								// A PM's batch target is whoever received it, which for an incoming
+								// message is us. Name the buffer after the other party, as the
+								// single-line PRIVMSG path does, or the conversation opens against
+								// our own nick.
+								val convo = when {
+									isChan -> mlState.target
+									nickEquals(from, currentNick) -> mlState.target
+									else -> from
+								}
 								val nowMs2 = System.currentTimeMillis()
 								// Reuse the same is-history determination the per-message
 								// path uses (msg-time + heuristic) so a multiline message
@@ -6306,7 +6359,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 								if (mlState.command.equals("NOTICE", ignoreCase = true)) {
 									send(IrcEvent.Notice(
 										from = from,
-										target = mlState.target,
+										target = convo,
 										text = joined,
 										isPrivate = !isChan,
 										isServer = false,
@@ -6318,7 +6371,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 								} else {
 									send(IrcEvent.ChatMessage(
 										from = from,
-										target = mlState.target,
+										target = convo,
 										text = joined,
 										isPrivate = !isChan,
 										isAction = false,  // multiline never carries CTCP wrapping
@@ -6382,6 +6435,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 
 				// Route WHOIS numerics back to the buffer where the WHOIS was invoked.
 				val whoisTargetBuffer: String? = run {
+					// Every numeric an ircd may answer WHOIS with. Anything missing here is
+					// printed in the server buffer instead of beside the reply it belongs to.
 					val whoisCodes = setOf(
 						"276","301","307","310","311","312","313","317","318","319","320","330",
 						"335","337","338","339","344","350","378","379","760",
@@ -6424,7 +6479,12 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					}
 				}
 				if (numericText != null && msg.command !in specialNumericCodes) {
-					send(IrcEvent.ServerText(numericText, code = msg.command, bufferName = modeNumericBuffer ?: whoisTargetBuffer))
+					send(IrcEvent.ServerText(
+						numericText,
+						code = msg.command,
+						bufferName = modeNumericBuffer ?: whoisTargetBuffer,
+						isWhoisReply = whoisTargetBuffer != null,
+					))
 				} else if (msg.command.length == 3 && msg.command.all { it.isDigit() }
 					&& msg.command !in setOf(
 						"001",
@@ -7727,4 +7787,29 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		return input.matches(Regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")) ||
 			   input.matches(Regex("^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$")) // rough IPv6 check
 	}
+}
+
+/**
+ * Decode the \xHH escapes RPL_ISUPPORT values use for space, '=' and backslash. A malformed
+ * escape is kept as written.
+ */
+internal fun unescapeIsupportValue(value: String): String {
+    if (!value.contains("\\x")) return value
+    val out = StringBuilder(value.length)
+    var i = 0
+    while (i < value.length) {
+        val c = value[i]
+        if (c == '\\' && i + 3 < value.length && value[i + 1] == 'x') {
+            val hi = Character.digit(value[i + 2], 16)
+            val lo = Character.digit(value[i + 3], 16)
+            if (hi >= 0 && lo >= 0) {
+                out.append((hi * 16 + lo).toChar())
+                i += 4
+                continue
+            }
+        }
+        out.append(c)
+        i++
+    }
+    return out.toString()
 }

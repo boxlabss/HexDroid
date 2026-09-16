@@ -54,9 +54,17 @@ class HexDroidApp : Application() {
     val ircViewModelOrNull: IrcViewModel?
         get() = if (ircViewModelDelegate.isInitialized()) ircViewModel else null
 
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
     override fun onCreate() {
         super.onCreate()
         repo = SettingsRepository(applicationContext)
+
+        // Smart selection off: a long press in a SelectionContainer hands the tapped range to
+        // the platform TextClassifier, and TextSelection.Request rejects a range it considers
+        // invalid with an IllegalArgumentException that reaches no catch. Chat lines made of
+        // block art, emoji or other non-word characters produce exactly such a range. Nothing
+        // here relies on the word-boundary suggestions, so the feature only costs crashes.
+        androidx.compose.foundation.ComposeFoundationFlags.isSmartSelectionEnabled = false
 
         // Foreground/background detection via activity lifecycle callbacks.
         //

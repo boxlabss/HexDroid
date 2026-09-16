@@ -240,7 +240,7 @@ class LogWriter(private val ctx: Context) {
             openWriters.peek(absPath)?.let { w ->
                 synchronized(writeLockFor(absPath)) { runCatching { w.flush() } }
             }
-            return f.inputStream().use { readTailFromStream(it, maxLines) }
+            return java.io.RandomAccessFile(f, "r").use { raf -> readTailFromChannel(raf.channel, maxLines) }
     }
 
     private fun readTailSaf(treeUri: Uri, networkName: String, buffer: String, maxLines: Int): List<String> {
@@ -258,9 +258,55 @@ class LogWriter(private val ctx: Context) {
         if (net.second != Document.MIME_TYPE_DIR) return emptyList()
             val file = findChild(resolver, treeUri, net.first, safBufferFileName(buffer)) ?: return emptyList()
             val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, file.first)
+            // Seek from the end where the provider allows it; a provider that only streams
+            // is read from the start.
+            val seeked = runCatching {
+                resolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
+                    java.io.FileInputStream(pfd.fileDescriptor).use { readTailFromChannel(it.channel, maxLines) }
+                }
+            }.getOrNull()
+            if (seeked != null) return seeked
             return runCatching {
                 resolver.openInputStream(fileUri)?.use { readTailFromStream(it, maxLines) } ?: emptyList()
             }.getOrDefault(emptyList())
+    }
+
+    private companion object {
+        /** Size of each block [readTailFromChannel] reads. */
+        const val TAIL_BLOCK_BYTES = 64 * 1024
+    }
+
+    /**
+     * The last [maxLines] lines of a file, read backwards from its end in blocks, so a large
+     * log costs what the tail costs rather than the whole file.
+     */
+    internal fun readTailFromChannel(channel: java.nio.channels.FileChannel, maxLines: Int): List<String> {
+        val size = channel.size()
+        if (size <= 0L) return emptyList()
+        val blocks = java.util.ArrayDeque<ByteArray>()
+        var pos = size
+        var newlines = 0
+        // One newline more than the lines wanted, so the first line kept is whole.
+        while (pos > 0 && newlines <= maxLines) {
+            val len = minOf(TAIL_BLOCK_BYTES.toLong(), pos).toInt()
+            pos -= len
+            val buf = java.nio.ByteBuffer.allocate(len)
+            while (buf.hasRemaining()) {
+                if (channel.read(buf, pos + buf.position()) < 0) break
+            }
+            val bytes = buf.array()
+            for (i in 0 until buf.position()) if (bytes[i] == '\n'.code.toByte()) newlines++
+            blocks.addFirst(if (buf.position() == len) bytes else bytes.copyOf(buf.position()))
+        }
+        val total = blocks.sumOf { it.size }
+        val all = ByteArray(total)
+        var off = 0
+        for (b in blocks) { System.arraycopy(b, 0, all, off, b.size); off += b.size }
+        var lines = String(all, Charsets.UTF_8).split('\n')
+        // A read that stopped part way into the file starts mid-line.
+        if (pos > 0 && lines.isNotEmpty()) lines = lines.drop(1)
+        if (lines.isNotEmpty() && lines.last().isEmpty()) lines = lines.dropLast(1)
+        return lines.takeLast(maxLines).map { it.removeSuffix("\r") }
     }
 
     private fun readTailFromStream(input: java.io.InputStream, maxLines: Int): List<String> {

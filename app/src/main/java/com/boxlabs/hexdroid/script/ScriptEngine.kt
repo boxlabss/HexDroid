@@ -34,7 +34,7 @@ class ScriptEngine(
     // The network/buffer of the event currently being dispatched. echo/msg/raw and raised
     // signals route to THIS context instead of the active window, so a handler triggered by a
     // message on network A always writes back to network A even if the user is looking at B.
-    // Scripts run on a single worker thread, so plain fields are safe here.
+    // Every call into the engine is made on the main thread, so plain fields are safe here.
     private var curNet: String? = null
     private var curBuf: String? = null
 
@@ -86,6 +86,9 @@ class ScriptEngine(
         eventHandlers.clear()
         commandHandlers.clear()
         backend.shutdown()
+        // The host owns the threads that run timers and HTTP, so stopping the backend alone
+        // leaves them running for the life of the process.
+        runCatching { host.shutdown() }
         started = false
     }
 
@@ -134,7 +137,7 @@ class ScriptEngine(
                     handlers,
                     EventData(
                         network = ev.network, buffer = ev.buffer, text = ev.text,
-                        fields = mapOf("code" to ev.code),
+                        fields = mapOf("code" to ev.code, "whois" to ev.isWhoisReply.toString()),
                     ),
                 )
             }
@@ -219,8 +222,13 @@ class ScriptEngine(
             onResult,
         )
 
-        override fun mediaPick(mimeFilter: String, onResult: (MediaRef?) -> Unit) {
-            host.mediaPick(mimeFilter) { ref ->
+        override fun mediaPick(
+            mimeFilter: String,
+            owner: String,
+            userInitiated: Boolean,
+            onResult: (MediaRef?) -> Unit,
+        ) {
+            host.mediaPick(curNet, curBuf, mimeFilter, owner, userInitiated) { ref ->
                 host.runOnScriptThread {
                     onResult(ref?.let { MediaRef(it.token, it.name, it.mime, it.size) })
                 }
@@ -232,13 +240,15 @@ class ScriptEngine(
             token: String,
             field: String?,
             headers: Map<String, String>,
+            formFields: Map<String, String>,
+            owner: String,
             onResult: (HttpResult) -> Unit,
         ) {
             if (!host.isNetworkAllowed(url)) {
                 host.runOnScriptThread { onResult(HttpResult(false, 0, "", "network not permitted: $url")) }
                 return
             }
-            host.mediaUpload(ScriptUploadRequest(url, token, field, headers)) { resp ->
+            host.mediaUpload(ScriptUploadRequest(url, token, field, headers, formFields, owner)) { resp ->
                 host.runOnScriptThread {
                     onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
                 }
@@ -252,6 +262,7 @@ class ScriptEngine(
             // active window. This keeps a translation/reply on the network its request came from.
             val net = fields["__net"]?.ifBlank { null } ?: curNet ?: host.activeNetwork()
             val buf = fields["__buf"]?.ifBlank { null } ?: curBuf ?: host.activeBuffer()
+            val owner = fields["__owner"]?.ifBlank { null }
             val clean = if (fields.keys.any { it.startsWith("__") }) fields.filterKeys { !it.startsWith("__") } else fields
             dispatch(
                 eventName,
@@ -260,6 +271,7 @@ class ScriptEngine(
                     buffer = buf.orEmpty(),
                     fields = clean,
                     args = args,
+                    owner = owner,
                 ),
             )
         }
@@ -322,13 +334,15 @@ data class TextEvent(
 /**
  * Server line presented to NUMERIC handlers. [code] is the three digit numeric, or empty
  * for server output that carries none. [buffer] is where the line was about to be printed,
- * which for a WHOIS reply is the buffer the WHOIS was run from.
+ * which for a WHOIS reply is the buffer the WHOIS was run from. [isWhoisReply] is true when
+ * the line was matched to a WHOIS the user ran.
  */
 data class NumericEvent(
     val network: String,
     val buffer: String,
     val code: String,
     val text: String,
+    val isWhoisReply: Boolean = false,
 )
 
 /** Outgoing line presented to INPUT handlers. */

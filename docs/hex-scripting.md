@@ -56,7 +56,10 @@ unset %count
 ```
 
 > Because there is a single engine per app, `%` globals are **not** per-network or
-> per-buffer, a value set while on one server is visible on another.
+> per-buffer, a value set while on one server is visible on another. They are not
+> per-script either: two scripts that both `set %ep` overwrite each other, and the last
+> `LOAD` to run wins. Prefix a script's globals (`%img_ep`, `%tr_ep`) and keep scratch
+> values in locals.
 
 `inc`, `dec` and `unset` take the variable **name** (`inc %count`), not its value.
 
@@ -120,8 +123,10 @@ numeric by testing `$code` in the body.
 `NUMERIC` fires for server output such as WHOIS replies, MOTD lines and error
 numerics. `$code` holds the three digit code, or is empty for server text that
 carries none, and `$buffer` is where the line was about to be printed, which for
-a WHOIS reply is the buffer the WHOIS was run from. Suppressing a line hides it;
-the client still acts on it internally.
+a WHOIS reply is the buffer the WHOIS was run from. `$whois` is `true` when the
+line was matched to a WHOIS the user ran, so a filter can leave the same numerics
+alone elsewhere (301 also answers a message sent to someone away). Suppressing a
+line hides it; the client still acts on it internally.
 
 **Transforming / suppressing text.** In `TEXT`/`ACTION`/`INPUT`/`NUMERIC` handlers:
 - `rewrite <new text>` replaces the line that will be shown/sent.
@@ -145,12 +150,12 @@ One command per statement (verb first). Full set:
 | `inc %v` / `dec %v` | +1 / −1 numeric |
 | `push %v <value>` | append to a list variable |
 | `setat %map <key> <value>` | set a map/list entry |
-| `rewrite <text>` | replace the current event's text (TEXT/ACTION/INPUT) |
+| `rewrite <text>` | replace the current event's text (TEXT/ACTION/INPUT/NUMERIC) |
 | `echo <buffer> <text>` | print a local line into `<buffer>` (not sent to the server) |
 | `msg <buffer> <text>` | send a PRIVMSG to `<buffer>` |
 | `raw <line>` | send a raw IRC line |
 | `signal <name> [args…]` | fire `SIGNAL:<name>` now |
-| `timer <ms> <signal> [args…]` | fire `SIGNAL:<signal>` after `<ms>` |
+| `timer <ms> <signal> [args…]` | fire `SIGNAL:<signal>` after `<ms>` (at least 20) |
 | `log <text>` / `debug <text>` | write `<text>` to the script debug log (development aid) |
 | `sidebar add\|remove...` | manage a sidebar launcher (see §11) |
 | `http.get <url> <signal> [ctx…]` | async GET, result to `SIGNAL:<signal>` (§10) |
@@ -161,10 +166,18 @@ One command per statement (verb first). Full set:
 | `if / elseif / else` | conditionals (§6) |
 | `return` / `halt` / `break` / `continue` | control flow (§7) |
 | `<aliasname> [args…]` | call another alias |
+| `toast <text>` | show a brief on-screen notice |
 
-`toast`, `decorate` and `action` are accepted by the parser and dispatched as UI
-intents, but the current host only implements `sidebar`; the others are no-ops
-(reserved). Don't rely on them yet.
+`decorate` and `action` are accepted by the parser and dispatched as UI intents, but
+the current host ignores them (reserved). Don't rely on them yet.
+
+A script can also run these app commands, in the buffer its event came from: `me`,
+`join`, `part`, `cycle`, `topic`, `mode`, `invite`, `kick`, `knock`, `names`, `who`,
+`whois`, `whowas`, `list`, `notice`, `ctcp`, `nick`, `away`, `back`, `op`, `deop`,
+`voice`, `devoice`, `ban`, `unban`, `ignore` and `unignore`. Commands that would drop
+or move the connection (`quit`, `server` and the like) are left out on purpose; `raw`
+remains for a script that really means it. Any other unknown verb is reported in the
+buffer and skipped.
 
 ---
 
@@ -389,8 +402,9 @@ completes, `SIGNAL:<signal>` runs with these extra fields plus your `ctx` as
 |---|---|
 | `$httpok` | `"true"` if status 200-299 |
 | `$httpstatus` | numeric HTTP status |
-| `$httpbody` | response body |
+| `$httpbody` | response body, cut off after about 1 MB |
 | `$httplocation` | `Location` header, or empty; upload endpoints answering 201 Created put the new URL here rather than in the body |
+| `$httperror` | why the request never got a status, when `$httpstatus` is 0: blocked by policy, unreachable, a file too large, and so on |
 
 Without `-t`, the POST body's `Content-Type` is inferred: a body starting `{` or `[`
 is sent as JSON, one that looks like `key=value&key=value` (has `=`, no spaces) is
@@ -433,7 +447,7 @@ buffer, the classic pattern is to thread the target buffer + original text as ct
 ```
 on TEXT {
   if ($isme == true) { return }
-  http.post %ep q=$urlencode($text)&target=en tr_done $buffer $text
+  http.post %tr_ep q=$urlencode($text)&target=en tr_done $buffer $text
 }
 on SIGNAL:tr_done {
   if ($httpok == true) { echo $1 ↳ $json($httpbody, translatedText) }
@@ -441,20 +455,27 @@ on SIGNAL:tr_done {
 ```
 
 Network access is subject to the host's policy; a blocked or failed request returns
-`$httpok == false` (don't forget an `else` - a silent success-only handler is why a
-failing endpoint looks like "nothing happened").
+`$httpok == false` with the reason in `$httperror` (don't forget an `else`: a silent
+success-only handler is why a failing endpoint looks like "nothing happened"). Scripts
+get no network access at all while any network using a proxy is connected.
 
 ### Uploading a file
 
 ```
 media.pick   [-m <mime>] <signal> [ctx…]
-media.upload [-h <name:value>] [-f <field>] [-r] <url> <token> <signal> [ctx…]
+media.upload [-h <name:value>] [-p <name=value>] [-f <field>] [-r] <url> <token> <signal> [ctx…]
 ```
 
 `media.pick` does not open anything by itself. HexDroid shows a prompt naming the
-buffer the script is running in, and only if the user agrees does the system file
-picker appear. The script is then handed a **token** for that one file, never a path,
-and can read nothing else on the device. Tokens last until scripts are reloaded.
+buffer and network the script is running in, and only if the user agrees does the
+system file picker appear. The script is then handed a **token** for that one file,
+never a path, and can read nothing else on the device. Tokens last until scripts are
+reloaded.
+
+The pick's signal is delivered only to the script that called `media.pick`, and only
+that script can upload with the token. After the user declines, further picks from the
+same script are refused without a prompt for a minute, unless they come from a command
+the user ran.
 
 `SIGNAL:<signal>` from a pick carries:
 
@@ -466,10 +487,15 @@ and can read nothing else on the device. Tokens last until scripts are reloaded.
 | `$mediamime` | MIME type |
 | `$mediasize` | size in bytes, or `-1` when the provider doesn't say |
 
-`media.upload` streams that file straight from the picker's URI to the URL: the bytes
-never pass through the script. It POSTs `multipart/form-data` under field name `file`
-by default (`-f <field>` to rename it, `-r` to send the bytes as the raw body instead),
-and answers with the same fields an `http.post` does, `$httplocation` included.
+`media.upload` sends that file to the URL without the bytes ever passing through the
+script. The request body is staged in the cache first so it carries an exact
+`Content-Length`: a chunked upload is invisible to servers that parse multipart from
+the content length (PHP's parser is one), which answer as though no file arrived. It POSTs `multipart/form-data` under field name `file`
+by default (`-f <field>` to rename it, `-r` to send the bytes as the raw body instead,
+`-p <name=value>` to add a text form field beside the file, repeatable, which is how an
+endpoint's own options are passed),
+and answers with the same fields an `http.post` does, `$httplocation` and `$httperror`
+included. Files over 64 MB are refused with `$httperror` saying so.
 Redirects are not followed, so a 3xx is reported rather than resending the file to a
 host the permission check never saw.
 
@@ -482,13 +508,26 @@ on SIGNAL:img_picked {
 }
 
 on SIGNAL:img_done {
-  if ($httpok == true) { msg $1 $httplocation }
-  else { echo $1 upload failed ($httpstatus) }
+  if ($httpok != true) { echo $1 upload failed ($httpstatus) $httperror | return }
+  set -l %url $trim($httplocation)
+  if ($len(%url) == 0) { set -l %url $trim($httpbody) }
+  msg $1 %url
 }
 ```
 
+Redirects are not followed, so an endpoint that answers with a 301 to a trailing
+slash or to an `index.php` reports that 301 instead of uploading; the error names
+where it wanted to send you, and that address is what belongs in the URL.
+
+There is no empty-string literal: `%url == ""` compares against a two-character
+string and is never true for a blank value. Test emptiness with `$len(%url) == 0`.
+
 Only one pick can be outstanding at a time; a second request while the prompt is up is
 answered with `$mediaok` false rather than stacking dialogs.
+
+Point the URL at the exact endpoint, file name included, since a directory URL that
+answers 301 is not followed. And check the body even on a 2xx: upload endpoints often
+answer 200 with a JSON body describing a failure, so `$httpok` alone is not success.
 
 ---
 
@@ -507,14 +546,14 @@ on LOAD { sidebar add poker poker_open Poker Night }
 
 ## 12. Threads & lifecycle
 
-- `LOAD` and user-driven alias/button actions run on the app's main path.
-- `TEXT`/`ACTION`/`INPUT` run **synchronously** while the line is processed;
-  return quickly. Do slow work by firing an `http.*`/`timer` and finishing in the
-  signal handler.
-- `timer` callbacks and `http.*` result callbacks run on a single background worker
-  thread. Because there is one shared variable space, avoid assuming a bot loop and
-  a user action never interleave; keep state transitions in one place.
-- Signals fire the matching `SIGNAL:` handler wherever they were raised.
+- Every handler runs on the app's main thread: `LOAD`, aliases and buttons, events,
+  and the `timer`, `http.*` and `media.*` callbacks. Handlers never run at the same
+  time as each other.
+- `TEXT`/`ACTION`/`INPUT`/`NUMERIC` run **synchronously** while the line is
+  processed; return quickly. Do slow work by firing an `http.*`/`timer` and finishing
+  in the signal handler.
+- Signals fire the matching `SIGNAL:` handler in every script that registered it,
+  except the signal from `media.pick`, which only reaches the script that asked.
 
 A script is dropped and reloaded (its handlers cleared and re-registered, `LOAD`
 re-fired) on reload; globals do not survive a reload.

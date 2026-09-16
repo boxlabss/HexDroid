@@ -34,13 +34,15 @@ class HexScriptBackend : ScriptBackend {
     private val globals = HashMap<String, HexVal>()
     /** User-defined aliases, kept locally so they can be invoked as value functions $name(...). */
     private val aliases = HashMap<String, HexBlock>()
+    /** The script each loaded block came from. */
+    private val owners = java.util.IdentityHashMap<HexBlock, String>()
 
     override fun start(callbacks: EngineCallbacks, budget: Budget) {
         cb = callbacks; this.budget = budget
     }
 
-    override fun reset() { globals.clear(); aliases.clear() }
-    override fun shutdown() { globals.clear() }
+    override fun reset() { globals.clear(); aliases.clear(); owners.clear() }
+    override fun shutdown() { globals.clear(); owners.clear() }
 
     override fun loadScript(name: String, source: String): String? {
         val blocks = try {
@@ -50,6 +52,7 @@ class HexScriptBackend : ScriptBackend {
         } catch (e: Throwable) {
             val msg = "load error: ${e.message ?: e.javaClass.simpleName}"; cb.log("[$name] $msg"); return msg
         }
+        for (b in blocks) owners[b] = name
         for (b in blocks) when (b.kind) {
             HexBlock.Kind.EVENT -> cb.registerEvent(b.name, b)              // engine uppercases the key
             HexBlock.Kind.ALIAS -> { aliases[b.name.lowercase()] = b; cb.registerCommand(b.name.lowercase(), b) }
@@ -65,7 +68,7 @@ class HexScriptBackend : ScriptBackend {
         for (h in handlers) {
             val block = h as? HexBlock ?: continue
             if (!filterMatches(block, text)) continue
-            val env = envForEvent(event.copy(text = text), cb)
+            val env = envForEvent(event.copy(text = text), cb, owners[block])
             val flow = runBody(block.body, env)
             text = env.fields["text"] ?: text         // `rewrite` updates env text
             if (flow == Flow.HALT) { halted = true; break }
@@ -76,8 +79,9 @@ class HexScriptBackend : ScriptBackend {
     override fun dispatchNotify(handlers: List<Any>, event: EventData) {
         for (h in handlers) {
             val block = h as? HexBlock ?: continue
+            if (event.owner != null && owners[block] != event.owner) continue
             if (!filterMatches(block, event.text)) continue
-            runBody(block.body, envForEvent(event, cb))
+            runBody(block.body, envForEvent(event, cb, owners[block]))
         }
     }
 
@@ -87,7 +91,7 @@ class HexScriptBackend : ScriptBackend {
             network = network ?: "", buffer = buffer ?: "", text = args,
             args = if (args.isBlank()) emptyList() else args.trim().split(Regex("\\s+")),
         )
-        runBody(block.body, envForEvent(event, cb))
+        runBody(block.body, envForEvent(event, cb, owners[block], userInitiated = true))
     }
 
     private fun filterMatches(block: HexBlock, text: String): Boolean {
@@ -106,12 +110,18 @@ class HexScriptBackend : ScriptBackend {
         var depth = 0
     }
 
-    /** Per-call scope. Nested function calls share the [frame] (so one budget bounds the whole tree). */
+    /**
+     * Per-call scope. Nested function calls share the [frame] (so one budget bounds the whole tree).
+     * [owner] is the script whose block is running. [userInitiated] is true below a command the
+     * user ran.
+     */
     private inner class Env(
         val frame: Frame,
         val fields: HashMap<String, String>,
         val args: List<String>,
         val locals: HashMap<String, HexVal>,
+        val owner: String?,
+        val userInitiated: Boolean,
     ) {
         var returnValue: HexVal? = null
 
@@ -121,7 +131,8 @@ class HexScriptBackend : ScriptBackend {
         }
 
         /** A child scope for a function call: fresh locals + bound args, shared frame/fields. */
-        fun childForCall(callArgs: List<String>): Env = Env(frame, fields, callArgs, HashMap())
+        fun childForCall(callArgs: List<String>, callee: HexBlock): Env =
+            Env(frame, fields, callArgs, HashMap(), owners[callee] ?: owner, userInitiated)
     }
 
     private fun runBody(body: List<HexStmt>, env: Env): Flow {
@@ -187,7 +198,7 @@ class HexScriptBackend : ScriptBackend {
      * remain reachable through `raw` for a script that genuinely means it, which is at least explicit.
      */
     private val PASSTHROUGH_COMMANDS = setOf(
-        "join", "part", "cycle", "topic", "mode", "invite", "kick", "knock",
+        "me", "join", "part", "cycle", "topic", "mode", "invite", "kick", "knock",
         "names", "who", "whois", "whowas", "list", "notice", "ctcp", "nick",
         "away", "back", "op", "deop", "voice", "devoice", "ban", "unban", "ignore", "unignore",
     )
@@ -237,7 +248,7 @@ class HexScriptBackend : ScriptBackend {
         if (env.frame.depth >= MAX_CALL_DEPTH) throw HexAbort("call depth exceeded")
         val argExprs = splitTop(raw.trim(), " ").map { it.trim() }.filter { it.isNotEmpty() }
         val callArgs = argExprs.map { evalVal(it, env).asStr() }
-        val child = env.childForCall(callArgs)
+        val child = env.childForCall(callArgs, block)
         env.frame.depth++
         val fl = try { runBody(block.body, child) } finally { env.frame.depth-- }
         return if (fl == Flow.HALT) Flow.HALT else Flow.NORMAL
@@ -317,7 +328,7 @@ class HexScriptBackend : ScriptBackend {
             val sigName = (if (hasInlineBody) parts[2] else parts[1]).uppercase()
             val fields = mapOf(
                 "httpok" to res.ok.toString(), "httpstatus" to res.status.toString(), "httpbody" to res.body,
-                "httplocation" to res.location.orEmpty(),
+                "httplocation" to res.location.orEmpty(), "httperror" to res.error.orEmpty(),
                 "__net" to srcNet, "__buf" to srcBuf,
             )
             cb.raiseEvent("SIGNAL:$sigName", fields, parts.drop(ctxStart))
@@ -334,7 +345,7 @@ class HexScriptBackend : ScriptBackend {
      *
      * Opens the host's file prompt. The chosen file reaches the script as a token, never a
      * path, and `SIGNAL:<signal>` carries $mediaok, $mediatoken, $medianame, $mediamime and
-     * $mediasize.
+     * $mediasize. The signal is delivered to the picking script only.
      */
     private fun doMediaPick(raw: String, env: Env) {
         var rest = raw.trim()
@@ -350,30 +361,33 @@ class HexScriptBackend : ScriptBackend {
         val ctx = parts.drop(1)
         val srcNet = env.fields["network"] ?: ""
         val srcBuf = env.fields["buffer"] ?: ""
-        cb.mediaPick(mime) { ref ->
+        val owner = env.owner.orEmpty()
+        cb.mediaPick(mime, owner, env.userInitiated) { ref ->
             val fields = mapOf(
                 "mediaok" to (ref != null).toString(),
                 "mediatoken" to (ref?.token ?: ""),
                 "medianame" to (ref?.name ?: ""),
                 "mediamime" to (ref?.mime ?: ""),
                 "mediasize" to (ref?.size?.toString() ?: "0"),
-                "__net" to srcNet, "__buf" to srcBuf,
+                "__net" to srcNet, "__buf" to srcBuf, "__owner" to owner,
             )
             cb.raiseEvent("SIGNAL:$sigName", fields, ctx)
         }
     }
 
     /**
-     * media.upload [-h <name:value>] [-f <field>] [-r] <url> <token> <signal> [ctx...]
+     * media.upload [-h <name:value>] [-p <name=value>] [-f <field>] [-r] <url> <token> <signal> [ctx...]
      *
      * Sends the picked file as multipart/form-data under field name `file`, or as the raw
-     * request body with -r. Answers on `SIGNAL:<signal>` with the same fields an http.post
-     * does, $httplocation included.
+     * request body with -r. -p adds a text form field beside the file, which is how an
+     * endpoint's own options (a strip-metadata switch, an album name) are passed. Answers on
+     * `SIGNAL:<signal>` with the same fields an http.post does, $httplocation included.
      */
     private fun doMediaUpload(raw: String, env: Env) {
         var rest = raw.trim()
         var field: String? = "file"
         val headers = LinkedHashMap<String, String>()
+        val formFields = LinkedHashMap<String, String>()
         while (rest.startsWith("-")) {
             val flag = rest.substringBefore(' ')
             if (flag == "-r") {
@@ -381,7 +395,7 @@ class HexScriptBackend : ScriptBackend {
                 rest = rest.substringAfter(' ', "").trimStart()
                 continue
             }
-            if (flag != "-h" && flag != "-f") break
+            if (flag != "-h" && flag != "-f" && flag != "-p") break
             val after = rest.substringAfter(' ', "").trimStart()
             if (after.isEmpty()) return
             val value = flagValue(after.substringBefore(' '), env)
@@ -390,6 +404,10 @@ class HexScriptBackend : ScriptBackend {
                 "-h" -> {
                     val name = value.substringBefore(':').trim()
                     if (name.isNotEmpty()) headers[name] = value.substringAfter(':', "").trim()
+                }
+                "-p" -> {
+                    val name = value.substringBefore('=').trim()
+                    if (name.isNotEmpty()) formFields[name] = value.substringAfter('=', "")
                 }
             }
             rest = after.substringAfter(' ', "").trimStart()
@@ -400,11 +418,13 @@ class HexScriptBackend : ScriptBackend {
         val srcBuf = env.fields["buffer"] ?: ""
         val sigName = parts[2].uppercase()
         val ctx = parts.drop(3)
-        cb.mediaUpload(parts[0], parts[1], field, headers) { res ->
+        val owner = env.owner.orEmpty()
+        cb.mediaUpload(parts[0], parts[1], field, headers, formFields, owner) { res ->
             val fields = mapOf(
                 "httpok" to res.ok.toString(), "httpstatus" to res.status.toString(),
                 "httpbody" to res.body, "httplocation" to res.location.orEmpty(),
-                "__net" to srcNet, "__buf" to srcBuf,
+                "httperror" to res.error.orEmpty(),
+                "__net" to srcNet, "__buf" to srcBuf, "__owner" to owner,
             )
             cb.raiseEvent("SIGNAL:$sigName", fields, ctx)
         }
@@ -498,9 +518,11 @@ class HexScriptBackend : ScriptBackend {
     /** A character that may begin a `$`/`%` name (so the sigil is an expression, not a literal). */
     private fun isSigilNameChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_'
 
+    /** A name runs over letters, digits, '_' and '.', minus any trailing '.' (sentence punctuation). */
     private fun readIdent(s: String, start: Int): Pair<String, Int> {
         var i = start
         while (i < s.length && (s[i].isLetterOrDigit() || s[i] == '_' || s[i] == '.')) i++
+        while (i > start && s[i - 1] == '.') i--
         return s.substring(start, i) to i
     }
 
@@ -600,7 +622,7 @@ class HexScriptBackend : ScriptBackend {
 
     /**
      * Compiled patterns keyed by source, most recently used last; an invalid pattern caches as
-     * null. Unsynchronised because HexDroidScriptHost serialises script state onto one thread.
+     * null. Unsynchronised because every script call runs on the main thread.
      */
     private val reCache = object : LinkedHashMap<String, Regex?>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex?>) = size > RE_CACHE_MAX
@@ -717,14 +739,19 @@ class HexScriptBackend : ScriptBackend {
         val block = aliases[name.lowercase()] ?: return null
         if (env.frame.depth >= MAX_CALL_DEPTH) throw HexAbort("call depth exceeded")
         val callArgs = argExprs.map { evalVal(it, env).asStr() }
-        val child = env.childForCall(callArgs)
+        val child = env.childForCall(callArgs, block)
         env.frame.depth++
         try { runBody(block.body, child) } finally { env.frame.depth-- }
         return child.returnValue ?: HexVal.EMPTY
     }
 
     /** Build the root scope for an event dispatch (fresh Frame). */
-    private fun envForEvent(e: EventData, cb: EngineCallbacks): Env {
+    private fun envForEvent(
+        e: EventData,
+        cb: EngineCallbacks,
+        owner: String?,
+        userInitiated: Boolean = false,
+    ): Env {
         val f = HashMap<String, String>()
         f["network"] = e.network; f["buffer"] = e.buffer; f["chan"] = e.buffer
         f["target"] = e.buffer; f["text"] = e.text
@@ -734,7 +761,7 @@ class HexScriptBackend : ScriptBackend {
         f.putAll(e.fields)
         val args = if (e.args.isNotEmpty()) e.args
         else if (e.text.isBlank()) emptyList() else e.text.split(' ')
-        return Env(Frame(), f, args, HashMap())
+        return Env(Frame(), f, args, HashMap(), owner, userInitiated)
     }
 
     /**

@@ -101,16 +101,19 @@ interface EngineCallbacks {
 
     /**
      * Ask the user to pick a file (host shows a prompt, then the system picker). [onResult]
-     * runs on Main and gets null when nothing was chosen.
+     * runs on Main and gets null when nothing was chosen. [owner] is the picking script, which
+     * alone may upload the result. [userInitiated] is true when a command the user ran asked.
      */
-    fun mediaPick(mimeFilter: String, onResult: (MediaRef?) -> Unit)
+    fun mediaPick(mimeFilter: String, owner: String, userInitiated: Boolean, onResult: (MediaRef?) -> Unit)
 
-    /** Upload a picked file by its token. [field] null sends the bytes as the raw body. */
+    /** Upload a picked file by its token, which must belong to [owner]. [field] null sends the raw bytes. */
     fun mediaUpload(
         url: String,
         token: String,
         field: String?,
         headers: Map<String, String> = emptyMap(),
+        formFields: Map<String, String> = emptyMap(),
+        owner: String,
         onResult: (HttpResult) -> Unit,
     )
 
@@ -157,6 +160,8 @@ data class EventData(
     val fields: Map<String, String> = emptyMap(),
     /** Positional args carried by a raised event (becomes `$1-` in .hex). */
     val args: List<String> = emptyList(),
+    /** When set, only handlers from this script receive the event. */
+    val owner: String? = null,
 )
 
 /** Neutral handle to a file the user picked, handed to a script callback. */

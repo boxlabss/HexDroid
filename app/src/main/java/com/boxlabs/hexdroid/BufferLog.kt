@@ -53,6 +53,9 @@ data class BufferLog(
 
         /** Already known and not added. [log] still records its identity. */
         data class Duplicate(override val log: BufferLog) : Insert
+
+        /** Added at the end in place of the earlier copies it matched. */
+        data class Replaced(override val log: BufferLog) : Insert
     }
 
     /** The outcome of merging a block of messages into the log. */
@@ -69,6 +72,19 @@ data class BufferLog(
      *
      * Signatures are second-resolution, so they are only checked for a message that could be
      * a replay: two identical live lines in one second are two messages, not one seen twice.
+     *
+     * [floorMs] is the newest timestamp of the block read from disk. A message placed out of
+     * order stops below any line stamped at or before it, so it cannot sink into or above that
+     * block.
+     *
+     * [skewSeconds] is how far apart two copies may be stamped and still match. Our own lines
+     * warrant [OWN_SIGNATURE_SKEW_SECONDS]: the logged copy carries the device's send time and
+     * the server's copy the time it arrived, which a send queue can put well apart.
+     *
+     * [repeatsOnJoin] is for lines a server sends again on every join, such as a channel's
+     * entry notice. Earlier copies with the same sender and text, from the disk log or an
+     * earlier join and whatever their time, are removed and [msg] is added at the end, so it
+     * appears where the user just walked in, once.
      */
     fun insert(
         msg: UiMessage,
@@ -76,6 +92,9 @@ data class BufferLog(
         cap: Int,
         knownDuplicate: Boolean = false,
         nowMs: Long = System.currentTimeMillis(),
+        floorMs: Long? = null,
+        skewSeconds: Long = SIGNATURE_SKEW_SECONDS,
+        repeatsOnJoin: Boolean = false,
     ): Insert {
         val sig = signatureOf(msg)
         // Stamped well in the past means a replay whatever the caller called it: a server
@@ -83,15 +102,28 @@ data class BufferLog(
         // traffic at the point of classification.
         val couldBeReplay =
             origin == MessageOrigin.REPLAY || msg.timeMs < nowMs - REPLAY_SUSPICION_MS
-        val duplicate = knownDuplicate ||
-            (msg.msgId != null && seenIds.contains(msg.msgId)) ||
-            (couldBeReplay && matchesKnownSignature(msg))
+        val duplicateById = knownDuplicate || (msg.msgId != null && seenIds.contains(msg.msgId))
+        val duplicateBySig = !duplicateById && couldBeReplay && matchesKnownSignature(msg, seenSigs, skewSeconds)
 
-        if (duplicate) {
-            return Insert.Duplicate(remembering(msg.msgId, sig))
+        if (repeatsOnJoin && !knownDuplicate) {
+            val copies = indicesOfCopies(msg, skewSeconds = null)
+            val builder = messages.builder()
+            for (i in copies.asReversed()) builder.removeAt(i)
+            builder.add(msg)
+            val next = copy(
+                messages = builder.build(),
+                seenIds = if (msg.msgId != null) seenIds.adding(msg.msgId) else seenIds,
+                seenSigs = seenSigs.adding(sig),
+            ).trimmed(cap)
+            return if (copies.isEmpty()) Insert.Added(next) else Insert.Replaced(next)
         }
 
-        val placed = place(messages, msg, origin)
+        if (duplicateById || duplicateBySig) {
+            val base = if (duplicateBySig) adoptingId(msg, skewSeconds) else this
+            return Insert.Duplicate(base.remembering(msg.msgId, sig))
+        }
+
+        val placed = place(messages, msg, origin, floorMs)
         return Insert.Added(
             copy(
                 messages = placed,
@@ -115,13 +147,15 @@ data class BufferLog(
      *
      * [growCapacity] raises [extraCapacity] by the number added, bounded by [maxExtra], so
      * the trim cannot evict them. A disk preload passes false: it fills the buffer to its
-     * normal depth rather than past it.
+     * normal depth rather than past it. [isOwn] selects the messages matched with
+     * [OWN_SIGNATURE_SKEW_SECONDS].
      */
     fun merge(
         incoming: List<UiMessage>,
         baseCap: Int,
         maxExtra: Int,
         growCapacity: Boolean,
+        isOwn: (UiMessage) -> Boolean = { false },
     ): Merge {
         if (incoming.isEmpty()) return Merge(this, 0)
 
@@ -130,20 +164,25 @@ data class BufferLog(
         var ids = seenIds
         var sigs = seenSigs
         val fresh = ArrayList<UiMessage>(ordered.size)
+        var adopted = this
         for (m in ordered) {
             val sig = signatureOf(m)
-            val known = (m.msgId != null && ids.contains(m.msgId)) || matchesKnownSignature(m, sigs)
+            val skew = skewFor(m, isOwn, SIGNATURE_SKEW_SECONDS)
+            val knownById = m.msgId != null && ids.contains(m.msgId)
+            val knownBySig = !knownById && matchesKnownSignature(m, sigs, skew)
+            if (knownBySig) adopted = adopted.adoptingId(m, skew)
             if (m.msgId != null) ids = ids.adding(m.msgId)
             sigs = sigs.adding(sig)
-            if (!known) fresh.add(m)
+            if (!knownById && !knownBySig) fresh.add(m)
         }
+        val held = adopted.messages
 
         if (fresh.isEmpty()) {
-            return Merge(copy(seenIds = ids, seenSigs = sigs), 0)
+            return Merge(copy(messages = held, seenIds = ids, seenSigs = sigs), 0)
         }
 
         val extra = if (growCapacity) (extraCapacity + fresh.size).coerceAtMost(maxExtra) else extraCapacity
-        val merged = placeBlock(messages, fresh)
+        val merged = placeBlock(held, fresh)
 
         return Merge(
             copy(
@@ -250,10 +289,13 @@ data class BufferLog(
      * The block itself is not woven in by timestamp: disk logs and server history overlap,
      * and interleaving them by date leaves the divider between them with nothing to divide.
      * Where the block sits is still decided by time, so a log read that finishes after a
-     * page of older history was fetched lands below that page rather than on top of it,
-     * while a replay covering the same stretch as the block ends up below the block.
+     * page of older history was fetched lands below that page rather than on top of it.
      */
-    fun insertBlock(incoming: List<UiMessage>, skewSeconds: Long = SIGNATURE_SKEW_SECONDS): Merge {
+    fun insertBlock(
+        incoming: List<UiMessage>,
+        skewSeconds: Long = SIGNATURE_SKEW_SECONDS,
+        isOwn: (UiMessage) -> Boolean = { false },
+    ): Merge {
         if (incoming.isEmpty()) return Merge(this, 0)
 
         var ids = seenIds
@@ -261,7 +303,7 @@ data class BufferLog(
         val fresh = ArrayList<UiMessage>(incoming.size)
         for (m in incoming) {
             val known = (m.msgId != null && ids.contains(m.msgId)) ||
-                matchesKnownSignature(m, sigs, skewSeconds)
+                matchesKnownSignature(m, sigs, skewFor(m, isOwn, skewSeconds))
             if (m.msgId != null) ids = ids.adding(m.msgId)
             sigs = sigs.adding(signatureOf(m))
             if (!known) fresh.add(m)
@@ -269,13 +311,8 @@ data class BufferLog(
         if (fresh.isEmpty()) return Merge(copy(seenIds = ids, seenSigs = sigs), 0)
 
         val newest = fresh.maxOf { it.timeMs }
-        val oldest = fresh.minOf { it.timeMs }
         var at = messages.size
         while (at > 0 && messages[at - 1].timeMs > newest) at--
-        // Server playback that landed before the read finished covers ground this block
-        // covers, so the block goes above it rather than below. Bounded by the block's own
-        // span, which leaves a page of genuinely older history where it is.
-        while (at > 0 && messages[at - 1].fromHistory && messages[at - 1].timeMs >= oldest) at--
 
         val builder = messages.builder()
         builder.addAll(at, fresh)
@@ -329,6 +366,38 @@ data class BufferLog(
         return copy(seenIds = newIds, seenSigs = newSigs)
     }
 
+    /**
+     * Give [msg]'s msgid to the newest held copy of it that has none, such as a line read from
+     * the disk log, so replies and reactions naming that msgid can find it.
+     */
+    private fun adoptingId(msg: UiMessage, skewSeconds: Long): BufferLog {
+        val id = msg.msgId ?: return this
+        val at = indicesOfCopies(msg, skewSeconds).lastOrNull { messages[it].msgId == null } ?: return this
+        return replaceAt(at, messages[at].copy(msgId = id))
+    }
+
+    /**
+     * Ascending indices of the messages that are copies of [msg], by msgid or by sender and
+     * text stamped within [skewSeconds], or at any time when that is null.
+     */
+    private fun indicesOfCopies(msg: UiMessage, skewSeconds: Long?): List<Int> {
+        val sec = msg.timeMs / 1000
+        val who = normaliseSender(msg)
+        val body = normaliseBody(msg)
+        val out = ArrayList<Int>()
+        for (i in messages.indices) {
+            val m = messages[i]
+            val sameId = msg.msgId != null && m.msgId == msg.msgId
+            val sameSig = (skewSeconds == null || kotlin.math.abs(m.timeMs / 1000 - sec) <= skewSeconds) &&
+                normaliseSender(m) == who && normaliseBody(m) == body
+            if (sameId || sameSig) out.add(i)
+        }
+        return out
+    }
+
+    private fun skewFor(m: UiMessage, isOwn: (UiMessage) -> Boolean, default: Long): Long =
+        if (m.from != null && isOwn(m)) maxOf(default, OWN_SIGNATURE_SKEW_SECONDS) else default
+
     /** True when any signature within the clock-skew window is already known. */
     private fun matchesKnownSignature(
         msg: UiMessage,
@@ -336,8 +405,8 @@ data class BufferLog(
         skewSeconds: Long = SIGNATURE_SKEW_SECONDS,
     ): Boolean {
         val sec = msg.timeMs / 1000
-        val body = normaliseText(msg.text)
-        val who = normaliseSender(msg.from)
+        val body = normaliseBody(msg)
+        val who = normaliseSender(msg)
         for (delta in -skewSeconds..skewSeconds) {
             if (sigs.contains(signatureAt(sec + delta, who, body))) return true
         }
@@ -350,6 +419,9 @@ data class BufferLog(
          * store whole seconds, server-time stores milliseconds, and bouncers restamp.
          */
         const val SIGNATURE_SKEW_SECONDS = 3L
+
+        /** The skew window for our own messages. See [insert]. */
+        const val OWN_SIGNATURE_SKEW_SECONDS = 60L
 
         /**
          * How far out of order a live message may be and still keep its arrival position.
@@ -366,7 +438,7 @@ data class BufferLog(
 
         /** The content signature identifying [msg] regardless of which route delivered it. */
         fun signatureOf(msg: UiMessage): String =
-            signatureAt(msg.timeMs / 1000, normaliseSender(msg.from), normaliseText(msg.text))
+            signatureAt(msg.timeMs / 1000, normaliseSender(msg), normaliseBody(msg))
 
         private fun signatureAt(sec: Long, sender: String, body: String): String = "$sec|$sender|$body"
 
@@ -386,27 +458,48 @@ data class BufferLog(
                 .take(120)
                 .lowercase()
 
+        /**
+         * [msg]'s body in the form every delivery route shares.
+         *
+         * An action and a system line are both compared as the line "* nick text", because a
+         * log written by older versions holds join, part and quit lines in that shape and
+         * they read back as actions. Their bracketed details are removed first: a join, part
+         * or quit is rendered with the host, account and reason the server gave on that
+         * delivery, and a replay gives less. A replayed JOIN carries no extended-join
+         * account, so the live line and its replay would otherwise never match.
+         */
+        private fun normaliseBody(msg: UiMessage): String = when {
+            msg.from == null -> normaliseText(stripIrcFormatting(msg.text).replace(BRACKETED, " "))
+            msg.isAction -> normaliseText(
+                stripIrcFormatting("* ${msg.from} ${msg.text}").replace(BRACKETED, " ")
+            )
+            else -> normaliseText(msg.text)
+        }
+
         /** Any run of spaces, tabs or line breaks. */
         private val WHITESPACE_RUN = Regex("\\s+")
 
-        /** System lines have no sender, and nick case is not significant. */
-        private fun normaliseSender(from: String?): String = from?.lowercase() ?: "*"
+        /** A parenthesised or square-bracketed group with no nesting. */
+        private val BRACKETED = Regex("\\([^()]*\\)|\\[[^\\[\\]]*\\]")
+
+        /**
+         * System lines and actions share the sender "*" (see [normaliseBody]), and nick case is
+         * not significant.
+         */
+        private fun normaliseSender(msg: UiMessage): String =
+            if (msg.from == null || msg.isAction) "*" else msg.from.lowercase()
 
         /**
          * Insert [msg] at the position its timestamp asks for. Live messages append unless
          * stamped well before the tail, which means an unrecognised replay. Scans backwards
-         * because both cases almost always belong near the end.
-         *
-         * A replay stops at the newest line read from the disk log rather than sinking past
-         * it. Server history reaches further back than the loaded window, so a line the log
-         * does not cover would otherwise become the top of the buffer, dated days before
-         * everything the user has. Requested pages of older history do not come through
-         * here; they are woven in by [merge], which is what puts them above the log.
+         * because both cases almost always belong near the end. The scan stops at the first
+         * line stamped at or before [floorMs].
          */
         private fun place(
             list: PersistentList<UiMessage>,
             msg: UiMessage,
             origin: MessageOrigin,
+            floorMs: Long? = null,
         ): PersistentList<UiMessage> {
             if (list.isEmpty()) return list.adding(msg)
             val newest = list[list.size - 1].timeMs
@@ -414,9 +507,9 @@ data class BufferLog(
             if (origin == MessageOrigin.LIVE && msg.timeMs > newest - LIVE_REORDER_TOLERANCE_MS) {
                 return list.adding(msg)
             }
-            val floorAtLog = origin == MessageOrigin.REPLAY
+            val floor = floorMs ?: Long.MIN_VALUE
             var at = list.size
-            while (at > 0 && list[at - 1].timeMs > msg.timeMs && !(floorAtLog && list[at - 1].fromLog)) at--
+            while (at > 0 && list[at - 1].timeMs > msg.timeMs && list[at - 1].timeMs > floor) at--
             return list.addingAt(at, msg)
         }
 

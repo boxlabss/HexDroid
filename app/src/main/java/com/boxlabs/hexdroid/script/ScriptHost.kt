@@ -71,10 +71,8 @@ interface ScriptHost {
     fun httpRequest(req: ScriptHttpRequest, onResult: (ScriptHttpResponse) -> Unit)
 
     /**
-     * Run [block] on the Main/script thread. Used by the engine to deliver async
-     * callbacks (HTTP completions, timers) back onto the single thread where Rhino
-     * and _state live. Implement as
-     *     viewModelScope.launch(Dispatchers.Main.immediate) { block() }
+     * Run [block] on the main thread, where every other call into the engine is made.
+     * Used to deliver async callbacks (HTTP completions, picks) back to the script state.
      */
     fun runOnScriptThread(block: () -> Unit)
 
@@ -89,7 +87,7 @@ interface ScriptHost {
     /** Apply a script UI-intent (decorate/action/sidebar/toast) into _state for ChatScreen to render. */
     fun uiIntent(kind: String, args: List<String>)
 
-    /** Run [block] on the Main/script thread after [delayMs] (host owns the coroutine/timer). */
+    /** Run [block] on the main thread after [delayMs] (host owns the timer). */
     fun postDelayed(delayMs: Long, block: () -> Unit)
 
     /** Put a script-built [ScriptView] tree into _state so ScriptSurface renders it. */
@@ -100,14 +98,28 @@ interface ScriptHost {
 
     /**
      * Ask the user to choose a file for a script, filtered to [mimeFilter]. The host shows a
-     * prompt naming the script's context and opens the system picker only if the user agrees,
-     * so a script cannot reach a file the user did not hand it. [onResult] gets null when the
-     * user declines or picks nothing. May be invoked on any thread.
+     * prompt naming [network] and [buffer], the script's own context, and opens the system
+     * picker only if the user agrees. The resulting token is bound to [owner]. A request not
+     * [userInitiated] may be refused without a prompt after a recent decline. [onResult] gets
+     * null when the user declines or picks nothing, and may be invoked on any thread.
      */
-    fun mediaPick(mimeFilter: String, onResult: (ScriptMediaRef?) -> Unit)
+    fun mediaPick(
+        network: String?,
+        buffer: String?,
+        mimeFilter: String,
+        owner: String,
+        userInitiated: Boolean,
+        onResult: (ScriptMediaRef?) -> Unit,
+    )
 
     /** Upload a file the user picked, addressed by the token from [mediaPick]. */
     fun mediaUpload(req: ScriptUploadRequest, onResult: (ScriptHttpResponse) -> Unit)
+
+    /**
+     * Release whatever the host holds for scripts: threads, timers, pending callbacks. Called
+     * from [ScriptEngine.shutdown]. Default no-op for a host that holds nothing.
+     */
+    fun shutdown() {}
 }
 
 /**
@@ -127,6 +139,10 @@ data class ScriptUploadRequest(
     val token: String,
     val field: String? = "file",
     val headers: Map<String, String> = emptyMap(),
+    /** Extra text form fields sent alongside the file. Multipart only; ignored when raw. */
+    val formFields: Map<String, String> = emptyMap(),
+    /** The script making the upload; must match the script the token was issued to. */
+    val owner: String = "",
 )
 
 /** Minimal HTTP request model handed to [ScriptHost.httpRequest]. */

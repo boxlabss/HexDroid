@@ -1,0 +1,46 @@
+; WHOIS filter for HexDroid
+;
+; Hides the WHOIS reply lines you don't care about. Everything else the server sends
+; is left alone, including the same numerics when they arrive outside a WHOIS (a 301
+; away reply to a message you sent, for example).
+;
+; Edit %wf_hide below: it is the list of numerics to drop. Codes not in the list are
+; printed as usual. Scripts -> whoisfilter.hex -> Edit, then Reload.
+;
+;   276 client certificate fingerprint   330 logged in as
+;   301 away message                     335 is a bot
+;   307 registered nick                  337 free text
+;   310 helpop / available for help      338 actual host or IP
+;   311 user@host and real name          339 marks
+;   312 server they are on               344 country
+;   313 is an operator                   350 WebIRC gateway
+;   317 idle and signon times            378 connecting from
+;   318 end of WHOIS                     379 modes
+;   319 channels                         616 certificate fingerprint
+;   320 special / identified             671 secure connection
+;                                        760 metadata key
+;
+; To keep only a handful instead, set %wf_mode to keep and list those in %wf_keep.
+; Globals are shared by every script, so the settings carry a wf_ prefix.
+
+on LOAD {
+  ; drop = hide the codes in %wf_hide. keep = hide every WHOIS line except the codes in %wf_keep.
+  set %wf_mode drop
+
+  set %wf_hide $list(310, 337, 339, 344, 350, 378, 379)
+  set %wf_keep $list(311, 312, 317, 318, 319, 330, 671)
+}
+
+on NUMERIC {
+  ; $whois is true only for a line HexDroid matched to a WHOIS you ran
+  if ($whois != true) { return }
+
+  if (%wf_mode == keep) {
+    ; "no such nick" is an answer, not detail, so it is always shown
+    if ($has($list(401, 406), $code) == true) { return }
+    if ($has(%wf_keep, $code) == true) { return }
+    halt
+  }
+
+  if ($has(%wf_hide, $code) == true) { halt }
+}

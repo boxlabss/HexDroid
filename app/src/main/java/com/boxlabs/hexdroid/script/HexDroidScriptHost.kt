@@ -18,29 +18,29 @@
 
 package com.boxlabs.hexdroid.script
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.boxlabs.hexdroid.IrcViewModel
-import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
 /**
  * Bridges the script [ScriptEngine] to the running client.
+ *
+ * Script state lives on the main thread: events and commands already call in from there, so
+ * async results and timers are posted there too.
  */
 class HexDroidScriptHost(
     private val vm: IrcViewModel,
 ) : ScriptHost {
 
-    private val worker = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "hexdroid-scripts").apply { isDaemon = true }
-    }
+    private val main = Handler(Looper.getMainLooper())
 
-    /**
-     * HTTP runs here, never on [worker]: [worker] is the single thread all script state is
-     * serialised onto, and a fetch there stalls every script until its timeouts expire. Results are
-     * marshalled back via runOnScriptThread, so script state is still single-threaded.
-     */
+    @Volatile private var closed = false
+
+    /** Blocking HTTP and uploads. Results are posted back to the main thread. */
     private val httpWorker = Executors.newFixedThreadPool(2) { r ->
         Thread(r, "hexdroid-script-http").apply { isDaemon = true }
     }
@@ -70,10 +70,14 @@ class HexDroidScriptHost(
     override fun isNetworkAllowed(url: String): Boolean = vm.scriptNetworkAllowed(url)
 
     // ── Threading ────────────────────────────────────────────────────────────────
-    override fun runOnScriptThread(block: () -> Unit) { worker.execute { safe(block) } }
+    override fun runOnScriptThread(block: () -> Unit) {
+        if (closed) return
+        main.post { if (!closed) safe(block) }
+    }
 
     override fun postDelayed(delayMs: Long, block: () -> Unit) {
-        worker.schedule({ safe(block) }, delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        if (closed) return
+        main.postDelayed({ if (!closed) safe(block) }, delayMs.coerceAtLeast(MIN_TIMER_MS))
     }
 
     private inline fun safe(block: () -> Unit) =
@@ -151,7 +155,7 @@ class HexDroidScriptHost(
                         return@execute
                     }
                     val stream = if (status in 200..299) conn.inputStream else conn.errorStream
-                    val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+                    val text = readBody(stream)
                     // Upload endpoints answer 201 with the new URL in Location and often an empty
                     // body, so it is carried through rather than read off the body.
                     onResult(
@@ -211,15 +215,21 @@ class HexDroidScriptHost(
     }
 
     // ── media ─────────────────────────────────────────────────────────────────────
-    override fun mediaPick(mimeFilter: String, onResult: (ScriptMediaRef?) -> Unit) {
-        vm.scriptMediaPick(mimeFilter, onResult)
+    override fun mediaPick(
+        network: String?,
+        buffer: String?,
+        mimeFilter: String,
+        owner: String,
+        userInitiated: Boolean,
+        onResult: (ScriptMediaRef?) -> Unit,
+    ) {
+        vm.scriptMediaPick(network, buffer, mimeFilter, owner, userInitiated, onResult)
     }
 
     /**
-     * Stream a picked file to [ScriptUploadRequest.url]. The bytes never pass through the
-     * script: it holds a token, the URI behind it stays in the VM, and this reads it straight
-     * into the connection. Policy is re-checked here because a script could have been handed
-     * the token long before it called this.
+     * Upload a picked file to [ScriptUploadRequest.url]. The bytes never pass through the
+     * script: it holds a token, and the URI behind it stays in the VM. Policy is re-checked
+     * here because the token may have been issued long before this call.
      */
     override fun mediaUpload(req: ScriptUploadRequest, onResult: (ScriptHttpResponse) -> Unit) {
         httpWorker.execute {
@@ -227,7 +237,7 @@ class HexDroidScriptHost(
                 onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = "blocked by policy"))
                 return@execute
             }
-            val source = vm.scriptMediaSource(req.token)
+            val source = vm.scriptMediaSource(req.token, req.owner)
             if (source == null) {
                 onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = "unknown file token"))
                 return@execute
@@ -239,28 +249,37 @@ class HexDroidScriptHost(
                 return@execute
             }
             var conn: HttpURLConnection? = null
+            var staged: java.io.File? = null
             try {
                 val boundary = "hexdroid" + java.util.UUID.randomUUID().toString().replace("-", "")
-                conn = (URL(req.url).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    connectTimeout = 15_000
-                    readTimeout = 60_000
-                    // Redirects are not followed for an upload: replaying the body would need the
-                    // stream rewound, and a 3xx to another host would send the file somewhere the
-                    // policy check never saw.
-                    instanceFollowRedirects = false
-                    setChunkedStreamingMode(0)
-                    req.headers.forEach { (k, v) -> setRequestProperty(k, v) }
-                    setRequestProperty(
-                        "Content-Type",
-                        if (req.field != null) "multipart/form-data; boundary=$boundary" else mime,
-                    )
+
+                // The request body is assembled on disk first so its exact length is known.
+                // Chunked encoding is what a streaming upload would need, and a server that
+                // parses multipart from CONTENT_LENGTH (PHP's does) sees no parts at all in a
+                // chunked request and reports an empty upload. The provider's reported size is
+                // not usable for the length either, since it can disagree with what the stream
+                // yields; measuring the staged copy cannot.
+                val file = try {
+                    java.io.File.createTempFile("body", null, vm.scriptUploadCacheDir())
+                } catch (t: Throwable) {
+                    input.close()
+                    throw t
                 }
-                input.use { inp ->
-                    conn.outputStream.use { out ->
+                staged = file
+                input.use { raw ->
+                    val inp = CappedInputStream(raw, MAX_UPLOAD_BYTES)
+                    java.io.FileOutputStream(file).buffered().use { out ->
                         if (req.field != null) {
                             val safeName = com.boxlabs.hexdroid.FilehostUpload.sanitizeFileName(name)
+                            // Text fields first: an endpoint reading an option out of $_POST
+                            // needs it in the same body as the file.
+                            for ((k, v) in req.formFields) {
+                                out.write(
+                                    ("--$boundary\r\n" +
+                                        "Content-Disposition: form-data; name=\"${headerToken(k)}\"\r\n\r\n" +
+                                        v + "\r\n").toByteArray(Charsets.UTF_8)
+                                )
+                            }
                             out.write(
                                 ("--$boundary\r\n" +
                                     "Content-Disposition: form-data; name=\"${headerToken(req.field)}\"; " +
@@ -274,9 +293,29 @@ class HexDroidScriptHost(
                         }
                     }
                 }
+
+                val bodyLength = file.length()
+                conn = (URL(req.url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 15_000
+                    readTimeout = 60_000
+                    // Redirects are not followed for an upload: a 3xx to another host would
+                    // send the file somewhere the policy check never saw.
+                    instanceFollowRedirects = false
+                    setFixedLengthStreamingMode(bodyLength)
+                    req.headers.forEach { (k, v) -> setRequestProperty(k, v) }
+                    setRequestProperty(
+                        "Content-Type",
+                        if (req.field != null) "multipart/form-data; boundary=$boundary" else mime,
+                    )
+                }
+                conn.outputStream.use { out ->
+                    java.io.FileInputStream(file).buffered().use { it.copyTo(out) }
+                }
                 val status = conn.responseCode
                 val stream = if (status in 200..299) conn.inputStream else conn.errorStream
-                val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+                val text = readBody(stream)
                 onResult(
                     ScriptHttpResponse(
                         ok = status in 200..299,
@@ -285,11 +324,29 @@ class HexDroidScriptHost(
                         location = conn.getHeaderField("Location"),
                     )
                 )
+            } catch (_: CappedInputStream.LimitExceeded) {
+                onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = "file too large (limit ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB)"))
             } catch (t: Throwable) {
                 onResult(ScriptHttpResponse(ok = false, status = 0, body = "", error = t.message ?: "upload failed"))
             } finally {
+                staged?.delete()
                 conn?.disconnect()
             }
+        }
+    }
+
+    /** A response body as text, cut off at [MAX_RESPONSE_CHARS]. */
+    private fun readBody(stream: java.io.InputStream?): String {
+        if (stream == null) return ""
+        return stream.bufferedReader().use { reader ->
+            val out = StringBuilder()
+            val buf = CharArray(8192)
+            while (out.length < MAX_RESPONSE_CHARS) {
+                val n = reader.read(buf, 0, minOf(buf.size, MAX_RESPONSE_CHARS - out.length))
+                if (n < 0) break
+                out.append(buf, 0, n)
+            }
+            out.toString()
         }
     }
 
@@ -300,7 +357,44 @@ class HexDroidScriptHost(
     private fun headerToken(raw: String): String =
         raw.filter { it.code in 0x20..0x7e && it != '"' && it != ';' }.take(64).ifBlank { "file" }
 
-    fun shutdown() { worker.shutdownNow() }
+    override fun shutdown() {
+        closed = true
+        main.removeCallbacksAndMessages(null)
+        httpWorker.shutdownNow()
+    }
 
-    private companion object { const val TAG = "HexScript" }
+    /** Fails once more than [limit] bytes have been read. */
+    private class CappedInputStream(
+        inner: java.io.InputStream,
+        private val limit: Long,
+    ) : java.io.FilterInputStream(inner) {
+        class LimitExceeded : java.io.IOException("upload size limit exceeded")
+
+        private var count = 0L
+
+        override fun read(): Int {
+            val b = super.read()
+            if (b >= 0) add(1)
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = super.read(b, off, len)
+            if (n > 0) add(n.toLong())
+            return n
+        }
+
+        private fun add(n: Long) {
+            count += n
+            if (count > limit) throw LimitExceeded()
+        }
+    }
+
+    private companion object {
+        const val TAG = "HexScript"
+        const val MAX_UPLOAD_BYTES = 64L * 1024 * 1024
+        const val MAX_RESPONSE_CHARS = 1024 * 1024
+        /** Floor on timer delays, so a script re-arming a zero timer cannot spin the main thread. */
+        const val MIN_TIMER_MS = 20L
+    }
 }

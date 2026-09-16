@@ -1,26 +1,40 @@
 ; Image upload for HexDroid
 ;
-; /img  picks an image and uploads it, then puts the returned URL in the channel.
-; /imgme does the same but only shows the URL to you.
+; /img   picks an image and uploads it, then sends the URL to the channel.
+; /imgme does the same but shows the URL only to you.
 ;
-; ENDPOINT: point %ep at an upload endpoint that accepts a multipart/form-data POST.
-; %field is the form field name it expects (most want "file"). If yours takes the raw
-; bytes as the request body instead, put -r in place of -f %field below.
+; Written for the Paste Image Uploader PHP endpoint, which:
+;   - reads the file from the form field "images"
+;   - strips EXIF when the form field "strip_exif" is set
+;   - answers 200 with {"results":[{"success":true,"filePath":"/img/img_x.png",...}]}
+;     or {"results":[{"success":false,"error":"..."}]}
+;   - returns a site-absolute path, not a full URL, so %img_base supplies the origin
 ;
-; %auth is optional. Fill it in as a whole header line if the endpoint needs a token:
-;   set %auth Authorization: Bearer abc123
-; Leave it empty for an endpoint that does not.
+; SETTINGS
+;   %img_ep     exact upload URL including the file name. A directory URL answers 301 and
+;               the upload is not redirected, on purpose: a redirect to another host would
+;               send your file somewhere HexDroid never checked.
+;   %img_base   scheme and host the returned path hangs off, no trailing slash.
+;   %img_field  form field the server reads the file from.
+;   %img_auth   optional, a whole header line, e.g. Authorization: Bearer abc123
+;
+; Globals are shared by every script, so the settings carry an img_ prefix.
 ;
 ; The picker never opens on its own: HexDroid asks first, and you choose the file. The
 ; script is handed a token for that one file, not a path, and can read nothing else.
 
 on LOAD {
-  set %ep https://paste.boxlabs.uk/img
-  set %field file
-  set %auth
+  set %img_ep https://paste.boxlabs.uk/img/index.php
+  set %img_base https://paste.boxlabs.uk
+  set %img_field images
+  set %img_auth
 }
 
 alias img {
+  if ($buffer == *server*) {
+    echo $buffer *** /img needs a channel or query. Use /imgme here.
+    return
+  }
   media.pick -m image/* img_picked $buffer public
 }
 
@@ -32,26 +46,44 @@ on SIGNAL:img_picked {
   ; $1 buffer, $2 public|private
   if ($mediaok != true) { return }
   toast Uploading $medianame
-  if (%auth == "") {
-    media.upload -f %field %ep $mediatoken img_done $1 $2
+  ; strip_exif matters for photos: without it the server keeps the GPS tags.
+  if ($len(%img_auth) == 0) {
+    media.upload -f %img_field -p strip_exif=1 %img_ep $mediatoken img_done $1 $2
   }
   else {
-    media.upload -f %field -h %auth %ep $mediatoken img_done $1 $2
+    media.upload -f %img_field -p strip_exif=1 -h %img_auth %img_ep $mediatoken img_done $1 $2
   }
 }
 
 on SIGNAL:img_done {
   if ($httpok != true) {
-    echo $1 *** upload failed ($httpstatus) $httpbody
+    if ($httpstatus == 0) {
+      echo $1 *** upload failed: $httperror
+      return
+    }
+    echo $1 *** upload failed ($httpstatus) $left($trim($re_replace($httpbody, \s+, " ")), 200)
     return
   }
-  ; 201 Created names the new file in Location; others answer with the URL as the body.
-  set -l %url $httplocation
-  if (%url == "") { set -l %url $httpbody }
-  if (%url == "") {
-    echo $1 *** upload succeeded but the server returned no URL
+
+  ; A 2xx is not success here: this endpoint reports its failures in a 200 body.
+  set -l %err $json($httpbody, results.0.error)
+  if ($len(%err) > 0) {
+    echo $1 *** upload rejected: %err
     return
   }
+
+  set -l %path $trim($json($httpbody, results.0.filePath))
+  if ($len(%path) == 0) {
+    echo $1 *** uploaded, but no path in the reply: $left($trim($re_replace($httpbody, \s+, " ")), 200)
+    return
+  }
+
+  ; A site-absolute path hangs off %img_base; a full URL is used as it is.
+  ; Adjacent expansions concatenate, as translate.hex builds its endpoint.
+  set -l %url %img_base%path
+  if ($left(%path, 8) == https://) { set -l %url %path }
+  if ($left(%path, 7) == http://) { set -l %url %path }
+
   if ($2 == public) { msg $1 %url }
   else { echo $1 %url }
 }
