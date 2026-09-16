@@ -1,6 +1,31 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
+## [Unreleased]
+- **Scripts can upload a file you pick.** New `media.pick` and `media.upload` statements. HexDroid asks first, naming the channel and network the script is running in. The script gets a token for that one file and only that script can use it. Uploads go as multipart form data (`-f` names the field, `-p` adds form fields, `-r` sends the raw bytes) with an exact Content-Length. Files over 64 MB are refused and redirects are not followed. Ships with `imgpaste.hex`, which adds `/img` and `/imgme`.
+- **Scripts can post structured HTTP requests.** `http.get` and `http.post` take `-t` for the Content-Type, `-h` for headers (repeatable) and `-b %var` for a body taken whole from a variable, so JSON and header values with spaces survive. Replies expose `$httplocation`, and `$httperror` says why a request never got a status.
+- **New `NUMERIC` script event.** Scripts see server lines before they are printed and can rewrite or hide them; `$whois` says whether a line belongs to a WHOIS you ran. Added example whoisfilter.exe
+- **Scripts can send `/me` actions** with the `me` command.
+- **Bug fix: `/ctcp` upper-cased its arguments.** Only the CTCP command itself is now upper-cased, so `/ctcp nick ACTION waves` arrives as typed.
+- **Bug fix: script loading froze on a stray `}`.** A closing brace outside any block now reports an error instead.
+- **Bug fix: a script variable followed by a full stop read as empty.** `%url.` and `$nick.` now expand as expected.
+- **Server history lands in the right place.** On servers that replay lines on join, replayed lines wait for the saved scrollback to load and stay below it, under the history divider, instead of appearing above. Lines replayed without being marked as history no longer count as unread, notify, or get logged again, and their age is judged against the server's clock. Pages of older history you request still load above the log.
+- **Replayed joins, parts and quits are recognised.** With draft/event-playback, a server replays these alongside messages, and they were shown again below lines already in your saved log.
+- **Rejoining a channel fetches what you missed while away.** A rejoin now asks for everything since you left.
+- **Your own earlier parts and quits are no longer replayed at you.** With draft/event-playback a server replays them like anyone else's, which showed a quit for every earlier connection. A replayed part of your own also no longer takes the channel off the list rejoined after a reconnect.
+- **Reactions to messages that are not loaded attach to the message.** HexDroid fetches the message and shows the reaction under it, instead of a line naming a message id. A message read from the saved log also picks up its id when the server replays it, so reactions and replies to it attach. When the message cannot be found, the reaction is described without the id, and removals of such reactions are not shown.
+- **Your own messages are no longer shown twice after a history replay.** Your lines are now logged with the server's timestamp and wording once the server echoes them. Replays of your own lines are also matched against the log within a minute.
+- **Saved scrollback loads faster.** Logs are read backwards from the end.
+- **Rejected history requests are matched exactly.** When a server refuses a CHATHISTORY request, its reply label decides which request is closed.
+- **Safer filehost uploads.** Your login is only sent to an upload host that belongs with the IRC server, and a SCRAM or EXTERNAL login never sends its password. Failures now include the server's reason, a redirect names where it pointed, a link that is not http or https is refused, and a file whose size changes while it is read is sent again.
+- **Escaped ISUPPORT values are decoded.** A server can now advertise values such as an upload URL containing `=` or spaces.
+- **Network editor improved.** On phones the editor opens on a list of sections, each opening on its own page. TV and tablets keep the side.
+- **Bug fix: new aliases not saving.** An alias added in settings was stored with an empty expansion and then disappeared.
+- **Bug fix: coloured art collapsing.** A background-only colour code (`^C,15`) left its digits in the text and pushed the picture out of line. 24-bit colours (`^DRRGGBB[,RRGGBB]`) are now rendered.
+- **Bug fix: multiline PMs and PM reactions opening a buffer against your own nick.**
+- **Crash fixes** Smart selection could throw on lines of block art, emoji or symbols, so it is off.
+- **ANR fix: the log retention** Now in the background, and only when logging, the retention period or the log folder changes.
+
 ## [1.7.4] - 2026-09-06
 - **Ability to draw over other apps** Tap the menu and "Float"
 - **New privacy setting to stop answering CTCP requests.** Halt replies to VERSION, TIME, PING and similar. The setting is in Settings > Privacy.
