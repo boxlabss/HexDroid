@@ -2318,6 +2318,9 @@ class IrcClient(val config: IrcConfig) {
      *  Keyed by [casefold] - see [historyRequested] for why lowercase() is not enough. */
     private val historyExpectUntil = mutableMapOf<String, Long>()
 
+    /** Server time of our latest live JOIN per channel, keyed by [casefold]. */
+    private val selfJoinServerMs = mutableMapOf<String, Long>()
+
     /** znc.in/playback last-seen timestamps. Key = [casefold]ed buffer name. Value = epoch seconds. */
     private val zncLastSeen = mutableMapOf<String, Long>()
 
@@ -2416,9 +2419,12 @@ class IrcClient(val config: IrcConfig) {
      *  currently expecting history for that target and the message is older than ~now. */
     private fun isHeuristicHistory(target: String?, timeMs: Long?, nowMs: Long): Boolean {
         if (target.isNullOrBlank() || timeMs == null) return false
-        val until = historyExpectUntil[casefold(target)] ?: 0L
+        val key = casefold(target)
+        val until = historyExpectUntil[key] ?: 0L
         if (until < nowMs) return false
-        return timeMs < (nowMs - 15_000L)
+        // Anything the server stamped before our join is a replay, whatever the device clock says.
+        val joinedAt = selfJoinServerMs[key]
+        return if (joinedAt != null) timeMs < joinedAt - 1_000L else timeMs < (nowMs - 15_000L)
     }
 
     /** Parse server-time tag from IRCv3 tags (legacy `t` from znc.in/server-time-iso, or
@@ -3254,6 +3260,9 @@ class IrcClient(val config: IrcConfig) {
 
 						for (chan in chans) {
 							val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
+							if (nickEquals(nick, currentNick) && !chanHist && serverTimeMs != null) {
+								selfJoinServerMs[casefold(chan)] = serverTimeMs
+							}
 							send(
 								IrcEvent.Joined(
 									channel = chan,
@@ -5421,6 +5430,7 @@ class IrcClient(val config: IrcConfig) {
         historyRequested.clear()
         namesRequested.clear()
         historyExpectUntil.clear()
+        selfJoinServerMs.clear()
         zncLastSeen.clear()
         openPlaybackBatches.clear()
         playbackBatchTargets.clear()

@@ -1,0 +1,5 @@
+Chat history reworked: replayed messages now appear in order below your scrollback, without duplicates, and rejoining a channel fetches what you missed.
+Scripting engine reworked: Share images with /img (an example script included)
+Reactions now appear on the message they belong to.
+Faster scrollback loading, safer file uploads, and more capable scripts.
+Fixes for aliases not saving, coloured text art, WHOIS replies and several crashes.

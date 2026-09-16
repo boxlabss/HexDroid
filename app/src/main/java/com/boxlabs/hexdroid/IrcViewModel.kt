@@ -12006,10 +12006,14 @@ if (code == "442") {
             val unreadInc = if (!isSelected && !quiet) 1 else 0
             val highlightInc = if (!isSelected && effectiveHighlight && !quiet) 1 else 0
 
-            val newLastRead = if (isSelected)
-                java.time.Instant.ofEpochMilli(ts + 1L).toString()
-            else
+            // Only ever forward: a replayed line is older than what the user has already seen.
+            val newLastRead = if (isSelected) {
+                val known = buf.lastReadTimestamp?.let { parseMarkReadMs(it) }
+                if (known != null && known > ts) buf.lastReadTimestamp
+                else java.time.Instant.ofEpochMilli(ts + 1L).toString()
+            } else {
                 buf.lastReadTimestamp
+            }
 
             st.copy(
                 buffers = st.buffers + (bufferKey to buf.copy(
