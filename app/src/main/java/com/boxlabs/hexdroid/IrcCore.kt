@@ -1391,6 +1391,9 @@ internal fun redactRawLine(line: String): String {
 /** How long a UI-issued MODE query stays marked silent, for servers that omit 329. */
 private const val SILENT_MODE_QUERY_TTL_MS = 15_000L
 
+/** How long an outstanding WHO is kept waiting for its 315. */
+private const val WHO_REQUEST_TTL_MS = 60_000L
+
 /** Split [text] into pieces of at most [maxBytes] UTF-8 bytes, never mid-codepoint. */
 internal fun splitByUtf8Bytes(text: String, maxBytes: Int): List<String> {
     val bytes = text.toByteArray(Charsets.UTF_8)
@@ -1680,6 +1683,37 @@ class IrcClient(val config: IrcConfig) {
         return true
     }
 
+    /** One WHO on the wire. [buffer] is where replies are printed; null for the client's own queries. */
+    private class WhoRequest(val maskFold: String, val buffer: String?, val expiresAt: Long)
+
+    /** WHO requests in the order they were sent, so replies can be matched to them. */
+    private val whoRequests = ArrayDeque<WhoRequest>()
+
+    /** Records a WHO for [mask]. Call before sending it. */
+    private fun trackWho(mask: String, buffer: String?) {
+        synchronized(whoRequests) {
+            if (whoRequests.size >= MAX_PENDING_WHO) whoRequests.removeFirst()
+            whoRequests.addLast(
+                WhoRequest(casefold(mask), buffer, System.currentTimeMillis() + WHO_REQUEST_TTL_MS)
+            )
+        }
+    }
+
+    /** The WHO that the current 352/354 reply belongs to. */
+    private fun currentWho(): WhoRequest? = synchronized(whoRequests) {
+        val now = System.currentTimeMillis()
+        while (whoRequests.isNotEmpty() && whoRequests.first().expiresAt < now) whoRequests.removeFirst()
+        whoRequests.firstOrNull()
+    }
+
+    /** Completes the WHO for [mask], also dropping any earlier request the server never ended. */
+    private fun finishWho(mask: String): WhoRequest? = synchronized(whoRequests) {
+        val idx = whoRequests.indexOfFirst { it.maskFold == casefold(mask) }
+        if (idx < 0) return@synchronized whoRequests.removeFirstOrNull()
+        repeat(idx) { whoRequests.removeFirst() }
+        whoRequests.removeFirst()
+    }
+
     private val parser = IrcParser()
     /**
      * One atomic unit of outbound traffic: the writer emits every line back-to-back with
@@ -1754,6 +1788,8 @@ class IrcClient(val config: IrcConfig) {
         private const val MAX_TRACKED_BATCHES = 64
         /** Outstanding WHOIS routes kept before the oldest is dropped. */
         private const val MAX_PENDING_WHOIS = 50
+        /** Outstanding WHO requests kept before the oldest is dropped. */
+        private const val MAX_PENDING_WHO = 50
 
         /**
          * CHATHISTORY selector timestamp format. See [historyTimestamp].
@@ -3336,6 +3372,7 @@ class IrcClient(val config: IrcConfig) {
 							// useful on non-WHOX servers.
 							if (nickEquals(nick, currentNick) && whoxSupported && config.capPrefs.whox && !chanHist) {
 								// %u=ident %h=host %s=server %n=nick %f=flags %a=account %r=realname
+								trackWho(chan, null)
 								sendRaw("WHO $chan %tuhsnfar,42")
 							}
 						}
@@ -4040,6 +4077,7 @@ class IrcClient(val config: IrcConfig) {
      * the server has it, plain WHO otherwise; the away flag is in the flags field of both.
      */
     suspend fun refreshChannelWho(target: String) {
+        trackWho(target, null)
         if (whoxSupported && config.capPrefs.whox) sendRaw("WHO $target %tuhsnfar,42")
         else sendRaw("WHO $target")
     }
@@ -4680,6 +4718,7 @@ class IrcClient(val config: IrcConfig) {
             }
             "who" -> {
                 val arg = parts.drop(1).joinToString(" ")
+                trackWho(parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: "*", currentBuffer)
                 sendRaw(if (arg.isBlank()) "WHO" else "WHO $arg")
             }
             "nick" -> parts.getOrNull(1)?.let { sendRaw("NICK $it") }
@@ -5095,7 +5134,13 @@ class IrcClient(val config: IrcConfig) {
 				// all use it); /raw is the descriptive variant some clients prefer. Both
 				// are supported so muscle memory from any other client works here.
 				val line = parts.drop(1).joinToString(" ")
-				if (line.isNotBlank()) sendRaw(line)
+				if (line.isNotBlank()) {
+					val words = line.trim().split(' ').filter { it.isNotEmpty() }
+					if (words.first().equals("WHO", ignoreCase = true)) {
+						trackWho(words.getOrNull(1) ?: "*", currentBuffer)
+					}
+					sendRaw(line)
+				}
 			}
 			// IRCv3 MONITOR: watch list management
 			// /monitor + nick[,nick...]   - add to watch list  (or /monitor +nick)
@@ -5866,6 +5911,12 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
     //   <me> 42 <ident> <host> <server> <nick> <flags> <account> :<realname>
     //   The query type (42) is in params[1]; we skip this numeric if it doesn't match ours.
     "354" to handler@{ msg, _, _, _ ->
+        val req = currentWho()
+        if (req?.buffer != null) {
+            val fields = msg.allParams.drop(1).joinToString(" ") { stripIrcFormatting(it) }
+            send(IrcEvent.ServerText(fields, code = "354", bufferName = req.buffer))
+            return@handler
+        }
         // Verify this is our WHOX query (query type 42)
         if (msg.params.getOrNull(1) != "42") return@handler
         val ident   = msg.params.getOrNull(2) ?: return@handler
@@ -5893,10 +5944,24 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         val isAway = flags?.firstOrNull { it == 'H' || it == 'G' }?.let { it == 'G' }
         val isBot = botModeChar?.let { bc -> flags?.contains(bc) == true } ?: false
         send(IrcEvent.WhoxReply(nick = nick, ident = ident, host = host, account = null, isAway = isAway, isBot = isBot))
+        val buffer = currentWho()?.buffer ?: return@handler
+        val chan = msg.params.getOrNull(1) ?: "*"
+        val server = msg.params.getOrNull(4)?.let { " ($it)" } ?: ""
+        val realname = msg.trailing?.let { stripIrcFormatting(it.substringAfter(' ', "")) }.orEmpty()
+        send(IrcEvent.ServerText(
+            "$chan $nick ${flags.orEmpty()} $ident@$host$server $realname".trimEnd(),
+            code = "352",
+            bufferName = buffer,
+        ))
     },
 
-    // RPL_ENDOFWHO (315): <me> <mask> :End of WHO list. Consumed so it is not printed raw.
-    "315" to handler@{ _, _, _, _ -> },
+    // RPL_ENDOFWHO (315): <me> <mask> :End of WHO list. Printed only for a WHO the user typed.
+    "315" to handler@{ msg, _, _, _ ->
+        val mask = msg.params.getOrNull(1) ?: "*"
+        val buffer = finishWho(mask)?.buffer ?: return@handler
+        val text = msg.trailing?.let { stripIrcFormatting(it) }
+        send(IrcEvent.ServerText(if (text != null) "$mask: $text" else mask, code = "315", bufferName = buffer))
+    },
 
     // ERR_NOTONCHANNEL
     "442" to handler@{ msg, _, _, _ ->
