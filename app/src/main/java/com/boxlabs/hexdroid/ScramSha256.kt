@@ -136,17 +136,9 @@ class ScramSha256Client(
         name.replace("=", "=3D").replace(",", "=2C")
 
     /**
-     * PBKDF2-HMAC-SHA256, computed directly over the UTF-8 bytes of the password.
-     *
-     * NOT PBEKeySpec + SecretKeyFactory: PBEKeySpec takes a CharArray and leaves the
-     * char-to-byte conversion to the provider. Providers disagree - some use UTF-8,
-     * the PKCS#5 lineage uses only the low byte of each char - so a password with any
-     * character above U+007F derives a different key depending on which provider the
-     * device happens to ship. RFC 5802 defines Hi() over the UTF-8 encoding of the
-     * SASLprep'd password, so we encode it ourselves and the result is identical on
-     * every device.
-     *
-     * dkLen is one hash block (32 bytes), so the outer PBKDF2 loop runs exactly once.
+     * PBKDF2-HMAC-SHA256 over the UTF-8 bytes of the password, as RFC 5802 defines Hi(). Not
+     * PBEKeySpec, whose char-to-byte conversion differs between providers. dkLen is one block, so
+     * the outer loop runs once.
      */
     private fun hi(password: String, salt: ByteArray, iterations: Int): ByteArray {
         val pw = password.toByteArray(StandardCharsets.UTF_8)

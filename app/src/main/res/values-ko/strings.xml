@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">설정</string>
+    <string name="settings_view_one_page">한 페이지</string>
+    <string name="settings_view_categories">카테고리</string>
     <string name="settings_intro_tour">인트로 투어</string>
     <string name="settings_intro_tour_desc">주요 화면과 단축키에 대한 간단한 안내입니다.</string>
     <string name="section_appearance">외관</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">시작 시 자동 연결</string>
     <string name="setting_rejoin_on_kick">추방 시 재참가</string>
     <string name="setting_rejoin_on_kick_desc">추방된 후 자동으로 채널에 다시 참가합니다. +i/+k/+b 모드와의 반복 루프를 피하기 위해, 같은 채널에서 60초 이내의 두 번째 추방은 재참가하지 않습니다.</string>
+    <string name="setting_nick_regain">기본 닉 되찾기</string>
+    <string name="setting_nick_regain_desc">닉이 사용 중이라 대체 닉으로 접속한 경우, 몇 분 동안 원래 닉으로 되돌아가기를 계속 시도합니다.</string>
     <string name="setting_enable_notifications">알림 활성화</string>
     <string name="setting_notify_highlights">강조 알림</string>
     <string name="setting_notify_pm">개인 메시지 알림</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">강퇴</string>
     <string name="chat_ban">차단</string>
     <string name="chat_kick_ban_btn">강퇴+차단</string>
+    <string name="chat_ban_by">밴 기준</string>
+    <string name="chat_ban_type_host">호스트</string>
+    <string name="chat_ban_type_nick">닉</string>
+    <string name="chat_ban_type_account">계정</string>
+    <string name="chat_ban_type_domain">도메인</string>
 
     <!-- Network screens -->
     <string name="networks_title">네트워크</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">네트워크마다 Raw 버퍼에 주고받은 모든 줄을 표시합니다. 비밀번호는 가려집니다. 디버깅용입니다.</string>
     <string name="chat_show_less">간략히 보기</string>
     <string name="chat_not_delivered">전달되지 않음</string>
+    <string name="chat_status_read">읽음</string>
     <string name="vm_multiline_rejected">서버가 메시지를 거부했습니다 (%1$s): %2$s</string>
     <string name="network_edit_cap_also">%1$s도 함께 요청함</string>
     <string name="network_edit_caps_hint">기본 IRCv3 기능은 기본으로 활성화됩니다. 고급 옵션을 보려면 켜세요.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">메시지를 작성 중일 때 다른 사람에게 표시합니다 (draft/typing). 개인정보 보호를 위해 기본적으로 비활성화.</string>
     <string name="setting_receive_typing">다른 사람의 입력 중 표시 보기</string>
     <string name="setting_receive_typing_desc">채널이나 DM에서 다른 사람이 메시지를 작성 중일 때 표시기를 표시합니다.</string>
+    <string name="setting_read_receipts">읽음 확인</string>
+    <string name="setting_read_receipts_desc">개인 메시지에서 상대방의 메시지를 읽었음을 알리고, 상대방이 내 메시지를 읽었는지 표시합니다. 다른 HexDroid 사용자와만 작동합니다.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">채널이 %1$s에서 %2$s로 이름 변경됨</string>
@@ -452,6 +464,13 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="chat_cd_launch_scripts">스크립트 실행</string>
     <string name="chat_cd_edit_topic">주제 편집</string>
     <string name="chat_cd_jump_unread">읽지 않은 곳으로 이동</string>
+    <string name="format_bold">굵게</string>
+    <string name="format_italic">기울임꼴</string>
+    <string name="format_underline">밑줄</string>
+    <string name="format_colour">색상…</string>
+    <string name="format_clear">서식 지우기</string>
+    <string name="chat_art_show_as_text">텍스트로 보기</string>
+    <string name="chat_unread_since">%2$s 이후 %1$s</string>
     <string name="chat_cd_scroll_bottom">맨 아래로 스크롤</string>
     <string name="chat_cd_close_label">%1$s 닫기</string>
     <string name="chat_cd_cancel_reply">답장 취소</string>
@@ -460,6 +479,8 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="chat_reply_to">%1$s에게 답장</string>
     <string name="chat_delete_message">메시지 삭제</string>
     <string name="chat_delete_message_desc">서버를 통해 모든 사람에게서 삭제합니다</string>
+    <string name="chat_delete_message_others_desc">서버가 허용하는 경우 모두에게서 삭제합니다</string>
+    <string name="chat_delete_message_no_id">삭제할 수 없음: 서버가 이 메시지에 ID를 부여하지 않았습니다</string>
     <string name="chat_copy_messages">메시지 복사…</string>
     <string name="chat_copy_messages_desc">복사할 메시지를 여러 개 선택하세요</string>
 
@@ -1399,6 +1420,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <!-- ScriptsScreen -->
     <string name="scripts_title">스크립트</string>
     <string name="scripts_reload">다시 불러오기</string>
+    <string name="scripts_restore_defaults">기본 스크립트 복원 (%1$d)</string>
     <string name="scripts_import_file">파일 가져오기…</string>
     <string name="scripts_import">가져오기…</string>
     <string name="scripts_paste">붙여넣기…</string>
@@ -1492,7 +1514,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="cmd_unignore">무시 목록에서 사용자를 제거합니다</string>
     <string name="cmd_quit">IRC를 끝내고 연결을 끊습니다</string>
     <string name="cmd_kick">사용자를 채널에서 강퇴합니다</string>
-    <string name="cmd_ban">밴: 닉 (기본), 사용자, 호스트, 도메인, 계정</string>
+    <string name="cmd_ban">밴: 호스트 (기본), 닉, 사용자, 도메인, 계정</string>
     <string name="cmd_unban">밴을 해제합니다 (닉 밴이 아니면 /banlist의 정확한 마스크를 붙여넣으세요)</string>
     <string name="cmd_kb">사용자를 강퇴하고 밴합니다 (/ban과 같은 마스크 종류)</string>
     <string name="cmd_kickban">/kb의 다른 이름</string>

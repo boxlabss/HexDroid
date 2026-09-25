@@ -20,13 +20,8 @@ package com.boxlabs.hexdroid.crypto
 import com.boxlabs.hexdroid.data.SecretStore
 
 /**
- * A long-term identity: two INDEPENDENT keypairs (spec §1).
- *   - sig*  : Ed25519, used only to sign/verify (authenticates who sent a move)
- *   - dh*   : X25519, used only via dh() (lets others seal secrets to you, and seeds
- *             the 1:1 handshake). Kept distinct from the signing key on purpose.
- *
- * Private material is the 32-byte seeds; never log or serialise them except through
- * [AgeKeystore], which wraps them at rest.
+ * A long-term identity: independent Ed25519 (signing) and X25519 (DH) keypairs, held as 32-byte
+ * seeds. Never logged or serialised except through [AgeKeystore].
  */
 class AgeIdentity(
     val sigSeed: ByteArray,
@@ -69,16 +64,8 @@ class AgePublicIdentity(val sigPub: ByteArray, val dhPub: ByteArray) {
 }
 
 /**
- * At-rest protection for the identity private keys (spec §2). Rather than wrap our own
- * Keystore envelope, we reuse [SecretStore] , the same Android-Keystore-AES-GCM envelope
- * that already protects SASL/server/proxy passwords and per-target E2E keys. This keeps
- * one audited storage path and one Keystore key-invalidation policy for the whole app.
- *
- * Requires the three `age:*` accessors added to SecretStore:
- *   getAgeIdentity()/setAgeIdentity()/clearAgeIdentity() and
- *   getAgePins()/setAgePins()/clearAgePins().
- *
- * Residual risk (documented): the seeds are software keys, in process memory while in use.
+ * At-rest protection for the identity keys, reusing [SecretStore]'s Android-Keystore AES-GCM
+ * envelope. The seeds are software keys and sit in memory while in use.
  */
 class AgeIdentityStore(private val secrets: SecretStore) {
 
@@ -131,13 +118,12 @@ class AgeStore(
     enum class Result { PINNED_NEW, MATCH, NICK_UPDATED, CONFLICT_KEY_FOR_NICK }
 
     /**
-     * Observe a peer's announced identity under [nick].
-     *  - PINNED_NEW            : first time we've seen this key — pinned (TOFU).
-     *  - MATCH                 : key already pinned, same nick.
-     *  - NICK_UPDATED          : key already pinned, peer now using a different nick.
-     *  - CONFLICT_KEY_FOR_NICK : a DIFFERENT key arrived for a nick we already pinned a
-     *                            key for — likely nick-takeover / MitM. Caller must warn
-     *                            and must NOT silently trust it.
+     * Record a peer's announced identity under [nick]:
+     *   PINNED_NEW             first sight of this key, pinned (TOFU)
+     *   MATCH                  already pinned under this nick
+     *   NICK_UPDATED           already pinned, now under another nick
+     *   CONFLICT_KEY_FOR_NICK  a different key for a pinned nick; the caller must warn and not
+     *     trust it
      */
     fun observe(nick: String, identity: AgePublicIdentity): Result {
         val fp = AgeFingerprint.hex(AgeFingerprint.of(p, identity))
@@ -149,11 +135,9 @@ class AgeStore(
         // New key. Is there already a pin for this nick under a *different* key?
         val nickClash = pins.values.any { it.lastNick.equals(nick, ignoreCase = true) }
         if (nickClash) {
-            // Do NOT pin. A different key for a nick we already hold a key for is the one case the
-            // caller must not treat as routine: it is a reinstall / second device, or a nick takeover,
-            // and the two are indistinguishable from here. Pinning first and reporting the conflict
-            // afterwards (as this used to) meant a silent trust decision had already been made by the
-            // time anyone could object. The caller decides via [pinConfirmed].
+            // Do not pin. A different key for a nick we already hold a key for is either a
+            // reinstall or second device, or a nick takeover, and the two look the same from here,
+            // so the caller decides via [pinConfirmed] before any trust decision is made.
             return Result.CONFLICT_KEY_FOR_NICK
         }
         pins[fp] = Pin(identity, nick, verified = false)
@@ -220,14 +204,9 @@ class AgeStore(
 }
 
 /**
- * Identity announcement (spec §3): build and verify a signed `AGE IDENT` line. This is the
- * entry point to trust-on-first-use, a peer announces {edPub, dhPub, createdAt} with an
- * Ed25519 signature that binds all three together, so an active attacker can't swap the DH
- * key under a victim's signing key in transit. The verified [AgePublicIdentity] is then handed
- * to [AgeStore.observe] for pinning.
- *
- * Wire (spec §7):  AGE IDENT 1 <b64(edPub)> <b64(dhPub)> <createdAt> <b64(sig)>
- *   sig = Ed25519_sign( sigSeed, TLV("hexdroid/+AGE/ident/v1", edPub, dhPub, u64(createdAt)) )
+ * Build and verify the signed `AGE IDENT` announcement: `AGE IDENT 1 <b64(edPub)> <b64(dhPub)>
+ * <createdAt> <b64(sig)>`, where the Ed25519 signature covers all three fields so the DH key can't
+ * be swapped in transit. The verified identity goes to [AgeStore.observe].
  */
 object AgeIdent {
     private val LABEL = "hexdroid/+AGE/ident/v1".encodeToByteArray()

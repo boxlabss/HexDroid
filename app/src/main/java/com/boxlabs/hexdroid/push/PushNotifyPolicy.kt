@@ -54,12 +54,8 @@ object PushNotifyPolicy {
         val muteMasks: Map<String, List<String>>,
     ) {
         /**
-         * True when [nick] is muted for [netId].
-         *
-         * An empty [netId] means the push could not be attributed to one of the user's networks,
-         * which is the normal case when nothing is connected. Every network's masks then apply
-         * a nick the user has silenced somewhere is a nick they asked
-         * not to be alerted by, and staying quiet is the failure they chose.
+         * True when [nick] is muted for [netId]. An empty [netId] (push not attributable to a
+         * network) applies every network's masks.
          */
         fun mutesNick(netId: String, nick: String?): Boolean {
             val masks = if (netId.isBlank()) muteMasks.values.flatten() else muteMasks[netId].orEmpty()

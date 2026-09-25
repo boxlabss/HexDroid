@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Ayarlar</string>
+    <string name="settings_view_one_page">Tek sayfa</string>
+    <string name="settings_view_categories">Kategoriler</string>
     <string name="settings_intro_tour">Tanıtım turu</string>
     <string name="settings_intro_tour_desc">Ana ekranlar ve kısayolların hızlı bir turu.</string>
     <string name="section_appearance">Görünüm</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Başlangıçta otomatik bağlan</string>
     <string name="setting_rejoin_on_kick">Atılınca yeniden katıl</string>
     <string name="setting_rejoin_on_kick_desc">Bir kanaldan atıldıktan sonra otomatik olarak yeniden katılır. +i/+k/+b modlarına karşı döngüleri önlemek için aynı kanaldan 60 saniye içinde alınan ikinci atılma yeniden katılma denemesi yapmaz.</string>
+    <string name="setting_nick_regain">Birincil nick\'i geri al</string>
+    <string name="setting_nick_regain_desc">Nick\'in kullanımda olduğu için yedek bir nick ile bağlandığında, birkaç dakika boyunca kendi nick\'ine dönmeyi dener.</string>
     <string name="setting_enable_notifications">Bildirimleri etkinleştir</string>
     <string name="setting_notify_highlights">Vurgulama bildirimleri</string>
     <string name="setting_notify_pm">Özel mesaj bildirimleri</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Uzaklaştır</string>
     <string name="chat_ban">Yasakla</string>
     <string name="chat_kick_ban_btn">Uzaklaştır+Yasakla</string>
+    <string name="chat_ban_by">Ban türü</string>
+    <string name="chat_ban_type_host">Ana makine</string>
+    <string name="chat_ban_type_nick">Nick</string>
+    <string name="chat_ban_type_account">Hesap</string>
+    <string name="chat_ban_type_domain">Alan adı</string>
 
     <!-- Network screens -->
     <string name="networks_title">Ağlar</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Gönderilen ve alınan her satırı ağ başına bir Raw tamponunda gösterir. Parolalar gizlenir. Hata ayıklama içindir.</string>
     <string name="chat_show_less">Daha az göster</string>
     <string name="chat_not_delivered">İletilmedi</string>
+    <string name="chat_status_read">Okundu</string>
     <string name="vm_multiline_rejected">Sunucu mesajı reddetti (%1$s): %2$s</string>
     <string name="network_edit_cap_also">ayrıca %1$s ister</string>
     <string name="network_edit_caps_hint">Temel IRCv3 özellikleri varsayılan olarak etkin. Gelişmiş seçenekler için açın.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Başkalarının mesaj yazarken görmesine izin ver (draft/typing). Gizlilik için varsayılan olarak devre dışı.</string>
     <string name="setting_receive_typing">Diğerlerinin yazma göstergelerini göster</string>
     <string name="setting_receive_typing_desc">Bir kanal veya özel mesajda başkası mesaj yazarken gösterge göster.</string>
+    <string name="setting_read_receipts">Okundu bilgisi</string>
+    <string name="setting_read_receipts_desc">Özel mesajlarda, karşı tarafa mesajlarını okuduğunuzu bildirir ve sizinkileri ne zaman okuduklarını gösterir. Yalnızca diğer HexDroid kullanıcılarıyla çalışır.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Kanal %1$s\'dan %2$s\'ye yeniden adlandırıldı</string>
@@ -452,6 +464,13 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="chat_cd_launch_scripts">Betikleri çalıştır</string>
     <string name="chat_cd_edit_topic">Konuyu düzenle</string>
     <string name="chat_cd_jump_unread">Okunmayanlara git</string>
+    <string name="format_bold">Kalın</string>
+    <string name="format_italic">İtalik</string>
+    <string name="format_underline">Altı çizili</string>
+    <string name="format_colour">Renk…</string>
+    <string name="format_clear">Biçimlendirmeyi temizle</string>
+    <string name="chat_art_show_as_text">Metin olarak göster</string>
+    <string name="chat_unread_since">%2$s itibarıyla %1$s</string>
     <string name="chat_cd_scroll_bottom">En alta kaydır</string>
     <string name="chat_cd_close_label">Kapat: %1$s</string>
     <string name="chat_cd_cancel_reply">Yanıtı iptal et</string>
@@ -460,6 +479,8 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="chat_reply_to">Yanıtla: %1$s</string>
     <string name="chat_delete_message">Mesajı sil</string>
     <string name="chat_delete_message_desc">Sunucu üzerinden herkes için kaldırır</string>
+    <string name="chat_delete_message_others_desc">Sunucu izin veriyorsa herkes için kaldırır</string>
+    <string name="chat_delete_message_no_id">Silinemez: sunucu bu mesaja bir kimlik vermedi</string>
     <string name="chat_copy_messages">Mesajları kopyala…</string>
     <string name="chat_copy_messages_desc">Kopyalamak için birden fazla mesaj seçin</string>
 
@@ -1399,6 +1420,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <!-- ScriptsScreen -->
     <string name="scripts_title">Betikler</string>
     <string name="scripts_reload">Yeniden yükle</string>
+    <string name="scripts_restore_defaults">Varsayılan betikleri geri yükle (%1$d)</string>
     <string name="scripts_import_file">Dosya içe aktar…</string>
     <string name="scripts_import">İçe aktar…</string>
     <string name="scripts_paste">Yapıştır…</string>
@@ -1492,7 +1514,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="cmd_unignore">Bir kullanıcıyı yok sayma listesinden çıkarır</string>
     <string name="cmd_quit">IRC\'den çıkar ve bağlantıyı keser</string>
     <string name="cmd_kick">Bir kullanıcıyı kanaldan uzaklaştırır</string>
-    <string name="cmd_ban">Ban: nick (varsayılan), kullanıcı, ana makine, alan adı, hesap</string>
+    <string name="cmd_ban">Ban: ana makine (varsayılan), nick, kullanıcı, alan adı, hesap</string>
     <string name="cmd_unban">Bir banı kaldırır (nick banı değilse /banlist içindeki tam maskeyi yapıştırın)</string>
     <string name="cmd_kb">Bir kullanıcıyı uzaklaştırır ve banlar (/ban ile aynı maske türleri)</string>
     <string name="cmd_kickban">/kb için takma ad</string>

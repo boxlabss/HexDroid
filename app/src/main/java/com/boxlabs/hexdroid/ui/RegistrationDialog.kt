@@ -48,15 +48,9 @@ import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.RegPhase
 
 /**
- * Guided draft/account-registration dialog.
- *
- * Drives its UI from NetConnState.regState, which the ViewModel updates from the
- * server's REGISTER/VERIFY responses (and FAIL replies). The form adapts to the
- * cap-value flags: an account field appears only when the server allows a custom
- * account name, and email is marked required when the server demands it.
- *
- * On success the user may opt in to saving the password so SASL logs them in
- * automatically next connect.
+ * Guided draft/account-registration dialog, driven by NetConnState.regState. Shows an account field
+ * only when custom names are allowed and marks email required when the server needs it. On success
+ * the password can be saved for SASL.
  */
 @Composable
 fun RegistrationDialog(

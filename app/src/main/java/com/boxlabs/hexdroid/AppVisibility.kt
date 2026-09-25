@@ -19,47 +19,25 @@
 package com.boxlabs.hexdroid
 
 /**
- * Tracks whether the app process is currently in the foreground.
- *
- * Used to safely decide when we can call ContextCompat.startForegroundService()
- * without hitting Android 12+ restrictions (ForegroundServiceStartNotAllowedException)
- * when the app is backgrounded.
- *
- * Updated via ActivityLifecycleCallbacks in HexDroidApp.
+ * Whether the app is in the foreground, so a foreground service is only started when Android 12+
+ * allows it. Updated from HexDroidApp's ActivityLifecycleCallbacks.
  */
 object AppVisibility {
     @Volatile
     var isForeground: Boolean = false
 
     /**
-     * True while at least one Activity is in the STARTED state, updated with NO debounce.
-     *
-     * [isForeground] debounces the foreground > background transition by 500 ms to absorb
-     * OEM overlay stop/start blips. That debounce is correct for side effects (typing/logs),
-     * but it makes [isForeground] briefly stale-true while the app is actually going to the
-     * background. Using that stale value to gate ContextCompat.startForegroundService() is
-     * what produces ForegroundServiceDidNotStartInTimeException: we arm the ~10 s "must call
-     * startForeground()" watchdog, then the service's startForeground() is refused because the
-     * app is no longer foreground, and the watchdog fires a process-level crash.
-     *
-     * This flag flips to false the instant the last Activity stops, so it is the correct
-     * predicate for "are we allowed to start a foreground service right now". Erring toward
-     * false here is safe: the caller falls back to a plain notification instead of crashing.
+     * True while at least one Activity is STARTED, with no debounce. Use this, not [isForeground],
+     * to decide whether a foreground service may be started: [isForeground] lags the switch to
+     * background by its 500 ms debounce.
      */
     @Volatile
     var isActivityStarted: Boolean = false
 
     /**
-     * Deadline (SystemClock.elapsedRealtime) until which we may start a
-     * foreground service even with no Activity started. (when start on boot is enabled)
-     *
-     * Android 12+ blocks background FGS starts, but grants a short exemption to a few
-     * broadcast receivers, ACTION_BOOT_COMPLETED among them. [BootReceiver] opens a
-     * window here so the connection layer's normal start path can foreground the
-     * KeepAliveService during that grace period instead of falling back to a plain
-     * notification and letting the process be reaped.
-     *
-     * If the window has closed by the time connections come up, the fallback is a notification.
+     * Deadline (SystemClock.elapsedRealtime) until which a foreground service may be started with
+     * no Activity started. [BootReceiver] opens it during Android's post-boot exemption so
+     * KeepAliveService can start normally; after it closes, the fallback is a plain notification.
      */
     @Volatile
     var fgsStartExemptUntilElapsedMs: Long = 0L

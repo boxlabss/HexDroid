@@ -57,6 +57,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -85,11 +86,8 @@ import kotlin.random.Random
 enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE, SCRIPTS, DCC_TRUSTED }
 
 /**
- * UI-level message model.
- *
- * NOTE: [id] must be unique within a buffer list. Using timestamps alone can collide when multiple
- * lines arrive within the same millisecond (common during connect/MOTD), which can crash Compose
- * LazyColumn when keys are duplicated.
+ * UI-level message model. [id] must be unique within a buffer: it is the LazyColumn key, and
+ * timestamps alone collide when several lines arrive in the same millisecond.
  */
 data class UiMessage(
     val id: Long,
@@ -189,16 +187,14 @@ data class UiBuffer(
      * Cleared when the typing nick sends a message or emits "done" typing state.
      */
     val typingNicks: Set<String> = emptySet(),
+    /** Time of our newest message the other person has confirmed reading (read receipts, queries only). */
+    val peerReadAtMs: Long? = null,
     /** True while a CHATHISTORY BEFORE request for this buffer is in flight. Drives the spinner. */
     val historyLoading: Boolean = false,
 
     /**
-     * True once the server has answered a backfill with a short page, meaning its stored
-     * history for this buffer has run out. Hides the "load older" control.
-     *
-     * A full page that deduplicates away to nothing does NOT set this. That happens whenever
-     * disk logs already cover the range the anchor pointed at, and the user must still be
-     * able to walk further back from a new anchor.
+     * True once the server answered a backfill with a short page, so the history has run out; hides
+     * "load older". A full page that deduplicates to nothing doesn't set it.
      */
     val historyExhausted: Boolean = false,
 
@@ -292,23 +288,11 @@ data class UiSettings(
     val showTopicBar: Boolean = true,
     val hideMotdOnConnect: Boolean = false,
     val hideJoinPartQuit: Boolean = false,
-    /**
-     * Render channel-event lines (joins / parts / quits / kicks / nick changes / mode
-     * changes) with mIRC colour codes so they pop out against regular conversation:
-     * green for joins, orange for parts/quits, red for kicks, etc. Only affects display;
-     * the underlying log files store the raw codes (which most log-readers strip), and
-     * text copy preserves them too. Toggleable so users on monochrome themes or those
-     * who prefer plain output can opt out without disabling joins entirely.
-     */
+    /** Colour channel-event lines (join, part, quit, kick, nick, mode). Display only. */
     val colorChannelEvents: Boolean = true,
     /**
-     * Suppress "* user is away" / "* user is back" lines emitted by the away-notify
-     * IRCv3 capability. Bouncers (ZNC, soju) typically forward away-notify downstream
-     * regardless of which caps the client itself negotiates, and away/back scripts in
-     * the user's other clients can produce a constant trickle of these on busy networks.
-     * The away/back state tracking continues even when this is on — only the inline
-     * announcement is suppressed; the nicklist still reflects each nick's away status
-     * (typically by dimming the entry).
+     * Hide the "is away" / "is back" lines from away-notify. Away state is still tracked for the
+     * nicklist.
      */
     val hideAwayNotify: Boolean = false,
     val hideTopicOnEntry: Boolean = false,
@@ -330,14 +314,8 @@ data class UiSettings(
     val showConnectionStatusNotification: Boolean = true,
     val keepAliveInBackground: Boolean = true,
     /**
-     * Let servers supporting the webpush extension deliver messages of interest through a
-     * UnifiedPush distributor while no connection is open.
-     *
-     * Off by default: it needs a distributor app installed and a server that supports the
-     * extension, so silently enabling it would do nothing on most setups while implying
-     * push is working. Independent of [keepAliveInBackground] rather than replacing it —
-     * once push is confirmed working against a bouncer, the user can turn keep-alive off
-     * and get the battery back, but that is their call to make.
+     * Let servers with the webpush extension notify through a UnifiedPush distributor while no
+     * connection is open. Off by default; independent of [keepAliveInBackground].
      */
     val webPushEnabled: Boolean = false,
     /**
@@ -398,6 +376,8 @@ data class UiSettings(
      * replied to, so a stranger cannot learn the client, the platform or the clock.
      */
     val ctcpRepliesEnabled: Boolean = true,
+    /** Switch back to the configured nick after connecting on a fallback. */
+    val nickRegainEnabled: Boolean = true,
     /**
      * Custom colour for your own nick, stored as ARGB int (e.g. 0xFF_FF6600.toInt()).
      * Null means "Auto" - let [NickColors.colorForNick] pick a colour from the hash,
@@ -424,6 +404,10 @@ data class UiSettings(
     val sendTypingIndicator: Boolean = false,
     /** Show typing indicators from others. Independent of sendTypingIndicator. */
     val receiveTypingIndicator: Boolean = true,
+    /** Send and show read receipts in private messages. Off by default for privacy. */
+    val readReceiptsEnabled: Boolean = false,
+    /** Show Settings and the network editor as one continuous page instead of by category. */
+    val settingsOnePage: Boolean = false,
 
     /** Show inline image and YouTube thumbnail previews in chat. */
     val imagePreviewsEnabled: Boolean = false,
@@ -444,6 +428,11 @@ data class NetConnState(
      * Common: b,e,I,q. Defaults to a permissive set until ISUPPORT arrives.
      */
     val listModes: String = "bqeI",
+    /** Channel prefixes from ISUPPORT CHANTYPES. Until it arrives, every common prefix counts. */
+    val chanTypes: String = "#&!+",
+    /** PREFIX modes and their symbols from ISUPPORT, highest rank first. */
+    val prefixModes: String = "qaohv",
+    val prefixSymbols: String = "~&@%+",
     /** EXTBAN prefix (e.g. "~", or "" for no prefix); null when unsupported. */
     val extbanPrefix: String? = null,
     /** EXTBAN type letters; null when unsupported. */
@@ -541,19 +530,9 @@ data class BanEntry(
 )
 
 /**
- * Snapshot of one upstream network reported by a soju bouncer via the
- * `soju.im/bouncer-networks` extension. Distinct from [NetworkProfile] - this is what the
- * bouncer *says* exists, not what HexDroid is configured to connect to. The difference is
- * what lets the UI offer "bouncer has a network you haven't added" hints.
- *
- * [id] is the stable per-user netid assigned by the bouncer. The spec guarantees it does
- * not change during the lifetime of the network, so it's safe to use as a map key.
- *
- * [state] mirrors the spec values: "connected" | "connecting" | "disconnected". Null until
- * the bouncer has told us, when an update message omits the attribute (spec rule: a missing
- * attribute means "preserve the previous value"; we honour that via the merge logic in the
- * BouncerNetwork handler), or when the bouncer explicitly cleared it via `state=` with an
- * empty value (signalled in BouncerNetwork.clearedKeys).
+ * One upstream network reported by a soju bouncer (soju.im/bouncer-networks), as opposed to a
+ * configured [NetworkProfile]. [id] is the bouncer's stable netid. [state] is "connected",
+ * "connecting" or "disconnected", or null when unknown or cleared.
  */
 data class BouncerUpstreamInfo(
     val id: String,
@@ -652,14 +631,8 @@ data class UiState(
     val networkEditError: String? = null,
 
     /**
-     * Per-connection map of upstream bouncer networks reported by `soju.im/bouncer-networks`.
-     * Key = our local network profile id (the id used in [connections] and [runtimes]); inner
-     * key = the bouncer's upstream netid (stable per user). This is "what soju says exists",
-     * not "what HexDroid is configured to connect to". Distinguishing the two is what lets
-     * the UI show "your bouncer has a new network you haven't added yet" hints.
-     *
-     * Kept in sync with `BOUNCER NETWORK` push notifications (see the BouncerNetwork handler).
-     * Cleared when the connection drops so stale upstream state doesn't leak across reconnects.
+     * Upstream networks reported by each bouncer connection, keyed by our network id and then the
+     * bouncer's netid. Kept in sync with BOUNCER NETWORK and cleared when the connection drops.
      */
     val bouncerNetworks: Map<String, Map<String, BouncerUpstreamInfo>> = emptyMap(),
 
@@ -681,27 +654,15 @@ data class UiState(
     val bouncerCloneMessage: String? = null,
 
     /**
-     * True when the currently-saved `settings.logFolderUri` is in [LogWriter]'s
-     * unreadable-URIs set - i.e. a read or write against it threw SecurityException
-     * earlier in the session and we're now silently skipping log I/O for it. Surfaced
-     * to the Settings screen as a warning badge with a re-pick CTA. The most common
-     * trigger is a backup restore on a fresh install: the saved URI string is in
-     * settings but the matching SAF permission grant didn't survive the reinstall
-     * (those grants are stored per-install in the system, not in app data, and so are
-     * not part of any backup or D2D transfer payload).
+     * True when the saved log folder has become unreadable (SecurityException), so log I/O for it
+     * is skipped and Settings shows a re-pick warning. Usually a backup restored on a fresh
+     * install, since SAF grants don't survive a reinstall.
      */
     val logFolderUnreadable: Boolean = false,
 
     /**
-     * Monotonic counter incremented every time an E2E key is added/changed/removed.
-     * The chat screen reads it (alongside selectedBuffer + activeNetworkId) to
-     * derive the current buffer's encryption state for the compose-input lock
-     * badge. We track a counter rather than putting the full key info into state
-     * because the keys themselves never belong in observable state (they're
-     * sensitive, and including them in UiState would have them flow through
-     * every recomposition snapshot, logcat dump, and any future state-debug
-     * tooling). The counter lets compose re-derive the answer on demand without
-     * surfacing the bytes.
+     * Incremented whenever an E2E key changes, so the chat screen can re-derive the buffer's
+     * encryption state without keys ever entering UI state.
      */
     val e2eKeyVersion: Int = 0,
 )
@@ -789,13 +750,8 @@ class IrcViewModel(
     val state: StateFlow<UiState> = _state
 
     /**
-     * Accumulation buffer for incoming 322 LIST replies.
-     *
-     * Large servers (e.g. Libera) send 10 000+ channel entries. If we update [_state] on
-     * every entry the entire UiState - including all message buffers - is copied O(n) times
-     * and the UI re-renders for each one. Instead we collect entries here and flush to
-     * [_state] on a time throttle (see [_channelListLastFlushMs]), with a final flush on 323
-     * (ListEnd). The buffer is cleared on ListStart so back-to-back /list calls are safe.
+     * Incoming 322 LIST entries, flushed to state on a time throttle and once more at 323, rather
+     * than copying state per entry. Cleared on ListStart.
      */
     private val _channelListBuffer = ArrayList<ChannelListEntry>()
     /**
@@ -881,14 +837,8 @@ class IrcViewModel(
         /** Small delay before sending the rejoin so it doesn't feel adversarial to the kicker. */
         const val AUTO_REJOIN_DELAY_MS = 1500L
         /**
-         * How long a locally-echoed outgoing message stays eligible to suppress a
-         * bouncer's history-replay of that same message after a reconnect. Generous
-         * enough to cover a reconnect that happens a few minutes after sending (the
-         * common "phone changed networks / woke from doze" case), short enough that a
-         * genuinely-repeated message typed much later isn't wrongly deduped. Only ever
-         * suppresses a replay (isHistory) line, never a live one, so the worst-case
-         * effect of the window being too long is that a deliberately repeated message
-         * shows once instead of twice after a reconnect.
+         * How long a local echo can suppress a bouncer's replay of the same message after a
+         * reconnect. Only replayed lines are suppressed, never live ones.
          */
         const val SELF_SEND_RETAIN_MS = 15 * 60_000L
 
@@ -932,12 +882,8 @@ class IrcViewModel(
         /** Max chained alias expansions before we give up (alias-invokes-alias loop guard). */
         const val MAX_ALIAS_DEPTH = 8
         /**
-         * After a *reconnect*, how long self-JOIN echoes are treated as automatic rejoins
-         * (and therefore do NOT switch the active buffer). Covers both the client-sent
-         * rejoin burst and bouncer-replayed JOINs; sized to the 45 s upstream history-expect
-         * ceiling that bouncer playback uses (see the Connected handler). An explicit user
-         * /join during this window still switches, because it is recorded in
-         * [NetRuntime.pendingUserJoinSwitch] which overrides the suppression.
+         * After a reconnect, how long self-JOIN echoes count as automatic rejoins that don't switch
+         * the active buffer. An explicit /join still switches ([NetRuntime.pendingUserJoinSwitch]).
          */
         const val AUTO_JOIN_SWITCH_SUPPRESS_MS = 45_000L
     }
@@ -984,18 +930,17 @@ class IrcViewModel(
         // Manually-joined channels not covered by autoJoin, rejoined on reconnect.
         // Key = channel name (server casing), value = channel key or null.
         val manuallyJoinedChannels: MutableMap<String, String?> = mutableMapOf(),
+        /** Queries whose read marker was requested on this connection, casefolded. */
+        val queryReadMarkersRequested: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet(),
         // Channels the user EXPLICITLY asked to JOIN this session (join button or a typed
         // /join). A self-JOIN echo for one of these always switches the active buffer to it,
         // even inside the post-reconnect suppression window below. Folded channel names;
         // entries are consumed (removed) when the matching self-JOIN arrives.
         val pendingUserJoinSwitch: MutableSet<String> =
             java.util.concurrent.ConcurrentHashMap.newKeySet(),
-        // While System.currentTimeMillis() < this value, the JOIN handler does NOT auto-switch
-        // the active buffer for self-joins we did NOT explicitly request — i.e. the burst of
-        // rejoins after a reconnect (client-sent JOINs for autojoin + manuallyJoinedChannels,
-        // AND bouncer-replayed JOINs from our prior session). Set ONLY on a reconnect, so a
-        // first connect still lands the user in an autojoin channel as before. Without this, a
-        // reconnect that re-joins every channel yanks the user onto whichever JOIN echoes last.
+        // Until this time, self-JOINs we didn't explicitly request (the rejoin burst after a
+        // reconnect, including bouncer-replayed JOINs) don't switch the active buffer. Set only on
+        // a reconnect, so a first connect still opens an autojoin channel.
         @Volatile var suppressAutoJoinSwitchUntilMs: Long = 0L,
         // The Network this connection's socket was established on (captured at Connected).
         // Used by the ConnectivityManager onLost callback to detect a Wi-Fi<->cellular
@@ -1006,16 +951,9 @@ class IrcViewModel(
         @Volatile var boundNetwork: android.net.Network? = null
     )
 
-    // Many of the per-network maps and sets below are mutated and read from multiple
-    // coroutines simultaneously: each network's IRC events flow runs on its own
-    // Dispatchers.IO coroutine, so the moment the user has two networks active, every
-    // event handler touching these structures races against its sibling. Plain Java
-    // HashMap is documented as undefined-behaviour under concurrent mutation; on Android
-    // (OpenJDK 17 runtime) the failure mode ranges from silent data loss to internal
-    // table corruption that causes get() to loop forever (an ANR), and rarely throws
-    // ConcurrentModificationException outright when an iterator notices the structural
-    // mutation. ConcurrentHashMap is correct per-operation; the read-modify-write races
-    // that survive that fix are documented separately.
+    // These per-network maps and sets are read and written from each network's event coroutine
+    // concurrently, so they are ConcurrentHashMap-backed; a plain HashMap can corrupt under
+    // concurrent writes. Read-modify-write sequences still need their own care.
     private val runtimes: MutableMap<String, NetRuntime> = java.util.concurrent.ConcurrentHashMap()
 
     private val desiredConnected: MutableSet<String> =
@@ -1037,20 +975,58 @@ class IrcViewModel(
     // which would otherwise fire an IPC and wake the NotificationManager on every ping.
     private var lastNotifLabel: String? = null
     private var lastNotifStatus: String? = null
+    /** Whether [lastNotifLabel]/[lastNotifStatus] went to the service or to a plain notification. */
+    private var lastNotifViaService = false
+    /** Pending keep-alive notification update: a burst of status changes posts only the last. */
+    private var keepAliveUpdateJob: Job? = null
+    private val KEEPALIVE_UPDATE_COALESCE_MS = 300L
+
+    /**
+     * Send [i] to the keep-alive service after a short pause, replacing any update still waiting.
+     * Starts the service when it isn't running and the app may; otherwise shows a plain notification.
+     */
+    private fun postKeepAliveUpdate(i: Intent, netId: String, label: String, status: String) {
+        keepAliveUpdateJob?.cancel()
+        keepAliveUpdateJob = viewModelScope.launch {
+            delay(KEEPALIVE_UPDATE_COALESCE_MS)
+            runCatching {
+                when {
+                    KeepAliveService.isRunning -> appContext.startService(i)
+                    AppVisibility.canStartForegroundService() -> ContextCompat.startForegroundService(appContext, i)
+                    else -> notifier.showConnection(netId, label, status)
+                }
+            }.onFailure { runCatching { notifier.showConnection(netId, label, status) } }
+        }
+    }
+
+    /** Stop the keep-alive service, dropping any update still waiting to be sent. */
+    private fun stopKeepAliveService() {
+        keepAliveUpdateJob?.cancel()
+        keepAliveUpdateJob = null
+        lastNotifLabel = null
+        lastNotifStatus = null
+        runCatching {
+            appContext.startService(Intent(appContext, KeepAliveService::class.java).apply { action = KeepAliveService.ACTION_STOP })
+        }
+    }
     private val manualDisconnecting: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val noNetworkNotice: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
-     * Networks already told, on their server buffer, that the boot connect is holding out
-     * for Wi-Fi.
-     *
-     * Kept apart from [noNetworkNotice] so the two notices don't suppress each other: a
-     * network parked on the Wi-Fi wait that then loses connectivity altogether should
-     * still get the "no network" line, and vice versa.
+     * Networks already told on their server buffer that the boot connect is waiting for Wi-Fi.
+     * Separate from [noNetworkNotice] so the two notices don't suppress each other.
      */
     private val waitingForWifiNotice: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * Networks whose connect was held until connectivity, or Wi-Fi at boot, is available.
+     * These are finished when the network returns even with auto-reconnect off, since
+     * the connect was already asked for and never attempted.
+     */
+    private val deferredConnects: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
@@ -1061,45 +1037,23 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
-     * Networks where the last connection attempt failed with an authentication error
-     * (server PASS rejected via 464 ERR_PASSWDMISMATCH, or SASL aborted via 904/905/906).
-     * scheduleAutoReconnect bails when a netId is in this set, so the client doesn't
-     * re-fire the same wrong credentials every few seconds and either flood the bouncer
-     * UI or trip rate-limits / IP bans on the IRCd.
-     *
-     * Cleared when the user explicitly reconnects, edits the profile, or toggles
-     * autoConnect — i.e. anywhere they've had a chance to fix the credentials.
-     * NOT cleared on routine disconnects.
+     * Networks whose last attempt failed authentication (464, SASL 904/905/906). Auto-reconnect
+     * skips them until the user reconnects, edits the profile or toggles autoConnect.
      */
     private val authBlockedReconnect: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /**
-     * Networks that have successfully REGISTERED (received 001) at least once during this
-     * app-process session. Used to decide whether a given registration is a genuine first
-     * connect or a re-connect of any kind (auto-reconnect, the user's manual "Reconnect",
-     * or a manual disconnect followed by a manual connect).
-     *
-     * On a first connect we let autojoin pull the user into a channel; on any re-connect we
-     * arm [NetRuntime.suppressAutoJoinSwitchUntilMs] so the rejoin burst doesn't yank the
-     * user off the buffer they were viewing.
-     *
-     * Deliberately NOT cleared on disconnect (including manual disconnect): a manual
-     * disconnect→reconnect must still count as a re-connect. Only cleared when the profile
-     * is removed (deleteNetwork / orphan-import cleanup); the whole set is naturally empty
-     * again on the next app launch.
+     * Networks that have registered at least once in this process, so any later registration counts
+     * as a reconnect and arms [NetRuntime.suppressAutoJoinSwitchUntilMs]. Not cleared on
+     * disconnect; cleared only when the profile is removed.
      */
     private val everRegisteredThisSession: MutableSet<String> =
         java.util.concurrent.ConcurrentHashMap.newKeySet()
 
-    // Flap detection: track timestamps (ms) of ping-timeout disconnects per network.
-    // If ≥ FLAP_THRESHOLD occur within FLAP_WINDOW_MS the connection is deemed unstable
-    // and auto-reconnect is suspended until the user manually reconnects.
-    //
-    // Outer map is concurrent. Inner ArrayDeque is intentionally not thread-safe because
-    // it's only read/mutated under per-key access patterns from the same coroutine
-    // sequence (the ping loop for a given network) so there's no concurrent inner access
-    // in practice.
+    // Ping-timeout disconnect times per network for flap detection: FLAP_THRESHOLD within
+    // FLAP_WINDOW_MS pauses auto-reconnect. Each inner deque is only touched from its own network's
+    // ping loop.
     private val pingTimeoutTimestamps: MutableMap<String, ArrayDeque<Long>> =
         java.util.concurrent.ConcurrentHashMap()
 
@@ -1146,12 +1100,9 @@ class IrcViewModel(
     private val stsUpgradePorts: MutableMap<String, Int> = java.util.concurrent.ConcurrentHashMap()
 
     /**
-     * Per-network dedup tracker for transient connection-status lines (disconnect reasons,
-     * connect-failure errors, recurring SASL/keystore warnings). Within
-     * [CONN_STATUS_DEDUP_WINDOW_MS] of the first occurrence, a repeated identical line is
-     * NOT appended again, instead the existing message is updated in place with a
-     * "(×N)" counter suffix so the user can still see that the same condition happened
-     * multiple times.
+     * Tracks a repeated connection-status line per network, so a repeat within
+     * [CONN_STATUS_DEDUP_WINDOW_MS] updates the existing line with a "(×N)" count instead of adding
+     * another.
      */
     private data class ConnStatusDedupEntry(
         /** "$from|$text" identity key must match exactly for dedup. */
@@ -1172,20 +1123,9 @@ class IrcViewModel(
     private val connStatusLock = Any()
     private val CONN_STATUS_DEDUP_WINDOW_MS = 60_000L
     /**
-     * Per-network buffer of the most recent server-sent `ERROR :..` payload. Populated
-     * when the [IrcEvent.ServerError] handler fires; read by the [IrcEvent.Disconnected]
-     * handler to recover the rejection reason in cases where the disconnect itself
-     * arrives with a generic reason (e.g. "socket closed", "EOF") that's stripped of
-     * the server's actual explanation. The classic case is `ERROR :Closing Link: <addr>
-     * (SASL required for this connection class)` followed immediately by socket close
-     * without correlation the disconnect handler can't see "SASL required" in `r` and
-     * scheduleAutoReconnect happily floods.
-     *
-     * Cleared on successful registration
-     *
-     * Value: (message text, epoch ms). Correlation window is intentionally short
-     * ([SERVER_ERROR_DISCONNECT_CORRELATION_MS]) a server error from 30 s ago is
-     * almost certainly unrelated to the disconnect happening now.
+     * The last server `ERROR :...` per network, as (text, epoch ms), so a disconnect with a generic
+     * reason can recover the server's explanation (e.g. "SASL required"). Only used within
+     * [SERVER_ERROR_DISCONNECT_CORRELATION_MS]; cleared on registration.
      */
     private val lastServerErrorByNet: MutableMap<String, Pair<String, Long>> =
         java.util.concurrent.ConcurrentHashMap()
@@ -1216,12 +1156,9 @@ class IrcViewModel(
     }
 
     /**
-     * Hydrate our own stored metadata from DataStore, once.
-     *
-     * The flag is only set after the read completes, under the lock: setting it first let a
-     * second caller past while the store was still empty, so it saved against nothing and
-     * persisted a blob missing every other network. Values already in memory win, being
-     * newer than the file.
+     * Load our own stored metadata from DataStore once. The loaded flag is set only after the read,
+     * under the lock, so a concurrent caller can't save against an empty store. Values already in
+     * memory win.
      */
     private suspend fun ensureOwnMetadataLoaded() {
         if (ownMetadataLoaded) return
@@ -1265,15 +1202,22 @@ class IrcViewModel(
     }
 
     /**
-     * Per-network jobs that end a flap pause after a cooldown. Previously a flap pause
-     * lasted until the user tapped Reconnect: within a running process nothing ever
-     * cleared [flapPaused] by time (the 2x-window expiry in [ensureFlapPausedLoaded]
-     * only applies across restarts), so a shaky half hour on mobile could silently
-     * halt auto-reconnect for the rest of the day. The one-off warning line in the
-     * server buffer was easy to miss, and the app then just "failed to reconnect".
-     * Now the pause is a cooldown: after FLAP_WINDOW_MS the network resumes
-     * auto-reconnect on its own (with the backoff counter intact, so resumption
-     * stays polite to the server).
+     * When a registered secure connection closes, push its host's STS expiry to now plus the
+     * last advertised duration, as the STS spec requires.
+     */
+    private fun rescheduleStsOnClose(netId: String) {
+        if (_state.value.connections[netId]?.connected != true) return
+        if (runtimes[netId]?.client?.config?.useTls != true) return
+        val host = _state.value.networks.firstOrNull { it.id == netId }?.host?.trim()?.lowercase() ?: return
+        val entry = stsPolicies[host] ?: return
+        if (entry.durationSec <= 0) return
+        stsPolicies[host] = entry.copy(expiresAtMs = System.currentTimeMillis() + entry.durationSec * 1000L)
+        persistStsPolicies()
+    }
+
+    /**
+     * Per-network jobs that end a flap pause after FLAP_WINDOW_MS, so auto-reconnect resumes on its
+     * own. The backoff counter is kept, so resuming stays gentle on the server.
      */
     private val flapResumeJobs: MutableMap<String, kotlinx.coroutines.Job> =
         java.util.concurrent.ConcurrentHashMap()
@@ -1327,13 +1271,8 @@ class IrcViewModel(
     // Not persisted; resets to all-expanded on process restart.
     private val _collapsedNetworkIds = MutableStateFlow<Set<String>>(emptySet())
     /**
-     * Programmatic entry point for the buffer-list toolbar's search button. Equivalent to
-     * the user typing `/find <query>` in the currently-selected buffer. Kept separate from
-     * the slash-command dispatch path so the dispatcher can stay focused on parsing chat
-     * input; the toolbar already knows it wants to search and has the query in hand.
-     *
-     * If [global] is true, searches across all loaded buffers on the current network
-     * (mirroring `/gsearch`); otherwise only the active buffer.
+     * The buffer-list search button: the same as typing `/find <query>` in the selected buffer, or
+     * `/gsearch` across the network when [global].
      */
     fun searchFromToolbar(query: String, global: Boolean = false) {
         val q = query.trim()
@@ -1514,13 +1453,9 @@ class IrcViewModel(
     }
 
     /**
-     * The SOCKS proxy configured for [netId]'s profile, or a disabled config when the
-     * network has none. Used to tunnel DCC connections through the same proxy as the IRC
-     * link, and to decide whether listen-based DCC operations are available.
-     *
-     * The proxy password isn't needed here: DccManager only calls SocksProxy.connect, and an
-     * authenticated proxy will already be holding an authenticated IRC connection but to be
-     * correct for proxies that authenticate per-connection we load it from SecretStore.
+     * The SOCKS proxy configured for [netId]'s profile, or a disabled config when it has none. DCC
+     * connections go through the same proxy as the IRC link, and listen-based DCC is unavailable
+     * behind one. The password is loaded for proxies that authenticate per connection.
      */
     private fun proxyForNetwork(netId: String): com.boxlabs.hexdroid.connection.ProxyConfig {
         val profile = _state.value.networks.firstOrNull { it.id == netId }
@@ -1550,15 +1485,9 @@ class IrcViewModel(
     }
 
     /**
-     * Returns true when the app holds ACCESS_LOCAL_NETWORK (required on Android 17+).
-     * On earlier API levels the permission doesn't exist and this always returns true.
-     * True when accepting [offer] would be refused by the Android 17+ local-network gate.
-     *
-     * Active DCC connects to the sender's IP; passive DCC binds a local port, but the sender
-     * then connects back over the LAN. either way ACCESS_LOCAL_NETWORK is required for a
-     * LAN peer. Checked before auto-accepting as well as inside the accept path, so a
-     * blocked offer falls through to the normal prompt (with its notification) instead of
-     * failing quietly while nobody is watching the device.
+     * True when accepting [offer] would be refused by the Android 17+ local-network permission
+     * (ACCESS_LOCAL_NETWORK), which both active and passive DCC need for a LAN peer. Checked before
+     * auto-accepting too, so a blocked offer falls back to the normal prompt.
      */
     private fun dccBlockedByLanPermission(offer: DccOffer): Boolean =
         !offer.isPassive && isLocalHost(offer.ip) && !hasLocalNetworkPermission()
@@ -1571,10 +1500,14 @@ class IrcViewModel(
             )
     }
 
+    private val desiredPersistLock = Mutex()
+
+    /** Writes the desired set. Each write takes its snapshot under the lock, so the last one to run is the current state. */
     private fun persistDesiredNetworkIds() {
-        val ids = desiredConnected.toSet()
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { repo.setDesiredNetworkIds(ids) }
+            desiredPersistLock.withLock {
+                runCatching { repo.setDesiredNetworkIds(desiredConnected.toSet()) }
+            }
         }
     }
 
@@ -1588,12 +1521,8 @@ class IrcViewModel(
 
         desiredNetworkIdsApplied = true
         val existing = st.networks.map { it.id }.toSet()
-        // Only restore networks that BOTH were previously desired AND have autoConnect on.
-        // desiredConnected captures "was connected at last process death" which is the
-        // correct intent for "reconnect after network loss within a session", but for
-        // process-restart restoration it must be intersected with the per-network
-        // autoConnect flag. Otherwise toggling autoConnect off has no effect on a
-        // network that's currently connected
+        // Restore only networks that were desired AND have autoConnect on, so turning autoConnect
+        // off takes effect for a network that was connected when the process last ended.
         val autoConnectIds = st.networks.filter { it.autoConnect }.map { it.id }.toSet()
         val targets = desiredConnected
             .filter { existing.contains(it) && autoConnectIds.contains(it) }
@@ -1735,12 +1664,8 @@ class IrcViewModel(
     private val recentKickRejoins: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
 
     /**
-     * Per-buffer-key timestamp of our most recent self-JOIN. Read by the notice routing
-     * to attribute a service-bot welcome NOTICE that arrived within ~5 s of the join to
-     * the channel we just joined - even when the notice body doesn't mention the channel
-     * name (e.g. Anope BotServ-assigned bots that send "Welcome, $nick!" with no channel
-     * reference). Bounded by an opportunistic eviction in the JOIN handler; never holds
-     * entries longer than the read window cares about.
+     * When we last joined each buffer, so a service bot's welcome NOTICE arriving within a few
+     * seconds can be attributed to that channel even when it doesn't name it.
      */
     private val recentJoinAtMs: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
 
@@ -1799,14 +1724,9 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap()
 
     /**
-     * Outgoing sends that are currently "live"  either listening for an
-     * active-DCC connect or having sent a passive-DCC offer and waiting for the peer.
-     * Keyed by the peer's view of the file: `nick.lowercase() + "|" + baseName + "|" + size`.
-     * Used to look up the matching send when a DCC RESUME arrives from the peer.
-     *
-     * The CompletableDeferred receives the agreed start offset once we've replied with
-     * DCC ACCEPT and committed to seeking the file there. The actual seek happens inside
-     * the DccManager send path.
+     * An outgoing DCC send waiting for its peer, keyed by `nick|baseName|size`, so an incoming DCC
+     * RESUME can find it. [startOffset] receives the agreed offset once we have replied with DCC
+     * ACCEPT.
      */
     private data class LiveOutgoingSend(
         val target: String,
@@ -1856,27 +1776,10 @@ class IrcViewModel(
         java.util.concurrent.ConcurrentHashMap()
 
     /**
-     * Per-buffer record of messages WE sent and locally echoed, used to dedup the
-     * bouncer's history replay of our own messages on reconnect.
-     *
-     * The problem this solves: a local echo is appended with `timeMs = local clock`,
-     * but when a bouncer (ZNC / soju) replays that same message via CHATHISTORY or
-     * buffer playback after a reconnect, it carries the SERVER's `time=` tag. The
-     * content signature the log keys on includes the timestamp, so the differing clocks
-     * mean the replay never matches the echo and the user sees their last few messages
-     * twice.
-     *
-     * The echo-message dedup deque ([pendingSendsByNet]) can't help either: it's
-     * pruned to an 8-second window because it exists to catch the near-instant
-     * server reflection, not a reconnect that might happen minutes later.
-     *
-     * This map stores, per buffer, the (signature, insert-time) of each message we
-     * locally echoed. On a history replay attributed to our own nick we look for a
-     * matching un-expired signature; a hit means "already shown as a local echo" and
-     * we drop the replay. Entries expire after [SELF_SEND_RETAIN_MS] and are capped
-     * per buffer so a long-lived session can't grow this unbounded. Matching consumes
-     * the entry, so sending the identical text twice is reconciled correctly (two
-     * echoes, two entries, two replays each consume one).
+     * Per buffer, the (signature, insert time) of each local echo, used to drop a bouncer's replay
+     * of our own messages after a reconnect (the replay's server time never matches the echo's
+     * local time). Matching consumes the entry; entries expire after [SELF_SEND_RETAIN_MS] and are
+     * capped per buffer.
      */
     private val recentSelfSends: MutableMap<String, ArrayDeque<Pair<Long, String>>> =
         java.util.concurrent.ConcurrentHashMap()
@@ -1929,13 +1832,10 @@ class IrcViewModel(
     private fun bufKey(netId: String, bufferName: String): String = "$netId::$bufferName"
 
     /**
-     * Nicks we've recently held on each network (current + recent past). Used so our own
-     * messages replayed via chathistory are recognised as ours even when we reconnected onto
-     * a fallback nick. e.g. registered as "eck_" because our own ghost session still held
-     * "eck" until its ping-timeout. Without this, [isFromMe] in [append] compares the replayed
-     * sender against only the *current* nick and misses the duplicate. Survives reconnect (like
-     * [recentSelfSends]) and self-expires after [SELF_SEND_RETAIN_MS]; refreshed on every
-     * self-send so an active nick stays "known" no matter how long the session has been up.
+     * Nicks we've recently held on each network, so our own messages replayed via CHATHISTORY are
+     * recognised as ours after reconnecting on a fallback nick (e.g. "eck_" while a ghost session
+     * still holds "eck"). Survives reconnect, expires after [SELF_SEND_RETAIN_MS], and is refreshed
+     * on every self-send.
      */
     private val recentOwnNicks: MutableMap<String, MutableMap<String, Long>> =
         java.util.concurrent.ConcurrentHashMap()
@@ -1981,17 +1881,9 @@ class IrcViewModel(
 
 
     /**
-     * Wrap [text] in mIRC colour-code framing (`\u0003<code>` + text + `\u0003`) when the
-     * `colorChannelEvents` setting is on. The renderer's existing mIRC parser turns this
-     * into a Compose SpanStyle on display: log files, copy-to-clipboard, and any other
-     * sink that strips formatting will see the unwrapped text.
-     *
-     * Colour code conventions (mIRC palette indices):
-     *   3  green   joins (positive event)
-     *   7  orange  parts (neutral departure, client-initiated)
-     *   5  brown   quits (server-initiated departure, distinct from parts)
-     *   4  red     kicks (forced removal, demands attention)
-     *   10 cyan    nick changes (informational, low-priority)
+     * Wrap [text] in the mIRC colour [code] when colorChannelEvents is on: 3 green joins, 7 orange
+     * parts, 5 brown quits, 4 red kicks, 10 cyan nick changes. Display only; formatting-stripping
+     * sinks see plain text.
      */
     private fun colorEvent(text: String, code: Int): String {
         if (!_state.value.settings.colorChannelEvents) return text
@@ -2148,11 +2040,7 @@ class IrcViewModel(
 		}
 	}
 
-    /**
-     * Generic helper: initialises a mode-list buffer and marks it as loading.
-     * Replaces the four near-identical startBanList/startQuietList/startExceptList/startInvexList
-     * functions that were previously written out verbatim.
-     */
+    /** Initialises a mode-list buffer and marks it as loading. */
     private fun startModeList(
         netId: String,
         channel: String,
@@ -2205,16 +2093,9 @@ class IrcViewModel(
     }
 
     /**
-     * True when [echoed] is the server's rendering of the message we sent as [sent].
-     *
-     * The echo-message spec allows a server to change a message before echoing it: "If
-     * servers apply any modifications to these messages, they MUST send the final version of
-     * the message back", with formatting codes being stripped as the worked example. Exact
-     * comparison therefore fails on any network that filters, and the echo is then taken for
-     * someone else's message and drawn beside our own copy of it.
-     *
-     * Only used where labeled-response is unavailable; a label identifies an echo exactly and
-     * is tried first.
+     * True when [echoed] is the server's version of [sent]. echo-message lets a server modify a
+     * message (e.g. strip formatting) before echoing it, so the comparison ignores formatting. Only
+     * used when there is no label.
      */
     private fun echoTextMatches(sent: String, echoed: String): Boolean =
         sent == echoed || stripIrcFormatting(sent) == stripIrcFormatting(echoed)
@@ -2237,14 +2118,9 @@ class IrcViewModel(
     }
 
     /**
-     * Pending labeled-response labels for our own outbound messages, per network. When
-     * echo-message + labeled-response are both negotiated privmsg() attaches a unique @label
-     * and returns it; we record it here so the echoed copy which carries the SAME label
-     * can be correlated EXACTLY, independent of text, timestamp, or E2E transformation.
-     *
-     * We still call recordLocalSend() in parallel, so a server that advertises labeled-response
-     * but fails to echo the label (a server bug) degrades gracefully to consumeEchoIfMatch rather
-     * than showing a duplicate. Entries self-expire and are capped like the echo deque.
+     * Labels of our outbound messages awaiting their echo, per network, so an echo can be matched
+     * exactly regardless of text or encryption. recordLocalSend() still runs in parallel as a
+     * fallback. Entries expire and are capped.
      */
     private val pendingLabelsByNet: MutableMap<String, ArrayDeque<Pair<Long, String>>> =
         java.util.concurrent.ConcurrentHashMap()
@@ -2274,14 +2150,8 @@ class IrcViewModel(
         }
     }
 
-    // These two MUST be declared above the init block. Kotlin runs property initializers and
-    // init blocks in source order, and init calls registerNetworkCallback(). When they lived
-    // below init: (a) ConnectivityManager delivers onCapabilitiesChanged for every live network
-    // right after registration, so on a fast device the callback ran while the constructor was
-    // still initializing later fields and hit a null validatedNetworks (the Play pre-launch NPE
-    // on ConcurrentHashMap.put); (b) the "= null" initializer of networkCallback ran AFTER init
-    // had assigned the callback into it, silently clobbering it back to null, so onCleared never
-    // unregistered and the callback leaked across ViewModel recreation.
+    // Declared above the init block, which registers the network callback: property initialisers
+    // run in source order, and a callback firing during construction must find these initialised.
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     /** Last-seen NET_CAPABILITY_VALIDATED per live Network handle, so onCapabilitiesChanged can
      *  act on the not-validated -> validated EDGE only (the callback also fires for signal
@@ -2314,16 +2184,9 @@ class IrcViewModel(
         // Hydrate STS policies early too, so a startup auto-connect to a policy-covered
         // host is TLS-enforced from the very first attempt.
         viewModelScope.launch { runCatching { ensureStsPoliciesLoaded() } }
-        // Surface "log folder is unreadable" to the UI. LogWriter populates its
-        // unreadableTreeUrisFlow whenever a SAF query against a tree URI throws
-        // SecurityException (most often: backup-restore brought the URI string into
-        // settings but the persisted SAF permission grant didn't transfer to this
-        // install). We combine that set with the currently-saved logFolderUri to
-        // produce a single boolean that the Settings screen renders as a "re-pick
-        // your log folder" warning row. Done as a separate collector (not folded
-        // into the settingsFlow one above) so the badge updates in real time when
-        // LogWriter discovers the URI is dead - the user doesn't need to navigate
-        // away and back to see the warning appear.
+        // Expose "log folder is unreadable" to Settings: LogWriter's unreadable-URI set combined
+        // with the saved log folder. A separate collector so the warning appears as soon as
+        // LogWriter discovers the problem.
         viewModelScope.launch {
             logs.unreadableTreeUrisFlow.collect { unreadable ->
                 _state.update { st ->
@@ -2376,11 +2239,9 @@ class IrcViewModel(
                         else -> st.showBufferList
                     }
                 )
-                // Retention sweep. On SAF this is a query per directory, a query per file and
-                // a delete each, all IPC to the documents provider, so it cannot run on the
-                // collector's thread. Only on a change to the policy or the folder: settings
-                // emit on every preference the user touches, and re-sweeping each time was
-                // what blocked input long enough to ANR.
+                // Retention sweep, off the collector's thread since on SAF it is several IPC calls
+                // per file. Only runs when the policy or folder changes, because settings emit on
+                // every preference change.
                 val purgeKey = Triple(s.loggingEnabled, s.retentionDays, s.logFolderUri)
                 if (s.loggingEnabled && purgeKey != lastPurgeKey) {
                     lastPurgeKey = purgeKey
@@ -2390,7 +2251,10 @@ class IrcViewModel(
                 }
                 // Applies live: flipping the switch starts or stops logging on connections
                 // that are already up, which is the point of a debugging toggle.
-                runtimes.values.forEach { it.client.rawLogEnabled = s.rawLog }
+                runtimes.values.forEach {
+                    it.client.rawLogEnabled = s.rawLog
+                    it.client.nickRegainEnabled = s.nickRegainEnabled
+                }
                 syncPushNotifyPolicy()
                 maybeAutoConnect()
                 maybeRestoreDesiredConnections()
@@ -2423,13 +2287,11 @@ class IrcViewModel(
         }
 
         viewModelScope.launch {
-            repo.desiredNetworkIdsFlow.collect { ids ->
-                desiredConnected.clear()
-                desiredConnected.addAll(ids)
-                desiredNetworkIdsLoaded = true
-                refreshConnectionNotification()
-                maybeRestoreDesiredConnections()
-            }
+            // Seeds the set from the last process only. After this the in-memory set is authoritative.
+            desiredConnected.addAll(repo.desiredNetworkIdsFlow.first())
+            desiredNetworkIdsLoaded = true
+            refreshConnectionNotification()
+            maybeRestoreDesiredConnections()
         }
 
         registerNetworkCallback()
@@ -2452,34 +2314,25 @@ class IrcViewModel(
                 viewModelScope.launch {
                     delay(500) // Brief window to let a failover interface take over.
                     if (!hasInternetConnection()) {
-                        // No connectivity at all. Tear down each affected socket so its
-                        // readLine() unblocks immediately instead of blocking for up to
-                        // SOCKET_READ_TIMEOUT_MS (150 s). Without this, the UI freezes on
-                        // the stale connection state, the exit drawer button appears to do
-                        // nothing (the disconnect coroutine is queued behind the blocked
-                        // read), and the app can hang long enough for the OS to restart it.
-                        // dropConnectionForNetworkLoss() drops the socket but KEEPS the
-                        // network in desiredConnected and resumes auto-reconnect.
+                        // No connectivity at all: tear down each affected socket so its read
+                        // unblocks now rather than after SOCKET_READ_TIMEOUT_MS.
+                        // dropConnectionForNetworkLoss() keeps the network in desiredConnected.
                         val st = _state.value
                         val snapshot = desiredConnected.toList()
                         for (netId in snapshot) {
                             val conn = st.connections[netId]
                             if (conn?.connected == true || conn?.connecting == true) {
                                 val serverKey = bufKey(netId, "*server*")
-                                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_lost), doNotify = false)
+                                val lostText = if (autoReconnectAllowed(netId)) R.string.status_network_lost else R.string.status_disconnected
+                                append(serverKey, from = null, text = "*** " + appContext.getString(lostText), doNotify = false)
                                 noNetworkNotice.add(netId)
                                 dropConnectionForNetworkLoss(netId)
                             }
                         }
                     } else {
-                        // Connectivity still exists, but the network that just went away may have
-                        // been the exact interface one of our sockets was riding
-                        // That socket is now dead, yet onAvailable
-                        // won't fire for the failover link if it was already up, so nothing would
-                        // trigger a reconnect. Proactively drop+reconnect any live connection whose recorded
-                        // boundNetwork matches the lost network. dropConnectionForNetworkLoss()
-                        // resets the backoff and schedules a prompt reconnect on the new default
-                        // network. We do NOT set noNetworkNotice here (we have a network).
+                        // Connectivity remains, but a socket may have been bound to the network
+                        // that just went away, and onAvailable won't fire for an already-up
+                        // failover link. Drop and reconnect any connection bound to it.
                         val st = _state.value
                         val snapshot = desiredConnected.toList()
                         for (netId in snapshot) {
@@ -2487,8 +2340,9 @@ class IrcViewModel(
                             val ridingLostNet = runtimes[netId]?.boundNetwork == network
                             if (ridingLostNet && (conn?.connected == true || conn?.connecting == true)) {
                                 val serverKey = bufKey(netId, "*server*")
-                                append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_changed), doNotify = false)
-                                dropConnectionForNetworkLoss(netId, statusText = "Reconnecting…")
+                                val changedText = if (autoReconnectAllowed(netId)) R.string.status_network_changed else R.string.status_disconnected
+                                append(serverKey, from = null, text = "*** " + appContext.getString(changedText), doNotify = false)
+                                dropConnectionForNetworkLoss(netId, waitingText = appContext.getString(R.string.vm_status_reconnecting))
                             }
                         }
                     }
@@ -2496,14 +2350,9 @@ class IrcViewModel(
             }
 
             override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
-                // A router restart with the phone still associated to the AP never fires
-                // onLost/onAvailable: the Network object survives and only its VALIDATED
-                // capability toggles as Android's connectivity probes fail and later pass.
-                // Reconnect promptly on the not-validated -> validated edge, otherwise
-                // recovery after the router is back is left entirely to exponential backoff
-                // (up to RECONNECT_MAX_DELAY_SEC of dead air). Signal-strength and bandwidth
-                // updates land here constantly, so only the edge acts; IrcCore's ping cycle
-                // still handles stale sockets on its own.
+                // A router restart that leaves Wi-Fi associated only toggles VALIDATED, with no
+                // onLost/onAvailable. Reconnect on the not-validated to validated edge rather than
+                // waiting out the backoff; other capability updates are ignored.
                 val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 val was = validatedNetworks.put(network, validated)
                 if (validated && was == false) reconnectDesiredDisconnected()
@@ -2529,13 +2378,9 @@ class IrcViewModel(
     }
 
     /**
-     * Shared recovery pass for the two "connectivity is back" signals: onAvailable (a new
-     * network appeared, e.g. Wi-Fi<->cellular handoff) and the onCapabilitiesChanged
-     * not-validated -> validated edge (same network regained internet, e.g. a router restart
-     * the phone rode out while still associated). Skips networks that are connected or
-     * mid-attempt, clears any deep-backoff countdown and the attempt counter (the failure
-     * history belongs to a connectivity state that no longer applies), and force-connects
-     * everything the user wants up.
+     * Recovery when connectivity returns (onAvailable, or the validated edge): for every wanted
+     * network that is neither connected nor connecting, clear the backoff countdown and attempt
+     * counter and connect.
      */
     private fun reconnectDesiredDisconnected() {
         viewModelScope.launch {
@@ -2547,20 +2392,16 @@ class IrcViewModel(
             // ConcurrentModificationException on any background ramp-up.
             val snapshot = desiredConnected.toList()
             for (netId in snapshot) {
+                if (netId !in deferredConnects && !autoReconnectAllowed(netId)) continue
                 val conn = st.connections[netId]
                 if (conn?.connected != true && conn?.connecting != true) {
                     val serverKey = bufKey(netId, "*server*")
                     if (noNetworkNotice.remove(netId)) {
                         append(serverKey, from = null, text = "*** " + appContext.getString(R.string.status_network_available_reconnect), doNotify = false)
                     }
-                    // A network change invalidates the failure history: the old
-                    // attempts failed on an interface that no longer applies.
-                    // Cancel any countdown that may be sitting deep in exponential
-                    // backoff (previously it kept running with its inflated delay,
-                    // so if this immediate connect failed, the user was thrown
-                    // straight back to a multi-minute wait) and reset the counter,
-                    // matching what dropConnectionForNetworkLoss already does on
-                    // the way down.
+                    // A network change invalidates the failure history, so cancel any backoff
+                    // countdown and reset the counter, as dropConnectionForNetworkLoss does on the
+                    // way down.
                     autoReconnectJobs.remove(netId)?.cancel()
                     reconnectAttempts.remove(netId)
                     connectNetwork(netId, force = true)
@@ -2592,16 +2433,10 @@ class IrcViewModel(
         val n = _state.value.networks.firstOrNull { it.id == netId } ?: return
         viewModelScope.launch { repo.upsertNetwork(n.copy(autoConnect = enabled)) }
 
-        // When autoConnect is being turned OFF, also clear any pending auto-reconnect
-        // state for this network. Without this, a network that's currently connected
-        // (or in reconnect-backoff) keeps its slot in [desiredConnected], so it gets
-        // restored on the next process restart and the in-flight reconnect coroutine
-        // keeps trying - both directly contradicting the toggle the user just flipped.
-        // The user can still manually connect; they just won't get implicit reconnects.
-        //
-        // We do NOT immediately disconnect: if the network is currently connected the
-        // user is using it, and turning off autoConnect shouldn't drop them. They're
-        // saying "don't bring this back automatically", not "kill the connection now".
+        // Turning autoConnect off also clears pending auto-reconnect state, so the network is
+        // neither restored on the next process start nor retried by a running backoff. A current
+        // connection is left up: the user is asking not to bring it back automatically, not to drop
+        // it now.
         if (!enabled) {
             val removed = desiredConnected.remove(netId)
             if (removed) persistDesiredNetworkIds()
@@ -2624,18 +2459,13 @@ class IrcViewModel(
     )
 
     /**
-     * Parses irc://, ircs://, and irc+ssl:// URIs into an [IrcUri].
-     *
-     * Handles every form seen in the wild:
-     *   irc://host/channel           plain, port 6667
-     *   irc://host:+6697/channel     TLS via +port convention (mIRC/ZNC) - note: Chrome
-     *                                rejects this as an invalid URI; ircs:// or irc+ssl:// are
-     *                                the browser-safe alternatives
-     *   ircs://host:6697/channel     TLS via scheme (standard)
-     *   irc+ssl://host:6697/channel  TLS via scheme (HexChat/irssi alternative)
-     *   irc://host/#channel          # consumed as fragment by Uri; recovered
-     *   irc://host/%23channel        percent-encoded; decoded automatically
-     *   irc://host/chan?key=secret   channel key
+     * Parse irc://, ircs:// and irc+ssl:// URIs into an [IrcUri]:
+     *   irc://host/channel            plain, port 6667
+     *   irc://host:+6697/channel      TLS via +port
+     *   ircs:// or irc+ssl://host/... TLS via scheme
+     *   irc://host/#channel           # recovered from the fragment
+     *   irc://host/%23channel         percent-encoded
+     *   irc://host/chan?key=secret    channel key
      */
     private fun parseIrcUri(raw: String): IrcUri? {
         // Detect the +port TLS flag before Uri.parse() silently drops the '+'.
@@ -2671,17 +2501,9 @@ class IrcViewModel(
     }
 
     /**
-     * Opens (or creates) a network matching an IRC URI and navigates to it.
-     *
-     * Match priority:
-     *  1. Existing network whose host + port + TLS match exactly → re-use.
-     *  2. Existing network whose host matches (port/TLS differ) → re-use as-is.
-     *  3. No match → create a new [NetworkProfile] pre-filled from the URI and
-     *     open the Network Edit screen so the user can review before connecting.
-     *
-     * Channels from the URI are merged into the profile's autoJoin list if not
-     * already present.  When an existing network is matched, the app connects
-     * immediately and navigates to the first channel buffer.
+     * Open the network matching an IRC URI: an exact host, port and TLS match, else a host match,
+     * else a new pre-filled profile opened in the editor. The URI's channels are added to autoJoin.
+     * A matched network connects immediately and opens the first channel.
      */
     private fun handleIrcUri(ircUri: IrcUri) {
         viewModelScope.launch {
@@ -2981,6 +2803,99 @@ class IrcViewModel(
     }
 
     /**
+     * The server echoed a message we sent to [bufferKey]. The echo is dropped as a duplicate of
+     * our local copy, but it is the only one carrying the msgid, so give that id to the newest
+     * unidentified line of ours with the same content. With no such line the id is still
+     * recorded, so a second echo of the same message is dropped.
+     */
+    private fun attachEchoMsgId(bufferKey: String, text: String, isAction: Boolean, msgId: String?, myNick: String) {
+        val mid = msgId?.takeIf { it.isNotBlank() } ?: return
+        _state.update { s ->
+            // Only a buffer that already exists: creating one here would open an empty
+            // conversation for anything sent as a PRIVMSG under the hood, /ctcp included.
+            val buf = s.buffers[bufferKey] ?: return@update s
+            val idx = buf.messages.indexOfLast {
+                it.msgId == null && it.isAction == isAction && echoTextMatches(it.text, text) &&
+                    it.from != null && it.from.equals(myNick, ignoreCase = true)
+            }
+            if (idx >= 0) {
+                val newLog = buf.log.replaceAt(idx, buf.messages[idx].copy(msgId = mid))
+                return@update s.copy(buffers = s.buffers + (bufferKey to buf.copy(log = newLog)))
+            }
+            val seen = buf.log.seenIds.adding(mid)
+            if (seen === buf.log.seenIds) return@update s
+            s.copy(buffers = s.buffers + (bufferKey to buf.copy(log = buf.log.copy(seenIds = seen))))
+        }
+    }
+
+    /** Newest msgid a read receipt was sent for, per query buffer. */
+    private val readReceiptSentFor: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+    /** Pending read receipts, per query buffer, so a burst of messages sends one. */
+    private val readReceiptJobs: MutableMap<String, Job> = java.util.concurrent.ConcurrentHashMap()
+    private val READ_RECEIPT_DELAY_MS = 1_500L
+    /** The buffer whose newest message is on screen, as reported by the chat screen. */
+    @Volatile private var viewingLatestKey: String? = null
+
+    /** Called by the chat screen when [bufferKey]'s newest message scrolls into or out of view. */
+    fun onViewingLatest(bufferKey: String, atLatest: Boolean) {
+        if (atLatest) {
+            viewingLatestKey = bufferKey
+            sendReadReceipt(bufferKey)
+        } else if (viewingLatestKey == bufferKey) {
+            viewingLatestKey = null
+        }
+    }
+
+    /** Schedules a read receipt for query [key], replacing one already pending for it. */
+    private fun sendReadReceipt(key: String) {
+        if (!_state.value.settings.readReceiptsEnabled) return
+        val (netId, name) = splitKey(key)
+        if (name == "*server*" || isPseudoBuffer(name) || isDccChatBufferName(name)) return
+        if (isChannelOnNet(netId, name)) return
+        readReceiptJobs.remove(key)?.cancel()
+        readReceiptJobs[key] = viewModelScope.launch {
+            delay(READ_RECEIPT_DELAY_MS)
+            readReceiptJobs.remove(key)
+            sendReadReceiptNow(key)
+        }
+    }
+
+    /**
+     * Tells the other person in query [key] we've read up to their newest message, if it is on
+     * screen now: this buffer, scrolled to its newest message, with the app in front. At most
+     * once per message.
+     */
+    private fun sendReadReceiptNow(key: String) {
+        val st = _state.value
+        if (!st.settings.readReceiptsEnabled) return
+        if (viewingLatestKey != key || st.selectedBuffer != key) return
+        if (st.screen != AppScreen.CHAT || !AppVisibility.isForeground) return
+        val (netId, name) = splitKey(key)
+        val rt = runtimes[netId] ?: return
+        val me = st.connections[netId]?.myNick ?: rt.myNick
+        val newest = st.buffers[key]?.messages?.lastOrNull {
+            it.from != null && !it.from.equals(me, ignoreCase = true) && !it.msgId.isNullOrBlank()
+        } ?: return
+        val id = newest.msgId ?: return
+        if (readReceiptSentFor[key] == id) return
+        readReceiptSentFor[key] = id
+        viewModelScope.launch { runCatching { rt.client.sendReadReceipt(name, id) } }
+    }
+
+    /**
+     * Ask the server for a query's read marker once per connection. draft/read-marker pushes
+     * markers for channels on join, but a client has to request them for user targets.
+     */
+    private fun requestQueryReadMarker(netId: String, name: String) {
+        val rt = runtimes[netId] ?: return
+        if (!rt.client.hasCap("draft/read-marker")) return
+        if (name == "*server*" || isPseudoBuffer(name) || isDccChatBufferName(name)) return
+        if (isChannelOnNet(netId, name)) return
+        if (!rt.queryReadMarkersRequested.add(casefoldText(netId, name))) return
+        viewModelScope.launch { runCatching { rt.client.sendRaw("MARKREAD $name") } }
+    }
+
+    /**
      * Format [timeMs] the way the read-marker spec asks for: the server-time format, to
      * millisecond precision, in UTC.
      */
@@ -3078,17 +2993,9 @@ class IrcViewModel(
     }
 
     /**
-     * Sends [text] as a PRIVMSG to [buffer] on [networkId] without switching the active buffer.
-     * Used by [NotificationReplyReceiver] for inline notification replies.
-     *
-     * If the server supports IRCv3 `+reply`/`draft/reply` and [msgId] is known, the reply tag
-     * is attached so clients that understand threading show it as a reply.
-     *
-     * If the server does NOT support reply tags, the message is prefixed with a quote of
-     * the original so context isn't lost when replying to an older message. In a channel
-     * the sender's nick is prepended too (`Nick: (quote) - reply`); in a PM only the
-     * quote is used (`(quote) - reply`) since there is a single counterparty and a nick
-     * prefix would read as a highlight of the person you're already talking to.
+     * Send [text] to [buffer] on [networkId] without switching buffers, for notification replies.
+     * With reply-tag support and a known [msgId] the reply tag is attached; without it, the text is
+     * prefixed with a quote of the original (and in a channel the sender's nick).
      */
     fun sendToBuffer(
         networkId: String,
@@ -3430,17 +3337,10 @@ fun startAddNetwork() {
     fun saveEditingNetwork(profile: NetworkProfile, clientCertDraft: ClientCertDraft?, removeClientCert: Boolean) {
         viewModelScope.launch {
             _state.value = _state.value.copy(networkEditError = null)
-            // SecretStore writes go through Android Keystore, which can throw
-            // IllegalStateException / KeyStoreException when the keystore has been
-            // invalidated (e.g. lock-screen change with a binding policy in effect,
-            // user fingerprint reset, OEM keystore corruption after an OTA). The
-            // encrypt path internally retries once with a regenerated key, but the
-            // second-attempt failure propagates. Without a guard here, that throw
-            // bubbles up the viewModelScope.launch and crashes the app exactly when
-            // the user tapped Save - a particularly bad failure mode because the
-            // user thinks they just saved their credentials and instead lost the
-            // app session. Catch, surface as an in-screen error on the edit screen,
-            // and leave the credential state untouched so the user can try again.
+            // SecretStore writes go through Android Keystore, which throws when the keystore has
+            // been invalidated (lock-screen or fingerprint change, OEM corruption) and its one
+            // internal retry also fails. Report that on the edit screen and leave the stored
+            // credentials untouched.
             val secretsResult = runCatching {
                 if (profile.saslEnabled) {
                     val p = profile.saslPassword?.trim()
@@ -3530,16 +3430,9 @@ fun startAddNetwork() {
     }
 
     /**
-     * Purges all per-network in-memory maps for [netId].
-     *
-     * Called on disconnect, network deletion, and any hard reset so that:
-     * - chanNickCase / chanNickStatus (per-channel nick tracking)
-     * - nickAwayState (away status per nick)
-     * - pendingSendsByNet (echo-message dedup queue)
-     * - pendingCloseAfterPart (channels awaiting close after /part)
-     * - receivedTypingExpiryJobs (typing indicator timers)
-     * - reconnectAttempts / autoReconnectJobs
-     * ...do not accumulate entries for networks that no longer exist.
+     * Purge the per-network in-memory maps for [netId] (nick tracking, away state, echo queue,
+     * pending closes, typing timers and, with [resetReconnectState], reconnect state) so they don't
+     * accumulate for networks that no longer exist.
      */
     private fun cleanupNetworkMaps(netId: String, resetReconnectState: Boolean = false) {
         // Per-channel nick maps
@@ -3561,13 +3454,10 @@ fun startAddNetwork() {
         pendingSendsByNet.remove(netId)
         // Labeled-response correlation labels (parallel to the echo dedup queue).
         pendingLabelsByNet.remove(netId)
-        // NOTE: recentSelfSends is deliberately NOT cleared here. cleanupNetworkMaps runs
-        // on every disconnect, including the unexpected-drop path that immediately auto-
-        // reconnects - and the whole point of recentSelfSends is to dedup our own messages
-        // when the bouncer replays them on that reconnect. Wiping it here would defeat the
-        // fix. It self-expires (SELF_SEND_RETAIN_MS) and is per-buffer size-capped, so
-        // leaving it across a reconnect is safe and bounded. It IS cleared in
-        // deleteNetwork() when the profile is removed entirely.
+        // recentSelfSends is kept across disconnects: it exists to dedup the bouncer's replay on
+        // the reconnect that follows. It self-expires, is capped per buffer, and is cleared in
+        // deleteNetwork().
+        //
         // Pending close-after-part
         pendingCloseAfterPart.removeAll(pendingCloseAfterPart.filter { it.startsWith(chanPrefix) }.toSet())
         // Typing expiry jobs: cancel and remove all for this network
@@ -3582,17 +3472,9 @@ fun startAddNetwork() {
             .forEach { recentJoinAtMs.remove(it) }
         // Same per-network sweep for the chathistory marker armed window.
         chatHistory.forgetNetwork(netId)
-        // Flap-detection history (pingTimeoutTimestamps) and the exponential-backoff
-        // counter (reconnectAttempts) MUST survive a transient disconnect, because the
-        // whole point of both is to accumulate state across a connect>Drop>reconnect
-        // cycle:
-        //   - pingTimeoutTimestamps lets the flap detector count repeated timeouts and
-        //     pause auto-reconnect once FLAP_THRESHOLD is hit within the window.
-        //   - reconnectAttempts is the backoff exponent. The design (see the Connected
-        //     handler and STABLE_CONNECTION_MS) is that it resets ONLY after a connection
-        //     stays up for STABLE_CONNECTION_MS.
-        // We only clear them on a PERMANENT teardown (user disconnect, profile delete,
-        // orphan-import cleanup) where there is no pending auto-reconnect to preserve them
+        // Flap history and the backoff counter must survive a transient disconnect, since both
+        // accumulate across reconnects; they are cleared only on a permanent teardown (user
+        // disconnect, profile deletion, import cleanup).
         if (resetReconnectState) {
             pingTimeoutTimestamps.remove(netId)
             reconnectAttempts.remove(netId)
@@ -3621,28 +3503,11 @@ fun startAddNetwork() {
     }
 
     /**
-     * Append a transient connection-status line (disconnect reason, retry notice, auth
-     * warning) to the *server* buffer for [netId]. If an identical line was emitted within
-     * [CONN_STATUS_DEDUP_WINDOW_MS], the existing message is updated in place with a
-     * "(×N)" counter suffix rather than being re-appended; the connection-state status
-     * field is updated regardless so the toolbar still reflects the latest situation.
-     *
-     * Defaults are tuned for routine connectivity blips: no notification, no highlight,
-     * so the user's badge counts don't fill up while the network flaps. Callers that
-     * surface genuinely-actionable failures override these.
-     *
-     * When [broadcast] is true AND this call resulted in a fresh append (not a counter
-     * bump on an existing line), the same text is also mirrored into every non-server,
-     * non-DCC-chat buffer on this network, so a user reading a channel sees "Disconnected"
-     * / "Reconnecting in 5s" / "Reconnected" inline.
-     *
-     * Returns true if a new line was appended, false if it was collapsed into the
-     * existing line's counter.
-     *
-     * Thread-safety: serialised on [connStatusLock] so two concurrent calls (e.g. one
-     * from a Default-dispatched reconnect coroutine and one from a Main.immediate event
-     * handler) can't both decide they're the first to collapse and end up racing on the
-     * message search and counter increment.
+     * Append a connection-status line to [netId]'s server buffer. A repeat within
+     * [CONN_STATUS_DEDUP_WINDOW_MS] updates the existing line's "(×N)" count instead. No
+     * notification or highlight by default. With [broadcast], a new line is also copied into the
+     * network's other buffers. Returns true when a new line was added. Serialised on
+     * [connStatusLock].
      */
     private fun appendConnStatus(
         netId: String,
@@ -3715,24 +3580,8 @@ fun startAddNetwork() {
     }
 
     /**
-     * Mirror a connection-status line into every channel and query buffer on [netId] so
-     * the user sees state changes inline regardless of which buffer they're reading. The
-     * *server* buffer already has the canonical copy (with dedup-counter handling); this
-     * writes the secondary copies for visibility only.
-     *
-     * Exclusions:
-     *  - The *server* buffer itself (already has the canonical copy).
-     *  - DCC chat buffers
-     *  - Buffers on other networks
-     *
-     * Cross-posts are written with `isLocal = true` (no unread/highlight increment — a
-     * network-wide event shouldn't bump the badge on every channel) and `doNotify = false`
-     * (the *server*-buffer copy already ran the notification policy for this event;
-     * we mustn't double-fire).
-     *
-     * Disk-logging is left enabled: each channel log gets its own "*** Disconnected" /
-     * "*** Reconnected" entry at the matching timestamp, which gives a clear visual
-     * break for anyone reviewing logs later.
+     * Copy a connection-status line into every channel and query buffer on [netId], excluding the
+     * server buffer and DCC chats. The copies don't count as unread or notify, but are logged.
      */
     private fun broadcastConnStatusToOtherBuffers(netId: String, text: String, from: String?) {
         val keys = _state.value.buffers.keys.filter { key ->
@@ -3786,12 +3635,9 @@ fun startAddNetwork() {
         // Profile is gone, so its unsent composer text is too. removeBuffer() handles the
         // per-buffer case, but a delete drops every buffer at once without going through it.
         draftStore.clearNetwork(id)
-        // Purge orphan state for the deleted network: buffers, the connection record, and
-        // the per-buffer chathistory marker tracker. Without this, buffer messages and
-        // associated state stay in memory until the process is killed - a real leak in
-        // long-running sessions where the user is provisioning/deprovisioning networks.
-        // (cleanupNetworkMaps clears per-channel maps but deliberately doesn't touch
-        // _state, since most of its callers want to keep buffer history across reconnects.)
+        // Purge the deleted network's buffers, connection record and chathistory marker tracker.
+        // cleanupNetworkMaps doesn't touch _state, since most of its callers keep buffer history
+        // across reconnects.
         val prefix = "$id::"
         chatHistory.forgetNetwork(id)
         // The profile is gone, so its away message has nothing left to be restored onto.
@@ -3854,11 +3700,8 @@ fun startAddNetwork() {
                     ?.toString(Charsets.UTF_8)
                     ?: throw java.io.IOException(appContext.getString(R.string.vm_restore_no_input))
                 val orphanedIds = repo.importBackup(json)
-                // Clear encrypted secrets for profiles that existed locally before the restore
-                // but are absent from the imported backup. Without this, SASL passwords / server
-                // passwords / TLS client certs for deleted profiles linger in SecretStore
-                // indefinitely - a data-hygiene issue rather than an active security bug, but
-                // worth closing because the material is encrypted credential data.
+                // Clear stored secrets for profiles that existed before the restore but aren't in
+                // the backup.
                 for (id in orphanedIds) {
                     runCatching { repo.secretStore.clearSaslPassword(id) }
                     runCatching { repo.secretStore.clearServerPassword(id) }
@@ -3869,11 +3712,8 @@ fun startAddNetwork() {
                     // remain. They'll never be used (loadTlsClientCert requires both netId and
                     // certId), but a follow-up housekeeping pass could walk the directory.
                 }
-                // Disconnect any live runtimes for profiles that were deleted by the import.
-                // Without this, the IrcClient keeps running against the now-orphan profile,
-                // would auto-reconnect with stale credentials on next disconnect, and pollutes
-                // the connection notification with a network the user can no longer see in the
-                // sidebar. Switch to the Main dispatcher because disconnectNetwork mutates state.
+                // Disconnect live runtimes for profiles the import deleted, on Main since
+                // disconnectNetwork mutates state.
                 if (orphanedIds.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
                         for (id in orphanedIds) {
@@ -3954,39 +3794,17 @@ fun startAddNetwork() {
     }
 
     /**
-     * Ask a bouncer to (re-)send its current upstream-network list. Per-kind dispatch:
-     *
-     *  - SOJU: sends `BOUNCER LISTNETWORKS`. The bouncer replies with one
-     *    `BOUNCER NETWORK <id> <attrs>` per known upstream, terminated by
-     *    `BOUNCER NETWORK *`. Feeds the existing structured handler. Soju emits explicit
-     *    `BOUNCER NETWORK <id> *` deletion sentinels so the cache stays consistent
-     *    without explicit eviction.
-     *  - ZNC: sends `PRIVMSG *status :ListNetworks`. The reply is a free-text NOTICE
-     *    table that is scraped opportunistically by [parseZncListNetworksLine] and
-     *    surfaced as the same `BouncerNetwork` events soju produces — so the UI and
-     *    cache code paths are shared. Because ZNC has NO deletion sentinel (a removed
-     *    network simply doesn't appear in the next ListNetworks output), we wipe the
-     *    cache for this profile before issuing the command so the rebuild is authoritative.
-     *    A brief UI flicker is the cost; permanently-stale entries are the alternative.
-     *  - GENERIC / NONE: no-op. Generic bouncers have no standardised list command.
-     *
-     * Idempotent: re-receiving the same upstream attrs produces no visible change in
-     * the cache (the merge logic is value-based) so we don't need a per-request marker.
+     * Ask a bouncer to resend its upstream network list: soju gets `BOUNCER LISTNETWORKS`; ZNC gets
+     * `ListNetworks` sent to *status, with the cache wiped first since ZNC reports no deletions.
+     * No-op for other kinds.
      */
     fun refreshBouncerNetworks(parentNetId: String) {
         val rt = runtimes[parentNetId] ?: return
         val profile = _state.value.networks.firstOrNull { it.id == parentNetId } ?: return
         val cmd = when (profile.bouncerKind) {
             BouncerKind.SOJU -> {
-                // Wipe the cache for this profile so the LISTNETWORKS response is
-                // authoritative. soju's `BOUNCER NETWORK <id> *` delete frames are only
-                // sent for networks the bouncer believes our session knows about; a
-                // network removed via `sojuctl` while this client was offline is dropped
-                // from soju's state without a delete frame ever being delivered to us.
-                // Without the pre-wipe the stale entry lingers in our UI even after the
-                // user explicitly hits Refresh - and worse, an Import button click on a
-                // stale entry would create a profile pointing at a network the bouncer
-                // no longer routes. ZNC takes the same approach for the same reason.
+                // Wipe the cache so the LISTNETWORKS reply is authoritative: soju sends no delete
+                // frame for a network removed while this client was offline.
                 _state.update { st ->
                     if (!st.bouncerNetworks.containsKey(parentNetId)) st
                     else st.copy(bouncerNetworks = st.bouncerNetworks + (parentNetId to emptyMap()))
@@ -3994,10 +3812,8 @@ fun startAddNetwork() {
                 "BOUNCER LISTNETWORKS"
             }
             BouncerKind.ZNC -> {
-                // Wipe the cache for this profile so the table-scrape rebuild is
-                // authoritative. Without this, a network removed via ZNC's `DelNetwork`
-                // would linger in our UI forever because no row referencing it would
-                // arrive in the new reply.
+                // Wipe the cache so the rebuilt table is authoritative; a network removed with
+                // ZNC's DelNetwork simply stops appearing.
                 _state.update { st ->
                     if (!st.bouncerNetworks.containsKey(parentNetId)) st
                     else st.copy(bouncerNetworks = st.bouncerNetworks + (parentNetId to emptyMap()))
@@ -4010,38 +3826,12 @@ fun startAddNetwork() {
     }
 
     /**
-     * "Discover-and-clone" import: take a bouncer-reported upstream and create a local
-     * NetworkProfile for it that copies the bouncer connection details (host, port, TLS,
-     * SASL) from [parentNetId] but binds to the discovered upstream via [bouncerNetworkName].
-     *
-     * Why clone the parent rather than ask the user to fill in a fresh form: the bouncer-
-     * facing connection details (host/port/TLS/credentials) are identical for every upstream
-     * served by the same bouncer instance. only the per-upstream `bouncerNetworkName`
-     * differs. Re-typing those is the painful part of bouncer onboarding and the entire
-     * reason the discover-and-clone flow exists.
-     *
-     * The clone inherits the **parent's bouncerKind** so the SASL authcid / USER suffix is
-     * composed with the right syntax (soju's `user/network[@cid]` vs ZNC's
-     * `user[@cid]/network`). Parent kinds other than SOJU/ZNC are rejected, generic
-     * bouncers don't expose a discoverable upstream list and there's nothing meaningful
-     * to clone from.
-     *
-     * The new profile:
-     *  - inherits everything bouncer-side (host, port, useTls, allowInvalidCerts, nick,
-     *    username, realname, SASL config + secrets, server password + secret, caps)
-     *  - inherits the parent's bouncerKind (so SOJU stays SOJU, ZNC stays ZNC)
-     *  - overrides bouncerNetworkName = [bouncerNetworkName]
-     *  - clears clientId (per-client buffers are device-local, copying it would create
-     *    two profiles fighting over the same client buffer slot on the bouncer)
-     *  - clears autoJoin (the upstream may have its own server-side autojoin list and
-     *    the user usually wants to opt in to autoConnect deliberately on a fresh profile)
-     *  - autoConnect = false; user enables explicitly
-     *  - new UUID id; sortOrder placed at the end of the list
-     *
-     * On success, [bouncerCloneMessage] is set so the screen can surface a brief toast.
-     * Idempotency: if a profile already exists with the same bouncerKind+host+port
-     * targeting this upstream name, no clone is created and the existing profile is
-     * surfaced via the message instead.
+     * Create a profile for a bouncer-reported upstream by cloning [parentNetId]'s bouncer
+     * connection (host, port, TLS, credentials, capabilities, bouncerKind) with
+     * [bouncerNetworkName] set. The client id and autoJoin are cleared, autoConnect is off, and it
+     * gets a new id at the end of the list. Only for SOJU and ZNC parents. If a matching profile
+     * already exists, it is reported instead of cloned; [bouncerCloneMessage] reports the result
+     * either way.
      */
     fun cloneBouncerNetwork(parentNetId: String, bouncerNetworkName: String) {
         viewModelScope.launch {
@@ -4088,34 +3878,11 @@ fun startAddNetwork() {
             val newId = "net_" + java.util.UUID.randomUUID().toString().replace("-", "")
             val maxSort = st.networks.maxOfOrNull { it.sortOrder } ?: -1
 
-            // Prefer SASL for the cloned profile.
-            //
-            // Why: SASL PLAIN is the modern, structured auth path supported by all current
-            // soju and ZNC versions; the PASS line is a legacy fallback that requires the
-            // user to know the exact format their bouncer wants (and the format differs
-            // across bouncers). When the parent already has SASL enabled, inherit it.
-            // When the parent has no SASL but does have a server password, opportunistically
-            // upgrade the clone to SASL using the same credential, this is the path users
-            // almost always want when migrating a PASS-only setup to per-network profiles.
-            //
-            // SASL authcid format follows effectiveAuthIdentity (e.g. "eck/afternet" for
-            // soju, "eck@hexdroid/afternet" for ZNC), so inheriting `username` from the parent
-            // and adding bouncerNetworkName=targetName produces the right wire format
-            // automatically.
-            //
-            // If the parent has neither SASL nor a server password, we leave SASL off. the
-            // user clearly hasn't set credentials yet and the clone shouldn't pretend to
-            // have them.
+            // Use SASL for the clone: inherit it when the parent has it, otherwise upgrade a parent
+            // server password to SASL with the same credential; with neither, leave SASL off.
             val parentHasSasl = parent.saslEnabled && !parentSaslPass.isNullOrEmpty()
-            // Refuse the PASS->SASL auto-upgrade if the parent's serverPassword looks like
-            // a hand-formatted bouncer PASS line (e.g. "alice/libera:secret" — same shape
-            // effectivePassLine produces). SASL PLAIN sends the password verbatim in the
-            // wire frame, so copying a colon-delimited PASS string into the SASL slot would
-            // try to authenticate with the password literally being "alice/libera:secret"
-            // and the bouncer would reject it. Detection mirrors effectivePassLine's own
-            // hand-assembly heuristic: a `/` before the first `:` is unambiguous because
-            // no real IRC username contains `/`, and `@` isn't used as a hint because it
-            // appears in real passwords routinely.
+            // Don't upgrade a hand-formatted PASS value (a '/' before the first ':', like
+            // "alice/libera:secret") to SASL, which would send that whole string as the password.
             val parentPassLooksHandFormatted = parentServerPass?.let { pw ->
                 val firstColon = pw.indexOf(':')
                 firstColon > 0 && pw.substring(0, firstColon).contains('/')
@@ -4127,15 +3894,9 @@ fun startAddNetwork() {
                 parentHasUsablePassForSasl -> parentServerPass
                 else -> null
             }
-            // Mechanism choice for the clone:
-            //  - parent already had SASL enabled -> inherit verbatim (user picked it knowingly).
-            //  - parent was PASS-only -> force PLAIN. The SCRAM-* mechanisms negotiate a salted
-            //    challenge-response specific to how the bouncer stored the password, and a
-            //    server-PASS string almost certainly wasn't stored that way; trying SCRAM
-            //    with a PASS credential produces a 904 SASL fail. Worse, parent.saslMechanism
-            //    may be set to SCRAM as a leftover from a previous experiment that the user
-            //    abandoned by disabling SASL. copying it blindly would mean the clone
-            //    silently uses a mechanism the credential can't satisfy.
+            // Mechanism for the clone: the parent's when it used SASL; PLAIN when upgrading from a
+            // server password, since the stored credential may not suit SCRAM and the parent's
+            // mechanism may be a stale leftover.
             val cloneSaslMechanism = if (parentHasSasl) parent.saslMechanism else SaslMechanism.PLAIN
 
             val clone = parent.copy(
@@ -4149,14 +3910,11 @@ fun startAddNetwork() {
                 autoConnect = false,
                 isFavourite = false,
                 sortOrder = maxSort + 1,
-                // Promote to SASL when we have a credential to put there. saslAuthcid is
-                // copied from the parent only when the parent ALREADY had SASL enabled.
-                // For an auto-upgrade (parent was PASS-only) we deliberately clear it so
-                // effectiveAuthIdentity falls back to `username` and re-suffixes it with
-                // the *cloned* bouncerNetworkName. Without this clear, a stale legacy value
-                // like "alice/libera" on the parent would short-circuit effectiveAuthIdentity
-                // (which leaves identities containing '/' untouched) and the clone would
-                // silently SASL as the OLD network name instead of `targetName`.
+                // Promote to SASL when there is a credential for it. saslAuthcid is copied only
+                // when the parent already used SASL; on an upgrade from PASS it is cleared, so
+                // effectiveAuthIdentity builds it from `username` and the clone's
+                // bouncerNetworkName rather than keeping a parent value like "alice/libera" that
+                // names the old network.
                 saslEnabled = cloneShouldUseSasl,
                 saslMechanism = cloneSaslMechanism,
                 saslAuthcid = if (parentHasSasl) parent.saslAuthcid else null,
@@ -4203,17 +3961,9 @@ fun startAddNetwork() {
         _state.update { it.copy(bouncerCloneMessage = null) }
     }
 
-    // -------------------------------------------------------------------------
-    // E2E encryption: public API used by the EncryptionDialog and the compose-
-    // input lock badge. All operations are sync (cheap memory + SharedPreferences
-    // backed by SecretStore) so they can be called directly from Compose event
-    // handlers without launching a coroutine.
-    //
-    // The caller (UI) carries the responsibility for passing a sensible target -
-    // typically the active channel name or query nick. We lowercase internally
-    // through E2eKeyStore so casing inconsistency between callers (e.g. UI typed
-    // "#Foo" vs server-cased "#foo") still hits the same key.
-    // -------------------------------------------------------------------------
+    // ── E2E encryption ──
+    // Used by the encryption dialog and the input lock badge. Synchronous, so it can be called from
+    // Compose handlers. Targets are lowercased by E2eKeyStore.
 
     /** Snapshot of the current encryption state for a target, for UI rendering. */
     data class E2eKeyInfo(
@@ -4230,16 +3980,10 @@ fun startAddNetwork() {
         return E2eKeyInfo(entry.scheme, fp, b64)
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    //  +AGE encryption-dialog surface.
-    //
-    //  Unlike AGM/Blowfish there is no paste-a-key: +AGE uses a per-device identity,
-    //  trust-on-first-use pinning of peers, and a forward-secret ratchet (1:1). This
-    //  surface backs the dialog's +AGE panel: show our safety number, the contact's
-    //  pin/verify status, mark-verified, and an enable flag per target. Everything is
-    //  lazy + runCatching so a primitives/keystore hiccup degrades to "unavailable"
-    //  rather than crashing the dialog.
-    // ──────────────────────────────────────────────────────────────────────────
+    // ── +AGE encryption dialog ──
+    // No pasted key: +AGE uses a per-device identity, TOFU-pinned peers and a forward-secret
+    // ratchet. Backs the dialog's safety number, pin/verify status and per-target enable flag.
+    // Failures degrade to "unavailable".
 
     private val ageP: com.boxlabs.hexdroid.crypto.AgePrimitives? by lazy {
         // Backend: BouncyCastle (native Ed25519 + X25519, audited). runCatching guards
@@ -4366,6 +4110,7 @@ fun startAddNetwork() {
     fun setScriptEnabled(name: String, enabled: Boolean) { _scriptLaunchers.value = emptyList(); scriptManager.setEnabled(name, enabled); refreshScripts() }
     fun installScript(name: String, source: String) { _scriptLaunchers.value = emptyList(); scriptManager.install(name, source); refreshScripts() }
     fun removeScript(name: String) { _scriptLaunchers.value = emptyList(); scriptManager.remove(name); refreshScripts() }
+    fun restoreBundledScripts() { _scriptLaunchers.value = emptyList(); scriptManager.restoreBundled(); refreshScripts() }
     fun reloadScripts() { _scriptLaunchers.value = emptyList(); scriptClearMediaTokens(); scriptManager.reloadAll(); refreshScripts() }
     fun readScript(name: String): String? = scriptManager.read(name)
 
@@ -4608,6 +4353,40 @@ fun startAddNetwork() {
      * so a layout-aware script (poker) can re-render for the new orientation. Scripts opt in
      * with `on SIGNAL:screenchange { ... }`; scripts without a handler are unaffected.
      */
+    /**
+     * Raise a live IRC event to scripts (`on JOIN`, `on PART`, ...). Only once the script engine
+     * exists: an event never starts it. Handlers run synchronously, like `on TEXT`.
+     */
+    private fun scriptEvent(
+        name: String,
+        netId: String,
+        buffer: String,
+        nick: String? = null,
+        text: String = "",
+        isMe: Boolean = false,
+        isPrivate: Boolean = false,
+        fields: Map<String, String> = emptyMap(),
+    ) {
+        if (!scriptEngineDelegate.isInitialized()) return
+        runCatching {
+            scriptEngine.dispatch(
+                name,
+                com.boxlabs.hexdroid.script.EventData(
+                    network = netId, buffer = buffer, from = nick, text = text,
+                    isPrivate = isPrivate, isMine = isMe, fields = fields,
+                ),
+            )
+        }
+    }
+
+    /** True when [nick] is our current nick on [netId], under the network's case mapping. */
+    private fun isMyNick(netId: String, nick: String?): Boolean {
+        if (nick.isNullOrEmpty()) return false
+        val st = _state.value
+        val my = st.connections[netId]?.myNick ?: runtimes[netId]?.myNick ?: st.myNick
+        return casefoldText(netId, nick) == casefoldText(netId, my)
+    }
+
     fun scriptScreenChanged() {
         viewModelScope.launch(Dispatchers.Main.immediate) {
             runCatching {
@@ -4763,15 +4542,10 @@ fun startAddNetwork() {
     private val ageBridges =
         java.util.concurrent.ConcurrentHashMap<String, com.boxlabs.hexdroid.script.cap.AgeScriptBridge>()
     /**
-     * Per-network encrypted-transport bridges: one [AgeScriptBridge] per netId, each wired to send,
-     * deliver, dispatch and read our nick on THAT network. Previously a single active-network-bound
-     * bridge routed all +AGE traffic onto whichever network was on screen, so a background network's
-     * channel/PM crypto was misdelivered (sent on the wrong connection, decrypted into the wrong buffer,
-     * signed/verified against the wrong nick). Keying it by netId fixes that.
-     *
-     * A FAILED build is NOT cached: if the identity isn't ready yet (e.g. an inbound AGE line arrives
-     * during startup or a bouncer's CHATHISTORY replay) we return null and retry on the next access, so
-     * +AGE is never permanently wedged by one transient miss.
+     * Per-network +AGE bridges: one [AgeScriptBridge] per netId, sending, delivering, dispatching
+     * and reading our nick on that network. A failed build isn't cached: if the identity isn't
+     * ready yet (an inbound AGE line during startup or a CHATHISTORY replay), this returns null and
+     * the next access retries.
      */
     private fun ageBridgeFor(netId: String?): com.boxlabs.hexdroid.script.cap.AgeScriptBridge? {
         val net = netId ?: _state.value.activeNetworkId ?: return null
@@ -4813,9 +4587,8 @@ fun startAddNetwork() {
                         )
                     },
                     onIdentConflict = { target, nick, newFp, pinnedFp ->
-                        // The key was NOT pinned; it waits for the user. Fail loud and in the buffer
-                        // they're looking at, and notify: silently accepting was the old behaviour and
-                        // is exactly what makes a nick takeover invisible.
+                        // The key was not pinned and waits for the user. Say so in the buffer
+                        // they're looking at, and notify, so a changed key can't pass unnoticed.
                         append(
                             bufKey(net, target), from = null,
                             text = "*** " + appContext.getString(R.string.vm_age_key_warning, nick, newFp.take(16), pinnedFp.take(16)),
@@ -4842,15 +4615,10 @@ fun startAddNetwork() {
     private val AGE_PM_RETRY_CAP_MS = 24000L
 
     /**
-     * Resolve +AGE PM messages that [AgeScriptBridge.sendOrHoldPm] held for [peer]. IRC has no prekey
-     * server, so we can't encrypt a first message to a not-yet-established session the way Signal does;
-     * instead, since both clients are online, we wait for the live handshake:
-     *   - the peer's ratchet comes up  -> the bridge already flushed the held messages through it;
-     *   - no AGE IDENT within the grace -> the peer runs no +AGE client, so self-key + flush as garbled
-     *                                      AGE CHAT (future PMs to them self-key immediately);
-     *   - IDENT seen but handshake slow -> grant one more grace before self-keying, so a laggy handshake
-     *                                      doesn't garble the opening line.
-     * [bridge] is captured at call time so a network switch mid-grace flushes the right instance.
+     * Resolve +AGE PMs held for [peer] while the ratchet handshake runs: once it comes up the
+     * bridge has flushed them; with no AGE IDENT within the grace the peer has no +AGE client, so
+     * self-key and flush; with IDENT but a slow handshake, allow one more grace. [bridge] is
+     * captured so a network switch flushes the right one.
      */
     private fun scheduleAgePmGrace(netId: String, peer: String, bridge: com.boxlabs.hexdroid.script.cap.AgeScriptBridge?) {
         bridge ?: return
@@ -4858,22 +4626,10 @@ fun startAddNetwork() {
         if (!agePmGracePending.add(key)) return
         viewModelScope.launch {
             try {
-                // Reliability layer. A held +AGE PM waits for the ratchet handshake and then flushes
-                // DECRYPTABLY via flushPmOutboxRatchet (driven by onPmHello/onPmAck). While it waits we
-                // periodically re-drive the handshake (retryPmHandshake) so a lost or mistimed
-                // IDENT/HELLO/ACK recovers on its own instead of stranding the message. retryPmHandshake
-                // is idempotent and reuses existing keys, so re-driving never desyncs an in-flight or
-                // established session.
-                //
-                // We still deliberately do NOT self-key a 1:1 PM on a timeout. Self-keying works for a
-                // *channel* because the minted group key is shared with members, but a PM self-key
-                // encrypts under a key only WE hold, so the peer can't decrypt it. So we only keep
-                // nudging the handshake until it establishes or we hit the attempt cap; the message
-                // stays echoed-but-pending until then and flushes the instant both ends are on.
-                // Back off exponentially (3s, 6s, 12s, 24s, capped): on FIRST contact the peer may take
-                // many seconds to actually tap "enable", and a fixed short interval would re-announce
-                // repeatedly in that window and trip server flood limits. Backing off keeps recovery
-                // quick for a genuinely lost frame while spreading out the wait for a slow peer.
+                // Re-drive the handshake with exponential backoff until the ratchet is up or the
+                // attempt cap is reached. A 1:1 PM is never self-keyed on timeout, since the peer
+                // couldn't decrypt a key only we hold; the message stays pending until both ends
+                // are ready.
                 repeat(AGE_PM_MAX_RETRIES) { attempt ->
                     delay((AGE_PM_GRACE_MS shl attempt).coerceAtMost(AGE_PM_RETRY_CAP_MS))
                     if (bridge.pmReady(peer)) return@launch          // ratchet up: outbox already flushed
@@ -4922,27 +4678,16 @@ fun startAddNetwork() {
         else -> null
     }
     /**
-     * Egress policy for script HTTP (`http.get` / `http.post`). Fails closed.
-     *
-     * The critical case is a proxied network. Script HTTP is a plain HttpURLConnection with no Proxy
-     * (HexDroidScriptHost.httpRequest), so it egresses DIRECTLY and resolves DNS locally. Allowing
-     * that while the IRC link runs over Tor/SOCKS would hand the user's real IP and DNS to a third
-     * party while they believe they are anonymous, from nothing more than loading a script that
-     * fetches (the bundled translate.hex does exactly that). Silent direct egress is the one outcome
-     * that must never happen, so while any live network is proxied, scripts do not get to make
-     * requests at all. Routing script HTTP through SocksProxy with remote DNS is the richer fix and
-     * would let this return true again; note that java.net's SOCKS support resolves the hostname
-     * locally, so it must go through SocksProxy.connect rather than Proxy.Type.SOCKS.
+     * Egress policy for script HTTP (`http.get` / `http.post`). Fails closed. Script HTTP connects
+     * directly with local DNS, so while any live network uses a proxy (e.g. Tor), scripts may not
+     * make requests at all.
      */
     fun scriptNetworkAllowed(url: String): Boolean = scriptNetworkAllowed(url, resolve = false)
 
     /**
-     * Enforcing check for the HTTP path: resolves the host and tests every address, so the
-     * literal-form gaps in [isLocalOrPrivateHost] (127.1, 2130706433, ::ffff:127.0.0.1) cannot walk
-     * past it. Blocking DNS, so call it off the script thread.
-     *
-     * Known gap: resolve-then-connect is a TOCTOU, since HttpURLConnection resolves again when it
-     * dials. Closing it needs a SocketFactory that checks the address actually being connected to.
+     * Enforcing check for the HTTP path: resolves the host and tests every address, closing the
+     * literal-form gaps in [isLocalOrPrivateHost]. Blocking. Known gap: HttpURLConnection resolves
+     * again when connecting.
      */
     fun scriptNetworkAllowedResolved(url: String): Boolean = scriptNetworkAllowed(url, resolve = true)
 
@@ -5027,10 +4772,8 @@ fun startAddNetwork() {
         // sendInput treats a leading '/' as a command and anything else as literal chat, so restore
         // the slash the script author omitted. An explicit '/' from the script is kept as-is.
         val raw = if (cmd.startsWith("/")) cmd else "/$cmd"
-        // Run the command where it came from. The engine now hands us the dispatch's own network and
-        // buffer, so a handler that fires on network A no longer executes against whichever buffer the
-        // user happens to have selected (previously every script command arrived as network = null,
-        // meaning "active", and silently targeted the wrong place whenever the user was elsewhere).
+        // Run the command against the network and buffer the dispatch came from, not whichever
+        // buffer is selected.
         val originKey = if (!network.isNullOrBlank() && !buffer.isNullOrBlank()) bufKey(network, buffer) else null
         if (originKey != null && _state.value.buffers.containsKey(originKey)) {
             sendInput(raw, originKey)
@@ -5104,21 +4847,9 @@ fun startAddNetwork() {
     }
 
     /**
-     * Set a Blowfish key for [target] from a passphrase. The passphrase bytes are
-     * used directly as the Blowfish key, matching HexChat fishlim's behaviour
-     * exactly so a passphrase shared between the two clients produces the same
-     * key on both sides without any client-specific salt/KDF.
-     *
-     * Returns Success with the new key info, or Failure with a human-readable
-     * reason (passphrase too short / too long / Blowfish init failed).
-     *
-     * Note that "passphrase too short" is a UX-level guard, not a security one
-     * the cipher itself accepts 4+ bytes, but the dialog warns users when the
-     * passphrase has fewer than 8 characters because anything shorter is
-     * trivially brute-forceable. The actual key cap is 56 bytes (Blowfish's
-     * theoretical maximum); longer passphrases are truncated by some fishlim
-     * implementations and not others, so we reject rather than silently
-     * truncate.
+     * Set a Blowfish key for [target] from a passphrase used directly as the key, as HexChat's
+     * fishlim does, so both clients derive the same key. Passphrases over 56 bytes are rejected
+     * rather than truncated. Returns the key info, or a failure reason.
      */
     fun setE2eBlowfishPassphrase(networkId: String, target: String, passphrase: String): E2eImportResult {
         val raw = passphrase.toByteArray(Charsets.UTF_8)
@@ -5154,29 +4885,12 @@ fun startAddNetwork() {
     }
 
     /**
-     * Connect (or re-connect) a network.
+     * Connect (or reconnect) a network.
      *
-     * @param clearAuthBlock  Pass `true` only for user-initiated retries (manual button
-     *     tap, profile save, "retry after granting permission" flows, "allow plaintext
-     *     and connect" flow). The auth-failure block is then cleared so the scheduled
-     *     reconnect (which scheduleAutoReconnect would otherwise short-circuit on) can
-     *     run again - the user implicitly opted into one more attempt by reaching this
-     *     path. Pass `false` for automated callers (autoconnect on app start, restore-
-     *     desired-connections after process resume, the ConnectivityManager onAvailable
-     *     callback). Those paths must NOT clear the block, otherwise an auth-rejected
-     *     network will retry the same wrong credentials every time the WiFi reconnects
-     *     or the cell switches over - which is the "auto-reconnect halted but retries
-     *     again in 10 minutes" bug from 1.6.2: connectNetwork was unconditionally
-     *     clearing authBlockedReconnect, and the network callback fires roughly every
-     *     Doze cycle.
-     */
-    /**
-     * @param openServerBuffer when true, switch to this network's server buffer and the
-     * chat screen once the connection attempt has actually been started. Set by the
-     * Connect button on the Networks screen, which otherwise kicks off a connection and
-     * leaves the user staring at the network list with no indication anything happened.
-     * Deliberately not set on the automated paths (auto-connect, reconnect, resume),
-     * which must never yank the user out of the buffer they are reading.
+     * @param clearAuthBlock True only for user-initiated retries, which clear the auth-failure
+     *   block; automated callers pass false.
+     * @param openServerBuffer Switch to this network's server buffer once the attempt starts. Set
+     *   only by the Connect button, never by automated paths.
      */
     fun connectNetwork(
         netId: String,
@@ -5193,13 +4907,8 @@ fun startAddNetwork() {
             ensureStsPoliciesLoaded()
             var started = false
             withNetLock(netId) {
-                // Same gate as scheduleAutoReconnect's entry: if the network is auth-
-                // blocked and the caller didn't explicitly clear the block (i.e. this
-                // is an automated path), refuse to connect and leave the existing
-                // "Auth failed - reconnect halted" status in place. Without this gate,
-                // the connect would proceed, re-trip the same SASL/PASS rejection, and
-                // the user would see a flood of repeat auth-failure lines whenever
-                // network connectivity flapped.
+                // An automated connect to an auth-blocked network is refused, leaving the "Auth
+                // failed - reconnect halted" status in place.
                 if (!clearAuthBlock && netId in authBlockedReconnect) return@withNetLock
                 connectNetworkInternal(netId, force)
                 started = true
@@ -5254,10 +4963,7 @@ fun startAddNetwork() {
         autoReconnectJobs.remove(netId)?.cancel()
 
         val existing = runtimes.remove(netId)
-        // Channels the user joined manually (i.e. not in the profile's autoJoin list) are
-        // tracked on the NetRuntime. A reconnect discards the old runtime and builds a fresh
-        // one below, so without carrying this map over it would start empty and those channels
-        // would never be rejoined.
+        // Carry the manually joined channels over to the new runtime so they are rejoined.
         val carriedManualJoins = existing?.manuallyJoinedChannels?.toMap().orEmpty()
         if (existing != null) {
             runCatching { existing.client.forceClose("Reconnecting") }
@@ -5341,6 +5047,7 @@ fun startAddNetwork() {
                 noNetworkNotice.add(netId)
                 append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_turn_on_data), doNotify = false)
             }
+            deferredConnects.add(netId)
             setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_waiting_network), myNick = cfg.nick) }
             if (_state.value.activeNetworkId == netId) updateConnectionNotification(appContext.getString(R.string.vm_status_waiting_network))
             if (_state.value.settings.autoReconnectEnabled) scheduleAutoReconnect(netId)
@@ -5357,6 +5064,7 @@ fun startAddNetwork() {
                 append(serverKey, from = null,
                     text = "*** " + appContext.getString(R.string.vm_waiting_for_wifi), doNotify = false)
             }
+            deferredConnects.add(netId)
             setNetConn(netId) { it.copy(connected = false, connecting = false, status = appContext.getString(R.string.vm_status_waiting_wifi), myNick = cfg.nick) }
             if (_state.value.activeNetworkId == netId) updateConnectionNotification(appContext.getString(R.string.vm_status_waiting_wifi))
             // Backstop for the case the NetworkCallback failed to register (some OEM
@@ -5366,6 +5074,7 @@ fun startAddNetwork() {
         }
 
         waitingForWifiNotice.remove(netId)
+        deferredConnects.remove(netId)
 
         val preservedListModes = conn?.listModes ?: NetConnState().listModes
         val newConns = st.connections + (netId to NetConnState(
@@ -5375,17 +5084,8 @@ fun startAddNetwork() {
             myNick = cfg.nick,
             listModes = preservedListModes
         ))
-        // Focus handling: a fresh user-initiated connect from the Networks list should land
-        // on the chat screen for the new connection. But every subsequent reconnect attempt
-        // (auto-reconnect after a drop, manual retry from the Reconnect button while already
-        // on a channel, etc.) should stay on the same buffer they were reading.
-        //
-        //   * Only force `screen = AppScreen.CHAT` when the user was on the Networks list,
-        //     which is the typical first-connect entry point. Settings / Transfers / Edit
-        //     screens are off-limits, the user is doing something deliberate there.
-        //   * Only force `selectedBuffer` when the user has no buffer selected at all. If
-        //     they're already focused on a buffer (channel, query, or this network's own
-        //     server buffer), leave that selection alone.
+        // A connect started from the Networks list opens the chat screen; reconnects leave the user
+        // where they are. The buffer is only selected when none is.
         val curScreen = st.screen
         val nextScreen = if (curScreen == AppScreen.NETWORKS) AppScreen.CHAT else curScreen
         val nextSelectedBuffer = if (st.selectedBuffer.isBlank()) serverKey else st.selectedBuffer
@@ -5397,22 +5097,9 @@ fun startAddNetwork() {
             )
         )
 
-        // Pin this connection to the interface it is being established on. Binding the socket
-        // (in IrcCore/SocksProxy) makes a Wi-Fi<->cellular handoff tear the socket down promptly
-        // instead of leaving a half-dead socket; recording the same Network as boundNetwork lets
-        // the ConnectivityManager onLost callback match the lost interface and reconnect at once
-        // rather than waiting out SOCKET_READ_TIMEOUT_MS. Captured here (not at Connected) so the
-        // pinned network and the recorded network are always the same one.
-        //
-        // EXCEPTION: never pin when the active network is a VPN. Binding a socket to a specific
-        // Network object is wrong for VPNs, which replace that object constantly (rekey, roam,
-        // and every underlying Wi-Fi<->cellular handoff produces a fresh VPN Network). Each
-        // replacement kills the bound socket, and our NetworkCallback uses a default
-        // NetworkRequest which implicitly carries NET_CAPABILITY_NOT_VPN so it never sees the
-        // VPN network drop and can't trigger a prompt reconnect. Leaving it unpinned lets the
-        // OS route through the VPN and migrate the connection across underlying-network changes
-        // transparently, which is what a VPN is supposed to do. boundNetwork stays null too, so
-        // the onLost "riding the lost interface" branch correctly never fires for a VPN session.
+        // Pin the connection to the network it is made on, so a handoff drops the socket promptly
+        // and onLost can match it. Never pinned on a VPN, whose Network objects are replaced
+        // constantly; the OS migrates VPN connections itself.
         val chosenNetwork = runCatching {
             val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             val active = cm?.activeNetwork
@@ -5424,6 +5111,7 @@ fun startAddNetwork() {
         // Set before the connect coroutine starts so the handshake itself is logged, which
         // is where most of the interesting protocol traffic lives.
         client.rawLogEnabled = _state.value.settings.rawLog
+        client.nickRegainEnabled = _state.value.settings.nickRegainEnabled
         // Wire localized status text into the protocol engine (and its session).
         client.strings = { id, args -> appContext.getString(id, *args) }
         client.plurals = { id, qty, args -> appContext.resources.getQuantityString(id, qty, *args) }
@@ -5455,31 +5143,12 @@ fun startAddNetwork() {
             // Pass netId so concurrent multi-network connects each get their own lock.
             KeepAliveService.acquireScopedWakeLock(appContext, netId)
             try {
-                // Outer try around the flow collection itself, not just the per-event
-                // handler. The events() flow can throw mid-stream for several reasons:
-                //   - writeLine() called from the inline registration sequence (PASS / CAP
-                //     LS / NICK / USER) can raise IOException if the socket dropped between
-                //     openSocket and the first write (rare; fast network blips, server-side
-                //     instant-flood disconnects, midline TLS aborts on some bouncers).
-                //   - EncodingHelper.encode() can throw on degenerate input encodings.
-                //   - The IrcSession state machine reaches an assertion only triggered by
-                //     a very specific server-side malformed CAP / SASL sequence.
-                // Without this outer try, any such throw propagates out of collect, kills
-                // this viewModelScope.launch coroutine, and (because viewModelScope's default
-                // uncaught-exception handler re-throws on Android) crashes the whole process.
-                // The user-visible symptom is "app got to Negotiating capabilities, then
-                // crashed and closed" - exactly because the throw lands between sending the
-                // "Negotiating capabilities..." status and the first user-visible event of
-                // the new connection.
-                //
-                // Containment policy:
-                //   - CancellationException is re-thrown so coroutine cancellation still
-                //     works (this is what releases the wakelock via the finally block, and
-                //     what lets manual disconnect / reconnect cycles tear down cleanly).
-                //   - Any other Throwable is logged, surfaced in the server buffer, and
-                //     translated to a Disconnected handler invocation so the connection
-                //     state UI reaches a coherent terminal state (status pill, reconnect
-                //     scheduling, etc.) instead of being stuck at "Connecting".
+                // Outer try around the whole collection: events() can throw mid-stream (a write on
+                // a socket that dropped during registration, an encoding error, a malformed
+                // CAP/SASL sequence). CancellationException is rethrown so teardown still works;
+                // anything else is logged, shown in the server buffer and handled as a disconnect,
+                // so the connection reaches a proper end state instead of the throw ending the
+                // process.
                 try {
                     client.events()
                         // Decouple the socket read loop from Main-thread event handling. Without
@@ -5488,37 +5157,9 @@ fun startAddNetwork() {
                         // drained, which makes us a "slow reader".
                         .buffer(capacity = EVENT_DRAIN_BUFFER_CAPACITY)
                         .collect { ev ->
-                        // Hop to Main.immediate before touching state. The dozens of
-                        //
-                        //     val st = _state.value
-                        //     ... compute ...
-                        //     _state.value = st.copy(...)
-                        //
-                        // patterns scattered through handleEvent are NOT atomic: between
-                        // the read and the write, a concurrent UI tap (which mutates
-                        // state on the Main thread) can land its own write, and the
-                        // event handler then clobbers it with a state value derived from
-                        // the pre-tap snapshot. The visible symptom is "I tapped a
-                        // buffer and the selection bounced back" / "my unread badge
-                        // cleared then came back" - rare per-tap, but the race window
-                        // grows with IRC event volume (busy channel = more handler runs
-                        // = more chances to clobber).
-                        //
-                        // Forcing event handling onto the Main thread serializes it with
-                        // UI mutations: there is now exactly one thread that ever writes
-                        // _state.value, so the read-modify-write sequence is atomic by
-                        // construction. We use Main.immediate so callers that are
-                        // already on Main don't pay an extra dispatch hop (in this code
-                        // path the collect runs on IO so we'll dispatch every time, but
-                        // .immediate is the right semantic - "be on Main, dispatch only
-                        // if necessary"). CPU cost per event is microseconds; the only
-                        // real concern would be a single slow handler blocking UI
-                        // frames, which doesn't happen in practice (scrollback-load and
-                        // similar heavy work already runs in a separate launch).
-                        //
-                        // Throws from handleEvent are caught here on Main; the outer
-                        // try below still catches anything that escapes from inside the
-                        // collect's flow emission (writeLine IOException, etc.).
+                        // Handle events on Main: UI actions also write _state on Main, so every
+                        // read-modify-write of _state happens on one thread. Handler throws are
+                        // caught here; the outer try covers throws from the flow itself.
                         withContext(Dispatchers.Main.immediate) {
                             runCatching { handleEvent(netId, ev) }
                                 .onFailure { t ->
@@ -5551,15 +5192,9 @@ fun startAddNetwork() {
             }
         }
 
-        // FALLBACK ONLY: if the collector exits without ever emitting Disconnected,
-        // clean up and schedule reconnect. In the NORMAL path the IrcCore read loop
-        // does emit Disconnected; that fires handleEvent/Disconnected handler which
-        // calls scheduleAutoReconnect itself, and re-scheduling here would cancel and
-        // recreate the auto-reconnect coroutine, racing the reconnectAttempts increment
-        // and visibly freezing the "(attempt N)" counter.
-        // Guard: if the job was *cancelled* (intentional teardown. force-close, manual
-        // disconnect, reconnect replacing this runtime) we must not treat it as an
-        // unexpected drop. CancellationException means someone called job.cancel().
+        // Fallback for a collector that ends without emitting Disconnected: clean up and schedule a
+        // reconnect. Skipped when the job was cancelled (intentional teardown) and in the normal
+        // path, where the Disconnected handler schedules the reconnect itself.
         rt.job?.invokeOnCompletion { cause ->
             if (cause is kotlinx.coroutines.CancellationException) return@invokeOnCompletion
             viewModelScope.launch {
@@ -5660,9 +5295,11 @@ fun startAddNetwork() {
             ?: _state.value.settings.quitMessage.ifBlank { "Client disconnect" }
         viewModelScope.launch {
             withNetLock(netId) {
+            rescheduleStsOnClose(netId)
             val removedDesired = desiredConnected.remove(netId)
             if (removedDesired) persistDesiredNetworkIds()
             manualDisconnecting.add(netId)
+            deferredConnects.remove(netId)
             reconnectAttempts.remove(netId)  // Clear reconnect backoff
             autoReconnectJobs.remove(netId)?.cancel()
             cleanupNetworkMaps(netId, resetReconnectState = true)
@@ -5702,14 +5339,12 @@ fun startAddNetwork() {
         stableConnectionJobs.clear()
         noNetworkNotice.clear()
         waitingForWifiNotice.clear()
+        deferredConnects.clear()
 
         // Stop the foreground service + cancel notifications immediately.
         runCatching { NotificationHelper.cancelAll(appContext) }
         runCatching { appContext.stopService(Intent(appContext, KeepAliveService::class.java)) }
-        runCatching {
-            val i = Intent(appContext, KeepAliveService::class.java).apply { action = KeepAliveService.ACTION_STOP }
-            appContext.startService(i)
-        }
+        stopKeepAliveService()
         runCatching { notifier.cancelConnection() }
 
         // Then disconnect everything.
@@ -5722,13 +5357,9 @@ fun startAddNetwork() {
     }
 
     /**
-     * Clean shutdown for when the user swipes the app away from recents
-     * (KeepAliveService.onTaskRemoved). Only acts when background persistence is off
-     *
-     * Returns true if we sent QUITs; the service then stops from [onDone]. Sends QUIT and closes
-     * each socket (TLS close_notify) so the server sees an orderly disconnect rather than a ghost
-     * that lingers until its ping-timeout. Runs on IO: onTaskRemoved is called on the main thread
-     * and disconnect() blocks without observing cancellation.
+     * Orderly shutdown when the app is swiped from recents with background persistence off: send
+     * QUIT and close each socket so the server doesn't keep a ghost until ping timeout. Runs on IO.
+     * Returns true if QUITs were sent; [onDone] then stops the service.
      */
     fun onTaskRemovedGracefulQuit(onDone: () -> Unit): Boolean {
         if (_state.value.settings.keepAliveInBackground) return false
@@ -5751,19 +5382,18 @@ fun startAddNetwork() {
     }
 
     /**
-     * Drop a live connection because the underlying network interface went away
-     * (Wi-Fi/mobile handover with no failover)
-     *
-     * We tear the socket down (rather than waiting for readLine() to time out) so the
-     * UI updates instantly and the read coroutine doesn't sit blocked for up to
-     * SOCKET_READ_TIMEOUT_MS. Recovery is driven explicitly via [scheduleAutoReconnect]
+     * Tear down a live connection because its network went away, so the UI updates immediately
+     * instead of waiting for the read timeout. Recovery goes through [scheduleAutoReconnect].
      */
     private fun dropConnectionForNetworkLoss(
         netId: String,
-        statusText: String = appContext.getString(R.string.vm_status_waiting_network),
+        waitingText: String = appContext.getString(R.string.vm_status_waiting_network),
     ) {
         viewModelScope.launch {
             withNetLock(netId) {
+                val statusText = if (autoReconnectAllowed(netId)) waitingText
+                    else appContext.getString(R.string.vm_status_disconnected)
+                rescheduleStsOnClose(netId)
                 val oldRt = runtimes.remove(netId)
                 runCatching { oldRt?.client?.forceClose("Network lost") }
                 runCatching { oldRt?.job?.cancel() }
@@ -5781,15 +5411,17 @@ fun startAddNetwork() {
         }
     }
 
+    /** True when [netId] may be brought back without the user asking: global and per-network auto-reconnect, and not exiting. */
+    private fun autoReconnectAllowed(netId: String): Boolean {
+        val st = _state.value
+        if (!st.settings.autoReconnectEnabled) return false
+        if (appExitRequested) return false
+        return st.networks.firstOrNull { it.id == netId }?.autoReconnect != false
+    }
+
     // Auto-reconnect
     private fun scheduleAutoReconnect(netId: String) {
-        val st0 = _state.value
-        if (!st0.settings.autoReconnectEnabled) return
-        // Don't bring a connection back up while we're tearing down for an app exit or
-        // swipe-away (see onTaskRemovedGracefulQuit)
-        if (appExitRequested) return
-        // Per-network override.
-        if (st0.networks.firstOrNull { it.id == netId }?.autoReconnect == false) return
+        if (!autoReconnectAllowed(netId)) return
         // Auth failure on the previous attempt: do nothing. Reconnecting with the same
         // (wrong) credentials would just trigger the same 464 / SASL fail in a tight
         // loop, flooding the server log and hitting bouncer rate limits or IRCd bans.
@@ -5806,36 +5438,17 @@ fun startAddNetwork() {
         autoReconnectJobs.remove(netId)?.cancel()
         val serverKey = bufKey(netId, "*server*")
         autoReconnectJobs[netId] = viewModelScope.launch(Dispatchers.Default) {
-            // Outer guard. The loop body touches a lot of subsystems - state mutation,
-            // notifications, log writes, network checks, KeepAliveService wakelock, the
-            // socket connect itself - any of which can throw in the wild (Samsung
-            // PendingIntent rate-limit firing under load, SAF revocation mid-session,
-            // a transient JCE provider failure during TLS handshake, OOM during a
-            // memory-pressured connect). viewModelScope is a SupervisorJob so a child
-            // failure doesn't propagate to the parent, but the default
-            // CoroutineExceptionHandler on Android re-throws unhandled child exceptions
-            // and crashes the app. Catching here keeps the reconnect machinery resilient:
-            // the failed attempt is logged, the netId stays in autoReconnectJobs only
-            // briefly (cleared in finally), and the next manual reconnect can start fresh.
-            // CancellationException is re-thrown so explicit cancel() still works as
-            // structured-concurrency expects.
+            // Outer guard: the loop body touches state, notifications, logs, the wakelock and the
+            // socket, and any of them can throw on some devices. A failure is logged and the next
+            // reconnect starts fresh; CancellationException is rethrown so cancel() still works.
             try {
-                // Tracks which attempt number has already had its backoff countdown run.
-                // The loop body has several `continue` paths (connect still in flight,
-                // manual disconnect in progress) that previously re-entered the countdown
-                // for the SAME attempt, so each pass re-waited the full exponential delay.
-                // With a 40 s delay and a 20 s in-flight connect, the effective wait
-                // between real attempts roughly doubled, and the buffer filled with
-                // duplicate "Reconnecting in Ns" lines. Worse, at attempt 0 those
-                // `continue` paths skipped the countdown entirely and busy-spun with no
-                // delay at all. The latch runs the countdown once per attempt; the
-                // continue paths now use a short 1 s poll instead.
+                // The attempt whose backoff countdown has already run. The `continue` paths below
+                // (connect in flight, manual disconnect in progress) poll every second instead of
+                // re-running the countdown for the same attempt.
                 var countdownDoneForAttempt = -1
                 while (isActive) {
                 val attempt = reconnectAttempts[netId] ?: 0
-                // Without this guard we'd print "Reconnecting in Ns
-                // (attempt N)…" and run the whole countdown over a connection that's already
-                // up, only self-correcting at the post-countdown check below.
+                // Already connected: skip the countdown rather than announcing a reconnect.
                 if (_state.value.connections[netId]?.connected == true) {
                     reconnectAttempts.remove(netId)
                     break
@@ -5903,9 +5516,8 @@ fun startAddNetwork() {
 
                 // Stop if the user no longer wants this network connected.
                 if (!desiredConnected.contains(netId)) break
-                // If the user explicitly disconnected/reconnected, don't fight them.
-                // Short poll: the countdown latch above means continuing here no longer
-                // re-runs the backoff delay, so without this delay the loop would spin.
+                // The user disconnected or reconnected deliberately: don't fight them. Poll rather
+                // than spin.
                 if (manualDisconnecting.contains(netId)) { delay(1000L); continue }
 
                 val st = _state.value
@@ -5921,10 +5533,7 @@ fun startAddNetwork() {
                     reconnectAttempts.remove(netId)
                     break
                 }
-                // A connect attempt is in flight: wait for it to resolve rather than
-                // starting another. Short poll for the same reason as above; previously
-                // this was a bare `continue`, which busy-spun at attempt 0 and re-ran
-                // the full countdown at attempt > 0.
+                // A connect attempt is in flight: wait for it rather than starting another.
                 if (cur?.connecting == true) { delay(1000L); continue }
 
                 // If there's no connectivity at all (Wi‑Fi + Mobile disabled), pause auto-reconnect until it returns.
@@ -6000,18 +5609,9 @@ fun startAddNetwork() {
     }
 
     /**
-     * when the app returns to the foreground, re-check the socket state so the UI doesn't drift.
-     * (E.g. if a lifecycle event caused UI state to reset while the socket is still alive.)
-     * Also triggers reconnection for networks that should be connected but aren't.
-     */
-    /**
-     * When the app returns to the foreground, re-check the socket state so the UI doesn't drift.
-     * (E.g. if a lifecycle event caused UI state to reset while the socket is still alive.)
-     * Also triggers reconnection for networks that should be connected but went down while backgrounded.
-     *
-     * Important: we skip any network that is actively connecting or already has a reconnect job
-     * queued - isConnectedNow() can transiently return false during the handshake window, and
-     * interfering with an in-flight attempt would cause a duplicate reconnect race.
+     * On returning to the foreground, re-check connection state and reconnect wanted networks that
+     * dropped while backgrounded. Networks already connecting or with a reconnect queued are
+     * skipped.
      */
     fun resyncConnectionsOnResume() {
         val st = _state.value
@@ -6053,6 +5653,7 @@ fun startAddNetwork() {
             _state.value = syncActiveNetworkSummary(st.copy(connections = newMap))
         }
 
+        networksToReconnect.retainAll { it in deferredConnects || autoReconnectAllowed(it) }
         if (networksToReconnect.isNotEmpty() && hasInternetConnection()) {
             viewModelScope.launch {
                 delay(500) // Brief delay to let UI settle
@@ -6106,29 +5707,17 @@ fun startAddNetwork() {
     private var typingDoneJob: kotlinx.coroutines.Job? = null
     private var typingLastKey: String? = null
 
-    // Track when we last sent "active" to enforce the IRCv3 minimum
-    // interval of 3 seconds between "active" sends. Without this, every keystroke fires a
-    // TAGMSG, which causes Excess Flood disconnection on any server with normal flood limits.
-    private var typingActiveLastSentMs: Long = 0L
-    private val TYPING_ACTIVE_INTERVAL_MS = 3_000L   // IRCv3 spec minimum
+    /** When a typing notification last went to each buffer key; draft/typing requires 3 s between them. */
+    private val typingSentAtMs: MutableMap<String, Long> = java.util.concurrent.ConcurrentHashMap()
+    /** "done" notifications held back by that spacing, per buffer key. */
+    private val pendingTypingDone: MutableMap<String, kotlinx.coroutines.Job> =
+        java.util.concurrent.ConcurrentHashMap()
+    private val TYPING_MIN_INTERVAL_MS = 3_000L
 
-    // Auto-expiry jobs for *received* typing indicators.
-    // Key: "$bufferKey/$nick". IRCv3 spec recommends expiring after 30 s with no update.
+    // Auto-expiry jobs for *received* typing indicators, keyed "$bufferKey/$nick".
     private val receivedTypingExpiryJobs: MutableMap<String, kotlinx.coroutines.Job> =
         java.util.concurrent.ConcurrentHashMap()
 
-    /**
-     * Called by the UI whenever the input text changes. Sends "active" typing status at most
-     * once every 3 seconds per the IRCv3 spec, then schedules a "paused" → "done" timeout
-     * if the user stops typing. Sending an empty string immediately sends "done".
-     *
-     * No-op if the user has disabled [UiSettings.sendTypingIndicator] in Settings (privacy).
-     */
-    /**
-     * Called when the app transitions to background. Immediately sends a "done" typing
-     * indicator so remote users don't see us typing forever, and cancels the pending
-     * paused/done timer coroutine so it doesn't wake the CPU 6–30 s later.
-     */
     /** Called when the app goes to background: flush log buffers to disk. */
     fun flushLogs() {
         if (_state.value.settings.loggingEnabled) {
@@ -6136,43 +5725,44 @@ fun startAddNetwork() {
         }
     }
 
+    /**
+     * Called when the app goes to background: sends "done" so we don't appear to be typing
+     * forever, and cancels the pending paused/done timer.
+     */
     fun cancelTypingOnBackground() {
         typingDoneJob?.cancel()
         typingDoneJob = null
         val prevKey = typingLastKey ?: return
         typingLastKey = null
-        typingActiveLastSentMs = 0L
-        val (prevNet, prevBuf) = splitKey(prevKey)
-        viewModelScope.launch {
-            runCatching { runtimes[prevNet]?.client?.sendTypingStatus(prevBuf, "done") }
+        sendTypingDone(prevKey)
+    }
+
+    /** Sends typing [state] to buffer [key] now and records the time. */
+    private fun sendTypingNow(key: String, state: String) {
+        val (netId, bufferName) = splitKey(key)
+        typingSentAtMs[key] = System.currentTimeMillis()
+        viewModelScope.launch { runCatching { runtimes[netId]?.client?.sendTypingStatus(bufferName, state) } }
+    }
+
+    /** Sends "done" to buffer [key], waiting out the 3 s spacing if a notification went out more recently. */
+    private fun sendTypingDone(key: String) {
+        pendingTypingDone.remove(key)?.cancel()
+        val wait = (typingSentAtMs[key] ?: 0L) + TYPING_MIN_INTERVAL_MS - System.currentTimeMillis()
+        if (wait <= 0) {
+            sendTypingNow(key, "done")
+            return
+        }
+        pendingTypingDone[key] = viewModelScope.launch {
+            delay(wait)
+            pendingTypingDone.remove(key)
+            sendTypingNow(key, "done")
         }
     }
 
     /**
-     * Called from [HexDroidApp.onActivityStarted] when the app comes back to the
-     * foreground. Resets unread and highlight counters on the currently-selected
-     * buffer because the user is, by definition, looking at it.
-     *
-     * Why this is needed: append()'s isSelected predicate includes
-     * AppVisibility.isForeground. While the app is backgrounded, isForeground is
-     * false, so an incoming message for the selected buffer increments unread.
-     * Without this hook, the user comes back to find a stale "1" badge on the
-     * channel they're actively viewing - particularly visible when they open the
-     * sidebar to switch channels. The reset here mirrors what openBuffer does
-     * for an explicit buffer-switch.
-     *
-     * Also anchors a lastReadTimestamp so the "unread separator" line shows up
-     * in the right place if the user later switches AWAY and then comes back -
-     * otherwise the separator would be anchored at the moment of the most
-     * recent foreground transition, which is wrong (no actual messages were
-     * "marked as read", we just suppressed the badge).
-     *
-     * Idempotent: safe to call when nothing is selected, when the selected
-     * buffer has zero unread, or when the buffer doesn't exist.
-     *
-     * Clears the exit/swipe-away teardown suppression ([appExitRequested]) when the app returns
-     * to the foreground, so auto-reconnect works normally again if the process happened to
-     * outlive a swipe-away.
+     * Called from [HexDroidApp.onActivityStarted] on returning to the foreground. Clears unread and
+     * highlights on the selected buffer (anchoring lastReadTimestamp so the separator stays put),
+     * and clears [appExitRequested] so auto-reconnect works again.
      */
     fun onAppForegrounded() {
         appExitRequested = false
@@ -6201,8 +5791,18 @@ fun startAddNetwork() {
             val updated = buf.copy(unread = 0, highlights = 0)
             st.copy(buffers = st.buffers + (key to updated))
         }
+        _state.value.let { st ->
+            if (st.selectedBuffer.isNotBlank() && st.screen == AppScreen.CHAT) sendReadReceipt(st.selectedBuffer)
+        }
     }
 
+    /**
+     * Called by the UI whenever the input text changes. Sends "active" at most once every 3 s
+     * while composing, "paused" after 6 s without changes and "done" 24 s after that, or when
+     * the input is cleared. A slash command doesn't count as composing.
+     *
+     * No-op unless [UiSettings.sendTypingIndicator] is on.
+     */
     fun notifyTypingChanged(text: String) {
         val st = _state.value
 
@@ -6222,51 +5822,27 @@ fun startAddNetwork() {
 
         typingDoneJob?.cancel()
 
-        if (text.isEmpty()) {
-            // User cleared input - send "done" immediately to the correct network.
-            // look up the client at send time rather than capturing
-            // `rt` here. If the user reconnected between keystrokes, `rt` would be the old
-            // disconnected client; runtimes[prevNet] gives the live one.
-            typingLastKey?.let { prevKey ->
-                val (prevNet, prevBuf) = splitKey(prevKey)
-                viewModelScope.launch { runtimes[prevNet]?.client?.sendTypingStatus(prevBuf, "done") }
-            }
+        // "//" sends a literal slash, so only a single leading slash marks a command.
+        val isCommand = text.startsWith("/") && !text.startsWith("//")
+        if (text.isEmpty() || isCommand) {
+            typingLastKey?.let { sendTypingDone(it) }
             typingLastKey = null
-            typingActiveLastSentMs = 0L
             return
         }
 
-        // If buffer changed, send "done" to the OLD buffer on whichever network it belonged to.
-        val prevKey = typingLastKey
-        if (prevKey != null && prevKey != currentKey) {
-            val (prevNet, prevBuf) = splitKey(prevKey)
-            viewModelScope.launch { runtimes[prevNet]?.client?.sendTypingStatus(prevBuf, "done") }
-            typingActiveLastSentMs = 0L
-        }
-
+        typingLastKey?.takeIf { it != currentKey }?.let { sendTypingDone(it) }
         typingLastKey = currentKey
+        pendingTypingDone.remove(currentKey)?.cancel()
 
-        // only send "active" if 3+ seconds have passed since the
-        // last send. The IRCv3 draft/typing spec explicitly requires this rate limit.
-        // Capture only the string ids, not the client reference, to avoid the stale-client bug.
-        val now = System.currentTimeMillis()
-        if (now - typingActiveLastSentMs >= TYPING_ACTIVE_INTERVAL_MS) {
-            typingActiveLastSentMs = now
-            val capturedNetId = netId
-            val capturedBuffer = bufferName
-            viewModelScope.launch {
-                runtimes[capturedNetId]?.client?.sendTypingStatus(capturedBuffer, "active")
-            }
+        if (System.currentTimeMillis() - (typingSentAtMs[currentKey] ?: 0L) >= TYPING_MIN_INTERVAL_MS) {
+            sendTypingNow(currentKey, "active")
         }
 
-        // After 6 s of inactivity -> "paused"; after another 24 s -> "done".
-        val capturedNetId = netId
-        val capturedBuffer = bufferName
         typingDoneJob = viewModelScope.launch {
             delay(6_000L)
-            runtimes[capturedNetId]?.client?.sendTypingStatus(capturedBuffer, "paused")
+            sendTypingNow(currentKey, "paused")
             delay(24_000L)
-            runtimes[capturedNetId]?.client?.sendTypingStatus(capturedBuffer, "done")
+            sendTypingNow(currentKey, "done")
             typingLastKey = null
         }
     }
@@ -6277,22 +5853,9 @@ fun startAddNetwork() {
      * of those same lines isn't silently swallowed as a "duplicate" of messages we just removed.
      */
     /**
-     * Empty [bufferKey] and stop the view refilling it.
-     *
-     * An emptied buffer puts the top of the scrollback on screen, which is the same signal
-     * the view uses to fetch older history, so without marking it exhausted /clear
-     * immediately asked the server for the messages it had just discarded. Reconnecting
-     * clears the flag again, as does asking for history explicitly.
-     */
-    /**
-     * Poll the visible channel's member list so away status stays current.
-     *
-     * away-notify reports transitions, but only where the server offers it. Polling covers
-     * the rest, which is how clients tracked away before the capability existed.
-     *
-     * Only while the member list is actually open, in the foreground, on the chat screen,
-     * and for the channel being looked at. Away status has no other reader, so polling with
-     * the list closed is a WHO a minute that changes nothing anyone can see.
+     * Poll the visible channel's member list so away status stays current where the server lacks
+     * away-notify. Only while the member list is open, in the foreground, on the chat screen, for
+     * the channel being viewed.
      */
     private fun startAwayPolling() {
         viewModelScope.launch {
@@ -6315,6 +5878,10 @@ fun startAddNetwork() {
         }
     }
 
+    /**
+     * Empty [bufferKey] and mark its history exhausted, so the emptied view doesn't
+     * immediately fetch back what was cleared.
+     */
     fun clearBuffer(bufferKey: String) {
         chatHistory.forget(bufferKey)
         historyAnchors.remove(bufferKey)
@@ -6364,6 +5931,20 @@ fun startAddNetwork() {
     }
 
     fun sendInput(raw: String, targetKey: String? = null) = sendInputInternal(raw, 0, targetKey)
+
+    /**
+     * Send what the user typed in the input box. `on INPUT` script handlers see it first and may
+     * rewrite or halt it; lines sent by scripts, buttons and menus use [sendInput] and skip them.
+     */
+    fun sendUserInput(raw: String, targetKey: String? = null) {
+        val st = _state.value
+        val key = targetKey?.takeIf { it.isNotBlank() && st.buffers.containsKey(it) } ?: st.selectedBuffer
+        if (key.isBlank() || raw.isBlank()) return
+        val (netId, bufferName) = splitKey(key)
+        val result = scriptEngine.onInput(com.boxlabs.hexdroid.script.InputEvent(netId, bufferName, raw))
+        if (result.halted) return
+        sendInputInternal(result.text, 0, targetKey)
+    }
 
     /**
      * [targetKey] dispatches the command against a specific buffer instead of the selected one, so a
@@ -6449,27 +6030,13 @@ fun startAddNetwork() {
                         }
                     }
                     "quit", "disconnect" -> {
-                        // User-initiated disconnect. Send QUIT (so the server / bouncer sees
-                        // a graceful goodbye and any active channels announce a clean exit
-                        // to other users), then mark the network as manual-disconnecting
-                        // before the socket closes so the Disconnected handler's reconnect
-                        // path correctly identifies this as deliberate and bails. Without
-                        // this dual action, the raw "/quit" would just send QUIT to the
-                        // server; the server-side disconnect would then look identical to
-                        // an unexpected drop (manualDisconnecting unset, desiredConnected
-                        // still true) and scheduleAutoReconnect would immediately bring
-                        // the connection back, with the user-visible symptom of "I typed
-                        // /quit and it reconnected".
+                        // User-initiated disconnect: send QUIT and mark the network as manually
+                        // disconnecting before the socket closes, so the Disconnected handler
+                        // doesn't treat it as a drop and reconnect.
                         //
-                        // Everything after the command verb is the quit message:
-                        //   /quit                       -> persisted settings.quitMessage
-                        //   /quit gone for tea          -> "gone for tea"
-                        //   /quit "back in 5"           -> "\"back in 5\"" (quotes preserved
-                        //                                  because IRC QUIT trailing is free-
-                        //                                  form text; users can include
-                        //                                  formatting / colour codes here too)
-                        // We use cmdLine (not the lowercased cmd) so the casing of the
-                        // user's message is preserved on the wire.
+                        // Everything after the verb is the quit message, with its original casing:
+                        //   /quit                -> settings.quitMessage
+                        //   /quit gone for tea   -> "gone for tea"
                         val reason = cmdLine.substringAfter(' ', missingDelimiterValue = "")
                             .trim()
                             .takeIf { it.isNotBlank() }
@@ -6477,19 +6044,12 @@ fun startAddNetwork() {
                         return@launch
                     }
                     "agm-key" -> {
-                        // Manages per-target AES-256-GCM keys
-                        // for end-to-end encryption.
-                        //
-                        //   /agm-key gen [target]           - generate a fresh 32-byte key,
-                        //                                     store it, print it so the
-                        //                                     other side can /agm-key set
-                        //   /agm-key set <target> <b64>     - install a base64-encoded key
-                        //   /agm-key clear <target>         - remove the key
-                        //   /agm-key info [target]          - show scheme + fingerprint
-                        //   /agm-key                        - usage
-                        //
-                        // "target" defaults to the current buffer (channel or query nick).
-                        // base64 form is standard (with or without padding)
+                        // Per-target AES-256-GCM keys:
+                        //   /agm-key gen [target]        generate, store and print a 32-byte key
+                        //   /agm-key set <target> <b64>  install a base64 key (padding optional)
+                        //   /agm-key clear <target>      remove the key
+                        //   /agm-key info [target]       show scheme and fingerprint
+                        // The target defaults to the current buffer.
                         val parts = cmdLine.split(Regex("\\s+"), limit = 4)
                         val sub = parts.getOrNull(1)?.lowercase() ?: ""
                         fun usage() {
@@ -6662,14 +6222,9 @@ fun startAddNetwork() {
                     }
 
                     "react", "unreact" -> {
-                        // /react <emoji> [n]   - react to the n-th most recent message (n=1, default)
-                        // /unreact <emoji> [n] - remove a reaction from the n-th most recent message
-                        // Examples: /react 👍   /react :tada: 3   /unreact ❤️
-                        //
-                        // Reacting requires a server msgId on the target message (IRCv3 message-tags),
-                        // so the lookup walks backwards from the newest message and skips any line
-                        // without a msgId (server-status lines, /me actions if echo-message wasn't on,
-                        // older messages from before the cap was negotiated, etc.).
+                        // /react <emoji> [n] and /unreact <emoji> [n]: react to, or remove a
+                        // reaction from, the n-th most recent message (default 1). Only messages
+                        // with a server msgid count.
                         val remove = (cmd == "unreact")
                         val args = cmdLine.substringAfter(' ', "").trim().split(Regex("\\s+"))
                         val emoji = args.getOrNull(0)?.takeIf { it.isNotBlank() }
@@ -6819,6 +6374,21 @@ fun startAddNetwork() {
                         return@launch
                     }
 
+                    "markread" -> {
+                        if (c == null) {
+                            append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
+                            return@launch
+                        }
+                        // Without a timestamp, mark read up to the newest message: the spec requires
+                        // a real message time, which only the buffer knows.
+                        val args = cmdLine.substringAfter(' ', "").trim().split(' ').filter { it.isNotBlank() }
+                        if (args.size <= 1 && c.hasCap("draft/read-marker")) {
+                            stampReadMarker(args.firstOrNull()?.let { resolveBufferKey(netId, it) } ?: currentKey)
+                            return@launch
+                        }
+                        c.handleSlashCommand(cmdLine, bufferName)
+                        return@launch
+                    }
                     "motd" -> {
                         if (c == null) {
                             append(currentKey, from = null, text = "*** " + appContext.getString(R.string.vm_not_connected), doNotify = false)
@@ -7164,12 +6734,9 @@ fun startAddNetwork() {
             // The IRC protocol limit is typically 512 bytes (including CRLF), but many
             // servers support more via ISUPPORT LINELEN.
 
-            // Keep the user's line structure. A paste of code or ASCII art used to be
-            // flattened here into a single space-joined line (and the old
-            // .replace("  ", " ") collapsed only one pass of doubled spaces, so runs of
-            // 3+ survived half-collapsed anyway). The regular-send path below now sends
-            // one PRIVMSG per line, or a single multiline BATCH where the server
-            // supports it. Exceptions: DCC CHAT +AGE still use the flattened form.
+            // Keep the user's line structure: the send path below sends one PRIVMSG per line, or
+            // one multiline BATCH where the server supports it. DCC CHAT and +AGE still use the
+            // flattened form.
             val messageLines = trimmed
                 .replace("\r\n", "\n")
                 .replace('\r', '\n')
@@ -7267,13 +6834,11 @@ fun startAddNetwork() {
             val sendEncryption = e2eKeyStore.get(netId, bufferName)?.scheme
             val maxMsgLen = outgoingByteBudget(netId, bufferName)
 
-            // Cancel pending typing-done timer and send "done" immediately on send.
+            // Sending the message ends our typing state for receivers, so no "done" follows it.
             typingDoneJob?.cancel()
             typingDoneJob = null
-            if (st.settings.sendTypingIndicator && typingLastKey == currentKey) {
-                c.sendTypingStatus(bufferName, "done")
-                typingLastKey = null
-            }
+            pendingTypingDone.remove(currentKey)?.cancel()
+            if (typingLastKey == currentKey) typingLastKey = null
 
             // Multi-line input over a server that speaks IRCv3 multiline: one BATCH, so
             // the far side renders it as the single logical message the user typed
@@ -7309,12 +6874,9 @@ fun startAddNetwork() {
     }
 
     /**
-     * The payload budget in UTF-8 bytes for one PRIVMSG to [bufferName] on [netId].
-     *
-     * The server's LINELEN less a conservative estimate of ":nick!user@host PRIVMSG
-     * <target> :" and CRLF. A keyed target carries the larger encrypted form, so the
-     * formulas invert "prefix + base64(overhead + P) <= budget" for P: splitting on the
-     * plaintext budget would truncate the ciphertext and break decryption entirely.
+     * Payload budget in UTF-8 bytes for one PRIVMSG to [bufferName]: LINELEN minus an estimate of
+     * the prefix and CRLF. For an encrypted target the budget is solved for the plaintext, since
+     * splitting on the ciphertext would break decryption.
      */
     private fun outgoingByteBudget(netId: String, bufferName: String): Int {
         val serverLimit = runtimes[netId]?.support?.linelen ?: 512
@@ -7396,13 +6958,9 @@ fun startAddNetwork() {
     }
 
     /**
-     * Request the channel list.
-     *
-     * On servers that advertise ELIST user-count filtering (ELIST=...U)
-     * we always send a range: ">0" (every channel with at least one member)
-     * up to [maxUsers], or [DEFAULT_LIST_MAX_USERS] when unspecified, with [minUsers]
-     * raising the lower bound. The ListScreen's min/max fields narrow it further. Servers without
-     * ELIST U get a plain LIST and the list is filtered client-side.
+     * Request the channel list. With ELIST user-count filtering (ELIST=...U) a range is always
+     * sent, from [minUsers] (at least ">0") to [maxUsers] or [DEFAULT_LIST_MAX_USERS]; otherwise a
+     * plain LIST filtered client-side.
      */
     fun requestList(minUsers: Int? = null, maxUsers: Int? = null) {
         val netId = _state.value.activeNetworkId ?: return
@@ -7627,14 +7185,9 @@ fun startAddNetwork() {
                     // been superseded by a full reset.
                     it.copy(connecting = false, connected = true, status = appContext.getString(R.string.vm_status_connected_to, ev.server), lagMs = null, tlsPinMismatch = false, tlsPinMismatchActualFp = null, tlsHostnameMismatchIdentities = null)
                 }
-                // Arm chathistory marker windows for known PM-style buffers on this network.
-                // Bouncer playback delivers PRIVMSGs to query buffers without a corresponding
-                // JOIN event, so the JOIN-handler arm in the channel case doesn't cover them.
-                // We arm any buffer we already know about that isn't a channel — those are
-                // exactly the PM/query buffers that bouncer playback will likely re-deliver.
-                // Channel buffers don't need arming here: the bouncer replays our prior
-                // session's JOINs, which fire the JOIN handler's arm. 45 s window matches
-                // the upstream history-expect ceiling.
+                // Arm the history divider for this network's existing query buffers: bouncer
+                // playback delivers PMs without a JOIN, so the JOIN handler's arming doesn't cover
+                // them. Channels are armed by their replayed JOINs.
                 val chantypes = runtimes[netId]?.support?.chantypes ?: "#&+!"
                 val pmKeys = _state.value.buffers.keys.filter { k ->
                     val (nid, bn) = splitKey(k)
@@ -7671,28 +7224,27 @@ fun startAddNetwork() {
                 }
             }
             is IrcEvent.Disconnected -> {
+                // Only for a connection that was up: a failed connect attempt isn't a disconnect.
+                if (_state.value.connections[netId]?.connected == true) {
+                    scriptEvent("DISCONNECT", netId, "*server*", text = ev.reason.orEmpty(), isMe = true)
+                }
+                rescheduleStsOnClose(netId)
+                ageBridges[netId]?.onConnectionLost()
                 // A disconnect cancels the stability timer so a short-lived session
                 // (dropped before STABLE_CONNECTION_MS) never clears the backoff counter.
                 stableConnectionJobs.remove(netId)?.cancel()
                 val r = ev.reason?.trim()
                 val code = ev.code
-                // Connect failures and mid-stream connection errors are rendered as ERROR
-                // styled lines. Tray notifications stay suppressed (isHighlight = false,
-                // doNotify = false) because a routine connect-failure-and-retry shouldn't
-                // ping the user; the in-buffer error line is enough.
-                //
-                // This used to test the reason text for a "Connect failed:" prefix, which
-                // only worked while the text was English. It now switches on the code the
-                // core attaches, and ev.reason is display material only.
+                // Connect failures and mid-stream connection errors render as error lines, without
+                // a tray notification: a routine failure and retry shouldn't ping the user.
                 val isConnectFailureLine = code.stylesAsError
                 val disconnectedLabel = appContext.getString(R.string.vm_status_disconnected)
                 val pretty = when {
                     code == DisconnectCode.USER_QUIT || code == DisconnectCode.EOF -> disconnectedLabel
                     r.isNullOrBlank() -> disconnectedLabel
                     isConnectFailureLine -> r
-                    // UNKNOWN means the emitter didn't state a cause, which today only
-                    // happens for events built outside IrcClient. Keep the old text tests
-                    // as a fallback so those keep rendering the way they used to.
+                    // UNKNOWN: the emitter gave no cause, which only happens for events built
+                    // outside IrcClient. Fall back to testing the text.
                     code == DisconnectCode.UNKNOWN && (
                         r.equals("Client disconnect", ignoreCase = true) ||
                         r.equals("EOF", ignoreCase = true) ||
@@ -7709,22 +7261,12 @@ fun startAddNetwork() {
                 if (_state.value.activeNetworkId == netId) clearConnectionNotification()
                 cleanupNetworkMaps(netId)
 
-                // Flap detection: count dead-socket disconnects within the window.
-                // DisconnectCode.isDeadSocket covers the three causes that used to be
-                // matched by text here:
-                //   READ_TIMEOUT      the 150 s SOCKET_READ_TIMEOUT_MS path, the most common
-                //                     dead-socket case on mobile; fires BEFORE the 180 s
-                //                     client-ping timeout.
-                //   PING_TIMEOUT      no inbound traffic for PING_TIMEOUT_MS.
-                //   CONNECTION_RESET  peer reset, or a broken pipe mid-stream.
-                // It already excludes connect-attempt failures, so a server that is simply
-                // down no longer counts towards the flap threshold.
-                //
-                // Note the one behaviour change: a server-sent "Closing Link: ... (Ping
-                // timeout: 240 seconds)" arrives as SERVER_ERROR, not PING_TIMEOUT, so it
-                // no longer feeds flap detection. That text is the server's, in the
-                // server's wording, and matching it was always the fragile half of this
-                // test. The socket-level timeouts that follow such a drop still count.
+                // Flap detection counts dead-socket disconnects in the window: READ_TIMEOUT
+                // (SOCKET_READ_TIMEOUT_MS, the common case on mobile), PING_TIMEOUT and
+                // CONNECTION_RESET. Connect-attempt failures don't count, so a server that is
+                // simply down doesn't trip it. A server's own "Closing Link: ... (Ping timeout)"
+                // arrives as SERVER_ERROR and isn't counted; the socket timeouts that follow it
+                // are.
                 val isPingTimeout = code.isDeadSocket
                 if (isPingTimeout) {
                     val now = System.currentTimeMillis()
@@ -7755,41 +7297,21 @@ fun startAddNetwork() {
                     return
                 }
 
-                // Disconnect reasons that won't recover by retrying are split into two
-                // categories so the user gets an actionable message specific to the
-                // failure mode. In both cases we halt auto-reconnect via authBlockedReconnect
-                // without this, a misconfigured network cycles through the exponential backoff forever,
-                // hitting the same failure each time and burning battery.
+                // Failures that won't recover by retrying get a specific message and halt
+                // auto-reconnect via authBlockedReconnect, rather than cycling through backoff
+                // forever.
                 if (netId !in authBlockedReconnect) {
-                    // Both of these used to be substring tests against the reason text.
-                    // IrcClient.errorCode() now derives them once, from the raw exception
-                    // chain, which stays English regardless of the user's locale.
+                    // Derived by IrcClient.errorCode() from the exception chain, which stays
+                    // English whatever the locale.
                     val tlsUnrecoverable = code == DisconnectCode.TLS_UNRECOVERABLE
                     // "Server doesn't exist" class: the hostname doesn't resolve, or it
                     // resolves but nothing is listening on the configured port.
                     val hostUnreachable = code == DisconnectCode.HOST_UNREACHABLE
-                    // "Server rejected the connection" class: the TCP+TLS handshake succeeded
-                    // and the server then told us, in plain words, that it won't have us. The
-                    // wire form is typically a raw `ERROR :Closing Link: <addr> (<reason>)`
-                    // frame followed by the socket close; the `<reason>` text comes through as
-                    // part of `r`.
-                    //
-                    // We can't blanket-halt on "Closing Link" because the SAME framing is
-                    // used for routine drops the user DOES want auto-reconnected, most
-                    // notably "Closing Link: nick[host] (Ping timeout: 240 seconds)". So we
-                    // match the specific reasons that mean "your reconnect will hit the same
-                    // wall":
-                    //
-                    //   SASL-required class      bouncer/server demands SASL we don't provide
-                    //   K/G/Z/D/X-line class     IRCd ban
-                    //   bad-password class       PASS rejected via raw ERROR rather than the
-                    //                            464 numeric
-                    //   connection-limit class   server is at capacity OR we've hit a
-                    //                            per-IP / per-account connection cap
-                    //   access-denied / banned   catch-all for "you're not welcome here"
-                    // Server-supplied wording, so this half stays a text match: the
-                    // reasons below are the SERVER's English, not ours, and no code we
-                    // attach can stand in for them.
+                    // Server refused the connection (typically `ERROR :Closing Link: <addr>
+                    // (<reason>)` then close). "Closing Link" alone isn't enough, since ping
+                    // timeouts use it too, so match reasons that would recur on reconnect: SASL
+                    // required, K/G/Z/D/X-lines, bad password, connection limits, access denied.
+                    // These are the server's own words, so this stays a text match.
                     val lowerR = (r ?: "").lowercase()
                     val recentServerErrorText = lastServerErrorByNet[netId]?.let { (msg, ts) ->
                         if (System.currentTimeMillis() - ts < SERVER_ERROR_DISCONNECT_CORRELATION_MS)
@@ -7905,15 +7427,10 @@ fun startAddNetwork() {
             }
             is IrcEvent.Error -> {
                 val msg = ev.message
-                // "Transient" errors are routine connectivity blips that don't need to ping
-                // the user or bump the highlight badge: connect failures, socket-level
-                // timeouts, network resets, server-side closing-link messages from short
-                // disconnects, etc. Anything not matched here is treated as a genuine error
-                // We dedup either way so a flapping connection can't fill the buffer with identical
-                // "Read timed out" lines.
-                // The emitter states this where it knows (ev.transient). Where it doesn't,
-                // fall back to the text heuristic: it still works for server-sent wording
-                // such as "Closing Link", which is not translated.
+                // Transient errors (connect failures, timeouts, resets, short Closing Link drops)
+                // don't notify or bump highlights; anything else is a real error. Either way
+                // repeats are deduplicated. Uses the emitter's transient flag where set, otherwise
+                // the text.
                 val lower = msg.lowercase()
                 val isTransient = ev.transient ?: (
                     lower.contains("read timed out") ||
@@ -7935,29 +7452,14 @@ fun startAddNetwork() {
                 )
             }
             is IrcEvent.AuthFailed -> {
-                /*
-                * Auth failures
-                *
-                *   PASS (464 ERR_PASSWDMISMATCH): the server REJECTS the connection
-                *      entirely. The TCP socket is closed shortly after. Retrying with
-                *      the same credentials trips the same rejection. On bouncers,
-                *      repeated PASS failures can rate-limit or IP-ban us.
-                *        > Halt auto-reconnect via authBlockedReconnect, regardless of
-                *          whether the upstream is a bouncer.
-                *
-                *   SASL (904 / 905 / 906) on a direct IRC server: the server rejects
-                *      only the auth bundle, not the connection. SASL is optional,
-                *      the session proceeds.
-                *       > Warn the user but do NOT halt: a later ping-timeout drop on
-                *         this still-useful session should reconnect normally.
-                *
-                *   SASL on a bouncer (profile.isBouncer): the bouncer REQUIRES SASL
-                *      to route us to an upstream and will drop the connection within
-                *      seconds of the 904/905/906. Without a halt, we re-connect > re-
-                *      fail SASL > re-drop in a tight loop bounded only by the backoff,
-                *      flooding the bouncer's logs and burning battery for nothing.
-                *       >  Halt the same way as PASS.
-                */
+                /**
+                 * Auth failures:
+                 *   PASS (464): the server rejects the connection; halt auto-reconnect.
+                 *   SASL on a direct server: only authentication fails and the session continues;
+                 *     warn without halting.
+                 *   SASL on a bouncer: the bouncer drops the connection without SASL; halt as for
+                 *     PASS.
+                 */
                 val profile = _state.value.networks.firstOrNull { it.id == netId }
                 val isBouncerProfile = profile?.isBouncer == true
                 val isPassFailure = ev.source.equals("PASS", ignoreCase = true)
@@ -8007,19 +7509,15 @@ fun startAddNetwork() {
             is IrcEvent.TlsHostnameMismatch -> {
                 val sansStr0 = if (ev.sans.isEmpty()) "(none)" else ev.sans.joinToString(", ")
                 val profile = _state.value.networks.firstOrNull { it.id == netId }
-                // Upgrade grace. Before this release the hostname was never enforced, so a
-                // profile that has been connecting happily to a legacy or misconfigured cert
-                // would break on update with no warning. Such a profile is accepted once,
-                // recorded, and retried, so the user sees a notice rather than a dead network.
-                //
-                // Deliberately narrow: it needs a profile that predates the check
-                // (tlsHostnameGrace, set only when the stored JSON has no such key), it fires
-                // at most once, it is cleared by the first successful connect, and what it
-                // accepts is written to tlsAcceptedIdentities where the user can see and revoke
-                // it. A profile created after the upgrade never gets it, so this cannot become
-                // a permanent bypass.
+                // Hostname grace for profiles created before hostname checking existed
+                // (tlsHostnameGrace is set only when the stored JSON lacks the key). A mismatch is
+                // accepted once, recorded in tlsAcceptedIdentities where the user can see and
+                // revoke it, and retried, so the user gets a notice rather than a dead network. It
+                // fires at most once, is cleared by the first successful connect, and never applies
+                // to newer profiles.
                 if (profile != null && profile.tlsHostnameGrace &&
-                    profile.tlsAcceptedIdentities.isEmpty() && ev.sans.isNotEmpty()
+                    profile.tlsAcceptedIdentities.isEmpty() && ev.sans.isNotEmpty() &&
+                    !hasActiveStsPolicy(profile.host)
                 ) {
                     viewModelScope.launch {
                         runCatching {
@@ -8048,19 +7546,9 @@ fun startAddNetwork() {
             }
 
             is IrcEvent.TlsFingerprintChanged -> {
-                // The server is presenting a DIFFERENT certificate than the ones we trust.
-                // Two distinct legitimate cases:
-                //   - Cert renewal/rotation. The whole pin set is stale; the user resets and
-                //     re-pins.
-                //   - Round-robin DNS landed on a different server with its own cert. The
-                //     user grows the trust set with "Trust this server too" - the previous
-                //     fingerprints stay, the new one is added, and future connects to either
-                //     server succeed without further intervention.
-                //
-                // Halt auto-reconnect either way: silently retrying every few seconds against
-                // a possibly-malicious endpoint floods the server buffer with TLS WARNING
-                // lines and risks the user missing the original alert. Block clears on the
-                // next manual reconnect, like authBlockedReconnect.
+                // The server presented a certificate we don't trust: a renewal (reset and re-pin)
+                // or round-robin DNS reaching another server ("Trust this server too" adds its
+                // pin). Auto-reconnect halts either way until the next manual reconnect.
                 authBlockedReconnect.add(netId)
                 // Stash the actual fingerprint so NetworkEditScreen can offer the "Trust
                 // this server too" action without re-deriving the value from somewhere.
@@ -8328,6 +7816,9 @@ if (code == "442") {
                         extbanPrefix = ev.extbanPrefix,
                         extbanTypes = ev.extbanTypes,
                         accountExtban = ev.accountExtban,
+                        chanTypes = ev.chantypes,
+                        prefixModes = ev.prefixModes,
+                        prefixSymbols = ev.prefixSymbols,
                     )
                 }
 
@@ -8368,7 +7859,8 @@ if (code == "442") {
                                 ?.takeIf { it.useTls }?.port
                             stsPolicies[hostKey] = StsPolicyEntry(
                                 port = prev?.port ?: securePort,
-                                expiresAtMs = System.currentTimeMillis() + dur * 1000L
+                                expiresAtMs = System.currentTimeMillis() + dur * 1000L,
+                                durationSec = dur,
                             )
                             persistStsPolicies()
                             if (prev == null) {
@@ -8399,6 +7891,7 @@ if (code == "442") {
             }
 
             is IrcEvent.Registered -> {
+                scriptEvent("CONNECT", netId, "*server*", ev.nick, isMe = true)
                 runtimes[netId]?.myNick = ev.nick
                 recordOwnNick(netId, ev.nick)
                 val rt0 = runtimes[netId]
@@ -8407,22 +7900,14 @@ if (code == "442") {
                 val hasRedact = rt0 != null &&
                     (rt0.client.hasCap("draft/message-redaction") || rt0.client.hasCap("message-redaction"))
                 setNetConn(netId) { it.copy(myNick = ev.nick, hasReactionSupport = hasReact, hasRedactionSupport = hasRedact) }
+                _state.value.buffers.keys.filter { it.startsWith("$netId::") }
+                    .forEach { requestQueryReadMarker(netId, splitKey(it).second) }
                 // Re-send our own metadata so display name / avatar / colour etc. survive a
                 // reconnect even on servers that don't persist metadata across sessions.
                 reapplyOwnMetadata(netId)
                 append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_registered_as, ev.nick), doNotify = false)
-                // If this was a reconnect (we had been retrying), announce success in every
-                // channel/query buffer so the user reading a channel sees their connection
-                // come back without having to switch to the *server* buffer. Heuristic:
-                // reconnectAttempts[netId] > 0 means scheduleAutoReconnect had at least
-                // one round of backoff, i.e. this is a recovery, not a first connect.
-                // (For first connects, the user has just chosen to connect and doesn't
-                // need a "Reconnected" line in every channel they're about to join.)
-                //
-                // Done BEFORE resetConnStatusDedup so the dedup tracker, which is holding
-                // the previous "*** Disconnected:.." entry doesn't suppress the announce.
-                // Reconnected and Disconnected have different keys (different text), so
-                // they wouldn't collide anyway, but the ordering keeps intent obvious.
+                // After a reconnect (backoff attempts > 0), announce it in every channel and query
+                // buffer. Done before the dedup reset.
                 val wasReconnect = (reconnectAttempts[netId] ?: 0) > 0
                 if (wasReconnect) {
                     appendConnStatus(
@@ -8452,18 +7937,12 @@ if (code == "442") {
                 val rt = runtimes[netId] ?: return
                 val profile = _state.value.networks.firstOrNull { it.id == netId }
 
-                // On any RE-connect (auto-reconnect, manual "Reconnect", or manual
-                // disconnect→connect) the channels we re-join — and, for bouncers, the JOINs
-                // the bouncer replays for our prior session — arrive as self-JOIN echoes.
-                // Suppress the JOIN handler's automatic buffer switch for that window so the
-                // user stays on the buffer they were reading instead of being yanked onto
-                // whichever channel happens to JOIN last.
-                //
-                // We key this off "has this network ever registered this session" rather than
-                // the backoff counter: a manual reconnect clears reconnectAttempts, so the old
-                // wasReconnect check treated manual reconnects as first connects and still
-                // switched. A genuine FIRST connect (set.add returns true) deliberately does
-                // NOT arm, so initial autojoin still lands the user in a channel.
+                // On any reconnect (automatic, manual, or disconnect then connect), the rejoins and
+                // any bouncer-replayed JOINs arrive as self-JOIN echoes; suppress the automatic
+                // buffer switch for that window so the user stays where they were. Keyed off
+                // "registered before in this session" rather than the backoff counter, which a
+                // manual reconnect clears. A first connect doesn't arm it, so autojoin still opens
+                // a channel.
                 val firstRegistrationThisSession = everRegisteredThisSession.add(netId)
                 if (!firstRegistrationThisSession) {
                     rt.suppressAutoJoinSwitchUntilMs =
@@ -8570,11 +8049,17 @@ if (code == "442") {
                 }
             }
             is IrcEvent.NickChanged -> {
+                if (!ev.isHistory) scriptEvent(
+                    "NICK", netId, "", ev.oldNick,
+                    isMe = isMyNick(netId, ev.oldNick) || isMyNick(netId, ev.newNick),
+                    fields = mapOf("newnick" to ev.newNick),
+                )
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
 
                 val my = st0.connections[netId]?.myNick ?: runtimes[netId]?.myNick ?: st0.myNick
                 val isMe = casefoldText(netId, ev.oldNick) == casefoldText(netId, my)
+                if (!ev.isHistory && !isMe) ageBridges[netId]?.onNickChange(ev.oldNick, ev.newNick)
 
                 // Show nick changes in-channel:
                 //   * old is now known as new
@@ -8660,11 +8145,8 @@ if (code == "442") {
                         awayMap.remove(oldFold)?.let { awayMap[newFold] = it }
                     }
 
-                    // Rebuild from the channel membership maps, not from the lists that
-                    // happen to exist already. mapValues only visits keys it is given, so a
-                    // channel whose list had not been built yet was skipped and kept showing
-                    // the old nick until something else rebuilt it, which is why a nick could
-                    // be present in one channel and missing in another.
+                    // Rebuild from the membership maps, not only the lists already built, so every
+                    // channel the nick is in shows the new nick.
                     val rebuilt = chanNickCase.keys
                         .filter { it.startsWith("$netId::") }
                         .associateWith { rebuildNicklist(netId, it) }
@@ -8913,18 +8395,9 @@ if (code == "442") {
                     // unavailable when the line arrived (it retries, so key agreement recovers).
                     if (isAgeProtocolVerb(ev.text)) return
                 }
-                // Drop PRIVMSGs whose body is literally empty (zero bytes of trailing).
-                // Common sources: malformed CTCP wrappers that left only the SOH sentinel,
-                // a bouncer flushing a buffered control line with empty trailing, or a
-                // remote client sending "PRIVMSG #chan :". Without this guard the UI
-                // renders a bare "<nick> " line.
-                //
-                // Important: we only drop *truly empty* text. A message that looks blank
-                // because the wrong encoding decoded its bytes into invisible/control chars
-                // is still real content - dropping it would hide that the encoding is wrong.
-                // The encoding-detection fix (5-minute timeout + stricter thresholds in
-                // EncodingHelper) addresses the root cause; this guard only covers the
-                // protocol-level empty-trailing case.
+                // Drop PRIVMSGs with a literally empty body (a stripped CTCP wrapper, `PRIVMSG
+                // #chan :`), which would render as a bare "<nick> " line. Text that only looks
+                // blank because of a wrong encoding is kept, so the problem stays visible.
                 if (ev.text.isEmpty()) return
                 val my = _state.value.connections[netId]?.myNick ?: runtimes[netId]?.myNick ?: _state.value.myNick
                 val fromMe = ev.from.equals(my, ignoreCase = true)
@@ -8944,40 +8417,7 @@ if (code == "442") {
                 )
                 if (echoIsOurs) {
                     releaseOwnLogLine(netId, targetKey, ev.text, ev.isAction, ev.timeMs)
-                    // We deliberately drop this echo (it's a duplicate of our local echo), but the
-                    // server echo is the ONLY copy that carries the message's msgid. Two things to
-                    // do with it:
-                    //  1. Record the id on the log so a *second* echo of the same message (e.g. ZNC
-                    //     reflecting via both server-time and legacy paths) is caught by append()'s
-                    //     O(1) msgid dedup instead of slipping through as a visible duplicate.
-                    //  2. Back-fill it onto our local echo, which we displayed without an id. Without
-                    //     this our own lines carry no msgid, so when someone replies to us the
-                    //     reply-quote lookup (msgIdToText, keyed on msgId) can't find the original
-                    //     and renders "↩ (original message not in window)". Match the most recent
-                    //     still-unidentified line of ours with the same content.
-                    val mid = ev.msgId
-                    if (!mid.isNullOrBlank()) {
-                        _state.update { s ->
-                            // Only annotate a buffer that already exists. This attaches a
-                            // msgid to a line we have already drawn, so with no buffer there
-                            // is nothing to attach it to, and creating one here opened an
-                            // empty conversation for the target of anything sent as a
-                            // PRIVMSG under the hood, /ctcp included.
-                            val buf = s.buffers[targetKey] ?: return@update s
-                            val idx = buf.messages.indexOfLast {
-                                it.msgId == null && it.isAction == ev.isAction &&
-                                    echoTextMatches(it.text, ev.text) &&
-                                    it.from != null && it.from.equals(my, ignoreCase = true)
-                            }
-                            if (idx >= 0) {
-                                val newLog = buf.log.replaceAt(idx, buf.messages[idx].copy(msgId = mid))
-                                return@update s.copy(buffers = s.buffers + (targetKey to buf.copy(log = newLog)))
-                            }
-                            val seen = buf.log.seenIds.adding(mid)
-                            if (seen === buf.log.seenIds) return@update s
-                            s.copy(buffers = s.buffers + (targetKey to buf.copy(log = buf.log.copy(seenIds = seen))))
-                        }
-                    }
+                    attachEchoMsgId(targetKey, ev.text, ev.isAction, ev.msgId, my)
                     return
                 }
 
@@ -9034,61 +8474,31 @@ if (code == "442") {
                 )
             }
             is IrcEvent.Notice -> {
-                // Drop empty-bodied notices (literally zero bytes of trailing). Mirrors the
-                // ChatMessage guard above. Trigger seen in practice: bouncer bootstrapping
-                // notices (`NOTICE * :` with empty body), services pings, and the corner
-                // case where a remote client sends `NOTICE #chan :` with no payload.
-                // Without this guard the renderer paints a blank line attributed to the
-                // sender. Note: we don't filter encoding-mangled but non-empty content
-                // here (same as ChatMessage) - the user might want to see and fix the
-                // encoding rather than have the message silently dropped.
+                // Drop empty-bodied notices, as for PRIVMSG above; encoding-mangled but non-empty
+                // text is kept.
                 if (ev.text.isEmpty()) return
                 val st = _state.value
                 val suppressUnread = ev.isHistory && !st.settings.ircHistoryCountsAsUnread
                 if (!ev.isServer && isNickIgnored(netId, ev.from)) return
+                if (!ev.isHistory) scriptEvent(
+                    "NOTICE", netId, if (ev.isPrivate) ev.from else ev.target, ev.from, ev.text,
+                    isMyNick(netId, ev.from), isPrivate = ev.isPrivate,
+                    fields = mapOf("isserver" to ev.isServer.toString()),
+                )
                 val normTarget0 = normalizeIncomingBufferName(netId, ev.target)
                 val normTarget = stripStatusMsgPrefix(netId, normTarget0)
                 val isChanTarget = isChannelOnNet(netId, normTarget)
                 val targetIsServerBuffer = normTarget == "*server*"
 
-                // Notice routing rules:
-                //
-                //  1. Server notices (prefix is a hostname, not nick!user@host) →
-                //     *server* buffer. These are auth notices, MOTD-adjacent, network
-                //     announcements; they belong in the server log.
-                //  2. Notice targeted at a channel we have a buffer for → that channel.
-                //     This is the normal NOTICE-to-channel case.
-                //  3. Channel-mention rule: if the notice text contains a channel
-                //     name AND we have an open buffer for that channel, route there.
-                //     This catches the on-join welcome from service bots: ChanServ
-                //     ("[#chan] Welcome to #chan, ..."), X3 ("Welcome to #chan!"),
-                //     Anope BotServ-assigned bots with arbitrary names (since we
-                //     match on the body, not the sender), and similar. The notice
-                //     was a PM-target NOTICE so rule 2 didn't fire, but the user
-                //     clearly wants to see the greeting in the channel they just
-                //     walked into.
-                //
-                //     Note: Anope BotServ entry messages typically arrive as PRIVMSG
-                //     to the channel (so they don't even reach this notice handler).
-                //     The mention rule still helps for ChanServ-style PM greetings
-                //     and for custom service bots that send to-nick NOTICEs.
-                //
-                //  4. Recently-joined-channel rule: if rule 3 didn't match but the
-                //     notice arrived within ~5 s of us joining a channel on this
-                //     network, route to that channel. Catches BotServ greetings
-                //     whose body doesn't mention the channel name (e.g.
-                //     "Welcome, alice!"). Time-bounded to avoid catching unrelated
-                //     later notices. Only fires when there's exactly one recent
-                //     join — multiple recent joins are ambiguous.
-                //  5. Everything else → the currently selected buffer on this
-                //     network. If nothing is selected, fall back to *server*.
-                //
-                // The mention rule is conservative on purpose: it only routes when we
-                // ALREADY have a buffer for that channel name. A notice that mentions
-                // "#somechan" we never joined still goes to the selected buffer / server,
-                // because creating a buffer for a channel we're not in would be misleading.
-                // Multiple mentions: pick the first that resolves to an existing buffer
-                // (services typically only mention one channel per notice anyway).
+                // Notice routing:
+                //   1. Server notices (hostname prefix) go to *server*.
+                //   2. A notice to a channel we have a buffer for goes there.
+                //   3. A notice naming a channel we have a buffer for goes there (service-bot
+                //     welcomes).
+                //   4. Otherwise, one arriving within ~5 s of joining a single channel goes to that
+                //     channel.
+                //   5. Everything else goes to the selected buffer on this network, or *server*.
+                // Rules 3 and 4 never create a buffer.
                 fun firstMentionedKnownChannelKey(): String? {
                     val chantypes = runtimes[netId]?.support?.chantypes ?: "#&"
                     val text = ev.text
@@ -9191,19 +8601,8 @@ if (code == "442") {
                 }
 
                 ensureBuffer(destKey)
-                // Notice rendering: `* <nick> text` is the deliberate visual marker that
-                // distinguishes a notice from a channel message — the leading `* ` is what
-                // the user is looking for to know "this is a NOTICE, not a PRIVMSG".
-                //
-                // Exception: bouncer pseudo-users (`*status`, `*controlpanel`, `BouncerServ`,
-                // etc.) whose nicks already start with `*` produce a confusing `* <*status>`
-                // pile-up. For those, render as `<nick> text` — the pseudo-user prefix
-                // already signals "this is bouncer output, not a real user", which is the
-                // job the leading `* ` would have done.
-                //
-                // Detection mirrors IrcCore.isBouncerPseudoUser:
-                //  - ZNC convention: any nick starting with '*' (loaded modules)
-                //  - soju convention: the named pseudo-user "BouncerServ"
+                // Notices render as `* <nick> text`, except bouncer pseudo-users (nicks starting
+                // with '*', or BouncerServ), which render as `<nick> text` to avoid `* <*status>`.
                 val fromNick = ev.from
                 val isBouncerPseudo = ev.isServer && (
                     fromNick.startsWith("*") ||
@@ -9294,21 +8693,23 @@ if (code == "442") {
                 val keyFold = namesKeyFold(ev.channel)
                 val req = rt?.namesRequests?.remove(keyFold)
                 if (req != null) {
-                    val chanKey = resolveBufferKey(netId, ev.channel)
-                    ensureBuffer(chanKey)
-
-                    // Guard: some servers/bouncers can send EndOfNames without any 353 lines (or with partial output).
-                    // Don't wipe a populated nicklist in that case.
                     val st1 = _state.value
-                    val currentSize = st1.nicklists[chanKey]?.size ?: 0
-                    val incomingSize = req.names.size
-                    val looksBogus = (incomingSize == 0 && currentSize > 0) ||
-                        (currentSize >= 5 && incomingSize < 3)
-                    if (!looksBogus) {
-                        applyNamesSnapshot(netId, chanKey, req.names.toList())
+                    val meFold = casefoldText(netId, st1.connections[netId]?.myNick ?: st1.myNick)
+                    val includesMe = req.names.any {
+                        casefoldText(netId, parseNickWithPrefixes(netId, it).first) == meFold
                     }
-
-                    val names = rebuildNicklist(netId, chanKey)
+                    val names = if (includesMe) {
+                        val chanKey = resolveBufferKey(netId, ev.channel)
+                        ensureBuffer(chanKey)
+                        applyNamesSnapshot(netId, chanKey, req.names.toList())
+                        rebuildNicklist(netId, chanKey)
+                    } else {
+                        val ps = prefixSymbols(netId)
+                        req.names.sortedWith(
+                            compareBy<String> { n -> ps.indexOf(n.firstOrNull() ?: ' ').let { if (it < 0) ps.length else it } }
+                                .thenBy { casefoldText(netId, parseNickWithPrefixes(netId, it).first) }
+                        )
+                    }
                     if (req.printToBuffer) {
                         appendNamesList(req.replyBufferKey, ev.channel, names)
                     }
@@ -9316,6 +8717,10 @@ if (code == "442") {
             }
 
             is IrcEvent.Joined -> {
+                if (!ev.isHistory) scriptEvent(
+                    "JOIN", netId, ev.channel, ev.nick, isMe = isMyNick(netId, ev.nick),
+                    fields = mapOf("account" to (ev.account ?: "")),
+                )
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
                 // Recorded even when joins are hidden: a join is what precedes a replay.
@@ -9386,16 +8791,9 @@ if (code == "442") {
                         val cutoff = now - 5_000L
                         recentJoinAtMs.entries.removeAll { it.value < cutoff }
                     }
-                    // Arm the chathistory marker window for THIS join. If the bouncer or
-                    // CHATHISTORY response delivers replay messages within the next 45 s,
-                    // and the next live message arrives within that window, we'll insert
-                    // the "── Chat history • Last message: <ts> ──" separator. Outside the
-                    // window, history messages will not arm the marker - so a bouncer that
-                    // happens to deliver a delayed playback batch (or a manual /chathistory
-                    // call hours later) won't cause the marker to fire when the user
-                    // eventually types something. Window matches upstream history-expect
-                    // (15 s for znc.in/playback, 7 s for IRCv3 CHATHISTORY) plus a 30 s
-                    // grace for the first live message after the burst.
+                    // Arm the history divider for this join: if replayed history and then the first
+                    // live message arrive within the window, the divider is inserted. Later
+                    // playback or a manual request won't trigger it.
                     chatHistory.armDivider(chanKey, ChatHistoryController.DIVIDER_WINDOW_MS)
                 }
 
@@ -9435,11 +8833,7 @@ if (code == "442") {
                             val isAutoJoin = profile?.autoJoin?.any {
                                 casefoldText(netId, it.channel.split(",")[0].trim()) == casefoldText(netId, ev.channel)
                             } == true
-                            if (!isAutoJoin) {
-                                // Channel key is not available from the JOIN event - store null.
-                                // The user will be prompted by the server on reconnect if +k is still set.
-                                rt.manuallyJoinedChannels[ev.channel] = null
-                            }
+                            if (!isAutoJoin) rememberManualJoin(netId, rt, ev.channel, ev.key)
                         }
                     }
                     // Decide whether this self-JOIN should pull the user onto the channel.
@@ -9449,14 +8843,8 @@ if (code == "442") {
                     // which is what suppressAutoJoinSwitchUntilMs guards. An explicit user join
                     // always wins, even inside the suppression window.
                     val rtForSwitch = runtimes[netId]
-                    // A replayed join is a record of something that already happened, not a
-                    // request to go anywhere. Only a live one can move the user.
-                    //
-                    // The suppression window below was carrying this on its own, which works
-                    // for the rejoin burst right after a reconnect but not for a server whose
-                    // history replies carry our own JOIN: every request for older messages
-                    // delivered one, and each arrived long after the window had closed, so
-                    // the view jumped to that channel each time.
+                    // Only a live self-JOIN may switch the view. A replayed JOIN (e.g. in a history
+                    // reply) is a record, not a request.
                     val isLiveSelfJoin = isMe && !ev.isHistory
                     // Consume the intent only on an actual self-join so a JOIN by someone else
                     // never clears it.
@@ -9490,6 +8878,7 @@ if (code == "442") {
 
 
             is IrcEvent.Parted -> {
+                if (!ev.isHistory) scriptEvent("PART", netId, ev.channel, ev.nick, ev.reason.orEmpty(), isMyNick(netId, ev.nick))
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
 
@@ -9504,7 +8893,7 @@ if (code == "442") {
                     leftChannelAtMs[leftKey] = ev.timeMs ?: System.currentTimeMillis()
                     val pendingKey = popPendingCloseForChannel(netId, ev.channel)
                     // User explicitly left - remove from reconnect rejoin list.
-                    runtimes[netId]?.manuallyJoinedChannels?.remove(ev.channel)
+                    runtimes[netId]?.let { forgetManualJoin(netId, it, ev.channel) }
                     if (pendingKey != null) {
                         append(
                             bufKey(netId, "*server*"),
@@ -9560,6 +8949,10 @@ if (code == "442") {
             }
 
             is IrcEvent.Kicked -> {
+                if (!ev.isHistory) scriptEvent(
+                    "KICK", netId, ev.channel, ev.byNick, ev.reason.orEmpty(), isMyNick(netId, ev.victim),
+                    fields = mapOf("victim" to ev.victim),
+                )
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
 
@@ -9593,6 +8986,10 @@ if (code == "442") {
 
                     val myNick = st1.connections[netId]?.myNick ?: st1.myNick
                     val victimIsMe = casefoldText(netId, ev.victim) == casefoldText(netId, myNick)
+                    val kickedKey = if (victimIsMe) {
+                        runtimes[netId]?.let { forgetManualJoin(netId, it, ev.channel) }
+                            ?: autoJoinKey(netId, ev.channel)
+                    } else null
 
                     removeNickFromChannel(netId, chanKey, ev.victim)
                     if (victimIsMe) {
@@ -9624,7 +9021,8 @@ if (code == "442") {
                             recentKickRejoins[rejoinKey] = now
                             viewModelScope.launch {
                                 delay(AUTO_REJOIN_DELAY_MS)
-                                runtimes[netId]?.client?.sendRaw("JOIN ${ev.channel}")
+                                val join = if (kickedKey.isNullOrBlank()) "JOIN ${ev.channel}" else "JOIN ${ev.channel} $kickedKey"
+                                runtimes[netId]?.client?.sendRaw(join)
                             }
                         } else {
                             append(chanKey, from = null,
@@ -9636,6 +9034,7 @@ if (code == "442") {
             }
 
             is IrcEvent.Quit -> {
+                if (!ev.isHistory) scriptEvent("QUIT", netId, "", ev.nick, ev.reason.orEmpty(), isMyNick(netId, ev.nick))
                 val st0 = _state.value
                 val suppressUnread = ev.isHistory && !st0.settings.ircHistoryCountsAsUnread
                 val reason = ev.reason?.takeIf { it.isNotBlank() }
@@ -9658,18 +9057,9 @@ if (code == "442") {
                     .map { it.key }
                     .toList()
 
-                // Targets: ONLY channels where the user actually shared a nicklist with us.
-                // Previous behavior fell back to "all channels on this network" when the
-                // nicklist scan came up empty - that caused QUIT lines to appear in channels
-                // the parting user was never in. If we have no evidence they shared a
-                // channel with us, we have nothing meaningful to show, so the message is
-                // dropped entirely (matches how HexChat / Konversation behave).
-                // A replayed QUIT is for someone who already left, so they are not in any
-                // current nicklist and `affected` is empty: the line would silently vanish,
-                // except in the accidental case where they quit, rejoined, and quit again.
-                // The CHATHISTORY batch names the channel it replayed, so use that.
-                // A replay belongs to the channel whose history it came from, even when the
-                // nick is in other shared channels now.
+                // Targets: only channels where the quitting user shared a nicklist with us; with no
+                // such evidence the line is dropped. A replayed QUIT is for someone no longer in
+                // any nicklist, so it goes to the channel named by its CHATHISTORY batch.
                 val targets = when {
                     ev.isHistory && ev.historyChannel != null -> listOf(resolveBufferKey(netId, ev.historyChannel))
                     affected.isNotEmpty() -> affected
@@ -9790,10 +9180,8 @@ if (code == "442") {
             is IrcEvent.Topic -> {
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
-                // Always update the topic bar - isHistory only gates the chat line below.
-                // A live TOPIC command whose server-time tag is >15 s in the past (clock
-                // drift, or topic set just before you joined) was being flagged as history
-                // and setTopic was skipped, leaving the bar showing the old topic.
+                // Always update the topic bar; isHistory only gates the chat line below, since a
+                // live TOPIC can carry a server time well in the past.
                 setTopic(chanKey, ev.topic)
                 if (!ev.isHistory) {
                     // Append a status line so the change is visible in the buffer.
@@ -9942,15 +9330,9 @@ if (code == "442") {
                 append(serverKey, from = null, text = "*** " + appContext.getString(R.string.vm_server_error, ev.message), doNotify = false, isLocal = false)
             }
 
-            // AWAY status change for another user (away-notify CAP).
-            // Track away state per-nick so the nicklist can reflect it.
-            //
-            // Note: we always update the nickAwayState map (so the nicklist can dim away
-            // users), but only emit the inline "* foo is away/back" announcement when the
-            // user hasn't suppressed it via hideAwayNotify. Bouncers can forward
-            // away-notify regardless of which caps the client itself negotiates, so the
-            // suppression has to happen at render time — disabling the cap on our side
-            // doesn't stop the bouncer from sending these.
+            // Another user's away state (away-notify). The state is always tracked for the
+            // nicklist; the inline line is skipped with hideAwayNotify, which has to be applied
+            // here because bouncers forward away-notify regardless of our capabilities.
             is IrcEvent.AwayChanged -> {
                 val awayMap = nickAwayState.getOrPut(netId) { mutableMapOf() }
                 // On large servers with away-notify, every away transition adds an entry.
@@ -9965,7 +9347,8 @@ if (code == "442") {
                     markAwayInState(netId, ev.nick, true)
                     if (!wasAway && !suppressAnnouncement) {
                         // Only print "went away" on transition (not on away-message updates).
-                        val msg = if (ev.awayMessage.isBlank()) "* " + appContext.getString(R.string.vm_ev_now_away, ev.nick)
+                        val noReason = ev.awayMessage.isBlank() || ev.awayMessage == "*"
+                        val msg = if (noReason) "* " + appContext.getString(R.string.vm_ev_now_away, ev.nick)
                                   else "* " + appContext.getString(R.string.vm_ev_now_away_msg, ev.nick, ev.awayMessage)
                         val affected = _state.value.nicklists
                             .filterKeys { it.startsWith("$netId::") }
@@ -10264,13 +9647,12 @@ if (code == "442") {
                     }
                     st.copy(buffers = st.buffers + (targetKey to buf.copy(typingNicks = updatedTyping)))
                 }
-                // Manage the auto-expiry timer for this nick (IRCv3 recommends expiring after 30 s
-                // of no update so stale "is typing..." banners don't persist if "done" is never sent).
+                // Expire the indicator if no "done" arrives: 6 s after "active", 30 s after "paused".
                 val expiryKey = "$targetKey/${ev.nick}"
                 receivedTypingExpiryJobs[expiryKey]?.cancel()
                 if (ev.state == "active" || ev.state == "paused") {
                     receivedTypingExpiryJobs[expiryKey] = viewModelScope.launch {
-                        delay(30_000L)
+                        delay(if (ev.state == "active") 6_000L else 30_000L)
                         receivedTypingExpiryJobs.remove(expiryKey)
                         _state.update { st ->
                             val buf = st.buffers[targetKey] ?: return@update st
@@ -10517,6 +9899,18 @@ if (code == "442") {
                 }
             }
 
+            is IrcEvent.ReadReceipt -> {
+                // Receipts are shown only to users who send them.
+                if (!_state.value.settings.readReceiptsEnabled) return
+                val key = resolveBufferKey(netId, ev.nick)
+                _state.update { s ->
+                    val buf = s.buffers[key] ?: return@update s
+                    val read = buf.messages.lastOrNull { it.msgId == ev.msgId } ?: return@update s
+                    if ((buf.peerReadAtMs ?: Long.MIN_VALUE) >= read.timeMs) return@update s
+                    s.copy(buffers = s.buffers + (key to buf.copy(peerReadAtMs = read.timeMs)))
+                }
+            }
+
             is IrcEvent.OpenQueryBuffer -> {
                 // /query <nick> - open a PM buffer and switch to it.
                 val key = bufKey(netId, ev.nick)
@@ -10552,23 +9946,20 @@ if (code == "442") {
 
     private fun ensureBuffer(key: String) {
         // Use atomic update to prevent race conditions when multiple events create buffers.
+        var created = false
         _state.update { st0: UiState ->
             if (!st0.buffers.containsKey(key)) {
+                created = true
                 st0.copy(buffers = st0.buffers + (key to UiBuffer(key)))
             } else {
                 st0
             }
         }
+        if (created) splitKey(key).let { (netId, name) -> requestQueryReadMarker(netId, name) }
 
-        // Optional scrollback: preload the latest on-disk log tail into the buffer.
-        // This is independent of "logging enabled" (writing). Users often expect scrollback to load
-        // even if they later turn logging off, as long as logs exist.
-        //
-        // We load disk scrollback even when the server has chathistory, because chathistory
-        // typically provides only 20–50 messages while the user's scrollback may be 800+.
-        // Chathistory messages that arrive afterward are deduplicated in append() by msgid.
-        // The merge below uses a ±3 second fuzzy window to handle timestamp skew between
-        // log-file timestamps (second precision) and server-time tags (millisecond precision).
+        // Preload the on-disk log tail as scrollback, even with logging now off and even when the
+        // server has chathistory (which usually returns far fewer messages). Later history is
+        // deduplicated in append(); the merge allows ±3 s of timestamp skew.
         val st = _state.value
         val buf0 = st.buffers[key] ?: return
         if (!scrollbackRequested.add(key)) return
@@ -10583,18 +9974,9 @@ if (code == "442") {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Outer try around the whole scrollback pipeline. A throw here lands in
-                // viewModelScope's default uncaught-exception handler, which on Android
-                // re-throws and crashes the process. Concrete trigger we've seen in the
-                // wild: LogWriter.readTail -> readTailSaf -> findChild -> ContentResolver
-                // .query, which throws SecurityException when the saved logFolderUri came
-                // from a previous install via backup-restore and the SAF permission grant
-                // didn't transfer with the data. LogWriter now catches that at the source,
-                // but parseLogLineToUiMessage, the dedup arithmetic, and the merge into
-                // state are all I/O- and parse-heavy code paths that could plausibly throw
-                // on a partially-corrupted log file, so the belt-and-braces catch stays.
-                // Any failure here just means "no scrollback preload" - the user can still
-                // chat normally; live messages aren't affected.
+                // Outer try around the scrollback pipeline: reading and parsing a log can throw
+                // (SAF permission lost after a restore, a partly corrupted file). A failure only
+                // means no scrollback preload.
                 val lines = try {
                     logs.readTail(netName, bufferName, maxLines, st.settings.logFolderUri)
                 } catch (t: Throwable) {
@@ -10610,13 +9992,9 @@ if (code == "442") {
                     return@launch
                 }
 
-                // A line whose timestamp doesn't parse used to fall back to a now-anchored ramp
-                // (now - n + idx seconds). The display sorts by timeMs, so those landed in the
-                // middle of the current session instead of above it, and the ones nearest the end
-                // were then discarded by the "older than first live" filter below. Instead, carry
-                // the last real timestamp forward, so an unparseable line stays next to the line
-                // it actually followed in the log. Lines before ANY parseable timestamp inherit
-                // the first one found, which keeps them at the top where they belong.
+                // Lines whose timestamp doesn't parse inherit the last real timestamp before them
+                // (or the first one found, for lines at the top), so they stay next to the line
+                // they followed in the log.
                 val stamps = lines.map { parseLogLineTimeMs(it) }
                 val firstReal = stamps.firstOrNull { it != null }
                 var carried = firstReal ?: (System.currentTimeMillis() - lines.size.toLong() * 1000L)
@@ -10771,12 +10149,9 @@ if (code == "442") {
     // Chat history (IRCv3 CHATHISTORY)
 
     /**
-     * Oldest message of the last page each buffer received, used to anchor the next request.
-     *
-     * The chathistory spec pages from the earliest message of the previous *reply*, not from
-     * the earliest message on screen. The two differ whenever a page deduplicates away to
-     * nothing: the buffer is unchanged, so anchoring on it re-sends the same selector and
-     * receives the same page, forever.
+     * Oldest message of the last page each buffer received, anchoring the next request. The spec
+     * pages from the previous reply, not from the screen: a page that deduplicated to nothing
+     * leaves the buffer unchanged, and anchoring on it would repeat the request forever.
      */
     private val historyAnchors: MutableMap<String, UiMessage> =
         java.util.concurrent.ConcurrentHashMap()
@@ -11128,15 +10503,10 @@ if (code == "442") {
     }
 
     /**
-     * Ask for the messages [key] gained while we were disconnected (CHATHISTORY AFTER).
-     *
-     * Anchored on [after] when continuing, otherwise on the newest message held from before
-     * this join (for a channel) or this connection: a line from the saved log or one that
-     * arrived earlier. Lines replayed since are no anchor, since a short on-join replay would
-     * put the anchor past the gap it is meant to fill.
-     *
-     * Not a backfill: its messages belong at the bottom, and collecting them would stop the
-     * divider arming. Registered with the controller so its batch cannot close a backfill.
+     * Request what [key] missed while disconnected (CHATHISTORY AFTER), anchored on [after] when
+     * continuing, otherwise on the newest message held from before this join or connection. Its
+     * messages go at the bottom like live traffic. Registered with the controller so its batch
+     * can't close a backfill.
      */
     private fun requestHistoryCatchup(
         netId: String,
@@ -11206,15 +10576,9 @@ if (code == "442") {
     }
 
     /**
-     * Decide whether a catch-up page closed the gap it was filling, and ask for the next one
-     * when it did not.
-     *
-     * A page shorter than the request, or one the server marked as the end, means everything
-     * that was missing has arrived. A full page means there is more: AFTER and BETWEEN both
-     * return the messages nearest the near end, so a long absence from a busy channel needs
-     * several, each starting where the last one ended. The run is capped rather than left to
-     * walk as far as it must, and what is still missing is marked in the buffer instead of
-     * being dropped silently.
+     * Decide whether a catch-up page closed its gap: a short page, or one marked as the end, did; a
+     * full page means more, so request the next. The run is capped, and anything still missing is
+     * marked in the buffer.
      */
     private fun onCatchupPage(page: CatchupPage) {
         // A LATEST page had no gap to fill: older messages are reached by scrolling up.
@@ -11421,13 +10785,9 @@ if (code == "442") {
     }
 
     /**
-     * Choose [distributor] and subscribe through it.
-     *
-     * The subscription is bound to a server's VAPID key so the distributor can reject
-     * pushes that server did not sign, so the key of a connected webpush-capable network
-     * is used rather than none. With nothing connected yet there is no key to offer; the
-     * subscription is still requested, and [maybeRegisterWebPush] re-subscribes with a
-     * key on the next registration that has one.
+     * Choose [distributor] and subscribe through it, bound to a connected webpush-capable network's
+     * VAPID key. With none connected, the subscription is made keyless and [maybeRegisterWebPush]
+     * resubscribes once a key is available.
      */
     fun selectPushDistributor(distributor: String) {
         val vapid = runtimes.values
@@ -11437,12 +10797,8 @@ if (code == "442") {
     }
 
     /**
-     * Apply a change to the Web Push setting.
-     *
-     * Turning it off tells every connected server to drop the endpoint before the
-     * subscription is torn down locally, because once the endpoint is gone we can no
-     * longer name it in an UNREGISTER, and a server left holding a dead endpoint keeps
-     * POSTing to it until its own expiry logic notices.
+     * Apply a change to the Web Push setting. Turning it off unregisters from every connected
+     * server first, since the endpoint can't be named once the local subscription is gone.
      */
     fun applyWebPushSetting(enabled: Boolean) {
         if (enabled) {
@@ -11652,12 +11008,10 @@ if (code == "442") {
     @Volatile private var statusLineFirstWordsCache: Set<String>? = null
 
     /**
-     * First words of the server-status lines this client writes, in every shipped language.
-     *
-     * Every banner id is passed in and the ones whose translation opens with a format specifier
-     * fall out on their own, so a new banner or a translator reordering a string is covered
-     * without anyone maintaining a list. The previous hardcoded set was English-only and also
-     * missed You/Your, so "* You have left channel #foo" parsed back as an action by "You".
+     * First words of the server-status lines this client writes, in every shipped language, so
+     * those lines aren't read back from a log as actions. Every banner id is passed in, and ids
+     * whose translation starts with a format specifier drop out on their own, so new banners and
+     * reordered translations need no list maintained.
      */
     private fun statusLineFirstWords(): Set<String> {
         statusLineFirstWordsCache?.let { return it }
@@ -11712,21 +11066,12 @@ if (code == "442") {
         var text = body
         var isAction = false
 
-        // Common IRC log line styles - tried in priority order:
-        //
-        //   "*nick* action text"      NEW action format (unambiguous - written by this client
-        //                             going forward).  Server-status lines use "* word …"
-        //                             (asterisk-SPACE) and can never produce this pattern.
-        //
-        //   "<nick> hello"            Regular chat message.
-        //
-        //   "* nick action text"      OLD action format written by earlier versions of this
-        //                             client, and by HexChat/irssi/etc.  Treated as an action
-        //                             only when the first word passes IRC nick validation AND
-        //                             is not a known server-status sentinel word - otherwise
-        //                             the line is kept as a plain server message (from = null).
-        //
-        //   Anything else             Server/status line, rendered as plain text (from = null).
+        // Log line styles, in priority order:
+        //   "*nick* action text"   action (written by this client)
+        //   "<nick> hello"         chat message
+        //   "* nick action text"   older action format, only when the first word is a valid nick
+        //     and not a status word
+        //   anything else          status line (from = null)
 
         // IRC nick validation: may start with letter or _\[]{}|`^ and contain only those
         // characters plus digits and -.  Crucially excludes <, (, #, @, !, digits as first char.
@@ -12066,6 +11411,7 @@ if (code == "442") {
         val isActivelyVisible = (bufferKey == st.selectedBuffer
             && st.screen == AppScreen.CHAT
             && AppVisibility.isForeground)
+        if (isActivelyVisible && !isHistory && from != null && !isFromMe) sendReadReceipt(bufferKey)
         if (mayNotify && !isActivelyVisible && !quiet && st.settings.notificationsEnabled) {
             val (netId, bufferName) = splitKey(bufferKey)
             val cleanText = stripIrcFormatting(text)
@@ -12268,14 +11614,9 @@ if (code == "442") {
     }
 
     /**
-    * Determine whether a message should be highlighted for a specific network.
-    *
-    * Important: nicks can differ per network, so we must NOT use the global UiState.myNick.
-    * Highlight rules:
-    * - Private messages always highlight.
-    * - Nick + extra highlight words match as whole-words (prevents "eck" matching "check").
-    * - Uses per-network CASEMAPPING when folding.
-    */
+     * Whether [text] highlights on [netId], using that network's own nick and CASEMAPPING. Private
+     * messages always highlight; the nick and extra words match as whole words.
+     */
     private fun isHighlight(netId: String, text: String, isPrivate: Boolean): Boolean {
         if (isPrivate) return true
         val s = _state.value.settings
@@ -12314,6 +11655,35 @@ if (code == "442") {
         }
 
         return false
+    }
+
+    /** Adds [channel] to the reconnect rejoin list, keeping a key already known for it when [key] is null. */
+    private fun rememberManualJoin(netId: String, rt: NetRuntime, channel: String, key: String?) {
+        val known = forgetManualJoin(netId, rt, channel)
+        rt.manuallyJoinedChannels[channel] = key ?: known
+    }
+
+    /** Removes [channel] from the reconnect rejoin list in any case. Returns the key it had. */
+    private fun forgetManualJoin(netId: String, rt: NetRuntime, channel: String): String? {
+        val fold = casefoldText(netId, channel)
+        var key: String? = null
+        val it = rt.manuallyJoinedChannels.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (casefoldText(netId, e.key) == fold) {
+                key = key ?: e.value
+                it.remove()
+            }
+        }
+        return key
+    }
+
+    /** The key set for [channel] in the network's auto-join list, if any. */
+    private fun autoJoinKey(netId: String, channel: String): String? {
+        val fold = casefoldText(netId, channel)
+        return _state.value.networks.firstOrNull { it.id == netId }?.autoJoin
+            ?.firstOrNull { casefoldText(netId, it.channel.split(",")[0].trim()) == fold }
+            ?.key?.takeIf { it.isNotBlank() }
     }
 
     // Nicklist helpers (multi-status + CASEMAPPING aware)
@@ -12438,9 +11808,9 @@ private fun removeNickFromChannel(netId: String, chanKey: String, nick: String) 
     chanNickStatus[chanKey]?.remove(fold)
     if (chanNickCase[chanKey]?.isEmpty() == true) chanNickCase.remove(chanKey)
     if (chanNickStatus[chanKey]?.isEmpty() == true) chanNickStatus.remove(chanKey)
-    // +AGE: if a member leaves a channel the user has +AGE on, let the bridge rekey (revoke them).
-    val ageChan = chanKey.removePrefix("$netId::")
-    if (ageEnabledPrefs.getBoolean(ageKey(netId, ageChan), false)) ageBridgeFor(netId)?.onMemberLeft(ageChan, nick)
+    // +AGE: tell the bridge, which reports it to scripts and rekeys an encrypted chat channel.
+    // Unconditional, as for joins: a scripted game channel never sets the chat +AGE pref.
+    ageBridges[netId]?.onMemberLeft(chanKey.removePrefix("$netId::"), nick)
 }
 
 private fun setNicklistState(netId: String, chanKey: String) {
@@ -12508,19 +11878,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         if (appExitRequested) {
             // Don't resurrect the notification/FGS during an explicit user exit.
             runCatching { appContext.stopService(Intent(appContext, KeepAliveService::class.java)) }
-            runCatching {
-                val i = Intent(appContext, KeepAliveService::class.java).apply { action = KeepAliveService.ACTION_STOP }
-                appContext.startService(i)
-            }
+            stopKeepAliveService()
             runCatching { notifier.cancelConnection() }
             return
         }
         if (!st.settings.showConnectionStatusNotification && !st.settings.keepAliveInBackground) {
             // Ensure we don't leave stale notifications behind.
-            runCatching {
-                val i = Intent(appContext, KeepAliveService::class.java).apply { action = KeepAliveService.ACTION_STOP }
-                appContext.startService(i)
-            }
+            stopKeepAliveService()
             notifier.cancelConnection()
             return
         }
@@ -12549,32 +11913,22 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 val netIdForIntent = st.activeNetworkId?.takeIf { wanted.contains(it) } ?: wanted.first()
                 val statusTxt = if (!hasInternetConnection()) appContext.getString(R.string.vm_status_waiting_network)
                         else appContext.getString(R.string.vm_status_reconnecting)
+                if (lastNotifViaService && labelWanted == lastNotifLabel && statusTxt == lastNotifStatus &&
+                    KeepAliveService.isRunning) return
+                lastNotifLabel = labelWanted
+                lastNotifStatus = statusTxt
+                lastNotifViaService = true
                 val i = Intent(appContext, KeepAliveService::class.java).apply {
                     action = KeepAliveService.ACTION_UPDATE
                     putExtra(KeepAliveService.EXTRA_NETWORK_ID, netIdForIntent)
                     putExtra(KeepAliveService.EXTRA_SERVER_LABEL, labelWanted)
                     putExtra(KeepAliveService.EXTRA_STATUS, statusTxt)
                 }
-                runCatching {
-                    if (KeepAliveService.isRunning) {
-                        appContext.startService(i)
-                    } else if (AppVisibility.canStartForegroundService()) {
-                        ContextCompat.startForegroundService(appContext, i)
-                    } else {
-                        notifier.showConnection(netIdForIntent, labelWanted, statusTxt)
-                    }
-                }.onFailure {
-                    notifier.showConnection(netIdForIntent, labelWanted, statusTxt)
-                }
+                postKeepAliveUpdate(i, netIdForIntent, labelWanted, statusTxt)
                 return
             }
 
-            lastNotifLabel = null
-            lastNotifStatus = null
-            runCatching {
-                val i = Intent(appContext, KeepAliveService::class.java).apply { action = KeepAliveService.ACTION_STOP }
-                appContext.startService(i)
-            }
+            stopKeepAliveService()
             notifier.cancelConnection()
             return
         }
@@ -12600,9 +11954,11 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         if (st.settings.keepAliveInBackground) {
             // Skip the Binder IPC if the visible text hasn't changed - avoids waking
             // NotificationManager on every lag update / ping cycle (once per minute).
-            if (label == lastNotifLabel && status == lastNotifStatus && KeepAliveService.isRunning) return
+            if (lastNotifViaService && label == lastNotifLabel && status == lastNotifStatus &&
+                KeepAliveService.isRunning) return
             lastNotifLabel = label
             lastNotifStatus = status
+            lastNotifViaService = true
 
             val i = Intent(appContext, KeepAliveService::class.java).apply {
                 action = KeepAliveService.ACTION_UPDATE
@@ -12611,29 +11967,20 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 putExtra(KeepAliveService.EXTRA_STATUS, status)
             }
 
-            // Android 12+ can throw ForegroundServiceStartNotAllowedException if we try to start an FGS
-            // while the app is in the background. Also, if the service is already running, we can just
-            // deliver the update intent via startService().
-            runCatching {
-                if (KeepAliveService.isRunning) {
-                    appContext.startService(i)
-                } else if (AppVisibility.canStartForegroundService()) {
-                    ContextCompat.startForegroundService(appContext, i)
-                } else {
-                    // Background-start of a foreground service may be blocked on Android 12+.
-                    notifier.showConnection(netIdForIntent, label, status)
-                    return
-                }
-            }.onFailure {
-                // how a normal notification instead of crashing.
-                notifier.showConnection(netIdForIntent, label, status)
-            }
+            postKeepAliveUpdate(i, netIdForIntent, label, status)
             return
         }
 
         if (st.settings.showConnectionStatusNotification) {
+            // Same rule without the service: repost only when the text changes.
+            if (!lastNotifViaService && label == lastNotifLabel && status == lastNotifStatus) return
+            lastNotifLabel = label
+            lastNotifStatus = status
+            lastNotifViaService = false
             notifier.showConnection(netIdForIntent, label, status)
         } else {
+            lastNotifLabel = null
+            lastNotifStatus = null
             notifier.cancelConnection()
         }
     }
@@ -12829,13 +12176,9 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     }
 
     /**
-     * Send `DCC RESUME` to the peer and wait for a matching `DCC ACCEPT`. Returns the agreed
-     * offset (typically equal to [partial].receivedBytes) on success, or 0L if the peer didn't
-     * reply within the timeout (graceful fallback to a fresh transfer).
-     *
-     * Why we don't fail hard on no-reply: many older clients/bots don't implement RESUME, but
-     * happily send a fresh stream from byte 0 in response to our normal SEND-acknowledgement.
-     * Falling back to byte 0 is strictly better than telling the user "RESUME failed, try again".
+     * Send DCC RESUME and wait for the matching DCC ACCEPT. Returns the agreed offset, or 0 when
+     * the peer doesn't answer in time, falling back to a fresh transfer (many clients don't support
+     * RESUME).
      */
     private suspend fun negotiateResumeOrZero(
         netId: String,
@@ -13384,12 +12727,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     }
 
     /**
-     * Cancel an in-progress incoming DCC receive.
-     *
-     * Cancelling the Job triggers [DccManager]'s `invokeOnCompletion(onCancelling = true)`
-     * socket-close, which unblocks the receive loop synchronously. The launched coroutine's
-     * catch block transitions the transfer to `error = "Cancelled"`; the user then taps the
-     * separate X (clearDccTransfer) to dismiss the cancelled entry.
+     * Cancel an incoming DCC receive. Cancelling the job closes the socket, which ends the receive
+     * loop; the transfer then shows "Cancelled" until dismissed.
      */
     fun cancelIncomingDcc(offer: DccOffer) {
         incomingReceiveJobs[offer]?.cancel()
@@ -13459,19 +12798,11 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     }
 
     /**
-     * Upload a picked document to the network's soju.im/FILEHOST endpoint and hand the
-     * resulting public URL back on the main thread. [onDone] receives (url, error);
-     * exactly one is non-null.
-     *
-     * Credentials mirror the IRC connection: the SASL PLAIN identity (including any
-     * bouncer suffixes via effectiveAuthIdentity) with the SASL password, falling back
-     * to the server password for PASS-authenticated bouncers. A SCRAM or EXTERNAL login
-     * never shares its SASL password, and nothing is sent to an upload host that does not
-     * belong with the IRC server.
-     *
-     * Fail-closed on proxied profiles: HttpURLConnection does not route through
-     * SocksProxy.kt, so an upload from a Tor/proxied network would leave the proxy and
-     * leak the user's IP to the filehost. Refused until proxied uploads exist.
+     * Upload a picked document to the network's soju.im/FILEHOST endpoint; [onDone] gets (url,
+     * error) on the main thread, exactly one non-null. Credentials are the connection's SASL PLAIN
+     * identity and password, or the server password for PASS-authenticated bouncers; SCRAM and
+     * EXTERNAL passwords are never sent. Refused on proxied networks, since the upload would bypass
+     * the proxy.
      */
     fun uploadFileToFilehost(netId: String, uri: android.net.Uri, onDone: (url: String?, error: String?) -> Unit) {
         val cfg = runtimes[netId]?.client?.config
@@ -13563,12 +12894,8 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
     }
 
     /**
-     * Sanitise a draft/metadata-2 value before it reaches the UI. Metadata is
-     * attacker-controlled free text from any user on the network, so control
-     * characters (including IRC formatting codes, which could otherwise recolour
-     * or blank out surrounding text) and line breaks are stripped, and the result
-     * is length-capped. Returns null for a value that is absent or empty after
-     * cleaning, which the callers treat as "key not set".
+     * Clean a draft/metadata-2 value for display: strip control characters (including formatting
+     * codes) and line breaks, and cap the length. Null when nothing is left.
      */
     private fun sanitizeMetadataValue(raw: String?, maxLen: Int): String? {
         if (raw.isNullOrEmpty()) return null

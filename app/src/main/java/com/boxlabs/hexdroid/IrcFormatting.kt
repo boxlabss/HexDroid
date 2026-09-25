@@ -22,14 +22,8 @@ package com.boxlabs.hexdroid
 // are used inline so this file stays free of @Composable annotations and Activity context.
 
 /**
- * Strip common IRC formatting control codes and ANSI escape sequences.
- *
- * Removes:
- * - mIRC colours (\u0003 + optional fg/bg digits)
- * - 24-bit hex colours (\u0004 + up to 6 hex digits)
- * - common style toggles (bold/italic/underline/reverse/strikethrough/monospace/reset)
- * - ANSI CSI escape sequences (\u001b[ ... final-byte) covers SGR colour/style codes
- * - other ANSI/C0 control chars (except \n/\r/\t)
+ * Strip mIRC colours (\u0003 and \u0004 hex), style toggles, ANSI CSI sequences and other control
+ * characters except \n, \r and \t.
  */
 fun stripIrcFormatting(input: String): String {
     if (input.isEmpty()) return input
@@ -137,12 +131,8 @@ private val ANSI_BRIGHT: IntArray = intArrayOf(
 )
 
 /**
- * xterm 256-color palette — indices 0–255.
- *
- * 0–7:   Standard colors (same as ANSI_STANDARD above)
- * 8–15:  Bright/high-intensity colors (same as ANSI_BRIGHT above)
- * 16–231: 6×6×6 color cube: index = 16 + 36×r + 6×g + b  (r,g,b ∈ 0..5)
- * 232–255: Greyscale ramp from dark to light
+ * xterm 256-colour palette: 0-15 standard and bright, 16-231 the 6x6x6 cube (16 + 36r + 6g + b),
+ * 232-255 the greyscale ramp.
  */
 private val ANSI_256: IntArray by lazy {
     IntArray(256).also { p ->
@@ -181,23 +171,9 @@ internal data class AnsiStyleState(
 internal data class AnsiRun(val text: String, val style: AnsiStyleState)
 
 /**
- * Parse a string containing ANSI SGR escape sequences into a list of styled runs.
- *
- * Handles:
- *  - SGR 0: reset
- *  - SGR 1/22: bold on/off
- *  - SGR 3/23: italic on/off
- *  - SGR 4/24: underline on/off
- *  - SGR 7/27: reverse on/off
- *  - SGR 9/29: strikethrough on/off
- *  - SGR 30–37 / 90–97: standard/bright foreground
- *  - SGR 40–47 / 100–107: standard/bright background
- *  - SGR 38;5;n / 48;5;n: 256-colour fg/bg
- *  - SGR 38;2;r;g;b / 48;2;r;g;b: 24-bit RGB fg/bg
- *  - SGR 39 / 49: default fg/bg
- *
- * Non-SGR escape sequences (cursor movement etc.) are silently consumed.
- * Other C0 control codes are dropped (except \n \r \t).
+ * Parse ANSI SGR sequences into styled runs: reset, bold, italic, underline, reverse,
+ * strikethrough, standard/bright/256-colour/RGB foreground and background, and default colours.
+ * Other escape sequences are consumed; other control characters are dropped except \n, \r and \t.
  */
 internal fun parseAnsiRuns(input: String): List<AnsiRun> {
     if (input.isEmpty()) return emptyList()

@@ -67,15 +67,8 @@ fun isTvDevice(): Boolean {
 }
 
 /**
- * On TV only, requests initial focus on this element after first composition,
- * so a D-pad user sees a visible focus ring immediately instead of a screen
- * that appears unresponsive until the first key press. No-op on phones and
- * tablets (touch mode must not be disturbed, and focusing a field could pop
- * the keyboard).
- *
- * The one-frame wait lets the node attach and any enter animation begin;
- * requestFocus on an unattached node throws, hence the runCatching. Losing
- * the race is harmless: the user's first D-pad press assigns focus anyway.
+ * On TV, focus this element after first composition so a focus ring shows immediately. No-op
+ * elsewhere. Waits a frame for the node to attach.
  */
 @Composable
 fun Modifier.tvInitialFocus(): Modifier {
@@ -91,18 +84,8 @@ fun Modifier.tvInitialFocus(): Modifier {
 }
 
 /**
- * Draws a clearly visible border and tint on the element while it holds focus.
- *
- * Purpose: D-pad and keyboard navigation (Android TV, ChromeOS, hardware
- * keyboards). Material3's default focus indication is a faint state layer that
- * is nearly invisible on dark themes at TV viewing distance; this makes the
- * focused element unmistakable.
- *
- * Phone behavior is unchanged: in touch mode Compose does not assign focus to
- * clickable elements, so the highlight never appears for touch interaction.
- *
- * Place BEFORE the clickable/focusable modifier in the chain:
- *     Modifier.focusHighlight().clickable { ... }
+ * A visible border and tint while focused, for D-pad and keyboard navigation. Touch is unaffected,
+ * since touch mode doesn't focus clickables. Place before the clickable/focusable modifier.
  */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
@@ -175,16 +158,9 @@ fun Modifier.dpadReorder(onMoveUp: () -> Unit, onMoveDown: () -> Unit): Modifier
 }
 
 /**
- * Makes the HSV hue/saturation wheel usable without touch, mirroring the
- * dpadReorder select-to-engage pattern so arrow keys are only captured while
- * the user has explicitly entered adjust mode (otherwise up/down could never
- * move focus off the wheel to the brightness slider and dialog buttons).
- *
- * Focused: dim circular ring, arrows move focus normally.
- * Select (D-pad center / Enter): toggles adjust mode, shown as a bold ring.
- * In adjust mode: left/right step hue by [hueStep] degrees, up/down step
- * saturation by [satStep]; key auto-repeat makes held keys sweep smoothly.
- * Select again, back, or focus loss exits adjust mode.
+ * D-pad control of the hue/saturation wheel. Select toggles adjust mode; in it, left/right step hue
+ * by [hueStep] and up/down saturation by [satStep]. Select, back or focus loss exits; outside
+ * adjust mode the arrows move focus.
  */
 @Composable
 fun Modifier.dpadColourWheel(
@@ -237,13 +213,8 @@ fun Modifier.dpadColourWheel(
 }
 
 /**
- * Makes a drag handle that resizes a pane usable without touch, following the
- * same select-to-engage pattern as [dpadReorder]. The handle becomes focusable;
- * select (D-pad centre/enter) toggles resize mode, shown as a filled highlight.
- * While in resize mode, left/right call [onLeft]/[onRight] instead
- * of moving focus, and key auto-repeat makes a held key sweep the pane. Select,
- * back, or moving focus away exits resize mode, and [onEnd] runs so the caller
- * can persist the new width.
+ * D-pad control of a pane resize handle. Select toggles resize mode, in which left/right call
+ * [onLeft]/[onRight]; select, back or focus loss exits and calls [onEnd].
  */
 @Composable
 fun Modifier.dpadResize(
@@ -298,17 +269,8 @@ fun Modifier.dpadResize(
 }
 
 /**
- * Makes a D-pad select press (center / Enter) activate an element that only
- * responds to pointer input. Compose clickables handle select natively, but
- * ExposedDropdownMenuBox's menuAnchor opens its menu from a pointerInput tap
- * detector, so a focused read-only anchor field ignores the select button and
- * the menu can never be opened from a remote or hardware keyboard.
- *
- * Apply to the anchor field and toggle the menu's expanded state in
- * [onActivate]. Acts on KeyDown, matching the other helpers in this file; the
- * paired KeyUp propagates but unpaired KeyUps are ignored by clickables, so
- * nothing double-fires. All other keys pass through, leaving normal focus
- * traversal unaffected. Touch behavior is unchanged.
+ * Lets D-pad select (centre/Enter) activate an element that only reacts to pointer input, such as
+ * an ExposedDropdownMenuBox anchor. Acts on KeyDown; other keys pass through.
  */
 fun Modifier.dpadActivate(onActivate: () -> Unit): Modifier {
     return this.onKeyEvent { ev ->

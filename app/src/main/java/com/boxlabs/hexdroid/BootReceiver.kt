@@ -91,7 +91,7 @@ class BootReceiver : BroadcastReceiver() {
                 // helpers) that expect a Looper.
                 withContext(Dispatchers.Main) { app.ircViewModel }
             } catch (_: Throwable) {
-                // A boot receiver must never crash the process. connections resume when they next open the app.
+                // A boot receiver must never throw; connections resume when the app is next opened.
             } finally {
                 pending.finish()
             }

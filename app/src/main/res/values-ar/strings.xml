@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">الإعدادات</string>
+    <string name="settings_view_one_page">صفحة واحدة</string>
+    <string name="settings_view_categories">الفئات</string>
     <string name="settings_intro_tour">جولة تعريفية</string>
     <string name="settings_intro_tour_desc">جولة سريعة في الشاشات الرئيسية والاختصارات.</string>
     <string name="section_appearance">المظهر</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">اتصال تلقائي عند البدء</string>
     <string name="setting_rejoin_on_kick">إعادة الانضمام بعد الطرد</string>
     <string name="setting_rejoin_on_kick_desc">يعيد الانضمام تلقائياً إلى قناة بعد الطرد. الطرد الثاني من نفس القناة خلال 60 ثانية لا يُتبع بإعادة انضمام، لتجنب الحلقات مع أوضاع +i/+k/+b.</string>
+    <string name="setting_nick_regain">استعادة النيك الأساسي</string>
+    <string name="setting_nick_regain_desc">عند الاتصال بنيك بديل لأن نيكك مستخدم، يواصل المحاولة للعودة إليه لبضع دقائق.</string>
     <string name="setting_enable_notifications">تفعيل الإشعارات</string>
     <string name="setting_notify_highlights">إشعارات التمييز</string>
     <string name="setting_notify_pm">إشعارات الرسائل الخاصة</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">طرد</string>
     <string name="chat_ban">حظر</string>
     <string name="chat_kick_ban_btn">طرد+حظر</string>
+    <string name="chat_ban_by">الحظر حسب</string>
+    <string name="chat_ban_type_host">المضيف</string>
+    <string name="chat_ban_type_nick">النيك</string>
+    <string name="chat_ban_type_account">الحساب</string>
+    <string name="chat_ban_type_domain">النطاق</string>
 
     <!-- Network screens -->
     <string name="networks_title">الشبكات</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">إظهار كل سطر مُرسل ومستلم في مخزن Raw لكل شبكة. تُخفى كلمات المرور. لأغراض تصحيح الأخطاء.</string>
     <string name="chat_show_less">إظهار أقل</string>
     <string name="chat_not_delivered">لم يُسلَّم</string>
+    <string name="chat_status_read">قُرئت</string>
     <string name="vm_multiline_rejected">رفض الخادم الرسالة (%1$s): %2$s</string>
     <string name="network_edit_cap_also">ويطلب أيضًا %1$s</string>
     <string name="network_edit_caps_hint">ميزات IRCv3 الأساسية مفعلة افتراضياً. شغّل لرؤية الخيارات المتقدمة.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">السماح للآخرين برؤية وقت كتابة رسالة (draft/typing). معطّل افتراضياً لحماية الخصوصية.</string>
     <string name="setting_receive_typing">عرض مؤشرات كتابة الآخرين</string>
     <string name="setting_receive_typing_desc">عرض مؤشر عندما يكتب شخص آخر رسالة في قناة أو خاصة.</string>
+    <string name="setting_read_receipts">إيصالات القراءة</string>
+    <string name="setting_read_receipts_desc">في الرسائل الخاصة، أعلِم الآخرين عندما تقرأ رسائلهم، وشاهد متى قرأوا رسائلك. يعمل فقط مع مستخدمي HexDroid الآخرين.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">تمت إعادة تسمية القناة من %1$s إلى %2$s</string>
@@ -452,6 +464,13 @@
     <string name="chat_cd_launch_scripts">تشغيل السكربتات</string>
     <string name="chat_cd_edit_topic">تعديل الموضوع</string>
     <string name="chat_cd_jump_unread">الانتقال إلى غير المقروء</string>
+    <string name="format_bold">غامق</string>
+    <string name="format_italic">مائل</string>
+    <string name="format_underline">تسطير</string>
+    <string name="format_colour">اللون…</string>
+    <string name="format_clear">مسح التنسيق</string>
+    <string name="chat_art_show_as_text">عرض كنص</string>
+    <string name="chat_unread_since">%1$s منذ %2$s</string>
     <string name="chat_cd_scroll_bottom">التمرير إلى الأسفل</string>
     <string name="chat_cd_close_label">إغلاق %1$s</string>
     <string name="chat_cd_cancel_reply">إلغاء الرد</string>
@@ -460,6 +479,8 @@
     <string name="chat_reply_to">الرد على %1$s</string>
     <string name="chat_delete_message">حذف الرسالة</string>
     <string name="chat_delete_message_desc">يحذفها للجميع عبر الخادم</string>
+    <string name="chat_delete_message_others_desc">يزيلها للجميع إذا سمح لك الخادم بذلك</string>
+    <string name="chat_delete_message_no_id">لا يمكن حذفها: لم يمنح الخادم هذه الرسالة معرّفًا</string>
     <string name="chat_copy_messages">نسخ الرسائل…</string>
     <string name="chat_copy_messages_desc">حدّد عدة رسائل لنسخها</string>
 
@@ -1399,6 +1420,7 @@
     <!-- ScriptsScreen -->
     <string name="scripts_title">السكربتات</string>
     <string name="scripts_reload">إعادة التحميل</string>
+    <string name="scripts_restore_defaults">استعادة السكربتات الافتراضية (%1$d)</string>
     <string name="scripts_import_file">استيراد ملف…</string>
     <string name="scripts_import">استيراد…</string>
     <string name="scripts_paste">لصق…</string>
@@ -1492,7 +1514,7 @@
     <string name="cmd_unignore">يزيل مستخدماً من قائمة التجاهل</string>
     <string name="cmd_quit">يخرج من IRC ويقطع الاتصال</string>
     <string name="cmd_kick">يطرد مستخدماً من القناة</string>
-    <string name="cmd_ban">حظر: النيك (افتراضي)، المستخدم، المضيف، النطاق، الحساب</string>
+    <string name="cmd_ban">حظر: المضيف (افتراضي)، النيك، المستخدم، النطاق، الحساب</string>
     <string name="cmd_unban">يرفع حظراً (الصق القناع الدقيق من ‎/banlist لغير حظر النيك)</string>
     <string name="cmd_kb">يطرد مستخدماً ويحظره (نفس أنواع الأقنعة في ‎/ban)</string>
     <string name="cmd_kickban">اختصار لـ ‎/kb</string>

@@ -27,12 +27,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Persistent record of an interrupted DCC SEND we were on the receiving end of,
- * so we can offer DCC RESUME if the same offer (or a matching one) arrives later.
- *
- * The natural key is (from, filename baseName, size): a sender + file identity that
- * a remote peer would re-offer with the exact same DCC SEND payload. We deliberately
- * don't key on IP or port because those change between sessions of the sender.
+ * An interrupted incoming DCC transfer, kept so a later matching offer can be resumed. Keyed by
+ * sender, file name and size, not IP or port, which change between sessions.
  */
 data class PartialTransfer(
     val from: String,
@@ -56,15 +52,8 @@ data class PartialTransfer(
 }
 
 /**
- * Persists [PartialTransfer] entries to a small JSON file in the app's private storage.
- *
- * Writes are atomic (tmp-file rename). Reads are tolerant of corruption: a malformed
- * file is treated as "no partials" and replaced on the next write rather than throwing
- * an error to the user, losing the ability to resume a transfer is annoying but not
- * data loss, since the underlying partial files are still on disk.
- *
- * Thread-safety: an in-memory [ConcurrentHashMap] serves all reads; writes are
- * serialized via a single intrinsic lock so we never produce a half-written JSON file.
+ * Stores [PartialTransfer] entries as JSON in private storage. Writes are atomic and serialised; a
+ * corrupt file reads as empty and is replaced on the next write.
  */
 class DccResumeStore(ctx: Context) {
 

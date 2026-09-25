@@ -68,22 +68,14 @@ data class ViewProps(
     val ellipse: Boolean = false,   // ellipse/oval shape (table felt) instead of a rounded rect
     val bgImage: String? = null,    // surface background image URL, painted behind the children
     /**
-     * ring: vertical squash, as a multiple of the horizontal radius. 1.0 (the default) is a true
-     * circle; 0.62 reproduces the flattened ellipse .
-     *
-     * A float, like [weight], because it is a unitless multiplier. Ints are for dp measurements;
-     * a ratio is not a measurement. Worth tuning on device: a flatter ring buys vertical room but
-     * pushes the left and right children together, and they overlap once the squash drops below
-     * their own height.
+     * ring: vertical squash as a multiple of the horizontal radius; 1.0 (default) is a circle. A
+     * flatter ring gains height but pushes the side children together.
      */
     val ratio: Float? = null,
     /**
-     * ring: lay children out on the perimeter of a stadium (a rounded rect with semicircular
-     * caps) instead of an ellipse. ratio picks the axis: >= 1 is a VERTICAL capsule (caps top
-     * and bottom, seats flanking the straight sides - the portrait poker table), < 1 is a
-     * HORIZONTAL capsule (caps left and right, seats along the top edge - the landscape/TV
-     * table). Child 0 (the hero) stays anchored at the bottom either way, and the renderer
-     * grows the table as the seat count does so seats can never overlap.
+     * ring: lay children on a stadium (a rounded rectangle with semicircular caps) instead of an
+     * ellipse. ratio >= 1 gives a vertical capsule, < 1 a horizontal one. Child 0 stays at the
+     * bottom, and the table grows with the seat count.
      */
     val stadium: Boolean = false,
     /**
@@ -96,19 +88,15 @@ data class ViewProps(
 )
 
 /**
- * Parses the body of a .hex `view { ... }` block into a [ScriptView] tree. Runs AFTER
- * the backend has substituted $/% into the body, so values are already concrete.
- *
- * DSL (quote-aware, brace-grouped):
- *   column [<mods>] { ... }      row [<mods>] { ... }     stack [<mods>] { ... }
- *   surface [<mods>] { ... }
+ * Parses a .hex `view { ... }` body (after $/% substitution) into a [ScriptView] tree.
+ *   column | row | stack | surface [<mods>] { ... }
  *   text "<string>" [<mods>]
  *   button "<label>" <actionId> [<arg>...]
  *   card "<face>" [red] [<mods>]
  *   image <url> [<mods>]
  *   spacer [<mods>]
- * mods: bold | size <n> | textsize <n> | color #hex | bg #hex | weight <f> | pad <n>
- *       | align <center|start|end|top|bottom> | fill | gap <n>
+ * mods: bold | size <n> | textsize <n> | color #hex | bg #hex | weight <f> | pad <n> | align
+ * <center|start|end|top|bottom> | fill | gap <n>
  */
 class HexViewParser(body: String) {
     private val s = body
@@ -290,18 +278,12 @@ class HexViewParser(body: String) {
 }
 
 /**
- * Pure geometry for ScriptView.Ring, kept Android-free so it can be unit-tested off-device.
- * All functions take/return px as Double; [childW]/[childH] are the widest/tallest SEAT child.
- *
- * Three modes:
- *  - ellipse (stadium=false): equal-angle walk starting at the bottom - the historical
- *    behaviour, unchanged, child 0 at the bottom.
- *  - vertical stadium (stadium=true, ry >= rx): hero (child 0) on the bottom cap; opponents
- *    fill slots on the two straight sides (bottom-to-top on the right, then top-to-bottom on
- *    the left), with an odd opponent taking the top-cap apex. Slots are spaced a full seat
- *    apart, and [stadiumRequiredRy] grows ry so they always fit.
- *  - horizontal stadium (stadium=true, ry < rx): hero on the bottom edge; opponents evenly
- *    spaced along the top edge, facing the hero across the felt.
+ * Geometry for ScriptView.Ring, Android-free for unit testing; values in px, [childW]/[childH] the
+ * largest seat.
+ *   ellipse: equal angles from the bottom, child 0 at the bottom.
+ *   vertical stadium (ry >= rx): child 0 on the bottom cap, the rest up the right side and down the
+ *     left, an odd one at the top; [stadiumRequiredRy] grows ry to fit.
+ *   horizontal stadium: child 0 on the bottom edge, the rest spread along the top.
  */
 fun ringOffsets(n: Int, rx: Double, ry: Double, stadium: Boolean, childW: Double = 0.0, childH: Double = 0.0): List<Pair<Double, Double>> {
     if (n <= 0) return emptyList()

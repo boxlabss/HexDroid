@@ -18,14 +18,9 @@
 package com.boxlabs.hexdroid.crypto
 
 /**
- * Anonymous sealed box (spec §4): encrypt a payload TO a recipient's DH public key.
- * Anyone can seal; only the holder of the DH seed can open. Confidential by the
- * recipient's key alone, which is why a sealed invite is safe over an unencrypted PM.
- *
- *   seal:  epk fresh; shared = dh(esk, rpk)
- *          okm   = HKDF(shared, salt = epk‖rpk, info = SEAL, 44)
- *          key   = okm[0:32]; nonce = okm[32:44]   (epk fresh ⇒ key/nonce unique ⇒ no GCM reuse)
- *          blob  = epk(32) ‖ AES-256-GCM(key, nonce, plaintext, aad)
+ * Anonymous sealed box: encrypt to a recipient's DH public key; only its holder can open it. A
+ * fresh ephemeral key per seal gives a unique key and nonce: key || nonce = HKDF(dh(esk, rpk), salt
+ * = epk || rpk, info = SEAL, 44), blob = epk || AES-256-GCM(key, nonce, plaintext, aad).
  */
 object AgeSeal {
     private val INFO = "hexdroid/+AGE/seal/v1".encodeToByteArray()
@@ -54,14 +49,10 @@ object AgeSeal {
 }
 
 /**
- * Signal-style Double Ratchet for 1:1 PMs, forward secrecy + post-compromise security
- * on top of [AgeIdentity]. This is the engine the `+AGE` E2eCipher will wrap; the
- * interactive 3-DH handshake that seeds it is in [AgeHandshake].
- *
- * Symmetric-key (chain) ratchet: KDF_CK = HMAC(ck, 0x01)→messageKey, HMAC(ck, 0x02)→ck'.
- * DH ratchet: each direction change generates a fresh X25519 ratchet keypair and folds
- * DH(ours, theirs) into the root key. Out-of-order messages are handled by storing
- * skipped message keys, capped by [MAX_SKIP] to bound a memory-exhaustion DoS.
+ * Double Ratchet for 1:1 PMs (forward secrecy and post-compromise security), seeded by
+ * [AgeHandshake]. Chain step: HMAC(ck, 0x01) is the message key, HMAC(ck, 0x02) the next chain key;
+ * each direction change folds a fresh X25519 DH into the root key. Skipped keys for out-of-order
+ * messages are capped at [MAX_SKIP].
  */
 class AgeRatchet private constructor(
     private val p: AgePrimitives,
@@ -289,16 +280,13 @@ class AgeRatchet private constructor(
 }
 
 /**
- * Interactive 3-DH handshake that seeds an [AgeRatchet] (an online-friendly X3DH-lite —
- * no prekey server, since both peers are connected to IRC). Two messages:
- *
- *   A → B : HELLO  = seal_B( sign_A( A.identity ‖ EK_A_pub ‖ B.dh_pub ) )
- *   B → A : ACK    = seal_A( sign_B( EK_B_pub ‖ A.identity ‖ EK_A_pub ‖ B.sig_pub ) )
- *
- * Shared secret (initiator A, responder B):
- *   SK = HKDF( DH(IK_A, EK_B) ‖ DH(EK_A, IK_B) ‖ DH(EK_A, EK_B) )
- * Mutual auth comes from the identity keys in the DHs + the signatures; ephemeral
- * secrecy from EK_A/EK_B. (We omit DH(IK_A,IK_B) to preserve deniability, like X3DH.)
+ * Interactive 3-DH handshake that seeds an [AgeRatchet], X3DH without a prekey server since both
+ * peers are online:
+ *   A -> B: HELLO = seal_B(sign_A(A.identity || EK_A || B.dh))
+ *   B -> A: ACK   = seal_A(sign_B(EK_B || A.identity || EK_A || B.sig))
+ *   SK = HKDF(DH(IK_A, EK_B) || DH(EK_A, IK_B) || DH(EK_A, EK_B))
+ * The identity DHs and signatures give mutual authentication; DH(IK_A, IK_B) is omitted for
+ * deniability.
  */
 object AgeHandshake {
     private val SK_INFO = "hexdroid/+AGE/handshake/v1".encodeToByteArray()
@@ -408,25 +396,13 @@ object AgeHandshake {
 }
 
 /**
- * Encrypted group game channel (spec §6, §8). Holds the per-game key K_G and does
- * sign-then-encrypt outbound/decrypt-then-verify inbound. The shared key gives
- * confidentiality from outsiders; per-sender Ed25519 signatures give authentication
- * BETWEEN players (a shared key alone lets any member forge as any other).
- *
- *   out: inner = canonical(gameId, epoch, seq, senderFp, move)
- *        sig   = sign(my_sig_seed, MSG_TAG ‖ inner)
- *        k_s   = HKDF(K_G, info = MSG_KEY_INFO ‖ senderFp ‖ be32(epoch))   per-sender message key
- *        nonce = senderFp[0:8] ‖ be32(seq)
- *        ct    = AES-256-GCM(k_s, nonce, inner‖sig, aad = MSG_AAD ‖ gameId ‖ senderFp ‖ be32(seq))
- *
- * Deriving a per-sender key k_s from K_G (rather than encrypting under K_G directly) is what
- * stops the truncated-fingerprint nonce from causing GCM (key, nonce) reuse: the nonce only
- * carries 8 bytes of senderFp, so two members with a grindable 64-bit fingerprint-prefix
- * collision would otherwise share a nonce under the one shared key. Distinct identities derive
- * distinct k_s, so a prefix collision is harmless. See [messageKeyFor].
- *
- * Membership: [rekey] on removal (the removed member keeps the old K_G, so anything
- * they must not read uses the new one). Re-sealing K_G to members is [AgeInvite]'s job.
+ * Encrypted group game channel holding the group key K_G. Outbound is sign-then-encrypt, inbound
+ * decrypt-then-verify: K_G keeps outsiders out, and per-sender Ed25519 signatures stop members
+ * forging each other.
+ *   inner = canonical(gameId, epoch, seq, senderFp, move); sig = sign(inner)
+ *   k_s   = HKDF(K_G, senderFp, epoch) (see [messageKeyFor]); nonce = senderFp[0:8] || seq
+ *   ct    = AES-256-GCM(k_s, nonce, inner || sig)
+ * [rekey] on removal; re-sealing K_G to members is [AgeInvite]'s job.
  */
 class AgeChannel(
     private val p: AgePrimitives,
@@ -518,17 +494,10 @@ class AgeChannel(
     }
 
     /**
-     * Per-sender AES-256-GCM message key, derived from the shared group key.
-     *
-     * The wire nonce (see [nonceFor]) only carries the first 8 bytes of the sender's fingerprint,
-     * so under a single shared group key two members whose fingerprints collide in those 64 bits
-     * (grindable at ~2^64 targeted, or ~2^32 by birthday for two attacker-chosen identities) would
-     * reuse a (key, nonce) pair and break GCM. Binding the FULL fingerprint plus the epoch into a
-     * per-sender key removes that: distinct identities always get distinct keys, so a fingerprint
-     * PREFIX collision is harmless. The inner Ed25519 signature already prevents impersonation; this
-     * closes the AEAD-layer confidentiality gap so the group cipher meets the 128-bit bar on its own.
-     *
-     * fpHex is lowercased so both sides derive the same key regardless of wire-case.
+     * Per-sender message key from the group key, bound to the full fingerprint and epoch. The nonce
+     * only carries 8 bytes of the fingerprint, so under one shared key a fingerprint-prefix
+     * collision would reuse a GCM nonce; distinct keys per identity make that harmless. fpHex is
+     * lowercased so both sides agree.
      */
     private fun messageKeyFor(fpHex: String): ByteArray =
         p.hkdfSha256(
@@ -573,13 +542,9 @@ class AgeChannel(
 }
 
 /**
- * Game invite (spec §5): a signed payload, sealed to the invitee.
- *
- *   signed = canonical(payload) ‖ sig(host_sig_seed, INVITE_TAG ‖ canonical(payload))
- *   blob   = seal(invitee_dh_pub, signed, aad = INVITE_AAD ‖ invitee_nick ‖ game_id)
- *
- * Verify: open > split signed > verify host signature against the PINNED host sig key >
- * check expiry, unseen game_id, and that we're in members.
+ * Game invite: a payload signed by the host and sealed to the invitee, with the invitee's nick and
+ * the game id as AAD. To accept: open, verify against the pinned host key, then check expiry, that
+ * the game id is unseen and that we are a member.
  */
 object AgeInvite {
     private val SIGN_TAG = "hexdroid/+AGE/invite-sign/v1".encodeToByteArray()
@@ -676,11 +641,8 @@ object AgeInvite {
 }
 
 /**
- * `AGE ...` PRIVMSG framing (spec §7). One sub-protocol verb space carried in PRIVMSG,
- * same lineage as CTCP/DCC; non-+AGE clients ignore it. Large blobs are base64'd and
- * chunked under the ~512-byte line limit, then reassembled.
- *
- * Line shapes:
+ * `AGE ...` framing in PRIVMSG, ignored by other clients. Large blobs are base64-encoded and
+ * chunked under the line limit.
  *   AGE IDENT 1 <b64(ed)> <b64(dh)> <createdAt> <b64(sig)>
  *   AGE INVITE <id> <i>/<n> <b64chunk>
  *   AGE MSG <gameId> <senderFp> <epoch> <seq> <b64(ct)>

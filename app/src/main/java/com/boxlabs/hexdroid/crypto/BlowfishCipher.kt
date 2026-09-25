@@ -8,43 +8,12 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Blowfish encryption for the `+OK` wire scheme, AKA FiSH. Maintained for
- * interoperability with HexChat's fishlim plugin and other legacy IRC clients.
- *
- * **This is not a modern cipher and not recommended for new conversations.**
- * Blowfish has a 64-bit block size, which makes it vulnerable to birthday
- * collisions on long-running sessions, and the FiSH key-exchange protocol
- * (DH-1080) has been broken for over a decade. Use [AesGcmCipher] (+AGM) for
- * any new pairing. The implementation here exists so users can read what
- * their HexChat-using friends are sending and reply without changing their
- * existing key material - migration UX, nothing more.
- *
- * Two wire formats exist in the wild:
- *
- *   +OK <fishbase64>     ECB mode. The historical default. Each 8-byte plaintext
- *                        block is encrypted independently, so identical plaintexts
- *                        produce identical ciphertexts (visible pattern in long
- *                        repeated content). Encoded with a custom base64 alphabet
- *                        (./0-9A-Za-z) emitting 12 chars per 8-byte block.
- *
- *   +OK *<stdbase64>     CBC mode. Newer (~2009+). 8-byte random IV prefixed to
- *                        the ciphertext, all encoded with STANDARD base64
- *                        (RFC 4648 with +/= alphabet). Zero-padding to the block
- *                        size (FiSH/Mircryption convention - NOT PKCS#5; the
- *                        receiver strips trailing NUL bytes).
- *
- * Decoding tries CBC first when the payload starts with `*`, otherwise ECB.
- * Encoding always emits CBC (the more secure of the two) so a HexDroid user
- * who turns on Blowfish sending gets the best the protocol offers, but
- * receivers handle both because in-the-wild fishlim users still send ECB.
- *
- * Key handling: unlike AGM (32 random bytes), FiSH keys are user-typed
- * passphrases ranging from a few characters to 56 bytes. The passphrase is
- * fed to Blowfish as the raw key. No KDF, no salt, no stretching - matching
- * fishlim's behaviour exactly. This is one of the protocol's biggest
- * weaknesses (passphrases like "test123" become trivially brute-forceable
- * keys) and we don't try to paper over it: the EncryptionDialog warns users
- * who pick Blowfish, and short passphrases get an inline length warning.
+ * Blowfish for the `+OK` (FiSH) scheme, for interoperability with fishlim and other legacy clients
+ * only; not recommended (64-bit blocks, passphrase used directly as the key with no KDF, as fishlim
+ * does).
+ *   +OK <fishbase64>  ECB, fishlim's base64 alphabet, 12 chars per 8-byte block
+ *   +OK *<base64>     CBC, random 8-byte IV, standard base64, zero padding
+ * Decoding tries CBC when the payload starts with `*`, else ECB; encoding always uses CBC.
  */
 internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
     init {
@@ -155,20 +124,9 @@ internal class BlowfishCipher(private val key: ByteArray) : E2eCipher {
         }
 
         /**
-         * fishlim's custom base64 alphabet: 64 characters from `./0-9a-zA-Z`.
-         * Differs from RFC base64 in three ways:
-         *  - alphabet order (no `+/=`, uses `.` and `/` at positions 0-1, then
-         *    digits, then **lowercase a-z, then uppercase A-Z** - lowercase first)
-         *  - encoding direction: every 8 ciphertext bytes produce 12 chars
-         *    (instead of standard base64's 4 chars per 3 bytes), reading the
-         *    least-significant 6 bits first
-         *  - block layout: each 8-byte block is two big-endian 32-bit words
-         *    (left = bytes 0-3, right = bytes 4-7); the first 6 chars encode the
-         *    *right* word and the next 6 encode the *left* word
-         *
-         * The decoder below mirrors the canonical FiSH encoder.
-         * No tolerance: an unknown character returns null
-         * rather than guessing.
+         * fishlim's base64: alphabet `./0-9a-zA-Z` (lowercase before uppercase); each 8-byte block
+         * becomes 12 characters, the right 32-bit word first, least-significant 6 bits first. An
+         * unknown character fails the decode.
          */
         private val FISH_ALPHABET = "./0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         private val FISH_INDEX: IntArray = IntArray(128).also { idx ->

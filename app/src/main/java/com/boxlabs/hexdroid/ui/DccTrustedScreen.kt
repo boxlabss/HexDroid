@@ -16,9 +16,13 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.boxlabs.hexdroid.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -119,6 +123,9 @@ fun DccTrustedScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // Edge-to-edge: the keyboard doesn't shrink the window, so keep the content above it.
+                .consumeWindowInsets(padding)
+                .imePadding()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {

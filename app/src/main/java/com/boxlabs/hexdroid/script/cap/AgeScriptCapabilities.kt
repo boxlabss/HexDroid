@@ -28,17 +28,12 @@ import com.boxlabs.hexdroid.crypto.AgeStore
 import com.boxlabs.hexdroid.crypto.AgeWire
 
 /**
- * The `age.*` capability surface exposed to scripts — the last pillar of "features are
- * scripts". This is GENERAL crypto plumbing (any script can build an E2E feature), not
- * poker-specific: the script orchestrates, this native adapter holds the keys and does
- * the signing/encryption. Wire `capability()` from the VM's ScriptHost to here.
- *
- * Sync capabilities return a string (lists space-joined). Inbound traffic is delivered
- * back to the script as SIGNALs via [raiseSignal]. The engine keys handlers under the
- * uppercased "SIGNAL:NAME" form (see HexParser / ScriptEngine.dispatch), so the raised
- * names MUST carry that prefix or `on SIGNAL:age_msg` never matches:
- *   - `SIGNAL:AGE_MSG`  : a decrypted group message. fields: from=<fp>, chan=<channel>; args = move tokens.
- *   - `SIGNAL:AGE_DEAL` : a sealed payload addressed to us. fields: data=<plaintext>.
+ * The `age.*` capability for scripts: general E2E plumbing where the script orchestrates and this
+ * adapter holds the keys, signs and encrypts. Synchronous calls return strings (lists
+ * space-joined). Inbound traffic is raised as SIGNALs, which must carry the "SIGNAL:" prefix to
+ * match handlers:
+ *   SIGNAL:AGE_MSG   decrypted group message; from=<fp>, chan=<channel>, args = move tokens
+ *   SIGNAL:AGE_DEAL  sealed payload for us; data=<plaintext>
  */
 class AgeScriptCapabilities(
     private val p: AgePrimitives,

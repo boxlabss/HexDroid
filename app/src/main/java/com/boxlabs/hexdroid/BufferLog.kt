@@ -67,24 +67,15 @@ data class BufferLog(
     )
 
     /**
-     * Offer [msg] to the log, rejecting it when its msgid or signature is already known or
-     * [knownDuplicate] is set. A rejected message still contributes its identity.
+     * Add [msg] unless its msgid or signature is already known or [knownDuplicate] is set; a
+     * rejected message still records its identity.
      *
-     * Signatures are second-resolution, so they are only checked for a message that could be
-     * a replay: two identical live lines in one second are two messages, not one seen twice.
-     *
-     * [floorMs] is the newest timestamp of the block read from disk. A message placed out of
-     * order stops below any line stamped at or before it, so it cannot sink into or above that
-     * block.
-     *
-     * [skewSeconds] is how far apart two copies may be stamped and still match. Our own lines
-     * warrant [OWN_SIGNATURE_SKEW_SECONDS]: the logged copy carries the device's send time and
-     * the server's copy the time it arrived, which a send queue can put well apart.
-     *
-     * [repeatsOnJoin] is for lines a server sends again on every join, such as a channel's
-     * entry notice. Earlier copies with the same sender and text, from the disk log or an
-     * earlier join and whatever their time, are removed and [msg] is added at the end, so it
-     * appears where the user just walked in, once.
+     * [floorMs]: newest timestamp of the block read from disk; an out-of-order message is never
+     * placed at or before it.
+     * [skewSeconds]: how far apart two copies may be stamped and still match
+     * ([OWN_SIGNATURE_SKEW_SECONDS] for our own lines).
+     * [repeatsOnJoin]: for lines resent on every join; earlier copies are removed and [msg] is
+     * appended once.
      */
     fun insert(
         msg: UiMessage,
@@ -141,14 +132,10 @@ data class BufferLog(
         copy(messages = place(messages, marker, MessageOrigin.REPLAY)).trimmed(cap)
 
     /**
-     * Merge a block delivery (a finished backfill, a disk preload) into the log, dropping
-     * anything already known and placing the rest by timestamp. Incoming messages are
-     * deduplicated against the log and against each other.
-     *
-     * [growCapacity] raises [extraCapacity] by the number added, bounded by [maxExtra], so
-     * the trim cannot evict them. A disk preload passes false: it fills the buffer to its
-     * normal depth rather than past it. [isOwn] selects the messages matched with
-     * [OWN_SIGNATURE_SKEW_SECONDS].
+     * Merge a block delivery (finished backfill, disk preload) into the log, deduplicated and
+     * placed by timestamp. [growCapacity] raises [extraCapacity] by the number added, up to
+     * [maxExtra], so the trim cannot evict them; a disk preload passes false. [isOwn] selects
+     * messages matched with [OWN_SIGNATURE_SKEW_SECONDS].
      */
     fun merge(
         incoming: List<UiMessage>,
@@ -229,12 +216,8 @@ data class BufferLog(
         copy(extraCapacity = (extraCapacity + count).coerceAtMost(maxExtra))
 
     /**
-     * Trim the front of the buffer down to [baseCap] plus [extraCapacity].
-     *
-     * Evicted identities are removed one by one rather than rebuilt from what is retained,
-     * which would cost a full pass per message once the buffer sits at its cap. Two messages
-     * sharing a signature lose it when the first is evicted, letting a later duplicate
-     * through; that is the cheaper failure.
+     * Trim the front of the buffer to [baseCap] plus [extraCapacity], removing evicted identities
+     * one by one. Two messages sharing a signature lose it when the first is evicted.
      */
     fun trimmed(baseCap: Int): BufferLog {
         val cap = (baseCap + extraCapacity).coerceAtLeast(1)
@@ -283,13 +266,9 @@ data class BufferLog(
         copy(messages = messages.addingAt(index.coerceIn(0, messages.size), divider))
 
     /**
-     * Insert [incoming] as one block, keeping the order given, at the position its newest
-     * message belongs to.
-     *
-     * The block itself is not woven in by timestamp: disk logs and server history overlap,
-     * and interleaving them by date leaves the divider between them with nothing to divide.
-     * Where the block sits is still decided by time, so a log read that finishes after a
-     * page of older history was fetched lands below that page rather than on top of it.
+     * Insert [incoming] as one block in the given order, at the position its newest message belongs
+     * to by time. The block is not interleaved, so disk logs and server history stay on either side
+     * of the divider.
      */
     fun insertBlock(
         incoming: List<UiMessage>,
@@ -443,13 +422,8 @@ data class BufferLog(
         private fun signatureAt(sec: Long, sender: String, body: String): String = "$sec|$sender|$body"
 
         /**
-         * Reduce a message body to the form shared by every delivery route.
-         *
-         * Disk logs hold it already stripped of formatting codes; the wire copy does not.
-         * Whitespace is collapsed and trimmed because the two routes disagree about it: a
-         * line ending in a space keeps it one way and loses it the other, and comparing the
-         * text verbatim then read the pair as two different messages. Truncated to bound the
-         * key size.
+         * Normalise a message body for comparison across delivery routes: formatting stripped,
+         * whitespace collapsed and trimmed, truncated to bound the key size.
          */
         private fun normaliseText(text: String): String =
             stripIrcFormatting(text)
@@ -459,14 +433,9 @@ data class BufferLog(
                 .lowercase()
 
         /**
-         * [msg]'s body in the form every delivery route shares.
-         *
-         * An action and a system line are both compared as the line "* nick text", because a
-         * log written by older versions holds join, part and quit lines in that shape and
-         * they read back as actions. Their bracketed details are removed first: a join, part
-         * or quit is rendered with the host, account and reason the server gave on that
-         * delivery, and a replay gives less. A replayed JOIN carries no extended-join
-         * account, so the live line and its replay would otherwise never match.
+         * [msg]'s body in the form every delivery route shares. Actions and system lines compare as
+         * "* nick text", with bracketed details removed, since a replay carries less (no host,
+         * account or reason) than the live line.
          */
         private fun normaliseBody(msg: UiMessage): String = when {
             msg.from == null -> normaliseText(stripIrcFormatting(msg.text).replace(BRACKETED, " "))

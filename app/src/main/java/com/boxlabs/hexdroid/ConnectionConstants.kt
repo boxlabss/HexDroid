@@ -31,21 +31,9 @@ object ConnectionConstants {
     const val PING_TIMEOUT_MS = 180_000L  // 180 seconds (3 missed pings at 60s interval)
 
     /**
-     * Client PING interval used while the app is backgrounded (ms).
-     *
-     * Foreground uses 60 s (direct) / 90 s (bouncer) for a responsive lag readout and
-     * fast stall detection. Backgrounded, nobody is watching the lag display and a dead
-     * socket is already caught by [SOCKET_READ_TIMEOUT_MS] plus the ConnectivityManager
-     * callback, so the only job left for our own PING is to keep inbound data flowing.
-     * The IRC server itself PINGs an idle client (the read loop answers with PONG), so a
-     * frequent client PING is not required to avoid an idle-drop. Lengthening this cuts
-     * background CPU/radio wakeups.
-     *
-     * INVARIANT: this MUST stay strictly below [SOCKET_READ_TIMEOUT_MS]. Our PING elicits
-     * a PONG, and that inbound PONG is what resets the socket read deadline. If the
-     * interval met or exceeded the read timeout, a healthy-but-quiet connection would hit
-     * the read timeout and reconnect needlessly. 120 s leaves a 30 s margin for the PONG
-     * round-trip under the 150 s read timeout.
+     * Client PING interval while backgrounded (ms); the foreground uses 60 s direct and 90 s
+     * through a bouncer. Must stay below [SOCKET_READ_TIMEOUT_MS]: the PONG it elicits is what
+     * resets the read deadline.
      */
     const val BACKGROUND_PING_INTERVAL_MS = 120_000L
 
@@ -96,12 +84,8 @@ object ConnectionConstants {
     const val SOCKET_CONNECT_TIMEOUT_MS = 30_000
 
     /**
-     * Timeout for the TLS handshake (ms).
-     *
-     * Applied as SSLSocket.soTimeout *only* during startHandshake(), then restored to
-     * SOCKET_READ_TIMEOUT_MS. This bounds the handshake on devices whose BoringSSL
-     * implementation stalls or emits SSL_ERROR_SYSCALL/"Success" when the radio suspends.
-     * 30 s is generous for any reachable IRC server; typical handshakes finish in < 1 s.
+     * TLS handshake timeout (ms), applied as soTimeout only during startHandshake() and then
+     * restored to SOCKET_READ_TIMEOUT_MS, so a stalled handshake cannot hang the connect.
      */
     const val TLS_HANDSHAKE_TIMEOUT_MS = 30_000
 
@@ -117,20 +101,9 @@ object ConnectionConstants {
     const val TCP_KEEPALIVE = true
 
     /**
-     * Socket read timeout — safety net for dead sockets on mobile.
-     *
-     * Set to 150 s (2.5 min): safely above the 60 s PING interval so normal quiet
-     * channels never trigger it, but short enough to catch sockets that Doze mode
-     * has silently killed.
-     *
-     * Without this, InputStream.read() blocks indefinitely on a dead socket. The OS
-     * may buffer the outgoing PING so writeLine() succeeds, the PONG never arrives,
-     * and the 180 s ping timeout fires — meaning 4+ minutes pass before reconnect.
-     * Many servers detect the dead socket sooner and close it, which is what produces
-     * "Underlying socket operation returned zero" on the next read attempt.
-     *
-     * With 150 s soTimeout: a SocketTimeoutException is thrown after 2.5 min of
-     * silence, the coroutine exits cleanly, and auto-reconnect triggers immediately.
+     * Socket read timeout. Above the 60 s PING interval so quiet channels never trip it, but short
+     * enough to notice a socket that Doze has silently killed; the read then times out and
+     * auto-reconnect starts.
      */
     const val SOCKET_READ_TIMEOUT_MS = 150_000
 

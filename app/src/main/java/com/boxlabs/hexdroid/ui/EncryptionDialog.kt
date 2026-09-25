@@ -66,18 +66,10 @@ import com.boxlabs.hexdroid.crypto.E2eScheme
 import com.boxlabs.hexdroid.R
 
 /**
- * Per-target end-to-end encryption settings dialog.
- *
- * Three schemes:
- *   - +AGM (AES-256-GCM): HexDroid's symmetric default. One shared 256-bit key you
- *     generate and hand to the other party out of band.
- *   - +AGE: identity-based and forward-secret. No key to paste, each device has a
- *     pinned identity (trust-on-first-use), verified by comparing safety numbers.
- *   - Blowfish (FiSH): legacy interop with fishlim.
- *
- * AGM/Blowfish are "set a key" flows; +AGE is an "enable + verify identities" flow,
- * so its panel shows your safety number, the contact's pin/verify status, and a
- * toggle rather than a key field.
+ * Per-target encryption settings dialog for three schemes: +AGM (AES-256-GCM, a shared key
+ * exchanged out of band), +AGE (per-device identities, TOFU-pinned and verified by safety number,
+ * no key to paste) and Blowfish (FiSH, for fishlim interop). +AGE's panel shows the safety number,
+ * the contact's pin status and an enable toggle instead of a key field.
  */
 @Composable
 fun EncryptionDialog(

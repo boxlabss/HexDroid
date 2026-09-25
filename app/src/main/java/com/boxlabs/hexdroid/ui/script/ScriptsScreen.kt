@@ -39,6 +39,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -76,14 +79,9 @@ import com.boxlabs.hexdroid.script.ScriptInfo
 import com.boxlabs.hexdroid.script.ScriptsUiState
 
 /**
- * The Scripts section: see installed scripts, enable/disable them, watch load status,
- * and add a new one (import a file or paste source). The
- * ViewModel owns the [com.boxlabs.hexdroid.script.ScriptManager] and turns these
- * callbacks into manager calls + a refreshed [ScriptsUiState].
- *
- * Two entry points share the same contract and row rendering:
- * [ScriptsScreen]: full-screen management (Settings > Scripts).
- * [ScriptsDialog]: a compact pop-up for quick toggles from the chat overflow.
+ * Scripts management: list, enable/disable, load status, and add by importing or pasting.
+ * [ScriptsScreen] is the full screen (Settings > Scripts); [ScriptsDialog] is a compact version for
+ * the chat overflow.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,6 +95,7 @@ fun ScriptsScreen(
     onPaste: (name: String, source: String) -> Unit,
     onRead: (name: String) -> String? = { null },
     onRevert: (name: String) -> String? = { null },
+    onRestoreDefaults: () -> Unit = {},
 ) {
     var pasting by remember { mutableStateOf(false) }
     var editingName by remember { mutableStateOf<String?>(null) }
@@ -135,17 +134,22 @@ fun ScriptsScreen(
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
-            ScriptsHeader(state)
-
-            if (state.scripts.isEmpty()) {
-                ScriptsEmpty()
-            } else {
-                LazyColumn(
-                    Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(state.scripts, key = { it.name }) { s -> ScriptRow(s, onToggle, onRemove, onEdit = { editingName = it }) }
+            // The header is the list's first item, so it scrolls away instead of permanently taking
+            // space that a landscape phone doesn't have.
+            LazyColumn(
+                Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item(key = "header") { ScriptsHeader(state, onRestoreDefaults) }
+                if (state.scripts.isEmpty()) {
+                    item(key = "empty") { ScriptsEmpty() }
+                } else {
+                    items(state.scripts, key = { it.name }) { s ->
+                        Box(Modifier.padding(horizontal = 12.dp)) {
+                            ScriptRow(s, onToggle, onRemove, onEdit = { editingName = it })
+                        }
+                    }
                 }
             }
 
@@ -203,7 +207,7 @@ fun ScriptsDialog(
                     Text(stringResource(R.string.scripts_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     LazyColumn(
-                        Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                        Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 320.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(state.scripts, key = { it.name }) { s -> ScriptRow(s, onToggle, onRemove) }
@@ -241,7 +245,7 @@ fun ScriptsDialog(
 }
 
 @Composable
-private fun ScriptsHeader(state: ScriptsUiState) {
+private fun ScriptsHeader(state: ScriptsUiState, onRestoreDefaults: () -> Unit = {}) {
     Card(
         Modifier.fillMaxWidth().padding(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -266,6 +270,16 @@ private fun ScriptsHeader(state: ScriptsUiState) {
                      style = MaterialTheme.typography.labelMedium,
                      color = if (bad > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 )
+            }
+            // Bundled scripts the user removed stay removed until brought back here.
+            if (state.missingBundled.isNotEmpty()) {
+                TextButton(
+                    onClick = onRestoreDefaults,
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                ) {
+                    Text(stringResource(R.string.scripts_restore_defaults, state.missingBundled.size))
+                }
             }
         }
     }
@@ -340,7 +354,7 @@ private fun ScriptRow(
 /**
  * Script editor
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ScriptEditorScreen(
     name: String,
@@ -385,7 +399,16 @@ private fun ScriptEditorScreen(
         val vscroll = rememberScrollState()
         val hscroll = rememberScrollState()
         val lineCount = remember(text) { text.count { it == '\n' } + 1 }
-        Row(Modifier.fillMaxSize().padding(pad).verticalScroll(vscroll)) {
+        // The app draws edge-to-edge, so the keyboard doesn't shrink the window: pad for it here, or
+        // the end of the script and the line being typed sit behind it where they can't be scrolled to.
+        Row(
+            Modifier
+                .fillMaxSize()
+                .padding(pad)
+                .consumeWindowInsets(pad)
+                .imePadding()
+                .verticalScroll(vscroll)
+        ) {
             // Line numbers
             val gutter = remember(lineCount) { (1..lineCount).joinToString("\n") }
             Text(

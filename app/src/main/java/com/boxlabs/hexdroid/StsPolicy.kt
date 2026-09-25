@@ -19,22 +19,10 @@
 package com.boxlabs.hexdroid
 
 /**
- * IRCv3 Strict Transport Security (STS) support types.
- *
- * The `sts` capability always carries a value and is never requested with
- * CAP REQ; clients only observe it in CAP LS / CAP NEW:
- *
- *  - On an INSECURE connection the value carries `port=<tlsport>`: the client
- *    must abandon the plaintext connection and reconnect with TLS on that
- *    port. Nothing is persisted yet - the policy only becomes durable once
- *    confirmed over TLS.
- *  - On a SECURE connection the value carries `duration=<seconds>` (and
- *    optionally `preload`): the client persists/refreshes a policy that all
- *    connections to this host must use TLS until now + duration. A duration
- *    of 0 deletes the policy.
- *
- * Kept pure JVM (no Android imports) so it is unit-testable off-device,
- * matching IrcParser and FilehostUpload.
+ * IRCv3 Strict Transport Security (STS). The `sts` capability is observed in CAP LS/NEW, never
+ * requested. On a plaintext connection its `port=` value means reconnect with TLS on that port; on
+ * a TLS connection `duration=` (and optional `preload`) sets or refreshes a persisted policy, and a
+ * duration of 0 deletes it. Pure JVM so it can be unit tested.
  */
 
 /** Parsed value of the `sts` capability. */
@@ -45,15 +33,9 @@ data class StsCapValue(
 )
 
 /**
- * Parse an `sts` capability value such as `duration=2592000,preload` or
- * `port=6697`.
- *
- * Per the spec: tokens are comma-separated `key` or `key=value` pairs; keys
- * are lowercase and case-sensitive; unknown keys are ignored; on duplicate
- * keys the first occurrence wins; invalid values for a known key make that
- * key unusable but do not invalidate the rest. Returns null when neither a
- * usable `port` nor a usable `duration` is present (a valueless or empty
- * `sts` cap is meaningless and must be ignored).
+ * Parse an `sts` value such as `duration=2592000,preload` or `port=6697`: comma-separated keys,
+ * unknown keys ignored, first duplicate wins, an invalid value only disables its own key. Null when
+ * neither a usable port nor duration is present.
  */
 fun parseStsCapValue(raw: String?): StsCapValue? {
     if (raw.isNullOrBlank()) return null
@@ -76,17 +58,15 @@ fun parseStsCapValue(raw: String?): StsCapValue? {
 }
 
 /**
- * A persisted STS policy for one hostname (keyed externally by the
- * lowercased host). [port] is the TLS port learned from an insecure
- * connection's upgrade, kept so a plaintext-configured profile knows where
- * to connect; null when the policy was only ever seen over TLS (the profile
- * port, or 6697, is used instead). [expiresAtMs] is wall-clock epoch millis;
- * the spec's continual-refresh model means every secure connection that
- * advertises a duration pushes this forward.
+ * A persisted STS policy for one host. [port] is the TLS port learned from a plaintext upgrade, or
+ * null. [expiresAtMs] is refreshed by every secure connection that advertises a duration;
+ * [durationSec] is the last one advertised, used to extend the expiry when a secure connection
+ * closes.
  */
 data class StsPolicyEntry(
     val port: Int?,
     val expiresAtMs: Long,
+    val durationSec: Long = 0L,
 ) {
     fun isActive(nowMs: Long): Boolean = expiresAtMs > nowMs
 }

@@ -46,16 +46,9 @@ class ScriptEngine(
     }
 
     /**
-     * Run [block], and never let a script's failure reach the app.
-     *
-     * Every call into a script passes through here. A script is user-written and may divide
-     * by zero, recurse until the stack goes, or hit any other fault the interpreter does not
-     * anticipate; without this the exception unwinds through the event handler and takes the
-     * process with it, which would count against the app's own crash rate.
-     *
-     * Errors are surfaced to the script log so the author can see them. Error and its
-     * subclasses other than StackOverflowError are left alone: OutOfMemoryError and the rest
-     * say the process is no longer healthy and swallowing them hides a real fault.
+     * Run [block] so a script's failure never reaches the app: exceptions and StackOverflowError
+     * are logged to the script log and [fallback] returned. Other Errors (OutOfMemoryError and so
+     * on) propagate, since they mean the process is unhealthy.
      */
     private inline fun <T> guarded(what: String, fallback: T, block: () -> T): T =
         try {
@@ -82,7 +75,15 @@ class ScriptEngine(
         started = true
     }
 
+    /**
+     * Bumped on every reload and shutdown. Timers, HTTP requests and file picks capture it when
+     * started and are dropped on completion if it has changed, so a reloaded script never gets the
+     * callbacks its previous copy scheduled.
+     */
+    @Volatile private var generation = 0
+
     fun shutdown() {
+        generation++
         eventHandlers.clear()
         commandHandlers.clear()
         backend.shutdown()
@@ -100,6 +101,7 @@ class ScriptEngine(
 
     /** Full reload: drop handlers + the interpreter scope, then re-init. Caller re-loads scripts after. */
     fun resetHandlers() {
+        generation++
         eventHandlers.clear()
         commandHandlers.clear()
         backend.reset()
@@ -152,7 +154,10 @@ class ScriptEngine(
             withCtx(ev.network, ev.buffer) {
                 backend.dispatchTransform(
                     handlers,
-                    EventData(network = ev.network, buffer = ev.buffer, text = ev.text),
+                    EventData(
+                        network = ev.network, buffer = ev.buffer, text = ev.text,
+                        fields = mapOf("iscmd" to ev.text.trimStart().startsWith("/").toString()),
+                    ),
                 )
             }
         }
@@ -228,9 +233,10 @@ class ScriptEngine(
             userInitiated: Boolean,
             onResult: (MediaRef?) -> Unit,
         ) {
+            val gen = generation
             host.mediaPick(curNet, curBuf, mimeFilter, owner, userInitiated) { ref ->
                 host.runOnScriptThread {
-                    onResult(ref?.let { MediaRef(it.token, it.name, it.mime, it.size) })
+                    if (gen == generation) onResult(ref?.let { MediaRef(it.token, it.name, it.mime, it.size) })
                 }
             }
         }
@@ -248,9 +254,10 @@ class ScriptEngine(
                 host.runOnScriptThread { onResult(HttpResult(false, 0, "", "network not permitted: $url")) }
                 return
             }
+            val gen = generation
             host.mediaUpload(ScriptUploadRequest(url, token, field, headers, formFields, owner)) { resp ->
                 host.runOnScriptThread {
-                    onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
+                    if (gen == generation) onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
                 }
             }
         }
@@ -293,7 +300,9 @@ class ScriptEngine(
             // Host owns the timer; capture the scheduling context now so the delayed signal fires
             // back on the same network/buffer even if the active window has changed by then.
             val net = curNet; val buf = curBuf
+            val gen = generation
             host.postDelayed(delayMs) {
+                if (gen != generation) return@postDelayed
                 val f = HashMap<String, String>(2)
                 net?.let { f["__net"] = it }; buf?.let { f["__buf"] = it }
                 raiseEvent("SIGNAL:${signal.uppercase()}", f, args)
@@ -312,9 +321,10 @@ class ScriptEngine(
             host.runOnScriptThread { onResult(HttpResult(false, 0, "", "network not permitted: ${req.url}")) }
             return
         }
+        val gen = generation
         host.httpRequest(req) { resp ->
             host.runOnScriptThread {
-                onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
+                if (gen == generation) onResult(HttpResult(resp.ok, resp.status, resp.body, resp.error, resp.location))
             }
         }
     }

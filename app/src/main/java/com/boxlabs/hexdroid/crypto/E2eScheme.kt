@@ -19,18 +19,11 @@
 package com.boxlabs.hexdroid.crypto
 
 /**
- * End-to-end encryption schemes supported by HexDroid.
- *
- * Each scheme has a 3-letter wire prefix that follows the `+` sigil already used by
- * FiSH (`+OK`). Receivers dispatch by prefix so multiple schemes can coexist in a
- * channel during migration.
- *
- *   +OK  <base64>     FiSH Blowfish-CBC.    Legacy. Read-only by default.
- *   +AGM <base64>     HexDroid AES-256-GCM. Modern. PSK-based. v1 of this scheme.
- *   +AGE: identity/forward-secret group scheme. Appended LAST so the AGM/BLOWFISH
- *   ordinals (used in E2eFingerprint) never shift. Recognised here (detect/fromName,
- *   wire prefix, lock icon) but the message path is AgeChannel/AgeWire, not the 1:1
- *   E2eCodec cipher route, see cipherFor.
+ * End-to-end schemes, dispatched by wire prefix so several can coexist:
+ *   +OK  <base64>  FiSH Blowfish (legacy)
+ *   +AGM <base64>  AES-256-GCM with a shared key
+ *   +AGE           identity-based, forward-secret; declared last so the other ordinals don't shift.
+ *     Its messages go through AgeChannel/AgeWire, not E2eCodec (see cipherFor).
  */
 enum class E2eScheme(val wirePrefix: String, val displayName: String) {
     AGM("+AGM", "AES-256-GCM"),

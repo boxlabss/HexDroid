@@ -7,11 +7,7 @@
 -renamesourcefileattribute SourceFile
 
 # Bouncy Castle is used through its low-level org.bouncycastle.crypto.* API rather than a JCA
-# provider, so most of the library is genuinely unreachable and should be stripped. What must
-# survive is anything looked up by name: the JCA plumbing does that even when unused, and R8
-# cannot see through it.
--keep class org.bouncycastle.jcajce.provider.** { *; }
--keep class org.bouncycastle.jce.provider.** { *; }
+# provider, so most of the library is genuinely unreachable and should be stripped.
 -dontwarn org.bouncycastle.**
 -dontwarn javax.naming.**
 
@@ -29,5 +25,3 @@
 # are not shipped.
 -dontwarn kotlinx.coroutines.debug.**
 -keepclassmembers class kotlinx.coroutines.** { volatile <fields>; }
-
-# Compose keeps what it needs through its own rules shipped in the library. Nothing to add.

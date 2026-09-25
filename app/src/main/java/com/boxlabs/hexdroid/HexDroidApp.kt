@@ -59,35 +59,15 @@ class HexDroidApp : Application() {
         super.onCreate()
         repo = SettingsRepository(applicationContext)
 
-        // Smart selection off: a long press in a SelectionContainer hands the tapped range to
-        // the platform TextClassifier, and TextSelection.Request rejects a range it considers
-        // invalid with an IllegalArgumentException that reaches no catch. Chat lines made of
-        // block art, emoji or other non-word characters produce exactly such a range. Nothing
-        // here relies on the word-boundary suggestions, so the feature only costs crashes.
+        // Smart selection off: the platform TextClassifier throws on some selection ranges (block
+        // art, emoji), and nothing here uses its word-boundary suggestions.
         androidx.compose.foundation.ComposeFoundationFlags.isSmartSelectionEnabled = false
 
-        // Foreground/background detection via activity lifecycle callbacks.
-        //
-        // Two defensive measures for OEM devices (OnePlus/OxygenOS, OPPO, Xiaomi):
-        //
-        // 1. Floor `started` at 0. On some OEM ROMs, system overlays (app-lock auth screen,
-        //    notification shade, volume panel) inject onActivityStopped calls that aren't
-        //    matched by a prior onActivityStarted, causing `started` to go negative and
-        //    permanently locking `isForeground` to false for the session.
-        //
-        // 2. Debounce the isForeground > false transition by 500 ms. OEM overlays such as
-        //    volume controls and the quick-settings panel fire a rapid onStop / onStart pair
-        //    (often < 100 ms apart). Without the debounce, `isForeground` flips false during
-        //    that gap and any service-start attempt either races with startForeground() or is
-        //    skipped entirely. With debounce, transient blips are ignored.
-        //    OEM app-lock screens typically put the Activity in onPause (not onStop) while
-        //    the lock UI is showing, so they are unaffected by this debounce.
-        //
-        //    Background-only side effects (cancelTypingOnBackground, flushLogs) live INSIDE
-        //    goBackgroundRunnable for the same reason - firing them on every OEM overlay
-        //    blip would send "typing done" to the network every time the user swipes the
-        //    volume up, and flush a log buffer that's already going to be flushed properly
-        //    when the app is actually backgrounded a second later.
+        // Foreground/background tracking from activity lifecycle callbacks. `started` is floored at
+        // 0, since some OEM overlays send unmatched onActivityStopped calls. Going to background is
+        // debounced by 500 ms so overlay blips (volume panel, quick settings) don't count;
+        // background-only work (typing "done", log flush) runs in the debounced runnable for the
+        // same reason.
         val mainHandler = Handler(Looper.getMainLooper())
         val goBackgroundRunnable = Runnable {
             AppVisibility.isForeground = false
@@ -114,16 +94,9 @@ class HexDroidApp : Application() {
                 // outlived it and the user came back, clear that suppression so connections
                 // resume normally.
                 ircViewModel.onAppForegrounded()
-                // Clear the unread counter on the currently-selected buffer if any.
-                // Messages that arrived while the app was backgrounded increment unread
-                // (because isSelected uses isForeground in its predicate), and on
-                // foreground we want the user to land on a clean buffer - they're
-                // literally looking at it. Without this, the user sees a stale "1" on
-                // the channel they're actively viewing every time they switch away to
-                // another app and come back. Mirrors what openBuffer does when the
-                // user explicitly opens a buffer; here we apply the same logic to the
-                // existing selectedBuffer because the user is implicitly "re-opening"
-                // it by foregrounding the app.
+                // Clear unread on the selected buffer when the app comes back to the foreground:
+                // messages that arrived in the background counted as unread, but this is the buffer
+                // on screen.
                 ircViewModel.consumeUnreadOnForeground()
             }
 

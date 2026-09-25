@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Beállítások</string>
+    <string name="settings_view_one_page">Egy oldal</string>
+    <string name="settings_view_categories">Kategóriák</string>
     <string name="settings_intro_tour">Bevezető</string>
     <string name="settings_intro_tour_desc">Főbb ablakok és vezérlők áttekintése.</string>
     <string name="section_appearance">Megjelenés</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Auto-kapcsolódás indításkor</string>
     <string name="setting_rejoin_on_kick">Visszalépés kirúgáskor</string>
     <string name="setting_rejoin_on_kick_desc">Kirúgást követő automatikus visszalépés csatornára. Ugyanazon csatornáról 60 mp-en belüli második kirúgáskor nincs visszalépés, elkerülendő a +i/+k/+b módok miatti végtelen ismétlődést.</string>
+    <string name="setting_nick_regain">Elsődleges becenév visszaszerzése</string>
+    <string name="setting_nick_regain_desc">Ha foglalt a beceneved, és tartalék becenévvel csatlakozol, néhány percig próbál visszaváltani rá.</string>
     <string name="setting_enable_notifications">Értesítések bekapcsolása</string>
     <string name="setting_notify_highlights">Értesítések kiemelése</string>
     <string name="setting_notify_pm">Privát üzenet értesítések</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Kirúg</string>
     <string name="chat_ban">Kitilt</string>
     <string name="chat_kick_ban_btn">Kirúg+Kitilt</string>
+    <string name="chat_ban_by">Kitiltás alapja</string>
+    <string name="chat_ban_type_host">Gépnév</string>
+    <string name="chat_ban_type_nick">Becenév</string>
+    <string name="chat_ban_type_account">Fiók</string>
+    <string name="chat_ban_type_domain">Tartomány</string>
 
     <!-- Network screens -->
     <string name="networks_title">Hálózatok</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Minden elküldött és fogadott sor megjelenítése hálózatonként egy Raw pufferben. A jelszavak rejtve maradnak. Hibakereséshez.</string>
     <string name="chat_show_less">Kevesebb megjelenítése</string>
     <string name="chat_not_delivered">Nem kézbesítve</string>
+    <string name="chat_status_read">Olvasva</string>
     <string name="vm_multiline_rejected">A kiszolgáló elutasította az üzenetet (%1$s): %2$s</string>
     <string name="network_edit_cap_also">emellett kéri: %1$s</string>
     <string name="network_edit_caps_hint">Az alap IRCv3 funkciók eleve aktívak. Kapcsold be a haladó beállításokhoz.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Mindenki láthatja, amikor éppen üzenetet írsz (piszkozat/gépelés). Adatvédelemi okból, alapból kikapcsolva.</string>
     <string name="setting_receive_typing">Többiek gépelési jelének megjelenítése</string>
     <string name="setting_receive_typing_desc">Tájékoztatás megjelenítése, amikor valaki más csatornán, vagy privátban üzenetet ír.</string>
+    <string name="setting_read_receipts">Olvasási visszaigazolás</string>
+    <string name="setting_read_receipts_desc">Privát üzenetekben jelzi a többieknek, ha elolvastad az üzeneteiket, és mutatja, ha ők elolvasták a tieidet. Csak más HexDroid-felhasználókkal működik.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">A %1$s csatorna átnevezve erre: %2$s</string>
@@ -452,6 +464,13 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="chat_cd_launch_scripts">Szkriptek indítása</string>
     <string name="chat_cd_edit_topic">Topik szerkesztése</string>
     <string name="chat_cd_jump_unread">Ugrás az olvasatlanokhoz</string>
+    <string name="format_bold">Félkövér</string>
+    <string name="format_italic">Dőlt</string>
+    <string name="format_underline">Aláhúzott</string>
+    <string name="format_colour">Szín…</string>
+    <string name="format_clear">Formázás törlése</string>
+    <string name="chat_art_show_as_text">Megjelenítés szövegként</string>
+    <string name="chat_unread_since">%1$s %2$s óta</string>
     <string name="chat_cd_scroll_bottom">Görgetés az aljára</string>
     <string name="chat_cd_close_label">Bezárás: %1$s</string>
     <string name="chat_cd_cancel_reply">Válasz elvetése</string>
@@ -460,6 +479,8 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="chat_reply_to">Válasz neki: %1$s</string>
     <string name="chat_delete_message">Üzenet törlése</string>
     <string name="chat_delete_message_desc">A kiszolgálón keresztül mindenkinél eltávolítja</string>
+    <string name="chat_delete_message_others_desc">Mindenkinél eltávolítja, ha a szerver engedi</string>
+    <string name="chat_delete_message_no_id">Nem törölhető: a szerver nem adott azonosítót ennek az üzenetnek</string>
     <string name="chat_copy_messages">Üzenetek másolása…</string>
     <string name="chat_copy_messages_desc">Válassz ki több üzenetet a másoláshoz</string>
 
@@ -1399,6 +1420,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <!-- ScriptsScreen -->
     <string name="scripts_title">Szkriptek</string>
     <string name="scripts_reload">Újratöltés</string>
+    <string name="scripts_restore_defaults">Alapértelmezett szkriptek visszaállítása (%1$d)</string>
     <string name="scripts_import_file">Fájl importálása…</string>
     <string name="scripts_import">Importálás…</string>
     <string name="scripts_paste">Beillesztés…</string>
@@ -1492,7 +1514,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="cmd_unignore">Felhasználó eltávolítása a tiltólistáról</string>
     <string name="cmd_quit">Kilépés az IRC-ből és a kapcsolat bontása</string>
     <string name="cmd_kick">Felhasználó kirúgása a csatornáról</string>
-    <string name="cmd_ban">Kitiltás: becenév (alapértelmezett), felhasználó, gépnév, tartomány, fiók</string>
+    <string name="cmd_ban">Kitiltás: gépnév (alapértelmezett), becenév, felhasználó, tartomány, fiók</string>
     <string name="cmd_unban">Kitiltás visszavonása (nem becenév alapú kitiltásnál illeszd be a pontos maszkot a /banlist parancsból)</string>
     <string name="cmd_kb">Felhasználó kirúgása és kitiltása (ugyanazok a maszktípusok, mint a /ban esetén)</string>
     <string name="cmd_kickban">A /kb másik neve</string>

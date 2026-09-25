@@ -30,20 +30,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Small bounded image fetcher shared by the two places that render a
- * server-supplied image: the ICON / draft/ICON network icon (Networks screen,
- * sidebar, switcher) and draft/metadata-2 avatars (nick list).
- *
- * Callers are responsible for the policy gate before calling: HTTPS only, the
- * user's image-previews opt-in enabled, and an unproxied profile. That last one
- * matters most - HttpURLConnection does not route through SocksProxy.kt, so
- * fetching a server-supplied URL from a Tor/SOCKS profile would leave the proxy
- * and leak the user's IP. Same fail-closed rule as filehost uploads.
- *
- * Everything else is defence in depth: a hard byte cap so a hostile URL cannot
- * exhaust memory, a decode capped by pixel dimension as well, short timeouts, no
- * redirect following (which also means an https URL can never be bounced to
- * plaintext http), and failures that resolve to "no image" rather than an error.
+ * Bounded image fetcher for server-supplied images (network icons, metadata avatars). Callers must
+ * first check HTTPS, the image-previews opt-in and an unproxied profile, since this bypasses any
+ * proxy. Byte and pixel caps, short timeouts, no redirects; failures mean no image.
  */
 object RemoteImage {
 

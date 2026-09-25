@@ -19,24 +19,17 @@
 package com.boxlabs.hexdroid.script
 
 /**
- * The bridge between [ScriptEngine] and the rest of the app.
- *
- * The engine deliberately knows nothing about [com.boxlabs.hexdroid.IrcViewModel],
- * Android, OkHttp, or Compose. Everything a script can *do* to the outside world
- * goes through this interface, which the viewmodel implements as a thin adapter
- * over its existing private methods (append, privmsg, sendRaw, settings, …).
+ * The bridge from [ScriptEngine] to the app. The engine knows nothing of the ViewModel, Android,
+ * OkHttp or Compose; everything a script does outside itself goes through here.
  */
 interface ScriptHost {
 
     /**
-     * Print a local-only line into a buffer (never sent to the network). This is the
-     * script equivalent of the viewmodel's internal `append(key, from = null, …)`.
+     * Print a local-only line into a buffer; never sent.
      *
-     * @param network network id, or null to use the active network
-     * @param buffer  buffer name (channel / query / "*server*"), or null for the
-     *                currently-selected buffer
-     * @param from    optional nick to attribute the line to; null renders it as a
-     *                system line (the "*** …" style)
+     * @param network Network id, or null for the active network.
+     * @param buffer Buffer name, or null for the selected buffer.
+     * @param from Nick to attribute the line to, or null for a system line.
      */
     fun echo(network: String?, buffer: String?, from: String?, text: String)
 

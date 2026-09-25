@@ -21,33 +21,16 @@ package com.boxlabs.hexdroid.ui
 import androidx.compose.ui.graphics.Color
 
 /**
- * Nick colour assignment
- *
- * Both the sidebar and message nicks use the same stable hash ([colorForNick]) so a
- * nick always appears in the same colour everywhere.  The sidebar additionally runs a
- * lightweight forward-scan pass ([nicklistColors]) that detects when two alphabetically
- * adjacent nicks land within [MIN_HUE_GAP]° of each other and nudges the later one to
- * the opposite side of the wheel, guaranteeing no two consecutive sidebar entries share
- * a similar hue.  Because this nudge is applied only at display time and held in a
- * remember-cached map, it carries no persistent memory overhead.
- *
- * Palette: 45 hue slots spanning the full wheel while skipping two visually muddy zones:
- *   • yellow-green (58–91°): hard to read on both light and dark backgrounds
- *   • cyan         (168–204°): low contrast, visually confusable with blue/green
+ * Nick colours. Every nick gets a stable hash-based colour ([colorForNick]) everywhere. The sidebar
+ * also nudges a nick whose hue is within [MIN_HUE_GAP] of its neighbour's ([nicklistColors]). The
+ * palette skips the hard-to-read yellow-green and cyan bands.
  */
 object NickColors {
 
     /**
-     * 45 hue slots — midpoints interpolated within each clean arc to halve the
-     * spacing from ~12° to ~6°, doubling the effective palette without adding
-     * any entries in the two muddy zones.
-     *
-     * Arc 1 — reds / oranges / ambers (0–50°):    9 slots, ~6° apart
-     * Arc 2 — greens / teals          (91–163°):  13 slots, ~6° apart
-     * Arc 3 — blues / purples / pinks (204–347°): 23 slots, ~6–7° apart
-     *
-     * Combined with 8 lightness/saturation bands: 45 × 8 = 360 unique colour
-     * slots before any repeat (up from 24 × 8 = 192).
+     * 45 hue slots about 6 degrees apart across three arcs (reds to ambers, greens to teals, blues
+     * to pinks), avoiding the two muddy bands. With 8 lightness/saturation bands, 360 colours
+     * before a repeat.
      */
     private val hueSlots = floatArrayOf(
         // Arc 1: reds → ambers (0–50°)
@@ -105,14 +88,7 @@ object NickColors {
         Band(0.42f, 0.72f),  // medium vivid
     )
 
-    /**
-     * Stable hash-based colour for [baseNick].
-     *
-     * This is the single source of truth used for message rows, query window titles,
-     * and any other place where a nick needs a colour without access to the full sorted
-     * nicklist.  The colour depends only on the nick string and the dark/light mode —
-     * it never changes because of who else happens to be online.
-     */
+    /** Stable colour for [baseNick], depending only on the nick and the background luminance. */
     fun colorForNick(baseNick: String, bgLum: Float): Color {
         val bands   = if (bgLum < 0.5f) darkBgBands else lightBgBands
         val h       = mixHash(baseNick.lowercase().hashCode())
@@ -130,23 +106,9 @@ object NickColors {
     }
 
     /**
-     * Pre-compute sidebar colours for a sorted nicklist in a single O(n) pass.
-     *
-     * Each nick starts from its stable [colorForNick] hue.  A forward scan then checks
-     * consecutive pairs: if two adjacent hues are within [MIN_HUE_GAP]° of each other
-     * (shortest arc on the 360° wheel), the later nick is rotated by [CONFLICT_NUDGE_DEG]°
-     * so it lands on a perceptually distinct hue while keeping the same saturation and
-     * lightness band.
-     *
-     * The returned list is parallel to [sortedBaseNicks] — index N is the sidebar colour
-     * for `sortedBaseNicks[N]`.  Build a `Map<String, Color>` once (inside `remember`)
-     * for O(1) lookup during LazyColumn rendering.
-     *
-     * Memory: one `FloatArray(n)` for intermediate hues + the returned `List<Color>`,
-     * both the same size as the input.  No persistent state is stored anywhere.
-     *
-     * For nicks that need no nudge the returned colour is identical to [colorForNick],
-     * so sidebar and message colours match for the vast majority of nicks.
+     * Sidebar colours for a sorted nicklist in one pass: each nick starts from [colorForNick], and
+     * a nick within [MIN_HUE_GAP] of the previous one is rotated by [CONFLICT_NUDGE_DEG]. The
+     * result is parallel to [sortedBaseNicks]; unnudged nicks keep their message colour.
      */
     fun nicklistColors(sortedBaseNicks: List<String>, bgLum: Float): List<Color> {
         if (sortedBaseNicks.isEmpty()) return emptyList()

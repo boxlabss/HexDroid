@@ -212,14 +212,8 @@ private sealed interface FetchResult {
     data object Error : FetchResult   // network, 404, decode failure, timeout, etc.
 }
 
-// Explicit timeouts prevent a stalled image server from hanging an IO coroutine
-// indefinitely. OkHttp's defaults (10 s connect, 10 s read) are intentionally not relied
-// upon here; spelling them out makes the intended behaviour clear and easy to tune.
-//
-// The client is a process-wide singleton built lazily on first use so we can pass in a
-// Context for the disk cache directory. A 20 MB LRU cache means YouTube thumbnails and
-// inline images are served from disk on subsequent views (e.g. scrolling back through
-// history) without any network round-trip.
+// Process-wide HTTP client with explicit timeouts and a 20 MB disk cache, so thumbnails and images
+// aren't re-downloaded when scrolling back. Built lazily for the cache directory.
 @Volatile private var _httpClient: OkHttpClient? = null
 
 private fun httpClient(ctx: Context): OkHttpClient =
@@ -285,17 +279,8 @@ private suspend fun fetchBitmap(url: String, ctx: Context): FetchResult = withCo
                     bitmap = null, rawBytes = bytes, isGif = true
                 )
 
-                // Decode with explicit options to avoid the two bitmap-state edge cases
-                // that crash BaseRecordingCanvas.drawBitmap via throwIfCannotDraw():
-                //   1. Hardware bitmaps - some BitmapFactory paths on Android 9+ can
-                //      promote to Bitmap.Config.HARDWARE if the system is short on memory.
-                //      Hardware bitmaps cannot be drawn into a recording (display-list)
-                //      canvas without specific support, and Compose's BitmapPainter draws
-                //      into one. Forcing ARGB_8888 keeps the bitmap software-backed.
-                //   2. Non-premultiplied ARGB_8888 - the canvas requires premultiplied
-                //      alpha for ARGB_8888 with alpha channel; non-premultiplied throws
-                //      "Canvas: trying to use a non-premultiplied bitmap". Forcing
-                //      inPremultiplied = true normalises this.
+                // Decode as software ARGB_8888 with premultiplied alpha: a hardware bitmap or a
+                // non-premultiplied one throws when Compose draws it.
 
                 // Downsample to roughly the on-screen size
                 val targetMaxDim = 1600
@@ -482,26 +467,13 @@ private fun TwitterVideoPlayer(videoUrl: String, onClose: () -> Unit) {
 }
 
 /**
- * Renders an inline image preview, YouTube thumbnail+player, or Twitter/X media preview for [url].
- *
- * Image:
- *   Shows a small "Load preview" button. Nothing is downloaded until tapped.
- *   Once loaded, the image is shown. State is saved across recompositions so
- *   switching buffers and back doesn't re-download.
- *
- * YouTube:
- *   1. Thumbnail auto-loads from img.youtube.com
- *   2. Pressing play launches an inline player (using https://github.com/PierfrancescoSoffritti/android-youtube-player library)
- *
- * Twitter/X:
- *   1. Thumbnail auto-loads via the open api.fxtwitter.com metadata API (no auth needed)
- *   2. If the tweet has a video and fxtwitter returned a host-validated CDN URL, a play icon
- *      is shown and tapping launches an inline Media3 player. If no playable URL is available
- *      (text-only, untrusted host, or API gap), tapping opens the tweet URL in the browser.
- *   3. Photo-only tweets show the image inline with no play overlay.
- *
- * SVGs blocked by extension check AND Content-Type validation.
- * Image downloads capped at 5 MB with MIME-type allow-list.
+ * Inline preview for [url].
+ *   Image: a "Load preview" button; nothing downloads until tapped, and the result survives buffer
+ *     switches.
+ *   YouTube: the thumbnail loads automatically; play opens an inline player.
+ *   Twitter/X: a thumbnail from api.fxtwitter.com; a host-validated video plays inline, otherwise
+ *     tapping opens the tweet.
+ * SVGs are blocked; downloads are capped at 5 MB with a MIME allow-list.
  */
 
 /**
@@ -733,14 +705,8 @@ fun InlinePreview(
                                 modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                             )
                         } else if (s.bitmap != null && !s.bitmap.isRecycled && s.bitmap.width > 0 && s.bitmap.height > 0) {
-                            // Drawing a recycled or zero-dimension bitmap throws RuntimeException
-                            // from BaseRecordingCanvas.drawBitmap → throwIfCannotDraw, taking down
-                            // the whole composition. The bitmap is held by PreviewState.Ready so
-                            // it should remain valid for the composition's lifetime, but Android
-                            // can recycle hardware-backed bitmaps under memory pressure, and a
-                            // small-but-nonzero number of malformed images decode to 0×N or N×0.
-                            // The guard turns either case into a silently-blank preview rather
-                            // than a crash.
+                            // A recycled or zero-sized bitmap throws when drawn, so draw nothing in
+                            // that case.
                             Image(
                                 bitmap             = s.bitmap.asImageBitmap(),
                                 contentDescription = when {

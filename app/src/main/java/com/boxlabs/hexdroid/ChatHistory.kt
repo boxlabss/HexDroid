@@ -78,12 +78,8 @@ data class BackfillResult(
 )
 
 /**
- * A finished catch-up page, reported so the caller can decide whether the gap it was
- * filling is closed.
- *
- * A catch-up's messages are not collected here: they belong at the bottom of the buffer and
- * arrive one at a time like live traffic, which is what arms the history divider. Only the
- * shape of the reply is reported.
+ * A finished catch-up page, reported so the caller can decide whether the gap is closed. Catch-up
+ * messages arrive one at a time like live traffic; only the reply's shape is reported here.
  */
 data class CatchupPage(
     val bufferKey: String,
@@ -101,12 +97,9 @@ data class CatchupPage(
 )
 
 /**
- * Tracks CHATHISTORY requests in flight and the history divider.
- *
- * One backfill per buffer. While its reply batch arrives, messages are captured here rather
- * than going into the buffer one at a time, so the page is merged in a single state update.
- * Replies are correlated by labeled-response label where available, by target otherwise: a
- * bouncer can have a catch-up and a backfill open for one target at once.
+ * Tracks CHATHISTORY requests in flight and the history divider, one backfill per buffer. A
+ * backfill's reply is collected and merged in one state update. Replies are matched by label where
+ * available, otherwise by target.
  */
 class ChatHistoryController(
     private val scope: CoroutineScope,
@@ -297,12 +290,8 @@ class ChatHistoryController(
     }
 
     /**
-     * The buffer key of the only backfill open on [netId], or null when there are none or
-     * more than one.
-     *
-     * For a rejection that names no target: something definitely failed, and leaving a
-     * request open guarantees a stalled spinner, so closing the single candidate is better
-     * than waiting for the watchdog. With several open there is no way to tell which.
+     * The buffer key of the only backfill open on [netId], or null when there are none or several.
+     * Used to close a request when a rejection names no target.
      */
     fun soleOutstanding(netId: String, unlabelledOnly: Boolean = false): String? =
         backfills.entries
@@ -360,12 +349,9 @@ class ChatHistoryController(
     }
 
     /**
-     * Match a reply to an open backfill, or null when it belongs to something else.
-     *
-     * A label decides outright. Without one, order does: a buffer with an outstanding
-     * catch-up gets the first reply, since catch-ups are requested on connect and backfills
-     * only when the user scrolls back. [consume] is set only by the close, so one batch's
-     * open and close reach the same verdict.
+     * Match a reply to an open backfill, or null when it belongs to something else. A label decides
+     * outright; otherwise an outstanding catch-up gets the first reply. Only the close sets
+     * [consume], so a batch's open and close agree.
      */
     private fun resolve(bufferKey: String?, label: String?, consume: Boolean): Match {
         if (label != null) {

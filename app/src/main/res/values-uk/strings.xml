@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Налаштування</string>
+    <string name="settings_view_one_page">Одна сторінка</string>
+    <string name="settings_view_categories">Категорії</string>
     <string name="settings_intro_tour">Ознайомчий тур</string>
     <string name="settings_intro_tour_desc">Швидкий огляд основних екранів і скорочень.</string>
     <string name="section_appearance">Вигляд</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Підключатися під час запуску</string>
     <string name="setting_rejoin_on_kick">Повторно входити після кіку</string>
     <string name="setting_rejoin_on_kick_desc">Автоматично повертатися до каналу після кіку. Другий кік у тому самому каналі протягом 60 секунд не призводить до повторного входу, щоб уникнути циклів через режими +i/+k/+b.</string>
+    <string name="setting_nick_regain">Повертати основний нік</string>
+    <string name="setting_nick_regain_desc">Якщо ви підключилися під запасним ніком, бо ваш зайнятий, кілька хвилин намагатися повернути його.</string>
     <string name="setting_enable_notifications">Увімкнути сповіщення</string>
     <string name="setting_notify_highlights">Сповіщення про виділення</string>
     <string name="setting_notify_pm">Сповіщення про приватні повідомлення</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Кікнути</string>
     <string name="chat_ban">Забанити</string>
     <string name="chat_kick_ban_btn">Кік+бан</string>
+    <string name="chat_ban_by">Бан за</string>
+    <string name="chat_ban_type_host">Хост</string>
+    <string name="chat_ban_type_nick">Нік</string>
+    <string name="chat_ban_type_account">Акаунт</string>
+    <string name="chat_ban_type_domain">Домен</string>
 
     <!-- Network screens -->
     <string name="networks_title">Мережі</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Показувати кожен надісланий і отриманий рядок у буфері Raw для кожної мережі. Паролі приховано. Для налагодження.</string>
     <string name="chat_show_less">Показати менше</string>
     <string name="chat_not_delivered">Не доставлено</string>
+    <string name="chat_status_read">Прочитано</string>
     <string name="vm_multiline_rejected">Сервер відхилив повідомлення (%1$s): %2$s</string>
     <string name="network_edit_cap_also">також запитує %1$s</string>
     <string name="network_edit_caps_hint">Базові функції IRCv3 увімкнено типово. Увімкніть, щоб побачити розширені параметри.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Дозволити іншим бачити, коли ви складаєте повідомлення (draft/typing). Типово вимкнено з міркувань приватності.</string>
     <string name="setting_receive_typing">Показувати індикатори набору інших</string>
     <string name="setting_receive_typing_desc">Показувати індикатор, коли хтось інший складає повідомлення в каналі або приватному чаті.</string>
+    <string name="setting_read_receipts">Сповіщення про прочитання</string>
+    <string name="setting_read_receipts_desc">В особистих повідомленнях повідомляє співрозмовнику, що ви прочитали його повідомлення, і показує, коли він прочитав ваші. Працює лише з іншими користувачами HexDroid.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Канал перейменовано з %1$s на %2$s</string>
@@ -452,6 +464,13 @@
     <string name="chat_cd_launch_scripts">Запустити скрипти</string>
     <string name="chat_cd_edit_topic">Змінити тему</string>
     <string name="chat_cd_jump_unread">Перейти до непрочитаних</string>
+    <string name="format_bold">Жирний</string>
+    <string name="format_italic">Курсив</string>
+    <string name="format_underline">Підкреслений</string>
+    <string name="format_colour">Колір…</string>
+    <string name="format_clear">Очистити форматування</string>
+    <string name="chat_art_show_as_text">Показати як текст</string>
+    <string name="chat_unread_since">%1$s з %2$s</string>
     <string name="chat_cd_scroll_bottom">Прокрутити донизу</string>
     <string name="chat_cd_close_label">Закрити %1$s</string>
     <string name="chat_cd_cancel_reply">Скасувати відповідь</string>
@@ -460,6 +479,8 @@
     <string name="chat_reply_to">Відповісти %1$s</string>
     <string name="chat_delete_message">Видалити повідомлення</string>
     <string name="chat_delete_message_desc">Видаляє його для всіх через сервер</string>
+    <string name="chat_delete_message_others_desc">Видаляє його для всіх, якщо сервер це дозволяє</string>
+    <string name="chat_delete_message_no_id">Неможливо видалити: сервер не надав цьому повідомленню ID</string>
     <string name="chat_copy_messages">Копіювати повідомлення…</string>
     <string name="chat_copy_messages_desc">Виберіть кілька повідомлень для копіювання</string>
 
@@ -1399,6 +1420,7 @@
     <!-- ScriptsScreen -->
     <string name="scripts_title">Скрипти</string>
     <string name="scripts_reload">Перезавантажити</string>
+    <string name="scripts_restore_defaults">Відновити стандартні скрипти (%1$d)</string>
     <string name="scripts_import_file">Імпортувати файл…</string>
     <string name="scripts_import">Імпортувати…</string>
     <string name="scripts_paste">Вставити…</string>
@@ -1492,7 +1514,7 @@
     <string name="cmd_unignore">Прибирає користувача зі списку ігнорування</string>
     <string name="cmd_quit">Виходить з IRC і розриває з\'єднання</string>
     <string name="cmd_kick">Кікає користувача з каналу</string>
-    <string name="cmd_ban">Бан: нік (типово), користувач, хост, домен, акаунт</string>
+    <string name="cmd_ban">Бан: хост (типово), нік, користувач, домен, акаунт</string>
     <string name="cmd_unban">Знімає бан (для банів не за ніком вставте точну маску з /banlist)</string>
     <string name="cmd_kb">Кікає та банить користувача (ті самі типи масок, що й /ban)</string>
     <string name="cmd_kickban">Те саме, що /kb</string>

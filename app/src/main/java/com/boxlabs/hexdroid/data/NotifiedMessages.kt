@@ -21,12 +21,8 @@ package com.boxlabs.hexdroid.data
 import android.content.Context
 
 /**
- * Remembers which messages have already produced a notification, so one message never
- * pings twice.
- *
- * The same message can reach the notification code by two independent routes: a Web Push
- * delivered while no connection was open, and the live connection or its CHATHISTORY
- * catch-up once the app is running.
+ * Messages that already produced a notification, so one message never notifies twice when it
+ * arrives by both Web Push and the live connection or its catch-up.
  */
 object NotifiedMessages {
 

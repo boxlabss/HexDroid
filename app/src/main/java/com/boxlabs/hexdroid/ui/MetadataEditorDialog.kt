@@ -51,16 +51,9 @@ import com.boxlabs.hexdroid.IrcViewModel
 import com.boxlabs.hexdroid.R
 
 /**
- * draft/metadata-2 editor for the user's own metadata keys.
- *
- * On open it asks the server to LIST our current metadata (populating
- * NetConnState.ownMetadata), then presents one field per registry-defined user key.
- * Fields seed from the server's values and re-seed on late arrivals only while the
- * user has not diverged from what the server last reported, so an async LIST reply
- * cannot clobber an in-progress edit.
- *
- * Saving diffs each field against the last server value and issues METADATA SET (or
- * a clear, when a field is emptied) only for changed keys.
+ * draft/metadata-2 editor for our own keys. Opening it lists our metadata; each field seeds from
+ * the server and only re-seeds while unedited. Saving sends METADATA SET (or a clear) for changed
+ * fields only.
  */
 private data class MetaField(val key: String, val labelRes: Int, val singleLine: Boolean = true)
 

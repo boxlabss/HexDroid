@@ -29,26 +29,11 @@ import com.boxlabs.hexdroid.crypto.AgeStore
 import com.boxlabs.hexdroid.crypto.AgeWire
 
 /**
- * The encrypted-transport sibling of the loopback in [com.boxlabs.hexdroid.IrcViewModel].
- *
- * Owns one [AgeScriptCapabilities] for a network and turns a script's `age.*` calls into real
- * +AGE wire traffic, and inbound +AGE wire lines back into `age_msg` / `age_deal` script events.
- * It also performs the two things `AgeScriptCapabilities` deliberately does NOT invent itself:
- *
- *   1. **identity exchange** — pins peers' public keys (`AGE IDENT`) so signatures verify and
- *      deals can be sealed to them;
- *   2. **group-key establishment** — the host mints K_G and distributes it via signed+sealed
- *      `AGE INVITE` blobs ([AgeInvite]); invitees open them and remember K_G per channel.
- *
- * The VM constructs one of these per connected network and feeds it:
- *   - [sendPrivmsg]  — `(channel, line) -> Unit`, ships one wire line as a PRIVMSG to a channel;
- *   - [raiseSignal]  — `(event, fields, args) -> Unit`, raises a script SIGNAL synchronously.
- *
- * Routing note: `AgeScriptCapabilities.send` hands us a bare `AGE …` line with no IRC target.
- * `AGE MSG` carries its channel as `gameId` (token 2), so we route those precisely; everything
- * else (`DEAL` / `IDENT` / `INVITE`) is sent to [activeChannel], the channel of the current game.
- * A game occupies one channel at a time per network, which is the assumption to revisit if you
- * ever run two scripted tables on one network simultaneously.
+ * Carries a script's `age.*` calls as +AGE wire traffic for one network, and turns inbound +AGE
+ * lines into `age_msg` / `age_deal` events. Also handles identity exchange (pinning peers from `AGE
+ * IDENT`) and group-key establishment (the host mints K_G and distributes it in signed, sealed `AGE
+ * INVITE`s). `AGE MSG` is routed to its gameId channel; other lines go to [activeChannel], so one
+ * game per network at a time.
  */
 class AgeScriptBridge(
     private val p: AgePrimitives,
@@ -104,11 +89,10 @@ class AgeScriptBridge(
     private val groupKeys = HashMap<String, ByteArray>()
 
     /**
-     * channel -> the Ed25519 signing key that minted the current K_G (our own when we host/self-key,
-     * or the invite's owner key when we adopt one). Used to authorise a re-key: an already-established
-     * channel is only rotated to a new key by its current minter, or (for a hostless chat channel) by
-     * the deterministically-elected owner. This closes the group-key-injection hole where any peer who
-     * has seen our public IDENT could self-sign an invite and rotate us onto a key they control.
+     * channel -> the Ed25519 signing key that minted the current K_G (ours when we host or
+     * self-key, or the invite owner's when we adopt one). Only the current minter, or for a
+     * hostless chat channel the elected owner, may re-key an established channel, so a peer who has
+     * seen our public IDENT can't rotate us onto a key they control.
      */
     private val keyMinter = HashMap<String, ByteArray>()
 
@@ -134,12 +118,8 @@ class AgeScriptBridge(
      *  per-peer reciprocal announce-back below still forces a fresh IDENT for each new peer. */
     private val announcedSelf = HashSet<String>()
     /**
-     * Lower-case nicks that joined a channel AFTER our most recent IDENT there, so they cannot have
-     * seen it. Only these need a reciprocal announce-back: a peer who was already in the channel when
-     * we announced has our identity, and announcing again at them is pure duplicate traffic (the
-     * "+AGE announces IDENT twice" case, which is two clients announcing and then each answering an
-     * announce the other had already received). Cleared whenever we announce, because a fresh IDENT
-     * reaches everyone currently present.
+     * Lowercased nicks that joined a channel after our last IDENT there, the only ones owed a
+     * reciprocal announce. Cleared whenever we announce.
      */
     private val joinedSinceAnnounce = HashMap<String, MutableSet<String>>()
     /** (channel\u0000fp) we have already sealed the current K_G to, so re-announces don't re-invite. */
@@ -194,12 +174,10 @@ class AgeScriptBridge(
     fun chatReady(channel: String): Boolean = groupKeys.containsKey(channel)
 
     /**
-     * Self-key [target] (a channel or a PM nick) with a fresh K_G if it isn't keyed yet, so the client
-     * can send `AGE CHAT` immediately even when no secure session is ready. Used for a PM whose peer
-     * runs no +AGE client (a double ratchet can't be established without their key) or whose handshake
-     * is still pending. The message goes on the wire as ciphertext, garbled to anyone lacking K_G, and
-     * decrypts locally for our own echo. Fail-closed: plaintext is never transmitted. When a real +AGE
-     * peer later appears, the ratchet path ([pmReady]/[sendPm]) is preferred for its forward secrecy.
+     * Self-key [target] with a fresh K_G if it isn't keyed, so `AGE CHAT` can go out now: for a PM
+     * peer without +AGE, or whose handshake is pending. It travels as ciphertext and decrypts only
+     * for our own echo; plaintext is never sent. A later ratchet session ([pmReady]/[sendPm]) takes
+     * over.
      */
     fun ensureSelfKeyed(target: String) {
         if (target.isEmpty() || groupKeys.containsKey(target)) return
@@ -288,12 +266,9 @@ class AgeScriptBridge(
     private fun isPmName(name: String): Boolean = name.firstOrNull() !in setOf('#', '&', '+', '!')
 
     /**
-     * Held outbound PM plaintext per peer, queued while we wait to learn whether the peer runs a
-     * +AGE client. Flushed through the ratchet once the handshake completes (so the peer decrypts it
-     * with full forward secrecy), or self-keyed as `AGE CHAT` if the grace period lapses with no
-     * `AGE IDENT` from them. This is the IRC analogue of Signal sending to a not-yet-established
-     * session: we can't pre-fetch a prekey bundle (no server), but both clients are online, so we
-     * hold for the live handshake instead of racing past it under a key the peer will never hold.
+     * Held outbound PM text per peer while we learn whether they run +AGE: flushed through the
+     * ratchet once the handshake completes, or self-keyed as `AGE CHAT` if no `AGE IDENT` arrives
+     * within the grace period.
      */
     private val pmOutbox = HashMap<String, MutableList<Held>>()
     /** A held message plus the wall-clock time it was queued, used for the persistence TTL. */
@@ -355,14 +330,10 @@ class AgeScriptBridge(
         pmInterestNotified.add(peerNick)   // we've acted on their interest; no need to prompt anymore
         if (!pmReady(peerNick)) pmState(peerNick, "NEGOTIATING")
         announceIdent(peerNick)
-        // Catch-up: if this peer already announced their IDENT LIVE earlier this session (they enabled
-        // first, so the inbound IDENT handler ran once and will not run again for that line), drive the
-        // handshake now so the deterministic initiator still emits HELLO - against the exact fingerprint
-        // they announced. Gated on a live sighting: a bare stored pin from an earlier session is NOT
-        // enough, because the peer may be offline now - firing a HELLO into the void would latch
-        // helloSent and deadlock once they do come back. When they are absent we simply wait; their
-        // live IDENT will drive onPmIdent the moment they announce. onPmIdent is idempotent
-        // (helloSent / ratchet guards) and only the lower-fingerprint side emits.
+        // If the peer announced IDENT live earlier this session, drive the handshake now against
+        // that fingerprint. A stored pin alone isn't enough: a HELLO to an absent peer would latch
+        // helloSent and deadlock. onPmIdent is idempotent, and only the lower-fingerprint side
+        // sends HELLO.
         val liveFp = liveIdentFp[peerNick]
         debug("enablePm $peerNick liveSeen=${liveFp != null} me=${myFp.take(8)}")
         if (liveFp != null) onPmIdent(peerNick, liveFp)
@@ -377,13 +348,8 @@ class AgeScriptBridge(
     fun pmReady(peerNick: String): Boolean = pmByNick[peerNick]?.ratchet != null
 
     /**
-     * Reliability layer: re-drive an incomplete PM handshake. The host calls this on a bounded timer
-     * (every few seconds) until it returns false, so a lost or mistimed IDENT/HELLO/ACK recovers on its
-     * own instead of stranding the conversation. Every step is idempotent and reuses existing keys, so
-     * repeated calls never desync an established or in-flight session.
-     *
-     * Returns true while the handshake is still pending (keep retrying), false once it is established or
-     * no longer enabled (stop).
+     * Re-drive an incomplete PM handshake; the host calls this on a timer while it returns true.
+     * Idempotent. Returns false once established or disabled.
      */
     fun retryPmHandshake(peerNick: String): Boolean {
         if (peerNick !in pmPeers) return false
@@ -413,18 +379,14 @@ class AgeScriptBridge(
      *  ratchet handshake is possible (even if not yet complete). Drives the grace-period decision. */
     fun pmIdentSeen(peerNick: String): Boolean = pmByNick[peerNick] != null
 
-    /**
-     * Send [text] to [peerNick] if we can do so meaningfully now, otherwise hold it:
-     *   - ratchet established        -> encrypt + send over the ratchet immediately;
-     *   - already decided non-+AGE   -> self-key + send as `AGE CHAT` immediately;
-     *   - otherwise                  -> queue it (the caller schedules a grace timeout that resolves
-     *                                   to one of the two flush paths).
-     * Returns false only on a hard failure; true means sent-or-accepted-for-hold (the caller may echo
-     * the message locally either way, since it's our own text).
-     */
     /** Outcome of [sendOrHoldPm]: went on the wire now, held for later, or failed outright. */
     enum class PmSend { SENT, HELD, FAILED }
 
+    /**
+     * Send [text] to [peerNick] now if possible, otherwise hold it: over the ratchet when established,
+     * as self-keyed `AGE CHAT` when the peer is known not to run +AGE, else queued for the caller's
+     * grace timeout.
+     */
     fun sendOrHoldPm(peerNick: String, text: String): PmSend {
         if (pmByNick[peerNick]?.ratchet != null)
             return if (sendPm(peerNick, text)) PmSend.SENT else PmSend.FAILED
@@ -603,16 +565,42 @@ class AgeScriptBridge(
         deliverChat(peerNick, peerNick, pt.decodeToString())
     }
 
-    /** A member left [channel]. On a keyed chat channel, drop them; if we are the owner, rekey so the
-     *  departed member loses access to future messages (forward secrecy across membership change). */
+    /**
+     * [nick] left [channel] (PART, QUIT or KICK). Drops them from the channel's roster and tells
+     * scripts with `SIGNAL:AGE_LEFT` (chan, from = their fingerprint, nick); when [nick] is us, `from`
+     * is our own fingerprint. On a keyed chat channel the owner also rekeys, so the departed member
+     * can't read later messages.
+     */
     fun onMemberLeft(channel: String, nick: String) {
-        if (channel !in chatChannels) return
+        if (channel.isEmpty() || nick.isEmpty()) return
+        if (nick.equals(myNick(), ignoreCase = true)) {
+            if (roster.containsKey(channel) || channel in announcedSelf) {
+                raiseSignal("SIGNAL:AGE_LEFT", mapOf("chan" to channel, "from" to myFp, "nick" to nick), emptyList())
+            }
+            return
+        }
         val fp = roster[channel]?.entries?.firstOrNull { it.value.equals(nick, ignoreCase = true) }?.key ?: return
         roster[channel]?.remove(fp)
         invited.remove("$channel\u0000$fp")
+        raiseSignal("SIGNAL:AGE_LEFT", mapOf("chan" to channel, "from" to fp, "nick" to nick), emptyList())
+        if (channel !in chatChannels) return
         caps.removeMember(channel, fp)
         if (!ready(channel)) return
         if (ownerOf(channel).equals(myFp, ignoreCase = true)) rekeyChannel(channel)
+    }
+
+    /** [oldNick] is now [newNick]: keep each roster's nick current, so a later departure is matched. */
+    fun onNickChange(oldNick: String, newNick: String) {
+        for (members in roster.values) {
+            for (e in members.entries) if (e.value.equals(oldNick, ignoreCase = true)) e.setValue(newNick)
+        }
+    }
+
+    /** Our connection dropped, which leaves every channel: tell scripts, as for leaving one. */
+    fun onConnectionLost() {
+        for (ch in roster.keys + announcedSelf) {
+            raiseSignal("SIGNAL:AGE_LEFT", mapOf("chan" to ch, "from" to myFp, "nick" to myNick()), emptyList())
+        }
     }
 
     /** Owner mints a fresh K_G, rebuilds the channel on it, and re-seals it to the remaining members.
@@ -841,16 +829,10 @@ class AgeScriptBridge(
                         // re-run host election before anyone mints a group key; this is the script
                         // side of the IDENT-timing gate: a racing/late identity is accounted for.
                         raiseSignal("SIGNAL:AGE_PEER", mapOf("chan" to channel, "fp" to fp), emptyList())
-                        // If we already host this GAME channel's key (we are its minter) and the channel
-                        // is keyed, re-seal the SAME K_G to the newcomer (no rekey) so a player who joins
-                        // after we opened the table is keyed in. A LIVE IDENT also clears the `invited`
-                        // dedup first: the peer's client just (re)announced, which is what a rejoin after
-                        // leaving the table (age.close) or an app restart looks like, and both lose the
-                        // memory-only K_G. Without the reset the dedup permanently locked a returning
-                        // player out of the table (they announced, we skipped the invite, they could
-                        // never decrypt again until the whole table closed). Re-sealing the same K_G to
-                        // someone who already held it discloses nothing new. The chat path
-                        // (onChatPeer -> inviteExisting) already covers chatChannels, so this is game-only.
+                        // If we minted this game channel's key, re-seal the same K_G to a newcomer.
+                        // A live IDENT first clears the `invited` dedup, since a rejoining or
+                        // restarted client has lost its in-memory K_G. Game channels only; chat
+                        // channels use inviteExisting.
                         if (channel !in chatChannels && ready(channel) &&
                             keyMinter[channel]?.let { p.constantTimeEquals(it, me.sigPub) } == true) {
                             invited.remove("$channel\u0000$fp")
@@ -947,12 +929,10 @@ class AgeScriptBridge(
         if (open !is AgeInvite.Open.Ok) return
         val pl = open.payload
 
-        // Authorise the key. Without this, any peer who has seen our public IDENT could self-sign an
-        // invite naming themselves owner, seal it to us, and rotate us onto a key they control. Policy:
-        // the FIRST key for a channel is trust-on-first-use (the same first-contact risk as identity
-        // pinning), but RE-KEYING an already-established channel must come from the key's current minter,
-        // or, for a hostless chat channel, from its deterministically-elected owner (so a lower-fingerprint
-        // member can still legitimately take over). This protects scripted-game hosts and chat owners alike.
+        // Authorise the key. The first key for a channel is trust-on-first-use, like identity
+        // pinning; re-keying an established channel must come from its current minter or, for a
+        // hostless chat channel, the elected owner, so a peer who has seen our IDENT can't
+        // self-sign an invite and rotate us onto their key.
         val hadKey = groupKeys.containsKey(pl.gameId)
         val keyChanged = groupKeys[pl.gameId]?.let { !it.contentEquals(pl.groupKey) } ?: false
         if (hadKey && keyChanged) {
@@ -960,19 +940,10 @@ class AgeScriptBridge(
             val fromElectedOwner = pl.gameId in chatChannels &&
                 (store.lookupByFingerprint(ownerOf(pl.gameId))?.sigPub
                     ?.let { p.constantTimeEquals(it, pl.hostSigPub) } == true)
-            // GAME channels only: the player who opens the table hosts it, so two players tapping Open
-            // at the same moment both mint a K_G and invite each other. Without a tie-break each side
-            // keeps its own key, neither can decrypt the other, and the table deadlocks with both sides
-            // waiting. Deterministic resolution with no extra round-trip: the LOWER fingerprint's key
-            // wins, and both sides compute the same verdict from data they already hold.
-            //
-            // Deliberately narrow, so this cannot become a key-injection primitive:
-            //  - only when the key we currently hold is one WE minted (a key we merely adopted is never
-            //    rotated by this path), and
-            //  - only for a strictly LOWER fingerprint than our own (a higher one can never rotate us), and
-            //  - only for a fingerprint already pinned in our roster for this channel, matched by its
-            //    signing key rather than by nick, so the invite must come from an identity we pinned.
-            // Chat channels keep the strict elected-owner rule above; only games loosen.
+            // Game channels only: two players opening a table at once each mint a K_G. The lower
+            // fingerprint's key wins, computed identically on both sides. Only rotates a key we
+            // minted ourselves, only to a strictly lower fingerprint, and only one pinned in this
+            // channel's roster by signing key.
             val weMintedIt = keyMinter[pl.gameId]?.let { p.constantTimeEquals(it, me.sigPub) } ?: false
             val fromLowerFpOpener = pl.gameId !in chatChannels && weMintedIt &&
                 (fpForSigPub(pl.gameId, pl.hostSigPub)?.let { it.lowercase() < myFp.lowercase() } == true)
@@ -984,15 +955,9 @@ class AgeScriptBridge(
         if (keyChanged) caps.resetChannel(pl.gameId)   // rekey: rebuild on the new key before re-adding members
         activeChannel = pl.gameId
         pl.members.forEach { m -> if (store.lookupByFingerprint(m.fpHex) != null) caps.addMember(pl.gameId, m.fpHex) }
-        // Re-add everyone we have pinned on this channel, not just the invite's member list. Two reasons,
-        // both of which otherwise leave us unable to READ the very host we just adopted:
-        //  - `members` carries the host's PEERS and never the host itself, so it alone never restores the
-        //    host's signing key; normally we hold it from their IDENT.
-        //  - a keyChanged adopt calls resetChannel, which drops every sender key we had learned from those
-        //    IDENTs, so the IDENT-derived keys must be re-added here or they are simply gone.
-        // AgeChannel.decrypt drops any message from a sender it has no pinned signing key for, so without
-        // this a re-key silently turns the channel one-way: we can encrypt to them, they can read us, and
-        // every message they send back is dropped as "unknown sender".
+        // Re-add everyone pinned on this channel, not just the invite's members: `members` never
+        // includes the host, and a key-change adopt reset the sender keys learned from IDENTs.
+        // Without them, messages from those senders are dropped as unknown.
         roster[pl.gameId]?.keys?.forEach { fp -> if (store.lookupByFingerprint(fp) != null) caps.addMember(pl.gameId, fp) }
         // Member the HOST too, mapped from the payload's hostSigPub through our pin store. The member
         // list and roster loops above can both miss the host: `members` structurally never contains

@@ -93,12 +93,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Put the floating overlay up, or take it down if it is already there. Sends the user to
-     * grant the permission when it is missing.
-     *
-     * The overlay is added to the application context so it survives this activity going
-     * away, which is the point: it stays up while other apps are in front. Nothing handed to
-     * it may capture the activity, or the activity is held for as long as the window is.
+     * Show or hide the floating overlay, asking for the permission when it is missing. The overlay
+     * lives on the application context so it outlasts this activity, so nothing passed to it may
+     * hold the activity.
      */
     fun toggleFloatingWindow() {
         val app = applicationContext

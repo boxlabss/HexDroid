@@ -600,15 +600,8 @@ fun NetworksScreen(
 
     BackHandler(enabled = sheetId != null) { sheetId = null }
 
-    // Surface bouncer-clone results as a snackbar. The viewmodel sets
-    // bouncerCloneMessage on success / failure / "already imported"; we show it
-    // once and then clear so re-navigating doesn't re-trigger. LaunchedEffect is
-    // already a coroutine scope, so showSnackbar can be called directly — no
-    // nested launch (which would otherwise survive the LaunchedEffect's cancel
-    // and double-fire if the message changes mid-display).
-    //
-    // The clear is in `finally` so it runs even when the effect is cancelled
-    // mid-display by navigation away or by a fresh message replacing the key.
+    // Show bouncerCloneMessage once as a snackbar, then clear it (in finally, so a cancelled
+    // display still clears).
     LaunchedEffect(state.bouncerCloneMessage) {
         val msg = state.bouncerCloneMessage ?: return@LaunchedEffect
         try {
@@ -684,7 +677,6 @@ fun NetworksScreen(
                     .padding(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 if (sortedNetworks.isEmpty()) {
-                    // Previously an empty screen with an unlabelled "+" in the corner.
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -963,20 +955,9 @@ fun NetworksScreen(
 }
 
 /**
- * One bouncer multinetwork (soju) section per live SOJU profile.
- *
- * Lists every upstream the bouncer has reported via the soju.im/bouncer-networks extension,
- * with name + host + state pill + Import (or "Already imported" if a local profile already
- * targets this upstream on this bouncer host:port).
- *
- * The empty case (cap negotiated but no BOUNCER NETWORK frames received yet) is normal for
- * very fresh connections and for soju versions that send the list lazily — show a hint
- * pointing at the refresh button rather than hiding the section, so the user knows the
- * machinery exists.
- *
- * Idempotency for "already imported": the predicate must match cloneBouncerNetwork's own
- * dedupe predicate exactly (host + port + bouncerNetworkName, scoped to SOJU profiles),
- * otherwise the button label and the action's behaviour can disagree.
+ * One section per live SOJU profile listing the upstreams its bouncer reports, with name, host,
+ * state and Import or "Already imported". An empty list shows a hint to refresh. "Already imported"
+ * uses the same predicate as cloneBouncerNetwork.
  */
 @Composable
 private fun BouncerNetworksSection(
@@ -989,17 +970,8 @@ private fun BouncerNetworksSection(
     onRefresh: () -> Unit,
     onClone: (bouncerNetworkName: String) -> Unit,
 ) {
-    // Stable display order: by name (case-insensitive) then by id, so re-renders don't
-    // reshuffle entries when the bouncer re-emits push frames in a different order.
-    //
-    // Treat blank names the same way the dedupe predicate below does (.takeIf
-    // { isNotBlank() }) so the two definitions of "no name" stay consistent - otherwise
-    // an upstream with name = "" sorts under the empty-string key (first alphabetically)
-    // but renders via the unnamed-string-resource fallback, making blank-named entries
-    // cluster at the top of the list for unrelated reasons. lowercase(Locale.ROOT) for
-    // locale-independent ordering: lowercase() defers to default locale, which on a
-    // Turkish locale folds "I" → "ı" and produces user-surprising ordering that depends
-    // on the OS language setting.
+    // Stable order: name (blank treated as no name, as in the import check), case-folded with
+    // Locale.ROOT, then id.
     val sortedUpstreams = upstreams.values.sortedWith(
         compareBy(
             { (it.name?.takeIf { n -> n.isNotBlank() } ?: it.id).lowercase(java.util.Locale.ROOT) },
@@ -1041,17 +1013,11 @@ private fun BouncerNetworksSection(
                 )
             } else {
                 sortedUpstreams.forEach { upstream ->
-                    // Compute "already imported" only when the upstream actually has a name —
-                    // a nameless upstream can't be cloned (cloneBouncerNetwork rejects empty
-                    // bouncerNetworkName) and there's no meaningful identity to dedupe against.
-                    // Without this gate, two nameless upstreams would compare equal via
-                    // String?.equals(null, null) = true and falsely show "Already imported".
-                    //
-                    // The dedupe matches cloneBouncerNetwork's idempotency predicate exactly:
-                    // host + port + bouncerKind + bouncerNetworkName. Scoping by parentKind
-                    // means a soju-imported "libera" and a ZNC-imported "libera" on the same
-                    // bouncer host (rare but possible during migrations) are treated as
-                    // distinct profiles, which is correct.
+                    // "Already imported" is only computed for named upstreams: a nameless one can't
+                    // be cloned, and two nameless ones would otherwise compare equal. The match
+                    // mirrors cloneBouncerNetwork's own check (host + port + bouncerKind +
+                    // bouncerNetworkName), so the same name on soju and on ZNC counts as two
+                    // profiles.
                     val upstreamName = upstream.name?.takeIf { it.isNotBlank() }
                     val alreadyImported = upstreamName != null && existingProfiles.any {
                         it.bouncerKind == parentKind &&

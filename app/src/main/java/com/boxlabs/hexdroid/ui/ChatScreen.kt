@@ -84,6 +84,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -131,6 +132,8 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.filled.DoneAll
+import com.boxlabs.hexdroid.FontChoice
 import androidx.compose.material3.Badge
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Button
@@ -170,6 +173,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -240,6 +244,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.text.contextmenu.builder.TextContextMenuBuilderScope
+import androidx.compose.foundation.text.contextmenu.builder.item
+import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextDecoration
@@ -250,6 +259,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.zIndex
 import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.NickStyle
@@ -412,25 +422,10 @@ private val IRC_COMMANDS = listOf(
 )
 
 /**
- * Subcommand hints shown after the user types a command that takes a well-known
- * verb as its first argument — services aliases (/ns IDENTIFY, /cs ACCESS, …),
- * ZNC's *status module (/znc ListNetworks), soju's BouncerServ (/bouncerserv
- * network status). The second-word hint fires when the user has typed the parent
- * command plus a space, and narrows as they type the sub-verb.
- *
- * Keys are the parent command's short name (case-insensitive match against the
- * IRC_COMMANDS name). /bnc and /bouncerserv share the soju set since /bnc is
- * just an alias.
- *
- * Lists are intentionally curated, not every verb every services bot or module
- * supports, but the ones users actually reach for. Full reference lives at:
-	 X3
- *   NickServ/ChanServ: network docs (Atheme/Anope command set, stable across forks)
- *   ZNC *status:       https://wiki.znc.in/Using_commands
- *   BouncerServ:       https://soju.im/doc/soju.1.html  (commands under "SERVICE COMMANDS")
- *
- * Sub-verbs are stored in their canonical display casing so we can render them
- * directly in the chip; matching against [query] is case-insensitive.
+ * Sub-command hints shown after a command whose first argument is a verb: services aliases (/ns,
+ * /cs), ZNC's *status (/znc) and soju's BouncerServ (/bouncerserv, /bnc). Keys are the parent
+ * command's short name; verbs are stored in display casing and matched case-insensitively. A
+ * curated set of common verbs, not every one.
  */
 private val SUB_COMMANDS: Map<String, List<IrcCommand>> = mapOf(
     // NickServ — Atheme/Anope-compatible verbs
@@ -598,13 +593,8 @@ private val SUB_COMMAND_ALIASES: Map<String, String> = mapOf(
 )
 
 /**
- * For each parent command, the maximum number of spaces that can appear in any
- * of its sub-verb names. Used by the query detector to decide when the user has
- * typed past the sub-verb into its own arguments: if the user's partial sub-verb
- * already contains more spaces than the longest sub-verb for this parent, the
- * hint bar hides itself because no further match is possible.
- *
- * Cached at class load — SUB_COMMANDS is a static map, so the values never change.
+ * For each parent command, the most spaces any of its sub-verbs contains, so the hint bar hides
+ * once the typed sub-verb has more and can't match.
  */
 private val SUB_COMMAND_MAX_SPACES: Map<String, Int> =
     SUB_COMMANDS.mapValues { (_, verbs) ->
@@ -632,15 +622,8 @@ private fun subCommandMaxSpaces(parentCmd: String): Int {
 }
 
 /**
- * Command-completion bar shown above the input field when the user starts /typing
- *
- *   ┌───────────────────────────────────────────────────────────────┐
- *   │  /close  /closekey  /cycle  /ctcp   ....						 |
- *   ├───────────────────────────────────────────────────────────────┤
- *   │  /close                   Close the current buffer            │
- *   └───────────────────────────────────────────────────────────────┘
- *
- * Tapping a tab completes the command name (+ trailing space) into the input field.
+ * Command-completion bar shown above the input while typing a /command. Tapping an entry completes
+ * the command name and a trailing space.
  */
 @Composable
 private fun CommandHints(
@@ -748,20 +731,9 @@ private fun CommandHints(
 }
 
 /**
- * Subcommand-completion bar. Fires after the user has typed a parent command that
- * has a curated sub-verb list — /ns, /cs, /ms, /hs, /bs, /as, /znc, /bouncerserv, /bnc —
- * followed by a space and (optionally) a prefix of the sub-verb.
- *
- * Tapping a chip replaces the input with "/parent subverb " so the cursor lands
- * ready for the sub-verb's own arguments. The parent command and any prefix the
- * user typed are both resolved; typing "/ns id" narrows to IDENTIFY, and tapping
- * it produces "/ns IDENTIFY ".
- *
- * A separate composable from [CommandHints] rather than a generalised one: the
- * chip label, detail rendering, and onPick behaviour all differ in small but
- * non-parametric ways (sub-verbs render bare, not with a leading /; the detail
- * row shows the parent-command prefix; onPick preserves the parent). Shared
- * styling via Material3 tokens keeps the two visually consistent.
+ * Sub-command completion bar, shown after a parent command with a curated verb list (/ns, /cs, /ms,
+ * /hs, /bs, /as, /znc, /bouncerserv, /bnc) and a space. Typing narrows the list ("/ns id" to
+ * IDENTIFY); tapping produces "/parent VERB ".
  */
 @Composable
 private fun SubCommandHints(
@@ -876,13 +848,8 @@ private fun SubCommandHints(
 }
 
 /**
- * Nick-mention completion bar shown above the input field when the user types @prefix
- * (or just a word prefix in a channel that matches a nick in the nicklist).
- *
- * Trigger: user types "@" followed by ≥1 characters in a channel buffer.
- * On tap, replaces the @prefix token at the cursor with "@nick " (or "nick: " if at start).
- *
- * Layout mirrors CommandHints for a consistent look.
+ * Nick-completion bar shown above the input when "@" plus at least one character is typed in a
+ * channel. Tapping replaces the token with "@nick " (or "nick: " at the start of the line).
  */
 @Composable
 private fun NickHints(
@@ -1068,17 +1035,9 @@ private fun SidebarDragHandle(
 }
 
 /**
- * Small quoted preview shown above a message that carries a +reply tag.
- *
- * Resolves the parent via [msgStrToDisplayIdx] (O(1)) rather than scanning
- * the message list on every recomposition.  [msgIdToText] carries the
- * (from, text) pair for each known msgId so the label can be rendered without
- * a second lookup.  Both maps are built once per displayItems change.
- *
- * [canScroll] is true when [msgStrToDisplayIdx] contains the parent's msgId,
- * meaning it is currently visible in the buffer window and the user can tap
- * to jump to it.  When false (parent outside window), the quote is shown as
- * a non-tappable placeholder so threading intent is still visible.
+ * Quoted preview above a message with a reply tag. The parent is found through [msgStrToDisplayIdx]
+ * and [msgIdToText]. [canScroll] is true when the parent is loaded, making the quote tappable;
+ * otherwise it is shown as a non-tappable placeholder.
  */
 @Composable
 private fun ReplyQuote(
@@ -1244,6 +1203,8 @@ fun ChatScreen(
      * The ViewModel forwards this as MARKREAD / READ to the server when the cap is active.
      */
     onMarkRead: (bufferKey: String) -> Unit = {},
+    /** Reports whether a buffer's newest message is on screen, for read receipts. */
+    onViewingLatest: (bufferKey: String, atLatest: Boolean) -> Unit = { _, _ -> },
     onHighlightConsumed: () -> Unit = {},
     onCloseFindOverlay: () -> Unit = {},
     onFindNavigate: (Int) -> Unit = {},
@@ -1289,15 +1250,24 @@ fun ChatScreen(
         }
     }
 
+    // A buffer opened from outside the drawer (a notification, a link, a shortcut) is shown,
+    // not left underneath a drawer that was open when the app was left.
+    LaunchedEffect(state.selectedBuffer) {
+        if (!isWide && !tourWantsBuffers && drawerState.isOpen) drawerState.close()
+    }
+
     fun splitKey(key: String): Pair<String, String> {
         val idx = key.indexOf("::")
         return if (idx <= 0) ("unknown" to key) else (key.take(idx) to key.drop(idx + 2))
     }
 
-    fun baseNick(display: String): String = display.trimStart('~', '&', '@', '%', '+')
+    /** Membership prefix symbols: the common set plus any the selected network adds in PREFIX. */
+    val nickPrefixChars = "~&@%+" + (state.connections[splitKey(state.selectedBuffer).first]?.prefixSymbols ?: "")
+
+    fun baseNick(display: String): String = display.trimStart { it in nickPrefixChars }
 
     fun nickPrefix(display: String): Char? =
-        display.firstOrNull()?.takeIf { it in listOf('~', '&', '@', '%', '+') }
+        display.firstOrNull()?.takeIf { it in nickPrefixChars }
 
     fun netName(netId: String): String =
         state.networks.firstOrNull { it.id == netId }?.name ?: netId
@@ -1308,7 +1278,8 @@ fun ChatScreen(
     // when buffers are added or removed — not on every incoming message. Unread/highlight
     // counts are read directly in BufferRow/sidebarItems below, not cached here.
     val bufferKeySet = state.buffers.keys
-    val buffersByNet = remember(bufferKeySet, state.channelsOnly) {
+    val chanTypesByNet = state.connections.mapValues { it.value.chanTypes }
+    val buffersByNet = remember(bufferKeySet, state.channelsOnly, chanTypesByNet) {
         val groups = mutableMapOf<String, MutableList<String>>()
         for (k in bufferKeySet) {
             val idx = k.indexOf("::")
@@ -1324,7 +1295,7 @@ fun ChatScreen(
                 .filter { key ->
                     val (_, name) = splitKey(key)
                     when {
-                        state.channelsOnly -> name.startsWith("#") || name.startsWith("&")
+                        state.channelsOnly -> name.firstOrNull()?.let { it in (chanTypesByNet[netId] ?: "#&!+") } == true
                         else -> true
                     }
                 }
@@ -1434,6 +1405,9 @@ fun ChatScreen(
     val messages = buf?.messages ?: emptyList()
     val topic = buf?.topic
     val typingNicks = if (state.settings.receiveTypingIndicator) buf?.typingNicks.orEmpty() else emptySet()
+    val peerReadAtMs = if (state.settings.readReceiptsEnabled) buf?.peerReadAtMs else null
+    // Art blocks the user chose to read as ordinary lines, by first message id.
+    val artShownAsText = remember(selected) { mutableStateListOf<Long>() }
 
     // Separator position. Advances with each message on the active buffer; cleared by the scroll-to-bottom button.
     val firstUnreadIndex = remember(messages, buf?.lastReadTimestamp, buf?.unread) {
@@ -1500,12 +1474,44 @@ fun ChatScreen(
     var inputSnapshot by remember(selected) { mutableStateOf("") }
 
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
+    // Set when the colour sheet was opened from the selection toolbar: a swatch then colours
+    // this range of the input instead of the whole message.
+    var colourForSelection by remember { mutableStateOf<TextRange?>(null) }
+    LaunchedEffect(showColorPicker) { if (!showColorPicker) colourForSelection = null }
+    val inputFormatting = remember { MircInputTransformation() }
+    val formatLabels = listOf(
+        stringResource(R.string.format_bold),
+        stringResource(R.string.format_italic),
+        stringResource(R.string.format_underline),
+        stringResource(R.string.format_colour),
+        stringResource(R.string.format_clear),
+    )
     var selectedFgColor by rememberSaveable { mutableStateOf<Int?>(null) }   // 0-15 or null
     var selectedBgColor by rememberSaveable { mutableStateOf<Int?>(null) }   // 0-15 or null
     var boldActive by rememberSaveable { mutableStateOf(false) }
     var italicActive by rememberSaveable { mutableStateOf(false) }
     var underlineActive by rememberSaveable { mutableStateOf(false) }
     var reverseActive by rememberSaveable { mutableStateOf(false) }
+    // Formatting items appended to the input's text menu, after Cut/Copy/Paste. They act on the
+    // selection, or on what's typed next when nothing is selected.
+    val formatMenu: TextContextMenuBuilderScope.() -> Unit = {
+        separator()
+        item(key = "hexdroid.format.bold", label = formatLabels[0]) {
+            input = toggleFormat(input, '\u0002'); close()
+        }
+        item(key = "hexdroid.format.italic", label = formatLabels[1]) {
+            input = toggleFormat(input, '\u001D'); close()
+        }
+        item(key = "hexdroid.format.underline", label = formatLabels[2]) {
+            input = toggleFormat(input, '\u001F'); close()
+        }
+        item(key = "hexdroid.format.colour", label = formatLabels[3]) {
+            colourForSelection = input.selection; showColorPicker = true; close()
+        }
+        item(key = "hexdroid.format.clear", label = formatLabels[4]) {
+            input = clearFormat(input); close()
+        }
+    }
 
 
     val timeFmt = remember(state.settings.timestampFormat) {
@@ -1516,7 +1522,8 @@ fun ChatScreen(
         }
     }
 
-    val isChannel = selBufName.startsWith("#") || selBufName.startsWith("&")
+    val selConn = state.connections[selNetId]
+    val isChannel = selBufName.firstOrNull()?.let { it in (selConn?.chanTypes ?: "#&!+") } == true
 
     /** True for a one-to-one conversation: not a channel, server or DCC pseudo buffer. */
     val isPrivateMessage = !isChannel &&
@@ -1566,10 +1573,19 @@ fun ChatScreen(
     }
     val myDisplay = nicklist.firstOrNull { baseNick(it).equals(myNick, ignoreCase = true) }
     val myPrefix = myDisplay?.let { nickPrefix(it) }
-    val canKick  = isChannel && myPrefix in listOf('~', '&', '@', '%')
-    val canBan   = isChannel && myPrefix in listOf('~', '&', '@')
-    val canTopic = isChannel && myPrefix in listOf('~', '&', '@', '%')
-    val canMode  = isChannel && myPrefix in listOf('~', '&', '@')
+    /** True when our highest prefix ranks at or above the one for channel mode [mode] in PREFIX. */
+    fun hasRankOf(mode: Char): Boolean {
+        val symbols = selConn?.prefixSymbols ?: "~&@%+"
+        val mine = myPrefix?.let { symbols.indexOf(it) }?.takeIf { it >= 0 } ?: return false
+        val needed = (selConn?.prefixModes ?: "qaohv").indexOf(mode).takeIf { it >= 0 } ?: return false
+        return mine <= needed
+    }
+    val isOp = hasRankOf('o')
+    val isHalfOpOrAbove = isOp || hasRankOf('h')
+    val canKick  = isChannel && isHalfOpOrAbove
+    val canBan   = isChannel && isOp
+    val canTopic = isChannel && isHalfOpOrAbove
+    val canMode  = isChannel && isOp
     val isIrcOper = state.connections[selNetId]?.isIrcOper == true
     val selNetUnproxied = state.networks.firstOrNull { it.id == selNetId }?.proxyType ==
         com.boxlabs.hexdroid.connection.ProxyType.NONE
@@ -1691,6 +1707,8 @@ fun ChatScreen(
     var chanListTab by remember { mutableIntStateOf(0) } // 0=bans,1=quiets,2=excepts,3=invex
     var opsNick by remember { mutableStateOf("") }
     var opsReason by remember { mutableStateOf("") }
+    // Ban mask keyword passed to /ban and /kb: h host (default), n nick, a account, d domain.
+    var opsBanType by remember { mutableStateOf("h") }
     var opsTopic by remember(selected, topic) { mutableStateOf(topic ?: "") }
     var showTopicQuickEdit by remember { mutableStateOf(false) }
     /**
@@ -1889,19 +1907,9 @@ fun ChatScreen(
 			mod.padding(start = 16.dp + edgeInset, end = 16.dp, top = 8.dp, bottom = 8.dp),
 			verticalArrangement = Arrangement.spacedBy(4.dp)
 		) {
-			// Sidepanel toolbar: collapse-all, mark-all-read, search-current-buffer.
-			// HexDroid logo sits absolute-left in the same toolbar row.
-			//
-			// The control Row is anchored to CenterEnd, NOT to the Box's default
-			// contentAlignment = Center. Reason: when this drawer renders in landscape
-			// on a small phone, the buffer pane can drag down to a 130 dp min width,
-			// which after the 16 dp horizontal padding on each side leaves only ~98 dp
-			// of inner space. A Row of three 28 dp IconButtons + 4 dp spacings is ~92 dp
-			// wide; centering it in 98 dp puts its LEFT edge at ~3 dp, which is INSIDE
-			// the logo's 0-24 dp footprint at CenterStart. Anchoring the Row to
-			// CenterEnd keeps the controls glued to the right edge regardless of
-			// drawer width, so the gap between logo and controls only shrinks (and
-			// eventually disappears) but they never overlap.
+			// Side panel toolbar (collapse all, mark all read, search) with the logo at the left.
+			// The controls are anchored to the end rather than centred, so on a narrow pane they
+			// can't overlap the logo.
 			var showSearchDialog by remember { mutableStateOf(false) }
 			Box(
 				modifier = Modifier.fillMaxWidth(),
@@ -2387,8 +2395,8 @@ fun ChatScreen(
                                 onClick = { openNickActions(n) },
                                 onLongClick = { openNickActions(n) },
                             )
-                            // Scales with the nick font. A fixed 2.dp looked proportionally
-                            // huge once the font shrank to its 10sp minimum.
+                            // Scales with the nick font so the gap stays proportional down to the
+                            // 10sp minimum.
                             .padding(vertical = (nickFontSp * 0.08f).dp)
                     ) {
                         // draft/metadata-2 avatar: a small circle before the nick that scales
@@ -2450,17 +2458,7 @@ fun ChatScreen(
                             // Fade an away nick a touch further, on top of the row tint.
                             modifier = Modifier.alpha(if (isAway) 0.6f else 1f),
                         )
-//                         if (nickDisplayName != null) {
-//                             Text(
-//                                 " ($nickDisplayName)",
-//                                 color = Color.Gray,
-//                                 fontSize = (nickFontSp - 2f).coerceAtLeast(8f).sp,
-//                                 lineHeight = ((nickFontSp - 2f).coerceAtLeast(8f) * 1.15f).sp,
-//                                 maxLines = 1,
-//                                 overflow = TextOverflow.Ellipsis,
-//                             )
-//                         }
-                        // Bot Mode: a robot icon marks bot users.
+// Bot mode: a robot icon marks bot users.
                         if (isBot) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_robot_2),
@@ -2498,6 +2496,9 @@ fun ChatScreen(
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
         }
+    }
+    LaunchedEffect(selected) {
+        snapshotFlow { isAtBottom }.collect { onViewingLatest(selected, it) }
     }
 
     // Offered whenever the server can answer and has not said it has nothing older. Not
@@ -2592,15 +2593,8 @@ fun ChatScreen(
     var flickerMsgId by remember { mutableStateOf<Long?>(null) }
     val flickerAlpha = remember { Animatable(0f) }
 
-    // Hoisted map from UiMessage.id → displayItems index.
-    // Populated by BoxWithConstraints once displayItems is computed (below).
-    // The LaunchedEffect that drives highlight scrolling uses this to scroll to
-    // the correct LazyColumn item index rather than the reversedMessages index —
-    // the two diverge whenever art blocks collapse multiple messages into one item.
-    // msgId → displayIdx (forward) used by resolveAnchor and /find scroll.
-    // displayIdx → msgId (reverse) used by the highlight flicker to identify which
-    // message to pulse after scrollToItem. Both populated together by BoxWithConstraints.
-    // Starts empty; LaunchedEffect keys include this map so effects retry once it arrives.
+    // Maps between UiMessage ids and LazyColumn indices, which differ where art blocks merge
+    // messages. Filled once displayItems is built; effects keyed on it retry when it arrives.
     var msgIdToDisplayIdxHoisted by remember { mutableStateOf(emptyMap<Long, Int>()) }
     var displayIdxToMsgIdHoisted  by remember { mutableStateOf(emptyMap<Int, Long>()) }
     /** IRCv3 msgid String → displayItems index; populated together with [msgIdToDisplayIdxHoisted]. */
@@ -2608,15 +2602,9 @@ fun ChatScreen(
     /** IRCv3 msgid String → (from, text) for O(1) reply-quote label rendering. */
     var msgIdToTextHoisted by remember { mutableStateOf(emptyMap<String, Pair<String?, String>>()) }
 
-    // Resolve an anchor string to (displayItems index, exact) where exact=true means the
-    // index came from the hoisted display map and is safe to flicker/consume against.
-    // When msgIdToDisplayIdxHoisted is already populated (buffer was already visible),
-    // we use it for an exact display-index lookup. When it is still empty (first frame
-    // before BoxWithConstraints has fired its sync), we fall back to the reversedMessages
-    // index - without art blocks these are identical, and even with art blocks a near-
-    // correct scroll is better than returning -1 and triggering the isAtBottom race.
-    // The fallback is reported as exact=false so the caller keeps the anchor alive and
-    // finishes with an exact scroll once the map lands, instead of consuming a near-miss.
+    // Resolve an anchor to (display index, exact). Uses the display map when populated; before
+    // that, falls back to the reversedMessages index, reported as not exact so the caller keeps the
+    // anchor and finishes with an exact scroll once the map arrives.
     fun resolveAnchor(anchor: String): Pair<Int, Boolean> {
         fun msgToDisplayIdx(msg: UiMessage?): Pair<Int, Boolean> {
             if (msg == null) return -1 to false
@@ -2677,17 +2665,12 @@ fun ChatScreen(
         }
     }
 
-    // Drive scroll + flicker. Re-runs when anchor changes, the message list grows
-    // (so we retry once scrollback finishes loading from disk), or the display map
-    // arrives. Two-phase behaviour: while msgIdToDisplayIdxHoisted is empty (cold
-    // notification tap, first frame of the buffer) resolveAnchor can only offer the
-    // reversedMessages index, which drifts from the LazyColumn index whenever art
-    // blocks collapse multiple messages into one item. In that phase we scroll to the
-    // approximate index for responsiveness but keep the anchor ALIVE; keying on the
-    // map makes the effect re-run when BoxWithConstraints syncs it, and only that
-    // exact pass flickers and consumes. Consuming on the approximate pass was the
-    // "tapped a highlight but it landed on the wrong message" bug: the near-miss got
-    // cemented and the exact map had nothing left to correct.
+    // Drive scroll and flicker. Re-runs when the anchor changes, the list grows (scrollback
+    // finished loading) or the display map arrives. Until msgIdToDisplayIdxHoisted is populated
+    // (cold notification tap, first frame), resolveAnchor only has the reversedMessages index,
+    // which drifts from the LazyColumn index where art blocks merge messages. That pass scrolls
+    // approximately and keeps the anchor alive; only the exact pass after the map syncs flickers
+    // and consumes it.
     LaunchedEffect(state.pendingHighlightAnchor, reversedMessages.size, msgIdToDisplayIdxHoisted) {
         val anchor = state.pendingHighlightAnchor ?: return@LaunchedEffect
         val (displayIdx, exact) = resolveAnchor(anchor)
@@ -2786,6 +2769,14 @@ fun ChatScreen(
     // and ChatScreen recomposes on every incoming line.
     val chatFontFamily = remember(state.settings.chatFontChoice, state.settings.customChatFontPath) {
         fontFamilyForChoice(state.settings.chatFontChoice, state.settings.customChatFontPath)
+    }
+    // Art needs equal-width columns: the bundled monospace, unless the chat font is already
+    // monospace or a font file the user chose.
+    val artFontFamily = remember(state.settings.chatFontChoice, chatFontFamily) {
+        when (state.settings.chatFontChoice) {
+            FontChoice.MONOSPACE, FontChoice.CUSTOM -> chatFontFamily
+            else -> fontFamilyForChoice(FontChoice.MONOSPACE)
+        }
     }
 
     // Held across recompositions so every message Text sees the same instance. A style
@@ -3272,7 +3263,11 @@ fun ChatScreen(
                 // if each line were sized independently, short lines would be large and long
                 // lines small, breaking the grid alignment.
                 val motdAvailableWidthPx = constraints.maxWidth.toFloat() - with(LocalDensity.current) { 16.dp.toPx() } // subtract 8.dp padding each side
-                val motdStyle = chatTextStyle.copy(lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified)
+                val motdStyle = chatTextStyle.copy(
+                    lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified,
+                    fontFamily = artFontFamily,
+                    letterSpacing = 0.sp,
+                )
                 val motdLines = remember(messages, selBufName) {
                     if (selBufName == "*server*") messages.filter { it.isMotd }.map { it.text }
                     else emptyList()
@@ -3284,14 +3279,14 @@ fun ChatScreen(
                 )
 
                 // Build display items: each art block becomes a single LazyColumn item
-                // (all its lines in one Column) so there are zero inter-line gaps.
-                // Font sizing uses one measurement + direct scale factor instead of
-                // per-line binary search — O(1) per block instead of O(N×8).
+                // (all its lines in one Column) so there are zero inter-line gaps. Each block
+                // gets the largest size at which its widest line fits, cached per block.
                 val rawDisplayItems = rememberDisplayItems(
                     reversedMessages = reversedMessages,
                     availableWidthPx = motdAvailableWidthPx,
                     style = motdStyle,
                     artDetectionEnabled = state.settings.artDetectionEnabled,
+                    shownAsText = artShownAsText.toSet(),
                 )
                 // Final guard: drop any item whose key duplicates an earlier one. This
                 // should already be impossible (UiMessage ids are AtomicLong-generated and
@@ -3365,12 +3360,9 @@ fun ChatScreen(
                     else -1
                 else -1
 
-            // Note: SelectionContainer is intentionally NOT used here. Wrapping a LazyColumn
-            // in SelectionContainer causes NPE crashes when items are recycled mid-drag (see
-            // the long comment that was here before). Text copying is handled entirely through
-            // the long-press bottom sheet (single message) and the copy-range mode above
-            // (multiple messages). This also fixes the bug where text was getting selected
-            // during long-press instead of the bottom sheet appearing.
+            // SelectionContainer is deliberately not used: around a LazyColumn it throws when items
+            // are recycled mid-drag. Copying goes through the long-press sheet (one message) and
+            // copy-range mode (several).
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
@@ -3418,9 +3410,14 @@ fun ChatScreen(
                             ) {
                                 // Single attribution row above the block: "▸ bort  brot  boat  snot"
                                 // One line, zero height impact on the art itself.
-                                if (senders.isNotEmpty()) {
+                                // Attribution row: who posted the block, and a way to read it as
+                                // ordinary lines when it isn't really art.
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
                                     Row(
-                                        modifier = Modifier.padding(bottom = 1.dp),
+                                        modifier = Modifier.weight(1f),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -3441,18 +3438,59 @@ fun ChatScreen(
                                             )
                                         }
                                     }
-                                }
-                                // Art lines: tightly packed, no gaps between rows.
-                                for (msg in item.msgs) {
-                                    MotdLine(
-                                        text = msg.text,
-                                        fontSizeSp = item.fontSizeSp,
-                                        style = motdStyle,
-                                        mircColorsEnabled = state.settings.mircColorsEnabled,
-                                        ansiColorsEnabled = state.settings.ansiColorsEnabled,
-                                        linkStyle = linkStyle,
-                                        onAnnotationClick = onAnnotationClick,
+                                    Text(
+                                        text = stringResource(R.string.chat_art_show_as_text),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .focusHighlight(RoundedCornerShape(4.dp))
+                                            .clickable { artShownAsText.add(item.msgs.first().id) }
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
                                     )
+                                }
+                                // Art lines: tightly packed, no gaps between rows. A block too wide
+                                // for the pane at the minimum size scrolls sideways as one piece,
+                                // with a fade on whichever edge has more to see.
+                                val artScroll = rememberScrollState()
+                                Box(Modifier.fillMaxWidth()) {
+                                    androidx.compose.foundation.layout.Column(
+                                        modifier = if (item.overflows) Modifier.horizontalScroll(artScroll) else Modifier
+                                    ) {
+                                        for (msg in item.msgs) {
+                                            MotdLine(
+                                                text = msg.text,
+                                                fontSizeSp = item.fontSizeSp,
+                                                style = motdStyle,
+                                                mircColorsEnabled = state.settings.mircColorsEnabled,
+                                                ansiColorsEnabled = state.settings.ansiColorsEnabled,
+                                                linkStyle = linkStyle,
+                                                onAnnotationClick = onAnnotationClick,
+                                            )
+                                        }
+                                    }
+                                    if (item.overflows) {
+                                        val edge = MaterialTheme.colorScheme.background
+                                        if (artScroll.canScrollForward) {
+                                            Box(
+                                                Modifier
+                                                    .matchParentSize()
+                                                    .wrapContentWidth(Alignment.End)
+                                                    .width(28.dp)
+                                                    .background(Brush.horizontalGradient(listOf(Color.Transparent, edge)))
+                                            )
+                                        }
+                                        if (artScroll.canScrollBackward) {
+                                            Box(
+                                                Modifier
+                                                    .matchParentSize()
+                                                    .wrapContentWidth(Alignment.Start)
+                                                    .width(28.dp)
+                                                    .background(Brush.horizontalGradient(listOf(edge, Color.Transparent)))
+                                            )
+                                        }
+                                    }
                                 }
                                 Spacer(Modifier.height(4.dp))
                             }
@@ -3472,8 +3510,11 @@ fun ChatScreen(
                         val isFindMatch = findOverlay != null &&
                             (findOverlay.bufferKey == selected || findOverlay.bufferKey.startsWith("GLOBAL:")) &&
                             findOverlay.matchIds.contains(m.id)
+                        val readByPeer = peerReadAtMs != null && !isChannel && m.timeMs <= peerReadAtMs &&
+                            !m.failed && !m.pending && m.from != null && m.from.equals(myNick, ignoreCase = true)
                         SingleMessageItem(
                             m = m,
+                            readByPeer = readByPeer,
                             ts = ts,
                             nickStyle = state.settings.nickStyle,
                             timestampColor = state.settings.timestampColorInt?.let { Color(it) },
@@ -3627,15 +3668,15 @@ fun ChatScreen(
                 val unreadCount = buf?.unread ?: 0
                 // Find the timestamp of the oldest unread message for the "since HH:mm" label.
                 val firstUnreadMsg = reversedMessages.getOrNull(unreadScrollTarget)
-                val sinceLabel = firstUnreadMsg?.let { msg ->
+                val sinceTime = firstUnreadMsg?.let { msg ->
                     runCatching {
                         val fmt = java.text.SimpleDateFormat(
                             if (state.settings.timestampFormat.contains("ss")) "HH:mm:ss" else "HH:mm",
                             java.util.Locale.getDefault()
                         )
-                        " since ${fmt.format(java.util.Date(msg.timeMs))}"
-                    }.getOrElse { "" }
-                } ?: ""
+                        fmt.format(java.util.Date(msg.timeMs))
+                    }.getOrNull()
+                }
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.tertiaryContainer,
@@ -3671,10 +3712,13 @@ fun ChatScreen(
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.size(16.dp),
                         )
+                        val countText = pluralStringResource(R.plurals.chat_unread_count, unreadCount, unreadCount)
                         Text(
-                            text = if (unreadCount > 0)
-                                pluralStringResource(R.plurals.chat_unread_count, unreadCount, unreadCount) + sinceLabel
-                            else stringResource(R.string.chat_cd_jump_unread),
+                            text = when {
+                                unreadCount <= 0 -> stringResource(R.string.chat_cd_jump_unread)
+                                sinceTime != null -> stringResource(R.string.chat_unread_since, countText, sinceTime)
+                                else -> countText
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                         )
@@ -4146,14 +4190,8 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // E2E lock badge. Shown at the start of the input row whenever the
-                // currently-selected buffer has a key configured. The badge is a
-                // single Icon, tapping it opens the EncryptionDialog so the user
-                // can verify the safety number / regenerate / clear without
-                // having to reach for the overflow menu. The check derives from
-                // state.e2eKeyVersion so a key add/remove triggers recomposition
-                // automatically. We re-derive via getE2eKeyInfo on each render -
-                // it's a single ConcurrentHashMap lookup, no measurable cost.
+                // E2E lock badge at the start of the input row when the buffer has a key; tapping
+                // it opens the EncryptionDialog. Re-derived from state.e2eKeyVersion.
                 if (viewModel != null && selNetId.isNotBlank() &&
                     selBufName.isNotBlank() && selBufName != "*server*" && selBufName != "*status*"
                 ) {
@@ -4257,6 +4295,8 @@ fun ChatScreen(
 					unfocusedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
 					cursorColor = MaterialTheme.colorScheme.primary
 				)
+				// The input shows formatting as it will look; selecting text adds formatting items to
+				// the text menu (see formatMenu).
 				BasicTextField(
 					value = input,
 					onValueChange = { new ->
@@ -4264,10 +4304,12 @@ fun ChatScreen(
                         onTypingChanged(new.text)
                     },
 					cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+					visualTransformation = inputFormatting,
 					modifier = Modifier
 						.weight(1f)
 						.heightIn(min = 40.dp)
 						.tourTarget(TourTarget.CHAT_INPUT)
+						.appendTextContextMenuComponents(formatMenu)
 						.focusRequester(inputFocus)
 						.onFocusChanged { inputHasFocus = it.isFocused }
 						.onPreviewKeyEvent { ev ->
@@ -4336,8 +4378,6 @@ fun ChatScreen(
 					keyboardActions = KeyboardActions(onSend = { sendNow() }),
 					singleLine = false,
 					// Grow with content up to 6 visible lines before scrolling internally.
-					// The old cap of 2 forced any longer draft into a two-line window,
-					// which made cursor placement and line changes needlessly fiddly.
 					maxLines = 6,
 					minLines = 1,
 					interactionSource = interactionSource,
@@ -4731,9 +4771,8 @@ fun ChatScreen(
             gesturesEnabled = !state.settings.networkTabsAtBottom &&
                 (drawerState.isOpen || !inputHasFocus),
             drawerContent = {
-                // Match the landscape pane exactly: surface colour at 1 dp tonal elevation.
-                // Without this the portrait drawer uses a different tonal surface token,
-                // making it appear a different shade to the landscape buffer list.
+                // Match the landscape pane: surface colour at 1 dp tonal elevation, so both drawers
+                // are the same shade.
                 ModalDrawerSheet(
                     drawerContainerColor = MaterialTheme.colorScheme.surface,
                     drawerTonalElevation = 1.dp,
@@ -4965,6 +5004,28 @@ fun ChatScreen(
                         singleLine = true,
                         label = { Text(stringResource(R.string.chat_reason)) }
                     )
+                    if (canBan) {
+                        Text(
+                            stringResource(R.string.chat_ban_by),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                "h" to R.string.chat_ban_type_host,
+                                "n" to R.string.chat_ban_type_nick,
+                                "a" to R.string.chat_ban_type_account,
+                                "d" to R.string.chat_ban_type_domain,
+                            ).forEach { (kw, label) ->
+                                FilterChip(
+                                    selected = opsBanType == kw,
+                                    onClick = { opsBanType = kw },
+                                    label = { Text(stringResource(label)) },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(8.dp)),
+                                )
+                            }
+                        }
+                    }
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -4986,7 +5047,7 @@ fun ChatScreen(
                                 onClick = {
                                     val n = opsNick.trim()
                                     if (n.isNotBlank()) {
-                                        onSend("/ban $selBufName $n")
+                                        onSend("/ban $selBufName $n $opsBanType")
                                         showChanOps = false
                                     }
                                 }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
@@ -4996,7 +5057,7 @@ fun ChatScreen(
                                     val n = opsNick.trim()
                                     if (n.isNotBlank()) {
                                         val r = opsReason.trim()
-                                        onSend(if (r.isBlank()) "/kb $selBufName $n" else "/kb $selBufName $n $r")
+                                        onSend(if (r.isBlank()) "/kb $selBufName $n $opsBanType" else "/kb $selBufName $n $opsBanType $r")
                                         showChanOps = false
                                     }
                                 }, modifier = Modifier.focusHighlight(RoundedCornerShape(50))
@@ -5233,14 +5294,9 @@ fun ChatScreen(
 
     // mIRC colour/style picker sheet
     if (showColorPicker) {
-        // ── IRC Text Formatting - full 99-colour mIRC grid picker ─────────────────────
-        // Layout: live preview -> style chips -> colour mode tab -> 99-colour grid -> hex label
-        //
-        // The grid renders all 99 mIRC colour codes in the standard layout:
-        //   Row 0 (cols 0-15):  legacy 16 colours
-        //   Rows 1-5 (cols 16-98): extended colours, 16 per row (last row partial)
-        // Selecting a swatch in "FG" mode sets the text colour; "BG" sets the highlight.
-        // Tapping an active swatch deselects it.
+        // ── IRC text formatting: 99-colour mIRC picker ──
+        // Live preview, style chips, FG/BG tab, colour grid and hex label. A swatch sets the text
+        // colour in FG mode and the highlight in BG mode; tapping the active swatch clears it.
 
         var colorMode by remember { mutableStateOf(0) } // 0 = FG, 1 = BG
 
@@ -5429,21 +5485,9 @@ fun ChatScreen(
                     }
                 }
 
-                // ── Colour grid ───────────────────────────────────────────────
-                //
-                // Layout matches the standard mIRC / HexChat / WeeChat colour picker:
-                //
-                //  ┌────────────────────────────────────────────────────────┐
-                //  │  0–15  │ original 16-colour row (full width)           │
-                //  ├────────────────────────────────────────────────────────┤
-                //  │ 16–87  │ 6 rows × 12 columns colour-spectrum gradient  │
-                //  ├────────────────────────────────────────────────────────┤
-                //  │ 88–98  │ greyscale ramp row (11 swatches)              │
-                //  └────────────────────────────────────────────────────────┘
-                //
-                // The 6×12 block reads top-to-bottom as darkest->lightest and
-                // left-to-right as red->orange->yellow->green->cyan->blue->purple->pink,
-                // producing the gradient effect familiar from desktop IRC clients.
+                // ── Colour grid ──
+                // The standard mIRC layout: codes 0-15 in the first row, 16-87 as a 6x12 spectrum
+                // (dark to light, red through pink), 88-98 as the greyscale ramp.
 
                 val activeSel = if (colorMode == 0) selectedFgColor else selectedBgColor
 
@@ -5460,7 +5504,15 @@ fun ChatScreen(
                             )
                             .focusHighlight(RoundedCornerShape(4.dp))
                             .clickable {
-                                if (colorMode == 0)
+                                val range = colourForSelection
+                                if (range != null) {
+                                    input = colourFormat(
+                                        input.copy(selection = range),
+                                        fg = if (colorMode == 0) code else null,
+                                        bg = if (colorMode == 1) code else null,
+                                    )
+                                    showColorPicker = false
+                                } else if (colorMode == 0)
                                     selectedFgColor = if (selectedFgColor == code) null else code
                                 else
                                     selectedBgColor = if (selectedBgColor == code) null else code
@@ -6092,22 +6144,39 @@ fun ChatScreen(
                         }
                     )
                 }
-                // Delete (IRCv3 message-redaction); own messages with a server msgId only.
-                // The buffer updates when the server relays the REDACT back, so a FAIL
-                // leaves the message intact rather than vanishing locally but not remotely.
-                if (viewModel != null && ctxMsg.msgId != null && ctxMsg.from != null &&
-                    ctxMsg.from.equals(myNick, ignoreCase = true) &&
+                // Delete (message-redaction) on any message in a channel or query: the server
+                // decides who may delete what, and answers FAIL REDACT when we may not. The
+                // buffer updates when the server relays the REDACT back, so a refused delete
+                // leaves the message in place. A message without a server msgid can't be named
+                // in a REDACT, so it shows the option disabled with the reason.
+                if (viewModel != null && ctxMsg.from != null && selBufName != "*server*" &&
                     state.connections[selNetId]?.hasRedactionSupport == true
                 ) {
+                    val redactId = ctxMsg.msgId
+                    val isOwnMsg = ctxMsg.from.equals(myNick, ignoreCase = true)
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.chat_delete_message)) },
-                        supportingContent = { Text(stringResource(R.string.chat_delete_message_desc)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    when {
+                                        redactId == null -> R.string.chat_delete_message_no_id
+                                        isOwnMsg -> R.string.chat_delete_message_desc
+                                        else -> R.string.chat_delete_message_others_desc
+                                    }
+                                )
+                            )
+                        },
                         leadingContent = {
                             Icon(Icons.Default.Delete, contentDescription = null)
                         },
-                        modifier = Modifier.focusHighlight().clickable {
-                            viewModel.redactMessage(selNetId, selBufName, ctxMsg.msgId)
-                            longPressedMessage = null
+                        modifier = if (redactId != null) {
+                            Modifier.focusHighlight().clickable {
+                                viewModel.redactMessage(selNetId, selBufName, redactId)
+                                longPressedMessage = null
+                            }
+                        } else {
+                            Modifier.alpha(0.5f)
                         }
                     )
                 }
@@ -6539,22 +6608,15 @@ fun ChatScreen(
 }
 
 /**
- * Renders one [UiMessage] in the chat list.
- *
- * Extracted from the inline [itemsIndexed] lambda so Compose's skipping optimisation can
- * avoid re-executing this entire body when none of the parameters have changed. With the
- * function inline, Compose had no stable boundary to check, so every state update
- * (input field, nicklist, scroll position, etc.) caused every visible message to
- * rebuild its [buildAnnotatedString], nick lookup, and inline preview URL scan.
- *
- * All parameters are primitives, stable data classes, or lambdas — Compose treats all
- * of these as stable, so the function is skipped whenever its inputs are identical.
- * Mutable state mutations are surfaced as callbacks so this composable itself is
- * stateless (except for the per-item [swipeOffsetX] animation).
+ * Renders one [UiMessage] in the chat list. A separate composable so Compose can skip it when its
+ * parameters are unchanged; they are all primitives, stable data classes or lambdas. State changes
+ * surface as callbacks, so it holds no state beyond the per-item [swipeOffsetX] animation.
  */
 @Composable
 private fun SingleMessageItem(
     m: UiMessage,
+    /** Our message has been read by the other person (read receipts). */
+    readByPeer: Boolean = false,
     ts: String,
     /** Brackets drawn around the sender's nick. */
     nickStyle: NickStyle,
@@ -6621,14 +6683,12 @@ private fun SingleMessageItem(
     val swipeOffsetX = remember { Animatable(0f) }
     val canSwipeReply = fromNick != null && !m.isMotd
 
-    // Encryption badge: a Material icon rendered inline at the very start of the message
-    // line (replacing the old unicode padlock/fish/shield glyphs). Kept as an
-    // InlineTextContent placeholder so the line stays a single Text node - selection,
-    // copy and link-tap offsets are unaffected.
-    //   AGM  -> filled Lock   (AES-256-GCM, modern PSK)      primary tint
-    //   AGE  -> filled Shield (double-ratchet, forward secret) primary tint
-    //   +OK  -> outlined Lock (Blowfish/FiSH, legacy compat)  amber tint (reads as "weaker")
-    // Tints are intentionally simple; tweak here if you want per-scheme colour semantics.
+    // Encryption badge: a Material icon at the start of the line, as an InlineTextContent
+    // placeholder so the line stays one Text node and selection, copy and link offsets are
+    // unaffected.
+    //   AGM  -> filled Lock    (AES-256-GCM, PSK)                primary tint
+    //   AGE  -> filled Shield  (double ratchet, forward secret)  primary tint
+    //   +OK  -> outlined Lock  (Blowfish/FiSH, legacy)           amber tint
     val encScheme = m.encryption
     val encAlt = when (encScheme) {
         com.boxlabs.hexdroid.crypto.E2eScheme.AGM      -> "\uD83D\uDD12"  // 🔒 fallback / copy text
@@ -6680,7 +6740,26 @@ private fun SingleMessageItem(
         )
     } ?: emptyMap()
 
-    val inlineBadges = encInline + botInline
+    // Read receipt: a double tick after our message. Its alternate text is what screen readers announce.
+    val readLabel = stringResource(R.string.chat_status_read)
+    val statusInline: Map<String, InlineTextContent> = if (!readByPeer) emptyMap() else mapOf(
+        STATUS_INLINE_ID to InlineTextContent(
+            Placeholder(
+                width = 1.2.em,
+                height = 1.0.em,
+                placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Filled.DoneAll,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxHeight().aspectRatio(1f),
+            )
+        }
+    )
+
+    val inlineBadges = encInline + botInline + statusInline
 
     // Collapse multiline messages to the first COLLAPSE_LINES and offer to expand.
     val bodyLineCount = remember(m.text) { m.text.count { it == '\n' } + 1 }
@@ -6858,7 +6937,7 @@ private fun SingleMessageItem(
                 val botPrefix = stringResource(R.string.chat_bot_prefix)
                 val annotated = remember(ts, fromDisplay, fromBase, bodyText, colorizeNicks,
                     mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix,
-                    timestampColor) {
+                    timestampColor, readByPeer, readLabel) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         appendTimestamp(ts, timestampColor); append("* ")
@@ -6876,6 +6955,7 @@ private fun SingleMessageItem(
                         }
                         append(" ")
                         appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
+                        if (readByPeer) { append(" "); appendInlineContent(STATUS_INLINE_ID, readLabel) }
                     }
                 }
                 AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = inlineBadges)
@@ -6885,7 +6965,7 @@ private fun SingleMessageItem(
                 val botPrefix = stringResource(R.string.chat_bot_prefix)
                 val annotated = remember(ts, fromDisplay, fromBase, bodyText, colorizeNicks,
                     mircColorsEnabled, ansiColorsEnabled, linkStyle, encScheme, m.fromOper, m.fromBot, displayName, botPrefix,
-                    timestampColor, nickStyle) {
+                    timestampColor, nickStyle, readByPeer, readLabel) {
                     buildAnnotatedString {
                         if (encScheme != null) { appendInlineContent(ENC_INLINE_ID, encAlt); append(" ") }
                         appendTimestamp(ts, timestampColor); append(nickStyle.open)
@@ -6903,6 +6983,7 @@ private fun SingleMessageItem(
                         }
                         append(nickStyle.close); append(" ")
                         appendIrcStyledLinkified(bodyText, linkStyle, mircColorsEnabled, ansiColorsEnabled)
+                        if (readByPeer) { append(" "); appendInlineContent(STATUS_INLINE_ID, readLabel) }
                     }
                 }
                 AnnotatedClickableText(text = annotated, onAnnotationClick = onAnnotationClick, style = chatTextStyle, inlineContent = inlineBadges)
@@ -7066,7 +7147,136 @@ private fun BarIconButton(
     ) { content() }
 }
 
+/**
+ * Wrap the selection of [v] in the toggle [code] (bold, italic, underline), or unwrap it when it's
+ * already wrapped. With nothing selected, insert [code] at the cursor so it applies to what's typed
+ * next. The selection stays on the same text.
+ */
+private fun toggleFormat(v: TextFieldValue, code: Char): TextFieldValue {
+    val t = v.text
+    val s = v.selection.min
+    val e = v.selection.max
+    if (s == e) return TextFieldValue(t.substring(0, s) + code + t.substring(s), TextRange(s + 1))
+    if (s > 0 && e < t.length && t[s - 1] == code && t[e] == code) {
+        return TextFieldValue(t.substring(0, s - 1) + t.substring(s, e) + t.substring(e + 1), TextRange(s - 1, e - 1))
+    }
+    val inner = t.substring(s, e)
+    if (inner.length >= 2 && inner.first() == code && inner.last() == code) {
+        return TextFieldValue(t.substring(0, s) + inner.substring(1, inner.length - 1) + t.substring(e), TextRange(s, e - 2))
+    }
+    return TextFieldValue(t.substring(0, s) + code + inner + code + t.substring(e), TextRange(s + 1, e + 1))
+}
+
+/**
+ * Colour the selection of [v] with mIRC colour [fg] and/or background [bg]; with nothing
+ * selected, colour what's typed next. A digit or comma straight after a colour code would be read
+ * as part of it, so an empty bold pair separates them where needed.
+ */
+private fun colourFormat(v: TextFieldValue, fg: Int?, bg: Int?): TextFieldValue {
+    val code = buildString {
+        append('\u0003')
+        append((fg ?: 99).toString().padStart(2, '0'))
+        if (bg != null) append(',').append(bg.toString().padStart(2, '0'))
+    }
+    fun guard(next: Char?) = if (next != null && (next.isDigit() || next == ',')) "\u0002\u0002" else ""
+    val t = v.text
+    val s = v.selection.min
+    val e = v.selection.max
+    if (s == e) {
+        val open = code + guard(t.getOrNull(s))
+        return TextFieldValue(t.substring(0, s) + open + t.substring(s), TextRange(s + open.length))
+    }
+    val inner = t.substring(s, e)
+    val open = code + guard(inner.firstOrNull())
+    val close = "\u0003" + guard(t.getOrNull(e))
+    return TextFieldValue(
+        t.substring(0, s) + open + inner + close + t.substring(e),
+        TextRange(s + open.length, s + open.length + inner.length),
+    )
+}
+
+private val FORMAT_CODES = Regex("\u0003(?:\\d{1,2}(?:,\\d{1,2})?)?|\u0004(?:[0-9a-fA-F]{6})?|[\u0002\u000F\u0011\u0016\u001D\u001E\u001F]")
+
+/** Remove formatting codes from the selection of [v], or from the whole input when nothing is selected. */
+private fun clearFormat(v: TextFieldValue): TextFieldValue {
+    val t = v.text
+    val s = v.selection.min
+    val e = v.selection.max
+    if (s == e) {
+        val nt = FORMAT_CODES.replace(t, "")
+        return TextFieldValue(nt, TextRange(nt.length))
+    }
+    val inner = FORMAT_CODES.replace(t.substring(s, e), "")
+    return TextFieldValue(t.substring(0, s) + inner + t.substring(e), TextRange(s, s + inner.length))
+}
+
+/** Shows mIRC formatting in the input as it will look, with the control codes hidden. */
+private class MircInputTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val raw = text.text
+        if (raw.none { it < ' ' && it != '\n' && it != '\t' }) return TransformedText(text, OffsetMapping.Identity)
+        val out = AnnotatedString.Builder(raw.length)
+        val toOut = IntArray(raw.length + 1)
+        val toRaw = ArrayList<Int>(raw.length + 1)
+        var bold = false
+        var italic = false
+        var underline = false
+        var fg: Int? = null
+        var bg: Int? = null
+        var i = 0
+        while (i < raw.length) {
+            toOut[i] = out.length
+            val c = raw[i]
+            if (c == '\u0003') {
+                var j = i + 1
+                val fgDigits = StringBuilder()
+                while (j < raw.length && fgDigits.length < 2 && raw[j].isDigit()) fgDigits.append(raw[j++])
+                val bgDigits = StringBuilder()
+                if (fgDigits.isNotEmpty() && j + 1 < raw.length && raw[j] == ',' && raw[j + 1].isDigit()) {
+                    j++
+                    while (j < raw.length && bgDigits.length < 2 && raw[j].isDigit()) bgDigits.append(raw[j++])
+                }
+                if (fgDigits.isEmpty()) { fg = null; bg = null }
+                else {
+                    fg = fgDigits.toString().toInt()
+                    if (bgDigits.isNotEmpty()) bg = bgDigits.toString().toInt()
+                }
+                for (x in i until j) toOut[x] = out.length
+                i = j
+                continue
+            }
+            when (c) {
+                '\u0002' -> bold = !bold
+                '\u001D' -> italic = !italic
+                '\u001F' -> underline = !underline
+                '\u000F' -> { bold = false; italic = false; underline = false; fg = null; bg = null }
+                else -> if (c < ' ' && c != '\n' && c != '\t') Unit else {
+                    toRaw.add(i)
+                    out.withStyle(
+                        SpanStyle(
+                            fontWeight = if (bold) FontWeight.Bold else null,
+                            fontStyle = if (italic) FontStyle.Italic else null,
+                            textDecoration = if (underline) TextDecoration.Underline else null,
+                            color = fg?.let { mircColor(it) } ?: Color.Unspecified,
+                            background = bg?.let { mircColor(it) } ?: Color.Unspecified,
+                        )
+                    ) { append(c) }
+                }
+            }
+            i++
+        }
+        toOut[raw.length] = out.length
+        toRaw.add(raw.length)
+        val mapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int) = toOut[offset.coerceIn(0, raw.length)]
+            override fun transformedToOriginal(offset: Int) = toRaw[offset.coerceIn(0, toRaw.size - 1)]
+        }
+        return TransformedText(out.toAnnotatedString(), mapping)
+    }
+}
+
 private const val BOT_INLINE_ID = "botbadge"
+private const val STATUS_INLINE_ID = "readreceipt"
 
 
 private val urlRegex = Regex("https?://\\S+")
@@ -7207,32 +7417,9 @@ private data class MircStyleState(
 private data class MircRun(val text: String, val style: MircStyleState)
 
 /**
- * Full mIRC/IRCv3 colour table: 0-15 legacy + 16-98 extended (99 total).
- *
- * Codes 0-15 are the original mIRC palette used by essentially all IRC clients.
- * Codes 16-98 are the modern IRCv3 extension published at
- * https://modern.ircdocs.horse/formatting.html#color - supported by mIRC 7+,
- * WeeChat, HexChat, and most modern clients.
- *
- * Each entry is a 0xAARRGGBB value.
- */
-/**
- * Canonical mIRC / IRCv3 colour palette — 99 entries (codes 0–98).
- *
- * Source: https://modern.ircdocs.horse/formatting.html#color (the "IRC Colour" specification).
- * These are the exact RGB hex values that mIRC 7+, HexChat, WeeChat, and other modern
- * clients use. Codes 0–15 are the original mIRC palette; codes 16–97 are the extended
- * IRCv3 block (6 rows of 16, laid out as a gradient grid); code 98 is the spec-defined
- * "transparent/default" entry which maps to white for rendering purposes.
- *
- * Layout of codes 16–97 in the grid (each row = 16 entries, darkest → lightest):
- *   Row 1 (16–27):  greys darkening right → pure blacks at left
- *   Row 2 (28–39):  dark shades — red, orange, yellow, green, cyan, blue, purple, pink
- *   Row 3 (40–51):  mid shades
- *   Row 4 (52–63):  bright / saturated
- *   Row 5 (64–75):  light / pastel
- *   Row 6 (76–87):  very light / near-white pastels
- *   Row 7 (88–98):  greyscale ramp (black → white), code 98 = white alias
+ * The 99-entry mIRC colour palette (codes 0-98), from
+ * https://modern.ircdocs.horse/formatting.html#color. 0-15 are the original colours, 16-97 the
+ * extended grid, and 98 is "default", rendered as white.
  */
 private val MIRC_PALETTE: IntArray = intArrayOf(
     // ── 0–15: classic mIRC palette ────────────────────────────────────────────
@@ -7651,21 +7838,44 @@ private fun IrcLinkifiedText(
 private fun looksLikeProse(plain: String): Boolean {
     var words = 0
     var run = 0
-    var letters = 0
+    var wordChars = 0
     var nonSpace = 0
     for (ch in plain) {
         if (ch.isLetter()) {
             run++
-            letters++
+            wordChars++
         } else {
             if (run >= 2) words++
-                run = 0
+            run = 0
+            // Numbers are ordinary in prose ("14°C", "67%", "24-09").
+            if (ch.isDigit()) wordChars++
         }
         if (!ch.isWhitespace()) nonSpace++
     }
     if (run >= 2) words++
-        val letterRatio = if (nonSpace > 0) letters.toFloat() / nonSpace else 0f
-        return words >= 3 && letterRatio >= 0.55f
+    val wordRatio = if (nonSpace > 0) wordChars.toFloat() / nonSpace else 0f
+    return words >= 3 && wordRatio >= 0.55f
+}
+
+/**
+ * [s] without emoji: pictographs, flags, skin tones, keycaps, ZWJ joins and any symbol given emoji
+ * presentation (followed by U+FE0F). Emoji are neither art structure nor fixed-width, so they are
+ * left out of the art heuristics entirely.
+ */
+private fun stripEmoji(s: String): String {
+    val out = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val cp = s.codePointAt(i)
+        val n = Character.charCount(cp)
+        val next = if (i + n < s.length) s.codePointAt(i + n) else -1
+        val emoji = cp in 0x1F000..0x1FAFF || cp in 0xE0020..0xE007F ||
+            cp == 0x200D || cp == 0xFE0F || cp == 0x20E3 ||
+            next == 0xFE0F || next == 0x20E3
+        if (!emoji) out.appendCodePoint(cp)
+        i += n
+    }
+    return out.toString()
 }
 
 /**
@@ -7676,17 +7886,13 @@ private fun looksLikeArt(text: String): Boolean {
     // Examine stripped content for structural shape, plus ANSI SGR and mIRC colour
     // codes as additional signals. The block-size gate (≥2 consecutive lines from
     // non-action senders) does the primary false-positive filtering.
-    val plain = stripIrcFormatting(text)
+    val plain = stripEmoji(stripIrcFormatting(text))
     if (plain.length < 3) return false
 
-    // Single pass: detect ANSI SGR and count mIRC colour codes simultaneously.
-    // Previously two separate O(n) scans over the raw text string; merged into one.
-    //
-    // ANSI SGR ([…m): almost never in normal IRC text — even one is a strong signal.
-    // Other ANSI escapes ([3~ = Delete, [A = cursor-up) are NOT art; we check
-    // explicitly for the SGR final byte 'm'.
-    //
-    // mIRC colour codes (): common in normal chat so require ≥4 per line to trigger.
+    // Single pass: detect ANSI SGR and count mIRC colour codes. ANSI SGR (ESC[…m) is almost never
+    // in normal IRC text, so one is a strong signal; other ANSI escapes (ESC[3~, ESC[A) are not
+    // art, so only the SGR final byte 'm' counts. mIRC colour codes are common in chat, so it takes
+    // four or more on a line.
     var mircCount = 0
     var i = 0
     while (i < text.length) {
@@ -7713,17 +7919,9 @@ private fun looksLikeArt(text: String): Boolean {
 
     if (!isProse && mircCount >= 4) return true
 
-    // Signal 1: ≥2 leading spaces AND the content looks like a structural/art line.
-    //
-    // Previous version triggered on any non-alphanumeric first char, producing false
-    // positives for common IRC prose patterns like "  * list item" and "  - bullet".
-    //
-    // Refined rule:
-    // - Unambiguous if the first non-space char is a Unicode box-drawing or block-element
-    //   character (U+2500–U+2BFF): these never appear in normal prose.
-    // - For ASCII structural chars, require the line to be symmetrically framed — both
-    //   ends non-alphanumeric. This catches "|  text  |", "+---+", "*** header ***" while
-    //   correctly rejecting "  * bullet text" and "  - list item" (which end with a letter).
+    // Signal 1: two or more leading spaces and a structural line. A box-drawing or block character
+    // (U+2500-U+2BFF) first qualifies outright; ASCII structure needs both ends non-alphanumeric,
+    // so "|  text  |" counts but "  * bullet text" doesn't.
     if (plain.length >= 3 && plain[0] == ' ' && plain[1] == ' ') {
         val trimmed = plain.trimStart()
         if (trimmed.isNotEmpty()) {
@@ -7738,13 +7936,12 @@ private fun looksLikeArt(text: String): Boolean {
         }
     }
 
-    // Signal 2: structural-symbol density — tiered thresholds handle both short
-    // dense lines (e.g. "_____", "|_ _|") and medium-length mixed lines (e.g. "H _|\_/|_ H"):
-    //   • Short  (≥4 non-space):  density ≥ 80 % — catches pure border lines like "_____"
-    //   • Medium (≥8 non-space):  density ≥ 45 % — catches "H   _|\_/|_   H" (78 %) and
-    //                              "nHnn/ \___/ \nnHn" (47 %)
-    //   • Long   (≥16 non-space): density ≥ 30 % — the original threshold for wider art
-    // All thresholds safely reject normal prose: typical IRC chat scores < 20 % symbol density.
+    // Signal 2: structural-symbol density, with tiered thresholds for short dense lines and longer
+    // mixed ones:
+    //   Short  (>= 4 non-space):  density >= 80% (border lines like "_____")
+    //   Medium (>= 8 non-space):  density >= 45% ("H   _|\_/|_   H")
+    //   Long   (>= 16 non-space): density >= 30%
+    // Normal chat scores under 20%.
     var artCount = 0
     var alphaCount = 0
     for (ch in plain) {
@@ -7776,12 +7973,8 @@ private fun looksLikeArt(text: String): Boolean {
 }
 
 /**
- * A heterogeneous list item for the chat LazyColumn.
- *
- * [Single] wraps one normal message.
- * [Art] wraps an entire run of consecutive art lines as one item, so all
- * lines are rendered inside a single [Column] with zero inter-line gaps.
- * Keys use even/odd Long split to avoid collisions between the two types.
+ * A chat list item before sizing: [Single] is one message, [Art] a run of consecutive art lines
+ * rendered as one gap-free block.
  */
 private sealed class RawItem {
     data class Single(val msg: UiMessage) : RawItem()
@@ -7791,80 +7984,43 @@ private sealed class RawItem {
 private sealed class DisplayItem {
     abstract val key: Any
     data class Single(val msg: UiMessage) : DisplayItem() {
-        // Type-tagged string keys are collision-proof by construction: every Single
-        // gets "S:<id>", every Art gets "A:<firstId>:<size>". Previously the code
-        // used Long arithmetic (msg.id * 2 vs first().id * 2 + 1) which is unique
-        // for distinct ids but vulnerable to stale-cache scenarios where two
-        // RawItem.Art blocks built from different reversedMessages snapshots could
-        // briefly coexist with overlapping ids in flight; the type tag prevents
-        // any cross-type collision and the size suffix on Art makes the key change
-        // whenever the block grows or shrinks. Bug surfaced as
-        // "Key was already used" crashes on fling-driven measure passes
-        // (LayoutNodeSubcompositionsState.subcompose).
+        // Type-tagged string keys can't collide across types: "S:<id>" for a single message,
+        // "A:<firstId>:<size>" for an art block, whose key changes as the block grows or shrinks.
         override val key: Any = "S:${msg.id}"
     }
     data class Art(
         val msgs: List<UiMessage>,  // chronological: oldest first
         val fontSizeSp: Float,
+        /** Too wide for the pane even at the minimum size, so the block scrolls sideways. */
+        val overflows: Boolean = false,
     ) : DisplayItem() {
         override val key: Any = "A:${msgs.first().id}:${msgs.size}"
     }
 }
 
 /**
- * Builds the [DisplayItem] list consumed by the chat [LazyColumn].
- *
- * Consecutive art-like messages (from any sender) are merged into a single
- * [DisplayItem.Art] item so they render gap-free inside one [Column].
- *
- * Performance — two-phase approach:
- *
- * Phase 1 (block detection): scans [reversedMessages] with [looksLikeArt] and
- * groups consecutive art lines into [RawArt] blocks.  Pure string ops, no
- * allocation beyond the result list.  Cached by (n, newestId) so it only
- * re-runs when a message is added or removed.
- *
- * Phase 2 (font sizing): measures each [RawArt] block to find the font size
- * that fits the widest line.  Results are stored in a [HashMap] keyed by
- * (firstMsgId, blockSize) so that:
- *   - A new non-art message arriving → Phase 1 re-runs (fast), Phase 2
- *     re-iterates but every art block is a cache hit → zero [TextMeasurer]
- *     calls.
- *   - A new art message extending a block → cache key changes (blockSize++)
- *     → only that block is re-measured, all others are hits.
- *   - Layout width or font size changes → cache is cleared and all blocks
- *     are re-measured once.
+ * Builds the [DisplayItem] list for the chat LazyColumn, merging consecutive art lines into one
+ * [DisplayItem.Art]. Phase 1 detects blocks with string operations only, keyed on the message
+ * list. Phase 2 measures each block once and scales it to the pane width, so resizing costs no
+ * measurement.
  */
 @Composable
 private fun rememberDisplayItems(
     reversedMessages: List<UiMessage>,
     availableWidthPx: Float,
     style: androidx.compose.ui.text.TextStyle,
-    minFontSp: Float = 6f,
+    minFontSp: Float = 4f,
     artDetectionEnabled: Boolean = true,
+    /** First message ids of art blocks to show as ordinary lines instead. */
+    shownAsText: Set<Long> = emptySet(),
 ): List<DisplayItem> {
     val textMeasurer = rememberTextMeasurer()
     val naturalSizeSp = style.fontSize.value.takeIf { !it.isNaN() && it > 0f } ?: 14f
 
-    // ── Phase 1: block detection — O(n) string ops, no measurement ───────────
-    //
-    // Cache key: the reversedMessages list itself, by reference identity.
-    //
-    // Previous versions keyed on (n, newestId, oldestId). That fails when a
-    // merge or sort reorders messages while keeping those three values stable —
-    // a rare but real case during case-variant channel merges (mergeDuplicateBuffers
-    // sorts by (timeMs, id) after a .distinctBy { it.id }). A stale rawItems list
-    // then produces DisplayItem keys that collide with live ids, and Compose's
-    // LazyColumn throws "Key was already used" from a measure pass:
-    //   InlineClassHelperKt.throwIllegalArgumentException
-    //     → LayoutNodeSubcompositionsState.subcompose
-    //     → LazyLayoutMeasureScopeImpl.compose
-    // (seen in Play Console crash reports on 1.6.0.)
-    //
-    // Keying on reversedMessages by reference identity invalidates exactly when
-    // content changes. Phase 1 is pure string ops (~microseconds at the 5000
-    // scrollback cap) and Phase 2's expensive TextMeasurer calls are cached
-    // separately below, so the perf cost is negligible.
+    // ── Phase 1: block detection, string ops only ───────────────────────
+    // Keyed on the reversedMessages list by reference, so it invalidates exactly when the content
+    // changes; a merge can reorder messages while the size and end ids stay the same. Phase 1 costs
+    // microseconds at the scrollback cap, and Phase 2's measurements are cached separately below.
     val rawItems: List<RawItem> = remember(reversedMessages, artDetectionEnabled) {
         if (reversedMessages.isEmpty()) return@remember emptyList()
         // Detection disabled: every message renders as a normal chat line. Mapping
@@ -7910,73 +8066,56 @@ private fun rememberDisplayItems(
         result
     }
 
-    // ── Phase 2: font sizing — only measures blocks missing from cache ────────
-    // Key: (firstMsgId * MAX_BLOCK + blockSize) — uniquely identifies a block's
-    // content since IRC message lists are append-only and blocks only grow by
-    // having newer messages added at the end of the chronological order.
-    // Cache is cleared when layout dimensions change so all blocks are re-sized.
-    val fontSizeCache = remember { HashMap<Long, Float>() }
-    val prevWidth  = remember { mutableStateOf(availableWidthPx) }
-    val prevNatSp  = remember { mutableStateOf(naturalSizeSp) }
-    if (prevWidth.value != availableWidthPx || prevNatSp.value != naturalSizeSp) {
-        fontSizeCache.clear()
-        prevWidth.value  = availableWidthPx
-        prevNatSp.value  = naturalSizeSp
+    // ── Phase 2: font sizing ─────────────────────────────────────────────
+    // Each block is measured once, at the natural size: text width scales linearly with font
+    // size, so fitting a new pane width is arithmetic and resizing never re-measures. The cache
+    // is keyed on the style, and each block on its ids and text.
+    val naturalWidthCache = remember(style) { HashMap<Long, Float>() }
+
+    fun naturalWidest(msgs: List<UiMessage>): Float {
+        var key = (msgs.first().id shl 17) or msgs.size.toLong()
+        for (m in msgs) key = key * 31 + m.text.hashCode()
+        naturalWidthCache[key]?.let { return it }
+        if (naturalWidthCache.size >= 500) naturalWidthCache.clear()
+        val natural = style.copy(fontSize = naturalSizeSp.sp)
+        val widest = msgs.maxOfOrNull { m ->
+            val line = stripIrcFormatting(m.text)
+            if (line.isEmpty()) 0f else textMeasurer.measure(
+                text = line,
+                style = natural,
+                constraints = Constraints(maxWidth = Int.MAX_VALUE),
+                maxLines = 1,
+                softWrap = false,
+            ).size.width.toFloat()
+        } ?: 0f
+        naturalWidthCache[key] = widest
+        return widest
     }
 
-    fun fontSizeForBlock(msgs: List<UiMessage>): Float {
-        // (firstMsgId shifted left 17 bits) OR blockSize — collision-free for
-        // any realistic block size (<131072 lines) and message ID space.
-        val cacheKey = (msgs.first().id shl 17) or msgs.size.toLong()
-        fontSizeCache[cacheKey]?.let { return it }
-
-        // Evict stale entries when cache grows large. Art blocks trimmed by
-        // maxScrollbackLines leave orphan entries that are never invalidated.
-        if (fontSizeCache.size >= 500) fontSizeCache.clear()
-
-        // Not cached — run the binary search (same algorithm as rememberMotdFontSizeSp).
-        val plainLines = msgs.map { stripIrcFormatting(it.text) }.filter { it.isNotEmpty() }
-        val sp = if (plainLines.isEmpty() || availableWidthPx <= 0f) {
-            naturalSizeSp
-        } else {
-            val widestAtNatural = plainLines.maxOf { line ->
-                textMeasurer.measure(
-                    text = line,
-                    style = style.copy(fontSize = naturalSizeSp.sp),
-                    constraints = Constraints(maxWidth = Int.MAX_VALUE),
-                    maxLines = 1,
-                    softWrap = false,
-                ).size.width.toFloat()
-            }
-            if (widestAtNatural <= availableWidthPx) {
-                naturalSizeSp
-            } else {
-                var lo = minFontSp
-                var hi = naturalSizeSp
-                repeat(8) {
-                    val mid = (lo + hi) / 2f
-                    val widest = plainLines.maxOf { line ->
-                        textMeasurer.measure(
-                            text = line,
-                            style = style.copy(fontSize = mid.sp),
-                            constraints = Constraints(maxWidth = Int.MAX_VALUE),
-                            maxLines = 1,
-                            softWrap = false,
-                        ).size.width.toFloat()
-                    }
-                    if (widest <= availableWidthPx) lo = mid else hi = mid
-                }
-                lo
-            }
-        }
-        fontSizeCache[cacheKey] = sp
-        return sp
+    /** Font size for an art block, and whether it still overflows the pane at that size. */
+    fun fontSizeForBlock(msgs: List<UiMessage>): Pair<Float, Boolean> {
+        val widest = naturalWidest(msgs)
+        if (widest <= 0f || availableWidthPx <= 0f) return naturalSizeSp to false
+        // A little slack, so rounding at the new size can't push the last column past the edge.
+        val usable = availableWidthPx * 0.99f - 1f
+        if (widest <= usable) return naturalSizeSp to false
+        // Rounded down to a quarter point, so a resize only relays out a block when its size steps.
+        val fitted = kotlin.math.floor(naturalSizeSp * usable / widest * 4f) / 4f
+        val sp = fitted.coerceAtLeast(minFontSp)
+        return sp to (widest * sp / naturalSizeSp > availableWidthPx)
     }
 
-    return rawItems.map { raw ->
+    return rawItems.flatMap { raw ->
         when (raw) {
-            is RawItem.Single -> DisplayItem.Single(raw.msg)
-            is RawItem.Art    -> DisplayItem.Art(raw.msgs, fontSizeForBlock(raw.msgs))
+            is RawItem.Single -> listOf(DisplayItem.Single(raw.msg))
+            // The list runs newest first, the block oldest first.
+            is RawItem.Art -> if (raw.msgs.first().id in shownAsText) {
+                raw.msgs.asReversed().map { DisplayItem.Single(it) }
+            } else {
+                fontSizeForBlock(raw.msgs).let { (sp, overflows) ->
+                    listOf(DisplayItem.Art(raw.msgs, sp, overflows))
+                }
+            }
         }
     }
 }

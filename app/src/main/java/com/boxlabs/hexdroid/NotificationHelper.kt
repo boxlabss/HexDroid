@@ -25,6 +25,9 @@ import androidx.core.app.RemoteInput
 class NotificationHelper(private val ctx: Context) {
 
     companion object {
+        /** Set once the channels exist; they persist, so later calls can skip creating them. */
+        @Volatile private var channelsReady = false
+
         const val CH_CONNECTION      = "hexdroid_connection"
         const val CH_HIGHLIGHT_SILENT = "hexdroid_highlight_silent"
         const val CH_HIGHLIGHT_SOUND  = "hexdroid_highlight_sound"
@@ -90,28 +93,17 @@ class NotificationHelper(private val ctx: Context) {
         private val notifIdCounter = java.util.concurrent.atomic.AtomicInteger(2000)
         fun nextNotifId(): Int = notifIdCounter.incrementAndGet()
 
-        // Monotonically-increasing PendingIntent request code counter, used ONLY for
-        // notifications that must remain individually addressable (highlights, PMs, inline
-        // replies). String.hashCode() is a 32-bit signed integer with known collision pairs;
-        // two different buffer/network combos can produce the same request code, which
-        // causes one buffer's tap intent to silently overwrite another's in the system.
-        //
-        // Note: the connection notification's tap intent uses a STABLE code instead - see
-        // [CONNECTION_PI_REQUEST_CODE] below. The counter is reserved for one-shot
-        // notifications that genuinely need their own PendingIntent.
+        // Request codes for notifications that must stay individually addressable (highlights, PMs,
+        // inline replies). A counter rather than hashCode(), whose collisions let one buffer's tap
+        // intent overwrite another's. The connection notification uses a stable code instead.
         private val piRequestCounter = java.util.concurrent.atomic.AtomicInteger(0)
         fun nextPiRequestCode(): Int = piRequestCounter.incrementAndGet()
 
         /**
-         * Stable request code for the connection (foreground service) notification's tap
-         * intent. The connection notification is updated frequently (every server status
-         * change), and each update was previously allocating a fresh PendingIntent via
-         * [nextPiRequestCode]. On Samsung One UI 6 / Android 14 the system imposes a
-         * per-UID rate limit on PendingIntent creation and throws SecurityException once
-         * the limit is hit (~PendingIntentController.incrementUidStatLocked) - which then
-         * crashes the foreground service via [KeepAliveService.onStartCommand]. Using a
-         * stable code together with FLAG_UPDATE_CURRENT updates the existing PendingIntent
-         * in place rather than allocating a new one each time.
+         * Stable request code for the connection notification's tap intent. The notification is
+         * rebuilt on every status change, and some Samsung firmware rate-limits PendingIntent
+         * creation per UID and throws; a stable code with FLAG_UPDATE_CURRENT updates the existing
+         * PendingIntent instead of creating one.
          */
         const val CONNECTION_PI_REQUEST_CODE = 100
         const val CONNECTION_TRANSFERS_PI_REQUEST_CODE = 101
@@ -119,12 +111,8 @@ class NotificationHelper(private val ctx: Context) {
         const val CONNECTION_EXIT_PI_REQUEST_CODE = 103
 
         /**
-         * Wrap [PendingIntent.getActivity] / [PendingIntent.getBroadcast] in a try/catch
-         * that swallows SecurityException. On certain Samsung firmware builds the
-         * ActivityManager imposes a per-UID PendingIntent rate limit and throws when
-         * exceeded - we don't want that to crash the foreground service we are in the
-         * middle of starting. Returning null lets the caller skip the action gracefully
-         * (NotificationCompat tolerates a null contentIntent).
+         * Create a PendingIntent, returning null instead of throwing when some Samsung firmware's
+         * per-UID rate limit refuses it.
          */
         internal inline fun safePi(block: () -> PendingIntent): PendingIntent? =
             runCatching(block).getOrNull()
@@ -161,8 +149,14 @@ class NotificationHelper(private val ctx: Context) {
         }
     }
 
+    /**
+     * Create the app's channels, once per process. Every notification path calls this, and each
+     * creation is a call into the system; on some ROMs (HyperOS) those are slow enough that
+     * repeating them on every status update starves the main thread.
+     */
     fun ensureChannels() {
         if (Build.VERSION.SDK_INT < 26) return
+        if (channelsReady) return
         val nm = try {
             ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         } catch (_: Throwable) { return }
@@ -192,6 +186,7 @@ class NotificationHelper(private val ctx: Context) {
             nm.createNotificationChannel(pm)
             nm.createNotificationChannel(dcc)
             nm.createNotificationChannel(error)
+            channelsReady = true
         } catch (_: Throwable) {}
     }
 
@@ -252,13 +247,8 @@ class NotificationHelper(private val ctx: Context) {
     }
 
     /**
-     * Builds a mutable [PendingIntent] targeting [NotificationReplyReceiver].
-     *
-     * The intent carries [networkId], [buffer], and [notifId] so the receiver can
-     * send the message to the right place and then cancel the notification.
-     *
-     * Must be FLAG_MUTABLE: Android requires RemoteInput reply intents to be mutable
-     * so the system can attach the RemoteInput results bundle before delivery.
+     * A mutable PendingIntent for [NotificationReplyReceiver] carrying [networkId], [buffer] and
+     * [notifId]. Must be FLAG_MUTABLE so the system can attach the RemoteInput results.
      */
     private fun replyPendingIntent(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): PendingIntent? {
         val i = Intent(ctx, NotificationReplyReceiver::class.java).apply {
@@ -304,12 +294,9 @@ class NotificationHelper(private val ctx: Context) {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-        // Stable request codes: this notification is rebuilt on every status change, so
-        // allocating a fresh PendingIntent per build burns through Samsung's per-UID
-        // PendingIntent allowance and eventually throws SecurityException. Reusing a stable
-        // code with FLAG_UPDATE_CURRENT updates the existing entry in place instead.
-        // If PendingIntent creation fails (rate-limited firmware), the notification still
-        // shows; only its tap targets are skipped, which beats a crash.
+        // Stable request codes, since this notification is rebuilt on every status change (see
+        // [CONNECTION_PI_REQUEST_CODE]). If PendingIntent creation still fails, the notification
+        // shows without its tap targets.
         openBufferPendingIntent(networkId, "*server*", stableRequestCode = CONNECTION_PI_REQUEST_CODE)
             ?.let { b.setContentIntent(it) }
         actionPendingIntent(networkId, ACTION_QUIT, stableRequestCode = CONNECTION_QUIT_PI_REQUEST_CODE)
@@ -326,12 +313,8 @@ class NotificationHelper(private val ctx: Context) {
     fun cancelConnection() { NotificationManagerCompat.from(ctx).cancel(NOTIF_ID_CONNECTION) }
 
     /**
-     * Take down every notification raised for one buffer.
-     *
-     * Ids are allocated from a counter so that separate messages stack rather than
-     * replacing each other, which means they cannot be cancelled by id after the fact. The
-     * per-buffer tag is what groups them, and the active list is what turns the tag back
-     * into the ids to cancel.
+     * Cancel every notification for one buffer. Ids come from a counter so messages stack, so the
+     * per-buffer tag and the active list are used to find them.
      */
     fun cancelBuffer(networkId: String, buffer: String) {
         val tag = notifTagFor(networkId, buffer)

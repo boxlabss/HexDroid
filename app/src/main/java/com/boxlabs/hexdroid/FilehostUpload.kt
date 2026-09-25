@@ -25,18 +25,9 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 /**
- * HTTP upload client for the soju.im/FILEHOST extension (also advertised as
- * draft/FILEHOST by the pending IRCv3 spec).
- *
- * Protocol: the server advertises an upload URL via an ISUPPORT (005) token.
- * The client POSTs the raw file bytes to that URL, authenticating with the
- * same credentials as the IRC connection (HTTP Basic with the SASL PLAIN
- * identity). On success the server answers 201 Created with a Location header
- * naming the public URL of the uploaded file, which the client then pastes
- * into a message.
- *
- * Deliberately pure JVM (no Android imports) so it can be unit-tested and
- * compiled off-device, matching IrcParser's testing story.
+ * Upload client for soju.im/FILEHOST (draft/FILEHOST): POST the file to the advertised URL with the
+ * connection's credentials as HTTP Basic, and read the public URL from the 201 response's Location
+ * header. Pure JVM so it can be unit tested.
  */
 internal object FilehostUpload {
 
@@ -102,22 +93,12 @@ internal object FilehostUpload {
         host.contains(':') || host.all { it.isDigit() || it == '.' }
 
     /**
-     * Upload [input] to [uploadUrl].
+     * Upload [input] to [uploadUrl] and return the public URL. Blocking; the caller closes [input].
      *
-     * [username]/[password]: IRC connection credentials, sent as HTTP Basic
-     * when both are present. For soju this is the same user[/network][@client]
-     * identity used for SASL PLAIN. [withheldReason] says why the caller chose
-     * not to send them, and is shown if the server then asks for them.
-     *
-     * [connectionUsesTls]: when true, an http:// filehost URL is refused so a
-     * misconfigured server cannot silently downgrade credentials and file
-     * contents to plaintext while the IRC connection itself is encrypted.
-     *
-     * [contentLength]: exact byte count when known (enables fixed-length
-     * streaming); pass a value <= 0 to fall back to chunked streaming.
-     *
-     * Blocking: call from a background thread. The caller owns [input] and
-     * should close it; this function does not.
+     * @param username Credentials sent as HTTP Basic when both are present.
+     * @param withheldReason Why credentials were withheld, shown if the server asks for them.
+     * @param connectionUsesTls Refuse an http:// URL when the IRC connection is encrypted.
+     * @param contentLength Exact size for fixed-length streaming, or <= 0 for chunked.
      */
     fun upload(
         uploadUrl: String,

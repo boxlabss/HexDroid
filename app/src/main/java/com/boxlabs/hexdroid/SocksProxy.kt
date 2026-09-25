@@ -26,16 +26,8 @@ import java.net.InetSocketAddress
 import java.net.Socket
 
 /**
- * Proxy protocol families HexDroid can tunnel an IRC connection through.
- *
- * Both SOCKS variants resolve the *destination* hostname at the proxy rather than on the
- * device. This is essential for two reasons:
- *  - Tor: `.onion` addresses have no DNS record and can ONLY be resolved by the Tor daemon
- *    behind the SOCKS port, so local resolution is impossible by construction.
- *  - Privacy: even for clearnet hosts, resolving locally would leak the IRC server's
- *    hostname to the device's DNS resolver (and thus the network operator/ISP),
- *    defeating much of the point of proxying. Remote resolution keeps the lookup inside
- *    the tunnel.
+ * Proxy types for tunnelling an IRC connection. Both SOCKS variants resolve the destination at the
+ * proxy: required for .onion addresses, and it keeps the server's hostname out of the device's DNS.
  */
 enum class ProxyType {
     /** No proxy; connect directly. */
@@ -55,12 +47,8 @@ enum class ProxyType {
 }
 
 /**
- * Immutable description of the proxy to route a connection through. A [type] of
- * [ProxyType.NONE] means "no proxy"; the other fields are then ignored.
- *
- * [username] / [password] apply only to [ProxyType.SOCKS5] (RFC 1929 user/pass auth). For
- * [ProxyType.SOCKS4A], [username] is sent verbatim as the SOCKS4 USERID field and
- * [password] is ignored.
+ * The proxy for a connection; [ProxyType.NONE] means none. [username] and [password] are SOCKS5
+ * user/pass auth; for SOCKS4A, [username] is the USERID and [password] is ignored.
  */
 data class ProxyConfig(
     val type: ProxyType = ProxyType.NONE,
@@ -88,31 +76,19 @@ data class ProxyConfig(
 class ProxyException(message: String) : IOException(message)
 
 /**
- * Establishes TCP connections through a SOCKS proxy, performing the handshake by hand so
- * the destination hostname is resolved *at the proxy* (remote DNS) rather than on-device.
- *
- * The returned [Socket] is connected end-to-end to the destination: callers can read/write
- * it directly, or hand it to an [javax.net.ssl.SSLSocketFactory.createSocket] overload to
- * layer TLS on top exactly as they would a direct socket. From the TLS layer's perspective
- * the proxied socket is indistinguishable from a direct one, so certificate validation,
- * SNI, and hostname checks all continue to work against the real destination host.
+ * Opens TCP connections through a SOCKS proxy with a hand-written handshake, so the destination is
+ * resolved at the proxy. The returned socket is connected end to end, and TLS can be layered on it
+ * exactly as on a direct socket.
  */
 object SocksProxy {
 
     /**
-     * Open a TCP connection to [destHost]:[destPort] through the proxy described by [cfg].
+     * Connect to [destHost]:[destPort] through [cfg].
      *
-     * @param connectTimeoutMs applied to the TCP connect to the *proxy* and as the
-     *        socket's read timeout during the handshake, so a black-holed or wrong-protocol
-     *        proxy can't hang the connect coroutine forever.
-     * @param soTimeoutMs the read timeout to leave on the socket once the tunnel is up
-     *        (the handshake uses [connectTimeoutMs] internally and restores this after).
-     * @param tcpNoDelay/[keepAlive] applied to the underlying socket to match the
-     *        direct-connection socket options.
-     *
-     * @throws ProxyException if the proxy rejects the request or speaks an unexpected
-     *         protocol; the caller treats this like any other connect failure (it flows
-     *         into the error mapper and the reconnect loop).
+     * @param connectTimeoutMs Timeout for connecting to the proxy, also used as the read timeout
+     *   during the handshake.
+     * @param soTimeoutMs Read timeout left on the socket once the tunnel is up.
+     * @throws ProxyException If the proxy refuses or speaks an unexpected protocol.
      */
     @Throws(IOException::class)
     fun connect(
@@ -138,13 +114,10 @@ object SocksProxy {
             // the same network the rest of the connection is pinned to. runCatching: degrade
             // to default routing if the network vanished between selection and now.
             pinnedNetwork?.let { net -> runCatching { net.bindSocket(socket) } }
-            // Connect to the PROXY (not the destination). The proxy address is a literal
-            // host:port the user configured; usually 127.0.0.1 for Tor, where resolution is
-            // an instant literal parse. When it IS a hostname, resolve it with the same
-            // wall-clock bound as the direct path: InetSocketAddress(String, port) resolves
-            // eagerly and unbounded in its constructor, BEFORE the connect timeout applies,
-            // so a hung resolver (router mid restart) would wedge the attempt here exactly
-            // like the direct-path bug. Resolved on the pinned network to match the bind.
+            // Connect to the proxy, not the destination. The proxy host is usually a literal
+            // (127.0.0.1 for Tor); a hostname is resolved with the same time bound as the direct
+            // path, on the pinned network, since InetSocketAddress(String, port) resolves unbounded
+            // before the connect timeout applies.
             val proxyAddr = com.boxlabs.hexdroid.resolveAllWithTimeout(cfg.host, pinnedNetwork, connectTimeoutMs).first()
             socket.connect(InetSocketAddress(proxyAddr, cfg.port), connectTimeoutMs)
             // Bound the handshake so a silent/wrong-protocol proxy can't stall us. Restored
@@ -293,13 +266,9 @@ object SocksProxy {
     }
 
     /**
-     * Encode the SOCKS5 CONNECT destination. Returns (ATYP, payload) where payload is:
-     * IPv4 literal  -> ATYP 0x01, 4 raw bytes
-     * IPv6 literal  -> ATYP 0x04, 16 raw bytes
-     * anything else -> ATYP 0x03 (DOMAINNAME), [len][ASCII host] for resolution AT THE
-     * PROXY (remote DNS; required for .onion and to avoid on-device lookups).
-     * [parseIpv4Literal]/[parseIpv6Literal] are purely textual and never resolve, so a real
-     * hostname always falls through to the DOMAINNAME branch.
+     * Encode the SOCKS5 CONNECT destination as (ATYP, payload): IPv4 literal 0x01, IPv6 literal
+     * 0x04, anything else 0x03 (domain name, resolved at the proxy). The literal parsers never
+     * resolve.
      */
     private fun encodeSocks5Dest(destHost: String): Pair<Int, ByteArray> {
         parseIpv4Literal(destHost)?.let { return SOCKS5_ATYP_IPV4 to it }

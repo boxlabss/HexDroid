@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">設定</string>
+    <string name="settings_view_one_page">1ページ表示</string>
+    <string name="settings_view_categories">カテゴリ別</string>
     <string name="settings_intro_tour">入門ツアー</string>
     <string name="settings_intro_tour_desc">メイン画面とショートカットの簡単なウォークスルーです。</string>
     <string name="section_appearance">外観</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">起動時に自動接続</string>
     <string name="setting_rejoin_on_kick">キック時に再参加</string>
     <string name="setting_rejoin_on_kick_desc">キックされた後に自動的にチャンネルに再参加します。同じチャンネルで 60 秒以内に 2 回目のキックがあった場合は、+i/+k/+b モードによるループを避けるため再参加しません。</string>
+    <string name="setting_nick_regain">主ニックを取り戻す</string>
+    <string name="setting_nick_regain_desc">ニックが使用中のため代替ニックで接続した場合、数分間元のニックへの切り替えを試み続けます。</string>
     <string name="setting_enable_notifications">通知を有効化</string>
     <string name="setting_notify_highlights">ハイライト通知</string>
     <string name="setting_notify_pm">プライベートメッセージ通知</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">キック</string>
     <string name="chat_ban">バン</string>
     <string name="chat_kick_ban_btn">キック+バン</string>
+    <string name="chat_ban_by">バンの対象</string>
+    <string name="chat_ban_type_host">ホスト</string>
+    <string name="chat_ban_type_nick">ニック</string>
+    <string name="chat_ban_type_account">アカウント</string>
+    <string name="chat_ban_type_domain">ドメイン</string>
 
     <!-- Network screens -->
     <string name="networks_title">ネットワーク</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">送受信したすべての行をネットワークごとの Raw バッファに表示します。パスワードは隠されます。デバッグ用です。</string>
     <string name="chat_show_less">折りたたむ</string>
     <string name="chat_not_delivered">未配信</string>
+    <string name="chat_status_read">既読</string>
     <string name="vm_multiline_rejected">サーバーがメッセージを拒否しました (%1$s): %2$s</string>
     <string name="network_edit_cap_also">%1$s も要求します</string>
     <string name="network_edit_caps_hint">基本的なIRCv3機能はデフォルトで有効です。高度なオプションを表示するにはオンにしてください。</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">メッセージ入力中に他のユーザーに表示する（draft/typing）。プライバシーのためデフォルトで無効。</string>
     <string name="setting_receive_typing">他のユーザーの入力中インジケーターを表示する</string>
     <string name="setting_receive_typing_desc">チャンネルやDMで他のユーザーが入力中のときにインジケーターを表示します。</string>
+    <string name="setting_read_receipts">既読通知</string>
+    <string name="setting_read_receipts_desc">個人メッセージで、相手のメッセージを読んだことを伝え、相手があなたのメッセージを読んだかどうかを表示します。他の HexDroid ユーザーとの間でのみ機能します。</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">チャンネル名が%1$sから%2$sに変更されました</string>
@@ -452,6 +464,13 @@
     <string name="chat_cd_launch_scripts">スクリプトを実行</string>
     <string name="chat_cd_edit_topic">トピックを編集</string>
     <string name="chat_cd_jump_unread">未読へ移動</string>
+    <string name="format_bold">太字</string>
+    <string name="format_italic">斜体</string>
+    <string name="format_underline">下線</string>
+    <string name="format_colour">色…</string>
+    <string name="format_clear">書式をクリア</string>
+    <string name="chat_art_show_as_text">テキストで表示</string>
+    <string name="chat_unread_since">%2$s以降 %1$s</string>
     <string name="chat_cd_scroll_bottom">一番下へスクロール</string>
     <string name="chat_cd_close_label">%1$s を閉じる</string>
     <string name="chat_cd_cancel_reply">返信を取り消す</string>
@@ -460,6 +479,8 @@
     <string name="chat_reply_to">%1$s に返信</string>
     <string name="chat_delete_message">メッセージを削除</string>
     <string name="chat_delete_message_desc">サーバー経由で全員から削除します</string>
+    <string name="chat_delete_message_others_desc">サーバーが許可していれば、全員から削除します</string>
+    <string name="chat_delete_message_no_id">削除できません: サーバーがこのメッセージに ID を付けていません</string>
     <string name="chat_copy_messages">メッセージをコピー…</string>
     <string name="chat_copy_messages_desc">コピーするメッセージを複数選択してください</string>
 
@@ -1399,6 +1420,7 @@
     <!-- ScriptsScreen -->
     <string name="scripts_title">スクリプト</string>
     <string name="scripts_reload">再読み込み</string>
+    <string name="scripts_restore_defaults">既定のスクリプトを復元 (%1$d)</string>
     <string name="scripts_import_file">ファイルをインポート…</string>
     <string name="scripts_import">インポート…</string>
     <string name="scripts_paste">貼り付け…</string>
@@ -1492,7 +1514,7 @@
     <string name="cmd_unignore">無視リストからユーザーを外します</string>
     <string name="cmd_quit">IRC を終了して切断します</string>
     <string name="cmd_kick">ユーザーをチャンネルからキックします</string>
-    <string name="cmd_ban">バン: ニック (既定)、ユーザー、ホスト、ドメイン、アカウント</string>
+    <string name="cmd_ban">バン: ホスト (既定)、ニック、ユーザー、ドメイン、アカウント</string>
     <string name="cmd_unban">バンを解除します (ニック以外のバンでは /banlist の正確なマスクを貼り付けてください)</string>
     <string name="cmd_kb">ユーザーをキックしてバンします (/ban と同じマスクの種類)</string>
     <string name="cmd_kickban">/kb の別名</string>

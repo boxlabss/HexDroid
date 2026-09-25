@@ -1,6 +1,38 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
+## [1.7.6]
+### Added
+- Select text in the message box to make it bold, italic, underlined or coloured, and the message box now shows formatting as it will look.
+- Optional read receipts for private messages (Settings > Privacy, off by default). When both people use HexDroid with it on, a double tick shows your message has been read.
+- A one-page option for Settings and the network editor, showing every category on a single page as before 1.7.3.
+- A "Regain primary nick" option in Settings > IRC.
+- Delete message on any message where the server supports deletion. The server decides whether you're allowed.
+- "Unshrink" link above ASCII art, for anything misdetected as art.
+- Scripts can react to `JOIN`, `PART`, `QUIT`, `KICK`, `NICK`, `NOTICE`, `CONNECT` and `DISCONNECT`, and read the time with `$ctime`, `$ticks` and `$time`.
+
+### Changed
+- Bans, kickbans and mutes use `*!*@host` by default and usually apply instantly without a WHOIS. The channel tools let you ban by host, nick, account or domain, and account bans use the server's own syntax.
+- Typing indicators are no longer sent while you type a command, and others' indicators clear sooner when they stop typing.
+- Read markers for private messages now sync with your other clients on servers that support read markers.
+- `/markread` marks up to the newest message rather than the current time.
+- `/setname` works out of the box on new networks.
+- ASCII art always uses a monospace font, scrolls sideways when it's too wide, and resizing the member list beside it is smooth.
+- Outgoing text is always UTF-8 on networks that require it.
+- The app is about 1 MB smaller.
+
+### Fixed
+- Networks reconnecting on their own after a manual disconnect, or on Wi-Fi return or app resume with auto-reconnect turned off.
+- `/who` showing no results when typed.
+- Keyed channels you joined yourself failing to rejoin after a reconnect or kick. The key you joined with is now remembered.
+- A channel you were kicked from being rejoined on the next reconnect when Rejoin on kick is off.
+- Your away status being lost after a reconnect on servers without pre-away.
+- Channels with `!` or `+` prefixes being treated as private messages, and op controls on networks with non-standard prefixes.
+- Reactions and replies breaking when a reaction contains spaces or other special characters.
+- Long multiline messages occasionally being rejected for exceeding the server's size limit.
+- Number fields in Settings jumping to their limits while typing.
+- Lines with emoji, such as weather bots, being mistaken for ASCII art.
+
 ## [1.7.5] 2026-09-17
 - **Share images from scripts.** The included `imgpaste.hex` adds `/img` and `/imgme` to pick a photo and post a link. HexDroid always asks before a script can open the file picker, and a script only gets the one file you chose.
 - **More capable scripts.** Scripts can make richer web requests and see why one failed, send `/me` actions, and hide server replies they don't need (see the included `whoisfilter.hex`).

@@ -16,6 +16,8 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.boxlabs.hexdroid.ui
 
 import android.content.Intent
@@ -30,9 +32,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -75,7 +82,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -359,29 +372,66 @@ private fun SettingsNavPanel(
         },
         onSelect = onSelect,
         modifier = modifier,
-        header = {
-            Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.setting_intro_tour), style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            stringResource(R.string.setting_intro_tour_desc),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = onRunTour,
-                        modifier = Modifier
-                            .tourTarget(TourTarget.SETTINGS_RUN_TOUR)
-                            .focusHighlight(RoundedCornerShape(50))
-                    ) { Text(stringResource(R.string.run)) }
-                }
-            }
-        },
+        header = { IntroTourCard(onRunTour) },
     )
+}
+
+/** The intro tour card, at the top of the category list or of the one page. */
+@Composable
+private fun IntroTourCard(onRunTour: () -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.setting_intro_tour), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    stringResource(R.string.setting_intro_tour_desc),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            OutlinedButton(
+                onClick = onRunTour,
+                modifier = Modifier
+                    .tourTarget(TourTarget.SETTINGS_RUN_TOUR)
+                    .focusHighlight(RoundedCornerShape(50))
+            ) { Text(stringResource(R.string.run)) }
+        }
+    }
+}
+
+/** A category heading in the one-page layout. */
+@Composable
+private fun OnePageHeader(category: SettingsCategory) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(category.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Text(
+            stringResource(category.titleRes),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+/**
+ * Top bar button switching between the categorised layout and one continuous page.
+ * Shared with the network editor.
+ */
+@Composable
+internal fun OnePageToggle(onePage: Boolean, onToggle: () -> Unit) {
+    IconButton(onClick = onToggle, modifier = Modifier.focusHighlight()) {
+        Icon(
+            if (onePage) Icons.Filled.GridView else Icons.Filled.ViewAgenda,
+            contentDescription = stringResource(
+                if (onePage) R.string.settings_view_categories else R.string.settings_view_one_page
+            ),
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -487,6 +537,11 @@ fun SettingsScreen(
     var picked by rememberSaveable { mutableStateOf<SettingsCategory?>(null) }
     val current = if (railLayout) (picked ?: SettingsCategory.APPEARANCE) else picked
 
+    // One page: every category in one continuous list. The tour points at the category
+    // panel, so it runs in the categorised layout.
+    val onePage = s.settingsOnePage && !tourActive
+    var jumpTo by remember { mutableStateOf<SettingsCategory?>(null) }
+
     // Search spans every category, so while it is open the field and its results
     // replace both panes. Picking a result opens the category holding that setting.
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -501,7 +556,7 @@ fun SettingsScreen(
     }
 
     // Back closes search first, then the open category, then the screen.
-    BackHandler(enabled = searchOpen || (!railLayout && picked != null)) {
+    BackHandler(enabled = searchOpen || (!onePage && !railLayout && picked != null)) {
         if (searchOpen) closeSearch() else picked = null
     }
 
@@ -510,7 +565,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        if (!railLayout && current != null) stringResource(current.titleRes)
+                        if (!onePage && !railLayout && current != null) stringResource(current.titleRes)
                         else stringResource(R.string.settings_title)
                     )
                 },
@@ -519,7 +574,7 @@ fun SettingsScreen(
                         onClick = {
                             when {
                                 searchOpen -> closeSearch()
-                                !railLayout && picked != null -> picked = null
+                                !onePage && !railLayout && picked != null -> picked = null
                                 else -> onBack()
                             }
                         },
@@ -527,6 +582,9 @@ fun SettingsScreen(
                     ) { Text("←") }
                 },
                 actions = {
+                    OnePageToggle(onePage = s.settingsOnePage) {
+                        onUpdate { copy(settingsOnePage = !settingsOnePage) }
+                    }
                     IconButton(
                         onClick = { if (searchOpen) closeSearch() else searchOpen = true },
                         modifier = Modifier.focusHighlight()
@@ -561,13 +619,42 @@ fun SettingsScreen(
         // Reset the scroll position when the open category changes, otherwise a short
         // page opens scrolled past its own content.
         LaunchedEffect(current) {
-            runCatching { listState.scrollToItem(0) }
+            if (!onePage) runCatching { listState.scrollToItem(0) }
+        }
+
+        // One page: bring a search result's category heading to the top. Headings only have
+        // an index once laid out, so page down from the top until it is.
+        LaunchedEffect(jumpTo) {
+            val target = jumpTo ?: return@LaunchedEffect
+            val key = "hdr_${target.name}"
+            try {
+                listState.scrollToItem(0)
+                for (step in 0 until 100) {
+                    val hit = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
+                    if (hit != null) {
+                        listState.scrollToItem(hit.index)
+                        break
+                    }
+                    if (!listState.canScrollForward) break
+                    listState.scrollBy(listState.layoutInfo.viewportSize.height * 0.9f)
+                    // One step per frame, so a long page scrolls rather than stalling.
+                    withFrameNanos { }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // A list that was just replaced can refuse to scroll; the jump is best effort.
+            }
+            if (jumpTo == target) jumpTo = null
         }
 
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // Edge-to-edge: the keyboard doesn't shrink the window, so keep the content above it.
+                .consumeWindowInsets(padding)
+                .imePadding()
         ) {
 
         if (searchOpen) {
@@ -611,7 +698,7 @@ fun SettingsScreen(
             SettingsSearchResults(
                 results = searchResults,
                 onOpen = { entry ->
-                    picked = entry.category
+                    if (onePage) jumpTo = entry.category else picked = entry.category
                     closeSearch()
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -623,7 +710,7 @@ fun SettingsScreen(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            if (railLayout || current == null) {
+            if (!onePage && (railLayout || current == null)) {
                 SettingsNavPanel(
                     current = current,
                     rail = railLayout,
@@ -638,7 +725,7 @@ fun SettingsScreen(
                 if (railLayout) VerticalDivider()
             }
 
-            if (current != null) {
+            if (onePage || current != null) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -648,7 +735,9 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
 
 ) {
-            if (current == SettingsCategory.APPEARANCE) {
+            if (onePage) item { IntroTourCard(onRunTour) }
+            if (onePage || current == SettingsCategory.APPEARANCE) {
+            if (onePage) item(key = "hdr_APPEARANCE") { OnePageHeader(SettingsCategory.APPEARANCE) }
             item {
                 LanguagePicker(
                     currentCode = s.appLanguage,
@@ -858,7 +947,8 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.MEDIA) {
+            if (onePage || current == SettingsCategory.MEDIA) {
+            if (onePage) item(key = "hdr_MEDIA") { OnePageHeader(SettingsCategory.MEDIA) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -882,7 +972,8 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.CHAT) {
+            if (onePage || current == SettingsCategory.CHAT) {
+            if (onePage) item(key = "hdr_CHAT") { OnePageHeader(SettingsCategory.CHAT) }
             item {
                 SettingToggle(stringResource(R.string.setting_colorise_nicks), s.colorizeNicks) { onUpdate { copy(colorizeNicks = !colorizeNicks) } }
                 SettingToggle(stringResource(R.string.setting_show_nick_icons), s.showNickIcons) { onUpdate { copy(showNickIcons = !showNickIcons) } }
@@ -1060,7 +1151,8 @@ fun SettingsScreen(
             }
             }
 
-            if (current == SettingsCategory.ALIASES) {
+            if (onePage || current == SettingsCategory.ALIASES) {
+            if (onePage) item(key = "hdr_ALIASES") { OnePageHeader(SettingsCategory.ALIASES) }
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     Text(
@@ -1133,7 +1225,8 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.HIGHLIGHTS) {
+            if (onePage || current == SettingsCategory.HIGHLIGHTS) {
+            if (onePage) item(key = "hdr_HIGHLIGHTS") { OnePageHeader(SettingsCategory.HIGHLIGHTS) }
 
             item { SettingToggle(stringResource(R.string.setting_highlight_on_nick), s.highlightOnNick) { onUpdate { copy(highlightOnNick = !highlightOnNick) } } }
 
@@ -1154,7 +1247,8 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.IRC) {
+            if (onePage || current == SettingsCategory.IRC) {
+            if (onePage) item(key = "hdr_IRC") { OnePageHeader(SettingsCategory.IRC) }
 
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -1358,15 +1452,12 @@ fun SettingsScreen(
                     Text(stringResource(R.string.setting_reconnect_interval), style = MaterialTheme.typography.titleSmall)
                     Text(stringResource(R.string.setting_reconnect_interval_desc), style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = s.autoReconnectDelaySec.toString(),
-                        enabled = s.autoReconnectEnabled,
-                        onValueChange = { v ->
-                            val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                            onUpdate { copy(autoReconnectDelaySec = n.coerceIn(5, 600)) }
-                        },
+                    NumberSettingField(
+                        value = s.autoReconnectDelaySec,
+                        range = 5..600,
+                        onCommit = { n -> onUpdate { copy(autoReconnectDelaySec = n) } },
                         label = { Text(stringResource(R.string.setting_seconds)) },
-                        singleLine = true,
+                        enabled = s.autoReconnectEnabled,
                         modifier = Modifier.widthIn(max = 180.dp)
                     )
                 }
@@ -1384,9 +1475,23 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_nick_regain), s.nickRegainEnabled) {
+                        onUpdate { copy(nickRegainEnabled = !nickRegainEnabled) }
+                    }
+                    Text(
+                        stringResource(R.string.setting_nick_regain_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             }
 
-            if (current == SettingsCategory.NOTIFICATIONS) {
+            if (onePage || current == SettingsCategory.NOTIFICATIONS) {
+            if (onePage) item(key = "hdr_NOTIFICATIONS") { OnePageHeader(SettingsCategory.NOTIFICATIONS) }
 
             item { SettingToggle(stringResource(R.string.setting_enable_notifications), s.notificationsEnabled) { onUpdate { copy(notificationsEnabled = !notificationsEnabled) } } }
             item { SettingToggle(stringResource(R.string.setting_notify_highlights), s.notifyOnHighlights) { onUpdate { copy(notifyOnHighlights = !notifyOnHighlights) } } }
@@ -1403,7 +1508,8 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.LOGGING) {
+            if (onePage || current == SettingsCategory.LOGGING) {
+            if (onePage) item(key = "hdr_LOGGING") { OnePageHeader(SettingsCategory.LOGGING) }
 
             item { SettingToggle(stringResource(R.string.setting_enable_logging), s.loggingEnabled) { onUpdate { copy(loggingEnabled = !loggingEnabled) } } }
             item { SettingToggle(stringResource(R.string.setting_log_server), s.logServerBuffer) { onUpdate { copy(logServerBuffer = !logServerBuffer) } } }
@@ -1416,16 +1522,10 @@ fun SettingsScreen(
                     if (!s.logFolderUri.isNullOrBlank()) {
                         Text(s.logFolderUri, style = MaterialTheme.typography.bodySmall)
                     }
-                    // Permission-lost warning. Surfaces when LogWriter has flagged this
-                    // tree URI as unreadable - typically after a backup-restore on a fresh
-                    // install (SAF permission grants are stored per-install in the system
-                    // and don't travel through any backup format, so the URI string in
-                    // settings outlives the grant). Without this badge, the user sees no
-                    // scrollback after restoring and has no obvious cue why; logging
-                    // silently no-ops too. The "Choose folder" button right below this
-                    // box is the one-tap fix - re-picking the same (or a new) folder
-                    // grants a fresh persistable permission and the badge clears
-                    // immediately when settings update.
+                    // Shown when LogWriter has flagged this tree URI as unreadable, typically after
+                    // a backup restore on a fresh install, since SAF grants don't survive a
+                    // restore. "Choose folder" below re-grants it, and the warning clears when
+                    // settings update.
                     if (state.logFolderUnreadable) {
                         Spacer(Modifier.height(4.dp))
                         Surface(
@@ -1473,13 +1573,10 @@ fun SettingsScreen(
             }
 
             item {
-                OutlinedTextField(
-                    value = s.retentionDays.toString(),
-                    onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                        // 0 = keep logs forever (purge disabled); otherwise clamp to 1..365.
-                        onUpdate { copy(retentionDays = n.coerceIn(0, 365)) }
-                    },
+                NumberSettingField(
+                    value = s.retentionDays,
+                    range = 0..365,
+                    onCommit = { n -> onUpdate { copy(retentionDays = n) } },
                     label = { Text(stringResource(R.string.setting_retention_days)) },
                     supportingText = {
                         Text(
@@ -1487,25 +1584,22 @@ fun SettingsScreen(
                             else stringResource(R.string.setting_retention_days_hint)
                         )
                     },
-                    singleLine = true
                 )
             }
 
             item {
-                OutlinedTextField(
-                    value = s.maxScrollbackLines.toString(),
-                    onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                        onUpdate { copy(maxScrollbackLines = n.coerceIn(200, 5000)) }
-                    },
+                NumberSettingField(
+                    value = s.maxScrollbackLines,
+                    range = 200..5000,
+                    onCommit = { n -> onUpdate { copy(maxScrollbackLines = n) } },
                     label = { Text(stringResource(R.string.setting_max_scrollback)) },
-                    singleLine = true
                 )
             }
 
             }
 
-            if (current == SettingsCategory.PRIVACY) {
+            if (onePage || current == SettingsCategory.PRIVACY) {
+            if (onePage) item(key = "hdr_PRIVACY") { OnePageHeader(SettingsCategory.PRIVACY) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -1527,6 +1621,15 @@ fun SettingsScreen(
 
             item {
                 Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_read_receipts), s.readReceiptsEnabled) {
+                        onUpdate { copy(readReceiptsEnabled = !readReceiptsEnabled) }
+                    }
+                    Text(stringResource(R.string.setting_read_receipts_desc), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                }
+            }
+
+            item {
+                Column(Modifier.fillMaxWidth()) {
                     SettingToggle(stringResource(R.string.setting_ctcp_replies), s.ctcpRepliesEnabled) {
                         onUpdate { copy(ctcpRepliesEnabled = !ctcpRepliesEnabled) }
                     }
@@ -1536,21 +1639,19 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.HISTORY) {
+            if (onePage || current == SettingsCategory.HISTORY) {
+            if (onePage) item(key = "hdr_HISTORY") { OnePageHeader(SettingsCategory.HISTORY) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.setting_history_limit), style = MaterialTheme.typography.titleSmall)
                     Text(stringResource(R.string.setting_history_limit_desc), style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = s.ircHistoryLimit.toString(),
-                        onValueChange = { v ->
-                            val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                            onUpdate { copy(ircHistoryLimit = n.coerceIn(0, 500)) }
-                        },
+                    NumberSettingField(
+                        value = s.ircHistoryLimit,
+                        range = 0..500,
+                        onCommit = { n -> onUpdate { copy(ircHistoryLimit = n) } },
                         label = { Text(stringResource(R.string.setting_messages)) },
-                        singleLine = true
                     )
                 }
             }
@@ -1560,7 +1661,8 @@ fun SettingsScreen(
 
             }
 
-            if (current == SettingsCategory.TRANSFERS) {
+            if (onePage || current == SettingsCategory.TRANSFERS) {
+            if (onePage) item(key = "hdr_TRANSFERS") { OnePageHeader(SettingsCategory.TRANSFERS) }
 
             item { SettingToggle(stringResource(R.string.setting_enable_dcc), s.dccEnabled) { onUpdate { copy(dccEnabled = !dccEnabled) } } }
 
@@ -1608,32 +1710,31 @@ fun SettingsScreen(
             }
 
             item {
-                OutlinedTextField(
-                    value = s.dccIncomingPortMin.toString(),
-                    onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                        onUpdate { copy(dccIncomingPortMin = n.coerceIn(1, 65535)) }
+                NumberSettingField(
+                    value = s.dccIncomingPortMin,
+                    range = 1..65535,
+                    onCommit = { n ->
+                        onUpdate { copy(dccIncomingPortMin = n, dccIncomingPortMax = maxOf(dccIncomingPortMax, n)) }
                     },
                     label = { Text(stringResource(R.string.setting_incoming_port_min)) },
-                    singleLine = true
                 )
             }
 
             item {
-                OutlinedTextField(
-                    value = s.dccIncomingPortMax.toString(),
-                    onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.toIntOrNull() ?: return@OutlinedTextField
-                        onUpdate { copy(dccIncomingPortMax = n.coerceIn(1, 65535)) }
+                NumberSettingField(
+                    value = s.dccIncomingPortMax,
+                    range = 1..65535,
+                    onCommit = { n ->
+                        onUpdate { copy(dccIncomingPortMax = n, dccIncomingPortMin = minOf(dccIncomingPortMin, n)) }
                     },
                     label = { Text(stringResource(R.string.setting_incoming_port_max)) },
-                    singleLine = true
                 )
             }
 
             }
 
-            if (current == SettingsCategory.BACKUP) {
+            if (onePage || current == SettingsCategory.BACKUP) {
+            if (onePage) item(key = "hdr_BACKUP") { OnePageHeader(SettingsCategory.BACKUP) }
 
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -1815,6 +1916,52 @@ private fun LanguagePicker(currentCode: String?, onPick: (String) -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Numeric setting field. Typing stays local; the value is clamped to [range] and saved
+ * when the field loses focus, the user presses Done, or the field leaves the screen.
+ */
+@Composable
+private fun NumberSettingField(
+    value: Int,
+    range: IntRange,
+    onCommit: (Int) -> Unit,
+    label: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    supportingText: (@Composable () -> Unit)? = null,
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    var focused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val currentValue by rememberUpdatedState(value)
+    val currentOnCommit by rememberUpdatedState(onCommit)
+
+    fun commit() {
+        val n = text.toIntOrNull()?.coerceIn(range) ?: currentValue
+        text = n.toString()
+        if (n != currentValue) currentOnCommit(n)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { if (focused) commit() }
+    }
+
+    OutlinedTextField(
+        value = text,
+        onValueChange = { v -> text = v.filter { it.isDigit() }.take(range.last.toString().length) },
+        enabled = enabled,
+        label = label,
+        supportingText = supportingText,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+        modifier = modifier.onFocusChanged { f ->
+            if (focused && !f.isFocused) commit()
+            focused = f.isFocused
+        },
+    )
 }
 
 @Composable

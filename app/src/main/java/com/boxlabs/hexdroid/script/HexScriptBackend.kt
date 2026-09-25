@@ -80,7 +80,9 @@ class HexScriptBackend : ScriptBackend {
         for (h in handlers) {
             val block = h as? HexBlock ?: continue
             if (event.owner != null && owners[block] != event.owner) continue
-            if (!filterMatches(block, event.text)) continue
+            // Channel events filter on the channel (`on JOIN:#help`), everything else on the text.
+            val subject = if (block.name in CHANNEL_EVENTS) event.buffer else event.text
+            if (!filterMatches(block, subject)) continue
             runBody(block.body, envForEvent(event, cb, owners[block]))
         }
     }
@@ -93,6 +95,8 @@ class HexScriptBackend : ScriptBackend {
         )
         runBody(block.body, envForEvent(event, cb, owners[block], userInitiated = true))
     }
+
+    private val CHANNEL_EVENTS = setOf("JOIN", "PART", "KICK")
 
     private fun filterMatches(block: HexBlock, text: String): Boolean {
         val f = block.filter ?: return true
@@ -283,12 +287,10 @@ class HexScriptBackend : ScriptBackend {
      * http.get [flags] <url> <signal> [ctx...]
      * http.post [flags] <url> <body> <signal> [ctx...]
      * http.post [flags] -b %var <url> <signal> [ctx...]
-     *
-     * Flags come first and are read before expansion, so `%var` in one is the variable's
-     * whole value rather than tokens the splitter would then break apart:
+     * Flags come first and are read before expansion:
      *   -t <type>        Content-Type for the body
      *   -h <name:value>  request header, repeatable
-     *   -b %var          body taken whole from a variable, spaces and quotes included
+     *   -b %var          body taken whole from a variable
      */
     private fun doHttp(raw: String, env: Env, post: Boolean) {
         var rest = raw.trim()
@@ -376,12 +378,11 @@ class HexScriptBackend : ScriptBackend {
     }
 
     /**
-     * media.upload [-h <name:value>] [-p <name=value>] [-f <field>] [-r] <url> <token> <signal> [ctx...]
-     *
-     * Sends the picked file as multipart/form-data under field name `file`, or as the raw
-     * request body with -r. -p adds a text form field beside the file, which is how an
-     * endpoint's own options (a strip-metadata switch, an album name) are passed. Answers on
-     * `SIGNAL:<signal>` with the same fields an http.post does, $httplocation included.
+     * media.upload [-h <name:value>] [-p <name=value>] [-f <field>] [-r] <url> <token> <signal>
+     * [ctx...]
+     * Sends the picked file as multipart field `file` (or the raw body with -r); -p adds text
+     * fields. Answers on `SIGNAL:<signal>` with the same fields as http.post, $httplocation
+     * included.
      */
     private fun doMediaUpload(raw: String, env: Env) {
         var rest = raw.trim()
@@ -554,7 +555,19 @@ class HexScriptBackend : ScriptBackend {
         if (name.startsWith("age.") || name.startsWith("media.") || name.startsWith("screen.")) return cb.capability(name, emptyList()) to after
         if (aliases.containsKey(name.lowercase())) return (callUser(name, emptyList(), env)?.asStr() ?: "") to after
         if (name == "0") return env.args.size.toString() to after
+        clockValue(name)?.let { return it to after }
         return (env.fields[name] ?: "") to after
+    }
+
+    /**
+     * The clock: `$ctime` Unix time in seconds, `$ticks` milliseconds from a monotonic clock (for
+     * measuring intervals; unaffected by the wall clock changing), `$time` local HH:mm:ss.
+     */
+    private fun clockValue(name: String): String? = when (name) {
+        "ctime" -> (System.currentTimeMillis() / 1000).toString()
+        "ticks" -> (System.nanoTime() / 1_000_000).toString()
+        "time" -> java.time.LocalTime.now().withNano(0).toString().let { if (it.length == 5) "$it:00" else it }
+        else -> null
     }
 
     private fun positional(env: Env, from: Int, to: Int): String {
@@ -758,6 +771,7 @@ class HexScriptBackend : ScriptBackend {
         e.from?.let { f["nick"] = it }
         f["me"] = cb.nick().orEmpty()
         f["isme"] = e.isMine.toString()
+        f["isprivate"] = e.isPrivate.toString()
         f.putAll(e.fields)
         val args = if (e.args.isNotEmpty()) e.args
         else if (e.text.isBlank()) emptyList() else e.text.split(' ')

@@ -30,20 +30,11 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * The raw cryptographic primitives `+AGE` needs, behind one interface so the
- * protocol layer (seal/invite/channel/identity) is library-independent and unit
- * testable, and so the curve binding is swappable without touching protocol code.
- *
- * This interface is the trust boundary. The concrete implementation
- * ([BouncyCastleAgePrimitives]) is the ONLY file that depends on a specific curve
- * library; everything else deals in [ByteArray]s. The symmetric layer
- * (SHA-256/HMAC/HKDF/AES-GCM/RNG/ct-equals) lives in [JcaAgePrimitives].
- *
- * Key representation, everywhere above this interface:
- *   - private key      = its 32-byte seed
- *   - signing public   = 32-byte Ed25519 encoded point   (via [signingPublicKey])
- *   - DH public        = 32-byte X25519 u-coordinate      (via [dhPublicKey])
- * Two *independent* signing/DH keypairs make up an identity (never one key for both roles).
+ * The primitives `+AGE` needs, behind one interface so the protocol layer is library-independent
+ * and testable. [BouncyCastleAgePrimitives] is the only curve-library dependency; symmetric
+ * operations are in [JcaAgePrimitives]. Private keys are 32-byte seeds, signing public keys 32-byte
+ * Ed25519 points and DH public keys 32-byte X25519 u-coordinates. An identity has independent
+ * signing and DH keypairs.
  */
 interface AgePrimitives {
 
@@ -152,15 +143,9 @@ abstract class JcaAgePrimitives : AgePrimitives {
 }
 
 /**
- * The `+AGE` backend. Ed25519 sign/verify and **native** X25519 key agreement come
- * from BouncyCastle's low-level lightweight API (org.bouncycastle.crypto.*) — no JCA
- * provider registration, so it never collides with Android's platform-repackaged
- * BouncyCastle (com.android.org.bouncycastle). Symmetric ops come from [JcaAgePrimitives].
- *
- * The DH key is a real X25519 keypair (not an Ed25519 keypair reused via a birational
- * map), so [dhPublicKey] / [dh] are plain X25519. BC's X25519 also rejects all-zero
- * (low-order) shared secrets, which we surface as an [AgeException] so callers keep
- * failing closed.
+ * The `+AGE` backend: Ed25519 and native X25519 from BouncyCastle's lightweight API (no JCA
+ * provider registration), symmetric operations from [JcaAgePrimitives]. An all-zero X25519 shared
+ * secret raises [AgeException].
  */
 class BouncyCastleAgePrimitives : JcaAgePrimitives() {
 
@@ -210,14 +195,9 @@ class BouncyCastleAgePrimitives : JcaAgePrimitives() {
 }
 
 /**
- * Deterministic length-prefixed (TLV-ish) encoding for everything that gets signed or
- * sealed. We do NOT use JSON for signed data: signature verification must be over a
- * byte-exact canonical form, and JSON field ordering / whitespace / number formatting
- * are non-deterministic. A reader/writer with explicit field order removes that whole
- * class of bug.
- *
- * Layout: each field is `u32 length (big-endian) ‖ bytes`. Strings are UTF-8. Order is
- * fixed by the caller and MUST match between encode and decode.
+ * Deterministic length-prefixed encoding for everything signed or sealed, since signatures need a
+ * byte-exact form. Each field is `u32 length (big-endian) || bytes`, strings UTF-8, in a
+ * caller-fixed order.
  */
 object AgeCodec {
 
@@ -270,15 +250,9 @@ object AgeCodec {
 }
 
 /**
- * Identity fingerprint (spec §3):
- *   fp = SHA-256( "hexdroid/+AGE/identity/v1" ‖ sigPub ‖ dhPub )
- *
- * The 32-byte digest is the protocol-level peer id (used in pin keys, member lists,
- * and nonce derivation). For the user-facing safety number we render the first 80 bits
- * via the shared [com.boxlabs.hexdroid.crypto.Crockford32] encoder, so the verification
- * UX is consistent with the per-key +AGM/+OK fingerprints. 80 bits is deliberately
- * longer than the per-key +AGM fingerprint (40 bits): an identity guards everything
- * downstream, so the second-preimage bar is set higher.
+ * Identity fingerprint: SHA-256("hexdroid/+AGE/identity/v1" || sigPub || dhPub), the protocol-level
+ * peer id. The safety number shows its first 80 bits in [Crockford32], longer than the 40-bit
+ * per-key fingerprints because an identity guards everything downstream.
  */
 object AgeFingerprint {
     private val LABEL = "hexdroid/+AGE/identity/v1".encodeToByteArray()

@@ -25,41 +25,21 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 
 /**
- * Helper for handling character encodings in IRC connections.
- * 
- * IRC predates Unicode standardization, and many networks still use legacy encodings.
- * This helper provides:
- * - Auto-detection of incoming text encoding
- * - Per-network encoding configuration
- * - Proper encoding/decoding for non-UTF-8 networks
- * 
- * Common problematic networks include:
- * - Bulgarian networks (windows-1251)
- * - Russian networks (KOI8-R, windows-1251)
- * - Japanese networks (ISO-2022-JP, Shift_JIS)
- * - Chinese networks (GB2312, Big5)
+ * Character encoding handling for IRC connections: auto-detection of incoming text, per-network
+ * encoding, and encoding and decoding for legacy (non-UTF-8) networks.
  */
 
 /**
- * Maximum bytes accepted per line from the server (applies to both read paths).
- * RFC 1459 allows 512 bytes; IRCv3 with message-tags extends this to 8191.
- * In practice, ZNC and other bouncers routinely produce longer lines when replaying
- * buffered messages with stacked server-time/msgid/batch/account tags. We pick a
- * generous ceiling (32 KiB) so normal bouncer traffic never trips it; a line that
- * exceeds even this is treated as garbage and discarded WITHOUT closing the socket.
+ * Maximum bytes accepted per line from the server. Generous (32 KiB) because bouncer replays with
+ * stacked tags exceed the protocol limits; a longer line is discarded without closing the socket.
  */
 private const val MAX_LINE_BYTES = 32768
 
 object EncodingHelper {
     
     /**
-     * Common IRC encodings to try during auto-detection.
-     * Order matters for tie-breaking: earlier = higher priority when scores are equal.
-     * windows-1251 is listed before windows-1256 because Cyrillic IRC networks are far
-     * more common globally, and the byte ranges overlap significantly (both map 0xC0-0xFF
-     * to standard Cyrillic А-я under windows-1251, which windows-1256 also uses for Arabic
-     * letters in the same byte range — so the per-character script bonus does the
-     * discrimination, but order provides a safe tie-break).
+     * Encodings tried during auto-detection. Earlier entries win ties; windows-1251 comes before
+     * windows-1256 because their Cyrillic and Arabic ranges overlap.
      */
     val COMMON_ENCODINGS = listOf(
         "UTF-8",
@@ -138,18 +118,8 @@ object EncodingHelper {
     
     
     /**
-     * Try to detect the encoding of a byte array.
-     * 
-     * Detection strategy:
-     * 1. Check if valid UTF-8 (most common modern encoding)
-     * 2. Score other encodings based on:
-     *    - Presence of replacement characters (bad)
-     *    - Presence of valid letters/words (good)
-     *    - Control characters (bad, except CR/LF)
-     * 3. Return the best-scoring encoding
-     * 
-     * @param bytes Raw bytes to analyze
-     * @return Best-guess encoding name
+     * Detect the encoding of [bytes]: valid UTF-8 first, otherwise the best-scoring candidate by
+     * replacement characters, recognisable letters and control characters.
      */
     fun detectEncoding(bytes: ByteArray): String {
         if (bytes.isEmpty()) return "UTF-8"
@@ -195,32 +165,9 @@ object EncodingHelper {
     }
     
     /**
-     * Score an encoding based on how well it decodes the bytes.
-     * Higher score = better match.
-     *
-     * Key design for Cyrillic vs Arabic discrimination:
-     *
-     * windows-1251 and windows-1256 both map bytes 0xC0–0xFF to standard Cyrillic А–я,
-     * so text with only those bytes scores identically under both codepages.
-     * The discriminating range is 0x80–0xBF:
-     *
-     *   windows-1251  0x80–0xBF → Cyrillic supplement letters (Ђ, Ѓ, Ё, Є, Ї…) → U+0400–U+040F (extra +2 bonus)
-     *   windows-1256  0x80–0xBF → Arabic letters / presentation forms → U+0600–U+06FF (Arabic bonus)
-     *   KOI8-R        0x80–0x9F → C1 control chars → penalised −15
-     *
-     * So on a line with only 0xC0–0xFF (common Cyrillic words), the scores tie and
-     * list order (windows-1251 first) breaks the tie correctly.
-     * On a line with 0x80–0xBF Cyrillic supplement bytes, windows-1251 pulls ahead.
-     * On a line with Arabic letters, windows-1256 pulls ahead.
-     *
-     * Key design for Cyrillic vs Latin-family (ISO-8859-9, ISO-8859-1, windows-1252):
-     *
-     * The bytes 0xC0–0xFF decoded as ISO-8859-9 / ISO-8859-1 produce Latin Extended
-     * characters (À–ÿ, with a few Turkish substitutions).  These land in U+00C0–U+00FF,
-     * which is penalised below as "dense Latin Extended" — plausible in a French/German
-     * MOTD line but statistically rare in IRC traffic compared to Cyrillic.  The penalty
-     * widens the scoring gap so that corpus-level scoring cleanly picks windows-1251
-     * over ISO-8859-9 once a few Cyrillic lines have been accumulated.
+     * Score how well [charset] decodes [bytes]; higher is better. windows-1251 and windows-1256 are
+     * separated by the 0x80-0xBF range (Cyrillic supplement versus Arabic), and dense Latin
+     * Extended is penalised so Cyrillic isn't read as ISO-8859-x.
      */
     internal fun scoreEncoding(bytes: ByteArray, charset: Charset): Int {
         val decoder = charset.newDecoder()
@@ -317,13 +264,9 @@ object EncodingHelper {
             }
         }
 
-        // CJK/multibyte-specific density bonus: high-byte-density text is much more
-        // likely CJK than Latin or Cyrillic, so reward CJK codepages when > 30% of bytes
-        // are ≥ 0x80. Restricted to true multibyte / CJK codepages only.
-        // Single-byte Latin-family encodings (ISO-8859-9, windows-1254, windows-1256, etc.)
-        // are intentionally excluded: giving them a density bonus caused false-positive wins
-        // over windows-1251 on Cyrillic text, where 0xC0–0xFF bytes are common (high density)
-        // but should score as Cyrillic (+4/+6) not as Latin (+2 + density bonus).
+        // Density bonus for CJK and other multibyte codepages when over 30% of bytes are >= 0x80.
+        // Single-byte Latin encodings are excluded: Cyrillic in windows-1251 is also high-density
+        // and must score as Cyrillic, not Latin.
         val csName = charset.name().uppercase()
         val highByteCount = bytes.count { it.toInt() and 0xFF > 0x7F }
         if (highByteCount > 0) {
@@ -368,15 +311,7 @@ object EncodingHelper {
         return text to actualEncoding
     }
     
-    /**
-     * Encode a string to bytes using the specified encoding.
-     * 
-     * For "auto" mode, uses UTF-8 for outbound messages (modern default).
-     * 
-     * @param text Text to encode
-     * @param encoding Target encoding, or "auto" for UTF-8
-     * @return Encoded bytes
-     */
+    /** Encode [text] in [encoding]; "auto" encodes as UTF-8. */
     fun encode(text: String, encoding: String): ByteArray {
         val actualEncoding = if (encoding.equals("auto", ignoreCase = true)) "UTF-8" else encoding
         val charset = getCharset(actualEncoding)
@@ -384,18 +319,11 @@ object EncodingHelper {
     }
     
     /**
-     * Read a line from an InputStream with proper encoding handling.
-     * IRC uses CRLF (\r\n) as line terminators.
+     * Read one CRLF-terminated line from [input] and decode it.
      *
-     * @param input The input stream to read from
-     * @param encoding The encoding to use for decoding, or "auto" for detection
-     * @param autoDetect If true, run detection on each line
-     * @param onTruncated Optional callback invoked (once) when a line was dropped for
-     *                    exceeding [MAX_LINE_BYTES]. Lets callers distinguish an
-     *                    empty server line from a discarded oversize one.
-     * @return Pair of (decoded line or null if EOF, actual encoding used).
-     *         Returns "" (not null) on overflow so the caller skips that line
-     *         while keeping the stream open for subsequent reads.
+     * @param encoding Encoding to use, or "auto" to detect.
+     * @param onTruncated Called once when a line over [MAX_LINE_BYTES] is dropped.
+     * @return The line (null at EOF, "" for a dropped line) and the encoding used.
      */
     internal fun readLine(
         input: InputStream,
@@ -458,49 +386,10 @@ object EncodingHelper {
 }
 
 /**
- * A line reader that wraps an InputStream and handles encoding detection.
- * Maintains state for detected encoding across multiple reads.
- *
- * ## Detection strategy
- *
- * 1. Start assuming UTF-8 (overwhelmingly the most common modern encoding).
- * 2. On every line that contains at least one byte ≥ 0x80 (non-ASCII content):
- *    a. Append the raw bytes to a growing corpus buffer.
- *    b. Score all candidate encodings against the *entire corpus so far* (not just the
- *       current line). More data = better discrimination between ambiguous encodings.
- *    c. Cast a "vote" for the best-scoring encoding on this line and increment its
- *       per-encoding vote counter.
- * 3. Lock once one encoding leads by [LEAD_THRESHOLD] votes over the second-place
- *    encoding, with at least [MIN_EVIDENCE_LINES] non-ASCII lines seen.
- *
- * ## Why corpus scoring beats per-line scoring
- *
- * A single IRC line (e.g. "*** Welcome to the network") may have only 2–3 non-ASCII
- * bytes — too few to distinguish windows-1251 from ISO-8859-9 reliably.  Combining
- * bytes across lines builds up a byte-frequency distribution that is statistically
- * distinct per script family, allowing the scorer to tell Cyrillic from Turkish from
- * Latin with high confidence after just a handful of lines.
- *
- * ## Vote tolerance
- *
- * A single "wrong" per-line winner (e.g. a server NOTICE whose few non-ASCII bytes
- * happen to score slightly better under the wrong encoding) no longer blows away all
- * accumulated evidence.  Only when UTF-8 wins on a line does it reset everything,
- * since that is genuine contradicting evidence (valid UTF-8 multi-byte sequences cannot
- * be misidentified as a legacy 8-bit encoding by the scorer).
- *
- * ## Pre-lock decoding
- *
- * Lines arriving during the detection window are decoded with the *current leading
- * candidate* (highest-vote encoding), not with whatever each individual line votes for.
- * This means even the first few lines of a legacy-encoding channel render correctly
- * rather than showing garbled characters until the lock commits.
- *
- * ## ASCII neutrality
- *
- * Pure ASCII lines (no bytes ≥ 0x80) carry zero information about the server's legacy
- * encoding and are skipped in vote accounting.  This prevents MOTD/command lines from
- * diluting the evidence from actual non-ASCII content.
+ * A line reader over an InputStream that detects and keeps the encoding. Lines with high bytes are
+ * scored as a growing corpus; each line's winner gets a vote, and the encoding locks once it leads
+ * by [LEAD_THRESHOLD] after [MIN_EVIDENCE_LINES]. Only a UTF-8 win resets the votes. ASCII lines
+ * carry no evidence.
  */
 class EncodingLineReader(
     private val input: InputStream,
@@ -517,18 +406,8 @@ class EncodingLineReader(
     private var encodingLocked: Boolean = !autoDetect
 
     /**
-     * Wall-clock time when this reader was constructed, used by the detection-timeout
-     * cutoff. After [DETECTION_TIMEOUT_MS] from construction, auto-detection commits
-     * to whatever evidence we have (or stays on UTF-8 if none) and disables itself.
-     *
-     * Why this exists: without a timeout the detection loop runs for the lifetime of the
-     * connection. On a primarily-English channel that occasionally sees a non-ASCII line
-     * (a smart-quote pasted from Mac, a Russian-named user joining, a single Cyrillic word),
-     * those few stray bytes can vote a non-UTF-8 encoding above its threshold an hour into
-     * the session and switch decoding mid-stream - corrupting every subsequent message
-     * from regular UTF-8 users. Capping the window to the first 5 minutes contains the
-     * disruption to the early connect phase where most legitimate non-UTF-8 evidence
-     * arrives (MOTD, channel topics, NOTICE traffic).
+     * When this reader was created. Detection stops after [DETECTION_TIMEOUT_MS], so a stray
+     * non-ASCII line late in a session can't switch the decoding mid-stream.
      */
     private val createdAtMs: Long = System.currentTimeMillis()
 

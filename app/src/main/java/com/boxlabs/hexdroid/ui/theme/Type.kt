@@ -33,12 +33,8 @@ import java.util.concurrent.ConcurrentHashMap
 private fun TextStyle.withFamily(f: FontFamily): TextStyle = copy(fontFamily = f)
 
 /**
- * Bundled fonts for UI/chat.
- *
- * src/main/res/font/:
- *  - opensans_regular.ttf, opensans_italic.ttf, opensans_bold.ttf, opensans_bold_italic.ttf
- *  - inter_regular.ttf, inter_italic.ttf, inter_bold.ttf, inter_bold_italic.ttf
- *  - jetbrains_mono_regular.ttf, jetbrains_mono_italic.ttf, jetbrains_mono_bold.ttf, jetbrains_mono_bold_italic.ttf
+ * Bundled fonts in res/font: Open Sans, Inter and JetBrains Mono, each in regular, italic, bold and
+ * bold italic.
  */
 private val AppDefault = FontFamily(
     Font(R.font.opensans_regular, weight = FontWeight.Normal, style = FontStyle.Normal),

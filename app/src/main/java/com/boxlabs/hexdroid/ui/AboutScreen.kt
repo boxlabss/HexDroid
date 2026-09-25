@@ -867,10 +867,6 @@ private fun FlaskHero(
                 )
             }
 
-            // The mist gradient that used to fill the gap between logo and flask is gone.
-            // It was a full-width rect, so it was never bounded by the flask it was meant
-            // to be rising from, and with the mark now sitting in the flask there is
-            // nothing above it for the haze to sell.
         }
 
         // Logo overlay. The byline moved out to the caller so the flask can stand alone.

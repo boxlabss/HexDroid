@@ -19,17 +19,9 @@
 package com.boxlabs.hexdroid.crypto
 
 /**
- * Top-level entry point used by IrcCore / IrcMessageCrypto. Hides the cipher zoo
- * behind two simple operations: encrypt-for-target and decrypt-incoming. Either is
- * a no-op when no key is configured for the target.
- *
- * Lifetime: one E2eCodec per IrcClient (i.e. per network connection), constructed
- * from the shared [E2eKeyStore] singleton owned by the ViewModel. Cipher instances
- * are cached by raw key bytes so a hot channel doesn't re-init AES on every line.
- *
- * Thread-safety: all internal state is concurrent-safe. encrypt() and decrypt()
- * can be called from any thread - typical pattern has the IrcCore reader thread
- * calling decrypt while the user-input coroutine calls encrypt.
+ * Entry point for E2E: encrypt for a target and decrypt incoming text, each a no-op without a key.
+ * One per connection, built from the ViewModel's [E2eKeyStore]; ciphers are cached by key.
+ * Thread-safe.
  */
 class E2eCodec(
     private val networkId: String,
@@ -57,15 +49,8 @@ class E2eCodec(
         }
 
     /**
-     * If a key is configured for [target], encrypt [plaintext] and return the wire
-     * line (with prefix). Otherwise return [plaintext] unchanged.
-     *
-     * [selfNick] is the local user's current nick. It is needed so query (private
-     * message) AAD can be made symmetric between the two endpoints - see
-     * [aadContext]. For channel targets it is ignored.
-     *
-     * Note that the IRC-side caller is responsible for sanitising newlines and
-     * carriage returns before calling - we don't re-validate.
+     * Encrypt [plaintext] for [target] when it has a key, else return it unchanged. [selfNick]
+     * makes a query's AAD the same on both ends (see [aadContext]). The caller strips CR/LF first.
      */
     fun encryptOutgoing(target: String, plaintext: String, selfNick: String): String {
         val entry = keyStore.get(networkId, target) ?: return plaintext
@@ -73,23 +58,9 @@ class E2eCodec(
     }
 
     /**
-     * Canonical AAD context for a [target].
-     *
-     * The AAD binds a ciphertext to its conversation so it can't be replayed into a
-     * different one. The subtlety is that the two endpoints of a *query* see the
-     * conversation under different target names: the sender addresses the recipient's
-     * nick, the receiver sees the sender's nick.
-     * For queries, bind to the *unordered pair* of the two nicks. Both endpoints
-     * compute the same bytes regardless of direction. For channels the channel name is
-     * already identical for everyone, so it is used as-is (and stays wire-compatible
-     * with the previous format).
-     *
-     *   channel  ->  "#channel"                 (lowercased by the cipher)
-     *   query    ->  "user1\u0000user2"           (the two nicks, lowercased + sorted)
-     *
-     * Nicks are lowercased with [java.util.Locale.ROOT] (locale-independent) and
-     * compared by their natural string order; for the ASCII nicks IRC uses this is a
-     * stable, cross-platform ordering.
+     * AAD binding a ciphertext to its conversation. A channel uses its name; a query uses the two
+     * nicks, lowercased (Locale.ROOT) and sorted, joined by \u0000, since each side addresses the
+     * other by a different name.
      */
     private fun aadContext(target: String, selfNick: String): String {
         if (target.firstOrNull() in CHANNEL_PREFIXES) return target
@@ -99,15 +70,9 @@ class E2eCodec(
     }
 
     /**
-     * Result of an incoming decrypt attempt.
-     *
-     * - PASSTHROUGH: the wire didn't look encrypted; render [text] as cleartext.
-     * - DECRYPTED: successfully decrypted; render [text] as the plaintext with
-     *   an [scheme] padlock annotation.
-     * - FAILED: the wire looked encrypted but decrypt failed (wrong key, tamper,
-     *   replay across channels). Render the original wire text with a tamper
-     *   indicator. We keep the wire text visible rather than swallowing it so
-     *   the user can copy it out for diagnosis or relay to a working client.
+     * Result of an incoming decrypt: PASSTHROUGH (not encrypted), DECRYPTED (show [text] with a
+     * [scheme] badge) or FAILED (show the wire text with a tamper indicator, so it can still be
+     * copied).
      */
     enum class Outcome { PASSTHROUGH, DECRYPTED, FAILED }
     data class Result(val text: String, val scheme: E2eScheme?, val outcome: Outcome)

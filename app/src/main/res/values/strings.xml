@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
+    <string name="settings_view_one_page">One page</string>
+    <string name="settings_view_categories">Categories</string>
     <string name="settings_intro_tour">Intro tour</string>
     <string name="settings_intro_tour_desc">A quick walkthrough of the main screens and shortcuts.</string>
     <string name="section_appearance">Appearance</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Auto-connect on startup</string>
     <string name="setting_rejoin_on_kick">Rejoin on kick</string>
     <string name="setting_rejoin_on_kick_desc">Automatically rejoin a channel after being kicked. A second kick on the same channel within 60 seconds is not rejoined, to avoid loops against +i/+k/+b modes.</string>
+    <string name="setting_nick_regain">Regain primary nick</string>
+    <string name="setting_nick_regain_desc">When you connect on an alternate nick because yours is taken, keep trying to switch back to it for a few minutes.</string>
     <string name="setting_enable_notifications">Enable notifications</string>
     <string name="setting_notify_highlights">Highlight notifications</string>
     <string name="setting_notify_pm">Private message notifications</string>
@@ -185,6 +189,11 @@
     <string name="chat_kick">Kick</string>
     <string name="chat_ban">Ban</string>
     <string name="chat_kick_ban_btn">Kick+Ban</string>
+    <string name="chat_ban_by">Ban by</string>
+    <string name="chat_ban_type_host">Host</string>
+    <string name="chat_ban_type_nick">Nick</string>
+    <string name="chat_ban_type_account">Account</string>
+    <string name="chat_ban_type_domain">Domain</string>
     <string name="chat_react_custom">Custom reaction</string>
     <string name="chat_react_custom_hint">Emoji or word</string>
     <string name="chat_react_send">React</string>
@@ -268,6 +277,7 @@
     <string name="settings_raw_log_desc">Show every line sent and received in a Raw buffer per network. Passwords are hidden. For debugging.</string>
     <string name="chat_show_less">Show less</string>
     <string name="chat_not_delivered">Not delivered</string>
+    <string name="chat_status_read">Read</string>
     <string name="vm_multiline_rejected">The server rejected the message (%1$s): %2$s</string>
     <string name="network_edit_cap_also">also requests %1$s</string>
     <string name="network_edit_caps_hint">Basic IRCv3 features enabled by default. Switch on to see advanced options.</string>
@@ -347,6 +357,8 @@
     <string name="setting_send_typing_desc">Let others see when you are composing a message (draft/typing). Disabled by default for privacy.</string>
     <string name="setting_receive_typing">Show others\' typing indicators</string>
     <string name="setting_receive_typing_desc">Display an indicator when someone else is composing a message in a channel or query.</string>
+    <string name="setting_read_receipts">Read receipts</string>
+    <string name="setting_read_receipts_desc">In private messages, let people know when you\'ve read their messages, and see when they\'ve read yours. Only works with other HexDroid users.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Channel renamed from %1$s to %2$s</string>
@@ -467,6 +479,13 @@
     <string name="chat_cd_launch_scripts">Launch scripts</string>
     <string name="chat_cd_edit_topic">Edit topic</string>
     <string name="chat_cd_jump_unread">Jump to unread</string>
+    <string name="format_bold">Bold</string>
+    <string name="format_italic">Italic</string>
+    <string name="format_underline">Underline</string>
+    <string name="format_colour">Colour…</string>
+    <string name="format_clear">Clear formatting</string>
+    <string name="chat_art_show_as_text">Show as text</string>
+    <string name="chat_unread_since">%1$s since %2$s</string>
     <string name="chat_cd_scroll_bottom">Scroll to bottom</string>
     <string name="chat_cd_close_label">Close %1$s</string>
     <string name="chat_cd_cancel_reply">Cancel reply</string>
@@ -475,6 +494,8 @@
     <string name="chat_reply_to">Reply to %1$s</string>
     <string name="chat_delete_message">Delete message</string>
     <string name="chat_delete_message_desc">Removes it for everyone via the server</string>
+    <string name="chat_delete_message_others_desc">Removes it for everyone, if the server allows you to</string>
+    <string name="chat_delete_message_no_id">Can\'t be deleted: the server gave this message no ID</string>
     <string name="chat_copy_messages">Copy messages…</string>
     <string name="chat_copy_messages_desc">Select multiple messages to copy</string>
 
@@ -1437,6 +1458,7 @@
     <!-- ScriptsScreen -->
     <string name="scripts_title">Scripts</string>
     <string name="scripts_reload">Reload</string>
+    <string name="scripts_restore_defaults">Restore default scripts (%1$d)</string>
     <string name="scripts_import_file">Import file…</string>
     <string name="scripts_import">Import…</string>
     <string name="scripts_paste">Paste…</string>
@@ -1533,7 +1555,7 @@
     <string name="cmd_unignore">Remove a user from the ignore list</string>
     <string name="cmd_quit">Quit IRC and disconnect</string>
     <string name="cmd_kick">Kick a user from the channel</string>
-    <string name="cmd_ban">Ban: nick (default), user, host, domain, account</string>
+    <string name="cmd_ban">Ban: host (default), nick, user, domain, account</string>
     <string name="cmd_unban">Remove a ban (paste exact mask from /banlist for non-nick bans)</string>
     <string name="cmd_kb">Kick and ban a user (same mask types as /ban)</string>
     <string name="cmd_kickban">Alias for /kb</string>

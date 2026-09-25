@@ -21,19 +21,9 @@ package com.boxlabs.hexdroid.crypto
 import java.security.MessageDigest
 
 /**
- * Computes a short, human-comparable fingerprint of an E2E key for out-of-band
- * verification ("hey on Signal, what's your AGM fingerprint for #foo?").
- *
- * The fingerprint is SHA-256(scheme-tag || key) truncated to the first 5 bytes
- * (40 bits) and rendered as 8 base32 characters with a hyphen for readability:
- * e.g. `K4XR-T9BS`. The security property that matters here is SECOND-PREIMAGE
- * resistance: an attacker who wants to substitute their own key while keeping the
- * displayed safety number unchanged must find a key whose digest matches a fixed
- * 40-bit target, which costs ~2^40 SHA-256 evaluations AND each candidate must
- * also be a usable AES key.
- *
- * Rendering goes through the shared [Crockford32] encoder so the +AGM/+OK safety
- * numbers and the +AGE identity safety numbers use one alphabet and one code path.
+ * A short fingerprint of an E2E key for out-of-band comparison: SHA-256(scheme tag || key), first
+ * 40 bits, as 8 base32 characters (e.g. `K4XR-T9BS`). Matching it with another key costs about 2^40
+ * hashes. Rendered through [Crockford32].
  */
 object E2eFingerprint {
 

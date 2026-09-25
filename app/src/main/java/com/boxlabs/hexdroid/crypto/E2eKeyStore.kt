@@ -22,19 +22,8 @@ import com.boxlabs.hexdroid.data.SecretStore
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Per-(network, target) keystore for end-to-end encryption keys.
- *
- * Stores raw key bytes plus the scheme that applies to that target. Keys live in
- * [SecretStore] (Android-Keystore-wrapped AES-GCM, same envelope used for SASL
- * passwords), and a fast in-memory map mirrors them so encrypt/decrypt on the IRC
- * hot path doesn't touch disk per message.
- *
- * Target casefolding: IRC channel names are ASCII-case-insensitive but with the
- * "RFC1459 plus" rule that `{|}^` map to `[]\~`. We use a simple lowercase() here
- * which is correct for the common ASCII range and matches the casefolding the rest
- * of HexDroid uses for its own internal maps (chanNickCase etc.). The wire format's
- * AAD uses the same lowercased target so the byte sequence matches across clients
- * regardless of which casing the user typed.
+ * Per-(network, target) E2E keys and their schemes, stored in [SecretStore] and mirrored in memory
+ * for the hot path. Targets are lowercased, matching the AAD.
  */
 class E2eKeyStore(private val secretStore: SecretStore) {
 

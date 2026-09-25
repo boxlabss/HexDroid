@@ -102,14 +102,8 @@ private class HandleCache<T : java.io.Closeable>(
 }
 
 /**
- * Line-based log writer, one file per buffer.
- *
- * Storage layout:
- *   Internal:  <filesDir>/logs/<network>/<buffer>.txt
- *   SAF:       <treeUri>/<network>/<buffer>.txt
- *
- * Both paths keep a bounded set of handles open rather than reopening per message. Call
- * [closeAll] when the app exits or logging is turned off to flush and release them.
+ * Line-based log writer, one file per buffer, under <filesDir>/logs/<network>/ or
+ * <treeUri>/<network>/. Keeps a bounded set of handles open; [closeAll] flushes and releases them.
  */
 class LogWriter(private val ctx: Context) {
 
@@ -519,19 +513,9 @@ class LogWriter(private val ctx: Context) {
     }
 
     /**
-     * Tracks SAF tree URIs we've already discovered are unreadable in this process. When
-     * a backup restore brings over the user's chosen `logFolderUri` from a previous
-     * install, the new install doesn't inherit the persisted SAF permission grant
-     * (those are stored in the system per-package per-install, not in app data and so
-     * are not part of any backup). The first read attempt on that URI fails with a
-     * SecurityException; subsequent attempts would all fail the same way and just spam
-     * the log. We remember the URI here so [findChild] and [queryChildren] can
-     * short-circuit cheaply on every later call without re-issuing the doomed query.
-     * Bounded growth: there's only ever 1 or 2 entries (the user's old + new picks).
-     *
-     * Exposed publicly as [unreadableTreeUrisFlow] so the ViewModel can surface a
-     * "re-pick your log folder" badge in Settings when the user's currently-saved URI
-     * lands in here.
+     * SAF tree URIs found unreadable in this process (usually a backup restored on a fresh install,
+     * whose SAF grant didn't carry over), so later reads skip them. Exposed as
+     * [unreadableTreeUrisFlow] for the Settings warning.
      */
     private val unreadableTreeUris = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val _unreadableTreeUrisFlow = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
@@ -577,15 +561,9 @@ class LogWriter(private val ctx: Context) {
             if (isTreeUriUnreadable(treeUri)) return null
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
                 val projection = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
-                // ContentResolver.query can throw SecurityException ("Permission Denial: opening
-                // provider ... requires that you obtain access using ACTION_OPEN_DOCUMENT") when
-                // the URI's persisted permission grant isn't valid for this process. The most
-                // common trigger is a backup-restore on a fresh install: the saved tree URI is in
-                // settings but the SAF grant isn't (those don't travel through Android Auto Backup
-                // / D2D transfer). Without this catch the throw propagates up through readTailSaf,
-                // through ensureBuffer's IO-dispatched scrollback launch, and crashes the whole
-                // process - the user sees the app close as soon as they tap Connect because
-                // ensureServerBuffer fires right at the start of every connect.
+                // ContentResolver.query throws SecurityException when the tree URI's persisted
+                // grant isn't valid for this process, typically after a backup restore on a fresh
+                // install, since SAF grants don't travel with the data.
                 try {
                     resolver.query(childrenUri, projection, null, null, null)?.use { c ->
                         val idCol   = c.getColumnIndex(Document.COLUMN_DOCUMENT_ID)
@@ -663,16 +641,14 @@ class LogWriter(private val ctx: Context) {
 
             /** Canonical filename for internal storage. '#' is valid on EXT4/F2FS. */
             private fun safeBufferFileName(buffer: String): String {
-                val name = if (buffer == "*server*") "server" else buffer
-                // Strip characters that are illegal on FAT/NTFS-based filesystems. Android internal
-                // storage is ext4/f2fs and accepts almost anything except '/' and NUL, but the same
-                // sanitiser path serves SAF-backed external storage too — and SAF providers backed
-                // by removable SD cards (vfat) or by Windows-hosted cloud sync (Google Drive's
-                // Windows client, OneDrive, Dropbox) reject these. Buffer names commonly contain
-                // them: ZNC pseudo-users like `*status`, `*controlpanel`, BouncerServ; soju queries
-                // with `?` in nicks; punctuation in PM nicks. Stripping makes the same sanitiser
-                // safe across every storage backend so a user who later switches log location
-                // doesn't suddenly start losing lines.
+                // "server.txt" belongs to the server buffer; a query with a nick of that name gets its own file.
+                val name = when {
+                    buffer == "*server*" -> "server"
+                    buffer.trim().equals("server", ignoreCase = true) -> "${buffer.trim()}_"
+                    else -> buffer
+                }
+                // Strip characters that FAT/NTFS-backed storage rejects (SD cards, cloud-synced SAF
+                // providers), so the same names work on every storage backend.
                 val cleaned = name.trim()
                 .replace("\\", "_")
                 .replace("/", "_")

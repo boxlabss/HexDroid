@@ -56,17 +56,9 @@ import com.boxlabs.hexdroid.ui.focusHighlight
 import com.boxlabs.hexdroid.ui.tvInitialFocus
 
 /**
- * A true full-screen surface for a script-mounted [ScriptView], rendered via [ScriptSurface].
- *
- * Implemented as its own edge-to-edge window rather than an in-hierarchy overlay so it is
- * guaranteed above every app surface, but it behaves like a real screen: OPAQUE background
- * (no chat bleeding through), content drawn behind the system bars, and the bars themselves
- * hidden (swipe reveals them transiently) while the view is mounted. Back closes it, matching
- * every other screen in the app.
- *
- * Button taps inside the view come back through [onAction] (the engine re-mounts an updated
- * tree); the corner ✕ (or back) closes it. [onScreenChanged] fires when the device rotates
- * while mounted, so orientation-aware scripts can re-render (SIGNAL:screenchange).
+ * Full-screen surface for a script's [ScriptView]: its own edge-to-edge window with an opaque
+ * background and hidden system bars. Back or the corner ✕ closes it; taps go to [onAction];
+ * [onScreenChanged] fires on rotation.
  */
 @Composable
 fun ScriptViewHost(

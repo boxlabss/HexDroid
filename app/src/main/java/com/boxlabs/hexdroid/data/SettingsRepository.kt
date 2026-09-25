@@ -90,10 +90,8 @@ class SettingsRepository(private val ctx: Context) {
 
         val raw = prefs[Keys.NETWORKS_JSON]
         if (!raw.isNullOrBlank()) {
-            // Wrap migration in runCatching so that any unexpected exception (from SecretStore,
-            // JSON serialization, etc.) is logged but never prevents the migration flags from
-            // being set. Without this, a mid-migration crash would cause infinite retry on every
-            // app launch because the flags are set after the try block.
+            // Migration runs inside runCatching, so a failure is logged and the migration flags are
+            // still set below.
             runCatching {
                 val arr = JSONArray(raw)
                 var changed = false
@@ -283,10 +281,9 @@ class SettingsRepository(private val ctx: Context) {
                 chatFontStyle = runCatching {
                     ChatFontStyle.valueOf(o.optString("chatFontStyle", ChatFontStyle.REGULAR.name))
                 }.getOrDefault(ChatFontStyle.REGULAR),
-                // chatLineSpacing changed meaning in 1.7.3: it used to be a leading
-                // multiplier (1.0/1.2/1.45), it is now an inter-message gap as a fraction
-                // of the font size (0.0/0.15/0.45). Anything >= 1.0 is a stored value from
-                // the old scheme, so map it across instead of reading it as a huge gap.
+                // chatLineSpacing is the gap between messages as a fraction of the font size
+                // (0.0/0.15/0.45). A stored value >= 1.0 comes from the older leading-multiplier
+                // scheme (1.0/1.2/1.45) and is mapped across.
                 chatLineSpacing = o.optDouble("chatLineSpacing", 0.15).toFloat().let { v ->
                     when {
                         v < 1.0f -> v
@@ -358,13 +355,14 @@ class SettingsRepository(private val ctx: Context) {
                 dccIncomingPortMax = o.optInt("dccIncomingPortMax", 5010),
                 dccDownloadFolderUri = o.optString("dccDownloadFolderUri", "").takeIf { it.isNotBlank() },
 
-                // ctcpVersionReply was removed - always derived from BuildConfig at runtime.
-                // Key silently ignored when loading legacy settings files that still contain it.
+                // A legacy ctcpVersionReply key is ignored; the VERSION reply is derived from
+                // BuildConfig.
                 quitMessage = o.optString("quitMessage", UiSettings().quitMessage),
                 partMessage = o.optString("partMessage", UiSettings().partMessage),
                 colorizeNicks = o.optBoolean("colorizeNicks", true),
                 showNickIcons = o.optBoolean("showNickIcons", true),
                 ctcpRepliesEnabled = o.optBoolean("ctcpRepliesEnabled", true),
+                nickRegainEnabled = o.optBoolean("nickRegainEnabled", true),
                 ownNickColorInt = o.opt("ownNickColorInt")?.let { (it as? Int) ?: (it as? Long)?.toInt() },
                 mircColorsEnabled = o.optBoolean("mircColorsEnabled", true),
                 ansiColorsEnabled = o.optBoolean("ansiColorsEnabled", true),
@@ -375,6 +373,8 @@ class SettingsRepository(private val ctx: Context) {
                 portraitNicklistOverlay = o.optBoolean("portraitNicklistOverlay", true),
                 portraitNickPaneFrac = o.optDouble("portraitNickPaneFrac", 0.20).toFloat(),
                 sendTypingIndicator = o.optBoolean("sendTypingIndicator", false),
+                readReceiptsEnabled = o.optBoolean("readReceiptsEnabled", false),
+                settingsOnePage = o.optBoolean("settingsOnePage", false),
                 receiveTypingIndicator = o.optBoolean("receiveTypingIndicator", true),
                 imagePreviewsEnabled = o.optBoolean("imagePreviewsEnabled", false),
                 imagePreviewsWifiOnly = o.optBoolean("imagePreviewsWifiOnly", true),
@@ -470,6 +470,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("colorizeNicks", s.colorizeNicks)
         o.put("showNickIcons", s.showNickIcons)
         o.put("ctcpRepliesEnabled", s.ctcpRepliesEnabled)
+        o.put("nickRegainEnabled", s.nickRegainEnabled)
         if (s.ownNickColorInt != null) o.put("ownNickColorInt", s.ownNickColorInt) else o.remove("ownNickColorInt")
         o.put("mircColorsEnabled", s.mircColorsEnabled)
         o.put("ansiColorsEnabled", s.ansiColorsEnabled)
@@ -480,6 +481,8 @@ class SettingsRepository(private val ctx: Context) {
         o.put("portraitNicklistOverlay", s.portraitNicklistOverlay)
         o.put("portraitNickPaneFrac", s.portraitNickPaneFrac.toDouble())
         o.put("sendTypingIndicator", s.sendTypingIndicator)
+        o.put("readReceiptsEnabled", s.readReceiptsEnabled)
+        o.put("settingsOnePage", s.settingsOnePage)
         o.put("receiveTypingIndicator", s.receiveTypingIndicator)
         o.put("imagePreviewsEnabled", s.imagePreviewsEnabled)
         o.put("imagePreviewsWifiOnly", s.imagePreviewsWifiOnly)
@@ -536,7 +539,7 @@ class SettingsRepository(private val ctx: Context) {
                         extendedJoin = o.optBoolean("cap_extendedJoin", true),
                         inviteNotify = o.optBoolean("cap_inviteNotify", true),
                         multiPrefix = o.optBoolean("cap_multiPrefix", true),
-                        setname = o.optBoolean("cap_setname", false),
+                        setname = o.optBoolean("cap_setname", true),
                         userhostInNames = o.optBoolean("cap_userhostInNames", false),
                         draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
                         draftReadMarker = o.optBoolean("cap_draftReadMarker", true),
@@ -945,20 +948,11 @@ class SettingsRepository(private val ctx: Context) {
     }
 
     /**
-     * Parse a backup JSON string and restore settings and networks.
+     * Import a backup, replacing settings and networks with those in [json]. Secrets aren't part of
+     * backups. Returns the ids of profiles that existed before but aren't in the backup, so the
+     * caller can clear their secrets.
      *
-     * On success, all existing networks are replaced with those in the backup.
-     * Networks whose IDs already exist are overwritten; networks not in the backup are removed.
-     *
-     * @throws IllegalArgumentException if the JSON is invalid or the version is unsupported.
-     * Import a backup, replacing current settings and/or networks with the ones in [json].
-     * Does not touch the encrypted secret store — passwords and client certs live in
-     * [SecretStore] and are deliberately excluded from backups.
-     *
-     * Returns the set of profile ids that existed locally before the restore but are
-     * absent from the imported backup. Callers should clear any encrypted secrets for
-     * those ids out of [SecretStore] to avoid orphaned credential material accumulating
-     * on device after repeated restore cycles.
+     * @throws IllegalArgumentException If the JSON is invalid or its version unsupported.
      */
     suspend fun importBackup(json: String): Set<String> {
         val root = try {
@@ -1049,12 +1043,7 @@ class SettingsRepository(private val ctx: Context) {
         return orphanedIds
     }
 
-    // Flap detection state, migrated from SharedPreferences to DataStore so it is
-    // consistent with the rest of the persistence layer and immune to the data-loss issues
-    // that SharedPreferences can exhibit under process death on some OEM ROMs.
-    //
-    // Stored as a JSON object mapping netId > epoch-ms-when-paused, matching the previous
-    // SharedPreferences layout so existing paused-state is naturally superseded on first write.
+    // Flap detection state: a JSON object mapping netId to the epoch ms when it was paused.
 
     private fun flapKey() = stringPreferencesKey("flap_paused_v2_json")
 
@@ -1165,7 +1154,8 @@ class SettingsRepository(private val ctx: Context) {
                     val expires = entry.optLong("e", -1L)
                     if (expires <= 0) continue
                     val port = entry.optInt("p", -1).takeIf { it in 1..65535 }
-                    put(key, com.boxlabs.hexdroid.StsPolicyEntry(port = port, expiresAtMs = expires))
+                    val duration = entry.optLong("d", 0L).coerceAtLeast(0L)
+                    put(key, com.boxlabs.hexdroid.StsPolicyEntry(port = port, expiresAtMs = expires, durationSec = duration))
                 }
             }
         } catch (_: Throwable) { emptyMap() }
@@ -1177,6 +1167,7 @@ class SettingsRepository(private val ctx: Context) {
             val entry = JSONObject()
             e.port?.let { entry.put("p", it) }
             entry.put("e", e.expiresAtMs)
+            if (e.durationSec > 0) entry.put("d", e.durationSec)
             obj.put(host, entry)
         }
         return obj.toString()
@@ -1221,12 +1212,8 @@ data class NetworkProfile(
     val ignoredNicks: List<String> = emptyList(),
 
     /**
-     * Nicknames whose incoming DCC file offers are accepted without prompting
-     * (case-insensitive match). Populated from the nick action sheet, one entry per
-     * nick the user has explicitly chosen to trust on this network.
-     *
-     * Trust is per network and keyed on the nick alone, so it follows whoever holds
-     * that nick at the time — see the takeover caveat on IrcViewModel.isDccAutoAccepted.
+     * Nicks whose DCC file offers are accepted without prompting on this network
+     * (case-insensitive). Trust follows whoever holds the nick; see IrcViewModel.isDccAutoAccepted.
      */
     val dccAutoAcceptNicks: List<String> = emptyList(),
 
@@ -1240,16 +1227,9 @@ data class NetworkProfile(
     val notifyOnErrors: Boolean = false,
 
     /**
-     * Sender masks whose messages must NOT raise a highlight or private-message
-     * notification on this network
-     * The message still appears in its buffer; it just doesn't highlight, badge, play a
-     * sound, vibrate, or post a notification.
-     *
-     * Each entry is matched against the sender's nick (case-insensitive) as one of:
-     * - a plain nick: exact match (e.g. `GitHub`);
-     * - an IRC glob with `*` / `?` (e.g. `*-bot`, `travis?`); or
-     * - a regular expression wrapped in slashes (e.g. `/^(travis|circleci)/`).
-     * Invalid regexes are ignored rather than crashing the match.
+     * Sender masks that never highlight or notify on this network; their messages still appear.
+     * Each entry matches the nick case-insensitively as a plain nick, an IRC glob (`*`, `?`) or a
+     * /regex/. Invalid regexes are ignored.
      */
     val highlightIgnoreMasks: List<String> = emptyList(),
 
@@ -1312,31 +1292,15 @@ data class NetworkProfile(
      */
     val bouncerClientId: String? = null,
     /**
-     * Stored TOFU (Trust On First Use) TLS certificate fingerprint (SHA-256, colon-separated hex).
-     *
-     * - null: no fingerprint stored yet.
-     *   On first connect with [allowInvalidCerts] = true the fingerprint is learned from the
-     *   server's certificate and this field should be persisted ([IrcEvent.TlsFingerprintLearned]).
-     * - non-null: fingerprint is pinned. Connection is aborted if the server presents a different
-     *   certificate ([IrcEvent.TlsFingerprintChanged]), protecting against MITM / cert replacement.
-     *
-     * On round-robin DNS hosts (e.g. irc.libera.chat) the user can grow the trust set via
-     * [tlsTofuFingerprints]; the union of (this single field + that set) is the accepted
-     * fingerprint list for verification. The single field is preserved across the migration
-     * to avoid silently changing pin semantics on existing profiles.
+     * Primary TOFU fingerprint (SHA-256, colon-separated hex). Null until learned on the first
+     * connect with [allowInvalidCerts]; once set, a different certificate aborts the connection.
+     * With [tlsTofuFingerprints] it forms the accepted set.
      */
     val tlsTofuFingerprint: String? = null,
     /**
-     * Additional accepted TOFU fingerprints, used for round-robin DNS hosts where each
-     * cycle position has its own certificate (irc.libera.chat, irc.oftc.net, etc.). Empty
-     * for the common single-server case. The verifier accepts the connection when the peer
-     * fingerprint matches [tlsTofuFingerprint] OR any entry in this set.
-     *
-     * Populated by the user opting "Trust this server too" on a [TlsFingerprintChanged]
-     * mismatch, OR via the lower-friction "Reset & re-pin" which writes the new fingerprint
-     * into [tlsTofuFingerprint] and clears this set.
-     *
-     * Storing as Set guarantees no duplicates; serialised as a JSON array.
+     * Additional accepted TOFU fingerprints, for round-robin hosts where each server has its own
+     * certificate. Filled by "Trust this server too"; "Reset & re-pin" replaces the primary and
+     * clears this set.
      */
     val tlsTofuFingerprints: Set<String> = emptySet(),
 
@@ -1355,12 +1319,9 @@ data class NetworkProfile(
     val tlsHostnameGrace: Boolean = false,
 
     /**
-     * SOCKS proxy settings for this network. Default is [ProxyType.NONE] (direct connection).
-     * When set to SOCKS5/SOCKS4A, the connection is tunnelled through [proxyHost]:[proxyPort]
-     * and the destination is resolved at the proxy (remote DNS), which is what enables Tor
-     * (`.onion` via Orbot) and prevents the IRC server hostname from leaking to the local
-     * resolver. [proxyUsername]/[proxyPassword] apply to SOCKS5 auth (RFC 1929); for SOCKS4A
-     * the username is sent as the USERID field and the password is ignored.
+     * SOCKS proxy for this network; NONE connects directly. SOCKS5 and SOCKS4A resolve the
+     * destination at the proxy (needed for .onion, and it keeps the hostname out of local DNS).
+     * Credentials are SOCKS5 user/pass; SOCKS4A sends the username as USERID.
      */
     val proxyType: com.boxlabs.hexdroid.connection.ProxyType = com.boxlabs.hexdroid.connection.ProxyType.NONE,
     val proxyHost: String = "",

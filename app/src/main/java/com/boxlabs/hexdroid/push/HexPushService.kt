@@ -28,18 +28,9 @@ import org.unifiedpush.android.connector.data.PushEndpoint
 import org.unifiedpush.android.connector.data.PushMessage
 
 /**
- * Receives Web Push messages from the UnifiedPush distributor.
- *
- * This runs whether or not the app has a live IRC connection, which is the whole point:
- * with the bouncer pushing to us, "keep connection alive" stops being the only way to
- * hear about a message, and the foreground service can be turned off entirely.
- *
- * The payload is exactly one IRC message per the webpush spec, already decrypted by the
- * connector. It is deliberately treated as notification content only and never fed into
- * the ViewModel's buffers: this callback can arrive with the app in any state, including
- * a fresh process with no networks connected, and a push is a summary the server chose to
- * send rather than an authoritative view of the buffer. The real messages arrive over the
- * connection and are deduplicated there by msgid as usual.
+ * Receives Web Push messages from the UnifiedPush distributor, with or without a live connection.
+ * Each payload is one IRC message, already decrypted, used only for a notification and never added
+ * to buffers; the real messages arrive over the connection and are deduplicated by msgid.
  */
 class HexPushService : PushService() {
 

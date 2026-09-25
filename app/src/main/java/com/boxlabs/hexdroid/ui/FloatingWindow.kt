@@ -43,15 +43,9 @@ import com.boxlabs.hexdroid.IrcViewModel
 import kotlin.math.roundToInt
 
 /**
- * A draggable window that floats above other apps.
- *
- * Unlike picture-in-picture this one takes touches and can hold the keyboard, which is what
- * makes it usable for replying rather than only reading. The cost is the "display over other
- * apps" permission, which the user grants in system settings rather than a dialog.
- *
- * The window is added to the application context, so it outlives the activity and stays up
- * while other apps are in front. Nothing here may hold an activity: [show] takes only an
- * application context and a callback that must not capture one.
+ * A draggable window over other apps that takes touches and the keyboard, so it can be used for
+ * replying. Needs the "display over other apps" permission. It lives on the application context, so
+ * nothing here may hold an activity.
  */
 object FloatingWindow {
 
@@ -118,8 +112,8 @@ object FloatingWindow {
             setViewTreeSavedStateRegistryOwner(overlayOwner)
             setViewTreeViewModelStoreOwner(overlayOwner)
             setContent {
-                // Wrapped in the app's theme: a ComposeView added to the window manager
-                // inherits nothing, so without this it drew in the stock palette and font.
+                // Wrapped in the app's theme: a ComposeView added to the window manager inherits
+                // none of it.
                 val ui by vm.state.collectAsStateWithLifecycle()
                 HexDroidIRCTheme(
                     themeMode = ui.settings.themeMode,
@@ -175,12 +169,7 @@ object FloatingWindow {
         runCatching { wm.updateViewLayout(v, lp) }
     }
 
-    /**
-     * Keep a corner of the title bar reachable.
-     *
-     * Without this the window can be dragged past an edge and left with no visible way to
-     * move or close it.
-     */
+    /** Keep a corner of the title bar on screen, so the window can always be moved or closed. */
     private fun clampToScreen(ctx: Context, lp: WindowManager.LayoutParams) {
         val metrics = ctx.resources.displayMetrics
         val margin = (MIN_VISIBLE_DP * metrics.density).roundToInt()

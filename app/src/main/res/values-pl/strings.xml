@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Ustawienia</string>
+    <string name="settings_view_one_page">Jedna strona</string>
+    <string name="settings_view_categories">Kategorie</string>
     <string name="settings_intro_tour">Tour wprowadzający</string>
     <string name="settings_intro_tour_desc">Krótki przegląd głównych ekranów i skrótów.</string>
     <string name="section_appearance">Wygląd</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Automatyczne połączenie przy uruchomieniu</string>
     <string name="setting_rejoin_on_kick">Wejdź ponownie po kicku</string>
     <string name="setting_rejoin_on_kick_desc">Automatycznie dołącza ponownie do kanału po wyrzuceniu. Drugi kick z tego samego kanału w ciągu 60 sekund nie powoduje ponownego wejścia, aby uniknąć zapętleń z trybami +i/+k/+b.</string>
+    <string name="setting_nick_regain">Odzyskuj główny nick</string>
+    <string name="setting_nick_regain_desc">Gdy łączysz się z zapasowym nickiem, bo Twój jest zajęty, przez kilka minut próbuje wrócić do Twojego.</string>
     <string name="setting_enable_notifications">Włącz powiadomienia</string>
     <string name="setting_notify_highlights">Powiadomienia o podświetleniach</string>
     <string name="setting_notify_pm">Powiadomienia o wiadomościach prywatnych</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Wyrzuć</string>
     <string name="chat_ban">Zbanuj</string>
     <string name="chat_kick_ban_btn">Wyrzuć+Zbanuj</string>
+    <string name="chat_ban_by">Banuj według</string>
+    <string name="chat_ban_type_host">Host</string>
+    <string name="chat_ban_type_nick">Nick</string>
+    <string name="chat_ban_type_account">Konto</string>
+    <string name="chat_ban_type_domain">Domena</string>
 
     <!-- Network screens -->
     <string name="networks_title">Sieci</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Pokazuje każdą wysłaną i odebraną linię w buforze Raw dla każdej sieci. Hasła są ukrywane. Do debugowania.</string>
     <string name="chat_show_less">Pokaż mniej</string>
     <string name="chat_not_delivered">Nie dostarczono</string>
+    <string name="chat_status_read">Przeczytano</string>
     <string name="vm_multiline_rejected">Serwer odrzucił wiadomość (%1$s): %2$s</string>
     <string name="network_edit_cap_also">żąda również %1$s</string>
     <string name="network_edit_caps_hint">Podstawowe funkcje IRCv3 są domyślnie włączone. Włącz, aby zobaczyć zaawansowane opcje.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Pozwól innym zobaczyć, kiedy piszesz wiadomość (draft/typing). Domyślnie wyłączone ze względu na prywatność.</string>
     <string name="setting_receive_typing">Pokaż wskaźniki pisania innych</string>
     <string name="setting_receive_typing_desc">Wyświetl wskaźnik, gdy ktoś inny pisze wiadomość na kanale lub prywatnie.</string>
+    <string name="setting_read_receipts">Potwierdzenia odczytu</string>
+    <string name="setting_read_receipts_desc">W wiadomościach prywatnych informuje innych, że przeczytałeś ich wiadomości, i pokazuje, kiedy przeczytali Twoje. Działa tylko z innymi użytkownikami HexDroid.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Kanał zmienił nazwę z %1$s na %2$s</string>
@@ -452,6 +464,13 @@ To nowe wymaganie Android 17 dla połączeń z serwerami w sieci lokalnej.</stri
     <string name="chat_cd_launch_scripts">Uruchom skrypty</string>
     <string name="chat_cd_edit_topic">Edytuj temat</string>
     <string name="chat_cd_jump_unread">Przejdź do nieprzeczytanych</string>
+    <string name="format_bold">Pogrubienie</string>
+    <string name="format_italic">Kursywa</string>
+    <string name="format_underline">Podkreślenie</string>
+    <string name="format_colour">Kolor…</string>
+    <string name="format_clear">Wyczyść formatowanie</string>
+    <string name="chat_art_show_as_text">Pokaż jako tekst</string>
+    <string name="chat_unread_since">%1$s od %2$s</string>
     <string name="chat_cd_scroll_bottom">Przewiń na dół</string>
     <string name="chat_cd_close_label">Zamknij %1$s</string>
     <string name="chat_cd_cancel_reply">Anuluj odpowiedź</string>
@@ -460,6 +479,8 @@ To nowe wymaganie Android 17 dla połączeń z serwerami w sieci lokalnej.</stri
     <string name="chat_reply_to">Odpowiedz: %1$s</string>
     <string name="chat_delete_message">Usuń wiadomość</string>
     <string name="chat_delete_message_desc">Usuwa ją u wszystkich przez serwer</string>
+    <string name="chat_delete_message_others_desc">Usuwa ją dla wszystkich, jeśli serwer na to pozwala</string>
+    <string name="chat_delete_message_no_id">Nie można usunąć: serwer nie nadał tej wiadomości identyfikatora</string>
     <string name="chat_copy_messages">Kopiuj wiadomości…</string>
     <string name="chat_copy_messages_desc">Zaznacz kilka wiadomości do skopiowania</string>
 
@@ -1399,6 +1420,7 @@ To nowe wymaganie Android 17 dla połączeń z serwerami w sieci lokalnej.</stri
     <!-- ScriptsScreen -->
     <string name="scripts_title">Skrypty</string>
     <string name="scripts_reload">Wczytaj ponownie</string>
+    <string name="scripts_restore_defaults">Przywróć domyślne skrypty (%1$d)</string>
     <string name="scripts_import_file">Importuj plik…</string>
     <string name="scripts_import">Importuj…</string>
     <string name="scripts_paste">Wklej…</string>
@@ -1492,7 +1514,7 @@ To nowe wymaganie Android 17 dla połączeń z serwerami w sieci lokalnej.</stri
     <string name="cmd_unignore">Usuwa użytkownika z listy ignorowanych</string>
     <string name="cmd_quit">Kończy pracę z IRC i rozłącza się</string>
     <string name="cmd_kick">Wyrzuca użytkownika z kanału</string>
-    <string name="cmd_ban">Ban: nick (domyślnie), użytkownik, host, domena, konto</string>
+    <string name="cmd_ban">Ban: host (domyślnie), nick, użytkownik, domena, konto</string>
     <string name="cmd_unban">Usuwa bana (dla banów innych niż na nick wklej dokładną maskę z /banlist)</string>
     <string name="cmd_kb">Wyrzuca i banuje użytkownika (te same typy masek co /ban)</string>
     <string name="cmd_kickban">To samo co /kb</string>

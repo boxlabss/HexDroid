@@ -16,6 +16,8 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.boxlabs.hexdroid.ui
 
 import android.net.Uri
@@ -91,6 +93,7 @@ fun NetworkEditScreen(
     onSave: (NetworkProfile, ClientCertDraft?, Boolean) -> Unit,
     stsPolicyActive: Boolean = false,
     onClearStsPolicy: (() -> Unit)? = null,
+    onToggleOnePage: () -> Unit = {},
 ) {
     val n0 = state.editingNetwork ?: run {
         Text(stringResource(R.string.network_no_network_selected))
@@ -275,32 +278,36 @@ fun NetworkEditScreen(
     val open = picked?.takeIf { it in sections }
     val section = if (railLayout) (open ?: NetEditSection.CONNECTION) else open
     val formScroll = rememberScrollState()
+    // One page: every section in one continuous form.
+    val onePage = state.settings.settingsOnePage
+    fun shown(s: NetEditSection) = onePage || section == s
 
     LaunchedEffect(section) {
         runCatching { formScroll.scrollTo(0) }
     }
 
     // Back closes the open section first, then the editor.
-    BackHandler(enabled = !railLayout && open != null) { picked = null }
+    BackHandler(enabled = !onePage && !railLayout && open != null) { picked = null }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        if (!railLayout && section != null) stringResource(section.titleRes)
+                        if (!onePage && !railLayout && section != null) stringResource(section.titleRes)
                         else stringResource(R.string.network_edit_title)
                     )
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = { if (!railLayout && open != null) picked = null else onCancel() },
+                        onClick = { if (!onePage && !railLayout && open != null) picked = null else onCancel() },
                         modifier = Modifier.tvInitialFocus().focusHighlight(),
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cancel))
                     }
                 },
                 actions = {
+                    OnePageToggle(onePage = onePage, onToggle = onToggleOnePage)
                     Button(modifier = Modifier.focusHighlight(RoundedCornerShape(50)), onClick = {
                         val p = port.filter { it.isDigit() }.toIntOrNull() ?: 0
                         // validate port is in the legal TCP range before saving.
@@ -467,6 +474,9 @@ fun NetworkEditScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // Edge-to-edge: the keyboard doesn't shrink the window, so keep the content above it.
+                .consumeWindowInsets(padding)
+                .imePadding()
         ) {
             state.networkEditError?.let {
                 Text(
@@ -482,7 +492,7 @@ fun NetworkEditScreen(
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                if (railLayout || section == null) {
+                if (!onePage && (railLayout || section == null)) {
                     SectionRail(
                         entries = sections,
                         selected = section,
@@ -499,7 +509,7 @@ fun NetworkEditScreen(
                     if (railLayout) VerticalDivider()
                 }
 
-                if (section != null) {
+                if (onePage || section != null) {
                 Column(
                     Modifier
                         .weight(1f)
@@ -509,7 +519,7 @@ fun NetworkEditScreen(
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
 
-            CardSection(stringResource(R.string.network_section_connection), visible = section == NetEditSection.CONNECTION) {
+            CardSection(stringResource(R.string.network_section_connection), visible = shown(NetEditSection.CONNECTION)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -619,14 +629,9 @@ fun NetworkEditScreen(
                         Switch(checked = allowInvalidCerts, onCheckedChange = { allowInvalidCerts = it }, modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)))
                     }
 
-                    // Show every pinned TOFU fingerprint when at least one is stored. The
-                    // IRCv3 STS: when the server has published a TLS-only policy for this
-                    // host, connections are forced onto TLS with strict certificate checks
-                    // regardless of the toggles above. Surface that here, with an explicit
-                    // escape hatch for a policy gone stale (e.g. the server moved or broke
-                    // its TLS listener) before it expires. stsCleared hides the row locally
-                    // once tapped; the policy simply re-learns on the next TLS connect if
-                    // the server still advertises it.
+                    // STS: with a TLS-only policy for this host, connections use TLS with strict
+                    // certificate checks regardless of the toggles above. The row can clear a stale
+                    // policy early; it is re-learned on the next TLS connect if still advertised.
                     var stsCleared by remember(n0.id) { mutableStateOf(false) }
                     if (stsPolicyActive && !stsCleared) {
                         HorizontalDivider()
@@ -798,7 +803,7 @@ fun NetworkEditScreen(
                 }
             }
 
-            CardSection(stringResource(R.string.network_section_identity), visible = section == NetEditSection.IDENTITY) {
+            CardSection(stringResource(R.string.network_section_identity), visible = shown(NetEditSection.IDENTITY)) {
                 OutlinedTextField(
                     value = nick,
                     onValueChange = { nick = it },
@@ -834,7 +839,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_autoconnect), visible = section == NetEditSection.AUTOCONNECT) {
+            CardSection(stringResource(R.string.network_section_autoconnect), visible = shown(NetEditSection.AUTOCONNECT)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -921,14 +926,10 @@ fun NetworkEditScreen(
                                 }
                             }
                         }
-                        // Bouncer fields. Layout when bouncer mode is on:
-                        //   Username		repurposed `username` state (bouncer login)
-                        //   Network		bouncerNetworkName
-                        //   Client ID		bouncerClientId
-                        //
-                        // The same `username` state binds to the General-section ident field
-                        // when bouncer mode is OFF; the field is mutually exclusive between
-                        // the two sections so there's only ever one input for the value.
+                        // Bouncer fields: Username (the shared `username` state, used as the
+                        // bouncer login), Network (bouncerNetworkName) and Client ID
+                        // (bouncerClientId). `username` appears here or as the ident field, never
+                        // both.
                         AnimatedVisibility(visible = bouncerKind != com.boxlabs.hexdroid.BouncerKind.NONE) {
                             Column {
                                 OutlinedTextField(
@@ -976,7 +977,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_sasl), visible = section == NetEditSection.SASL) {
+            CardSection(stringResource(R.string.network_section_sasl), visible = shown(NetEditSection.SASL)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1046,7 +1047,7 @@ fun NetworkEditScreen(
                 }
             }
 
-            AnimatedVisibility(visible = tls && section == NetEditSection.TLS_CERT) {
+            AnimatedVisibility(visible = tls && shown(NetEditSection.TLS_CERT)) {
                 CardSection(stringResource(R.string.network_section_tls_cert)) {
                     val activeLabel = when {
                         pendingPemLabel != null -> pendingPemLabel
@@ -1201,7 +1202,7 @@ fun NetworkEditScreen(
                 }
             }
 			
-            CardSection(stringResource(R.string.network_section_autojoin), visible = section == NetEditSection.AUTOJOIN) {
+            CardSection(stringResource(R.string.network_section_autojoin), visible = shown(NetEditSection.AUTOJOIN)) {
                 Text(
                     stringResource(R.string.network_autojoin_hint),
                     style = MaterialTheme.typography.bodySmall,
@@ -1215,7 +1216,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_postcmds), visible = section == NetEditSection.POSTCMDS) {
+            CardSection(stringResource(R.string.network_section_postcmds), visible = shown(NetEditSection.POSTCMDS)) {
                 OutlinedTextField(
                     value = postDelayText,
                     onValueChange = { postDelayText = it.filter { c -> c.isDigit() } },
@@ -1252,7 +1253,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_proxy), visible = section == NetEditSection.PROXY) {
+            CardSection(stringResource(R.string.network_section_proxy), visible = shown(NetEditSection.PROXY)) {
                 // Proxy type selector. SOCKS5 is the right pick for Tor (Orbot) and for any
                 // modern proxy; SOCKS4a is offered for legacy proxies. Both resolve the
                 // destination host at the proxy (remote DNS), which is what lets `.onion`
@@ -1388,7 +1389,7 @@ fun NetworkEditScreen(
                 }
             }
 
-            CardSection(stringResource(R.string.network_section_encoding), visible = section == NetEditSection.ENCODING) {
+            CardSection(stringResource(R.string.network_section_encoding), visible = shown(NetEditSection.ENCODING)) {
                 ExposedDropdownMenuBox(
                     expanded = encodingExpanded,
                     onExpandedChange = { encodingExpanded = it }
@@ -1431,7 +1432,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_notifications), visible = section == NetEditSection.NOTIFICATIONS) {
+            CardSection(stringResource(R.string.network_section_notifications), visible = shown(NetEditSection.NOTIFICATIONS)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1466,7 +1467,7 @@ fun NetworkEditScreen(
                 )
             }
 
-            CardSection(stringResource(R.string.network_section_ircv3), visible = section == NetEditSection.IRCV3) {
+            CardSection(stringResource(R.string.network_section_ircv3), visible = shown(NetEditSection.IRCV3)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

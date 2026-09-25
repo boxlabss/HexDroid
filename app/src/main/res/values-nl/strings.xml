@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Instellingen</string>
+    <string name="settings_view_one_page">Eén pagina</string>
+    <string name="settings_view_categories">Categorieën</string>
     <string name="settings_intro_tour">Introductietour</string>
     <string name="settings_intro_tour_desc">Een korte rondleiding door de hoofdschermen en snelkoppelingen.</string>
     <string name="section_appearance">Uiterlijk</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Automatisch verbinden bij opstarten</string>
     <string name="setting_rejoin_on_kick">Opnieuw deelnemen na kick</string>
     <string name="setting_rejoin_on_kick_desc">Automatisch opnieuw deelnemen aan een kanaal na een kick. Een tweede kick in hetzelfde kanaal binnen 60 seconden wordt niet opgevolgd, om lussen tegen de modi +i/+k/+b te voorkomen.</string>
+    <string name="setting_nick_regain">Primaire nick heroveren</string>
+    <string name="setting_nick_regain_desc">Als je verbindt met een alternatieve nick omdat de jouwe bezet is, wordt een paar minuten lang geprobeerd terug te wisselen.</string>
     <string name="setting_enable_notifications">Meldingen inschakelen</string>
     <string name="setting_notify_highlights">Markeringsmeldingen</string>
     <string name="setting_notify_pm">Privéberichtmeldingen</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Verwijderen</string>
     <string name="chat_ban">Verbannen</string>
     <string name="chat_kick_ban_btn">Verwijder+Verban</string>
+    <string name="chat_ban_by">Bannen op</string>
+    <string name="chat_ban_type_host">Host</string>
+    <string name="chat_ban_type_nick">Nick</string>
+    <string name="chat_ban_type_account">Account</string>
+    <string name="chat_ban_type_domain">Domein</string>
 
     <!-- Network screens -->
     <string name="networks_title">Netwerken</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Toont elke verzonden en ontvangen regel in een Raw-buffer per netwerk. Wachtwoorden worden verborgen. Voor foutopsporing.</string>
     <string name="chat_show_less">Minder tonen</string>
     <string name="chat_not_delivered">Niet afgeleverd</string>
+    <string name="chat_status_read">Gelezen</string>
     <string name="vm_multiline_rejected">De server heeft het bericht geweigerd (%1$s): %2$s</string>
     <string name="network_edit_cap_also">vraagt ook %1$s aan</string>
     <string name="network_edit_caps_hint">Basis IRCv3-functies standaard ingeschakeld. Schakel in voor geavanceerde opties.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Laat anderen zien wanneer je een bericht aan het typen bent (draft/typing). Standaard uitgeschakeld voor privacy.</string>
     <string name="setting_receive_typing">Typtindicatoren van anderen weergeven</string>
     <string name="setting_receive_typing_desc">Toon een indicator wanneer iemand anders een bericht aan het typen is in een kanaal of privé.</string>
+    <string name="setting_read_receipts">Leesbevestigingen</string>
+    <string name="setting_read_receipts_desc">Laat in privéberichten weten wanneer je berichten hebt gelezen, en zie wanneer de ander de jouwe heeft gelezen. Werkt alleen met andere HexDroid-gebruikers.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Kanaal hernoemd van %1$s naar %2$s</string>
@@ -452,6 +464,13 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="chat_cd_launch_scripts">Scripts starten</string>
     <string name="chat_cd_edit_topic">Onderwerp bewerken</string>
     <string name="chat_cd_jump_unread">Naar ongelezen springen</string>
+    <string name="format_bold">Vet</string>
+    <string name="format_italic">Cursief</string>
+    <string name="format_underline">Onderstrepen</string>
+    <string name="format_colour">Kleur…</string>
+    <string name="format_clear">Opmaak wissen</string>
+    <string name="chat_art_show_as_text">Als tekst tonen</string>
+    <string name="chat_unread_since">%1$s sinds %2$s</string>
     <string name="chat_cd_scroll_bottom">Naar beneden scrollen</string>
     <string name="chat_cd_close_label">%1$s sluiten</string>
     <string name="chat_cd_cancel_reply">Antwoord annuleren</string>
@@ -460,6 +479,8 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="chat_reply_to">Antwoorden aan %1$s</string>
     <string name="chat_delete_message">Bericht verwijderen</string>
     <string name="chat_delete_message_desc">Verwijdert het via de server voor iedereen</string>
+    <string name="chat_delete_message_others_desc">Verwijdert het voor iedereen, als de server dat toestaat</string>
+    <string name="chat_delete_message_no_id">Kan niet worden verwijderd: de server heeft dit bericht geen ID gegeven</string>
     <string name="chat_copy_messages">Berichten kopiëren…</string>
     <string name="chat_copy_messages_desc">Selecteer meerdere berichten om te kopiëren</string>
 
@@ -1399,6 +1420,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <!-- ScriptsScreen -->
     <string name="scripts_title">Scripts</string>
     <string name="scripts_reload">Opnieuw laden</string>
+    <string name="scripts_restore_defaults">Standaardscripts herstellen (%1$d)</string>
     <string name="scripts_import_file">Bestand importeren…</string>
     <string name="scripts_import">Importeren…</string>
     <string name="scripts_paste">Plakken…</string>
@@ -1492,7 +1514,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="cmd_unignore">Verwijdert een gebruiker uit de negeerlijst</string>
     <string name="cmd_quit">Sluit IRC af en verbreekt de verbinding</string>
     <string name="cmd_kick">Verwijdert een gebruiker uit het kanaal</string>
-    <string name="cmd_ban">Ban: nick (standaard), gebruiker, host, domein, account</string>
+    <string name="cmd_ban">Ban: host (standaard), nick, gebruiker, domein, account</string>
     <string name="cmd_unban">Heft een ban op (plak het exacte masker uit /banlist bij niet-nick-bans)</string>
     <string name="cmd_kb">Verwijdert en verbant een gebruiker (dezelfde maskertypes als /ban)</string>
     <string name="cmd_kickban">Alias voor /kb</string>

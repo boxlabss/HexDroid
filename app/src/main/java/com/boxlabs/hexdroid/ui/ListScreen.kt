@@ -17,7 +17,8 @@
 */
 
 
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.boxlabs.hexdroid.ui
 
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -103,6 +104,9 @@ fun ListScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // Edge-to-edge: the keyboard doesn't shrink the window, so keep the content above it.
+                .consumeWindowInsets(padding)
+                .imePadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -304,13 +308,8 @@ fun ListScreen(
 }
 
 /**
- * A pair of sort controls for one dimension (e.g. "Size").
- *
- * When neither direction is active: shows a single outlined chip labelled with
- * the dimension name, tapping selects descending (the more useful default).
- *
- * When one direction is active: shows a filled chip with an arrow icon.
- * Tapping the active chip toggles to the opposite direction.
+ * Sort control for one dimension: an outlined chip when inactive (tapping selects descending), a
+ * filled chip with an arrow when active (tapping reverses it).
  */
 @Composable
 private fun SortChip(

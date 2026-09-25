@@ -22,12 +22,9 @@ import java.security.SecureRandom
 import java.util.Locale
 
 /**
- * Literal default value of [IrcConfig.username] when a new profile is created with no
- * user input. Treated as "unset" by the SASL authcid fallback in [IrcSession] so that
- * 1.6.1-era profiles, which commonly carry this value because the old UI didn't visibly
- * tie the field to SASL, continue to SASL as the IRC nick instead of as the literal
- * placeholder. Must stay in sync with the default sprinkled across
- * data/SettingsRepository.kt (every NetworkProfile() constructor call site).
+ * Default [IrcConfig.username] for a new profile. The SASL authcid fallback treats it as unset and
+ * uses the nick instead. Must match the default in the NetworkProfile constructor calls in
+ * data/SettingsRepository.kt.
  */
 private const val DEFAULT_USERNAME = "hexdroid"
 
@@ -126,6 +123,10 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
      */
     private var registered = false
 
+    /** True once the stored away message went out during registration under draft/pre-away. */
+    @Volatile var preAwaySent = false
+        private set
+
     /** Called when RPL_WELCOME arrives, so post-registration CAP handling behaves. */
     fun markRegistered() { registered = true }
 
@@ -133,13 +134,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     private var metadataSubSent = false
 
     /**
-     * Returns the initial draft/metadata-2 subscription line the first time it is
-     * needed, or null if the cap is not enabled or the subscription already went out.
-     * Self-guarding so both callers (CAP ACK when the server allows metadata during
-     * registration, and RPL_WELCOME otherwise) can call it unconditionally.
-     *
-     * Keys are sent in preference order: the spec processes them in order and stops
-     * at the subscription limit, so the most useful key must come first.
+     * The initial draft/metadata-2 subscription line, once; null if the capability isn't enabled or
+     * it was already sent. Keys are in preference order, since the server stops at its subscription
+     * limit.
      */
     fun takeMetadataSubLine(): String? {
         if (metadataSubSent) return null
@@ -285,6 +282,15 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             enabledCaps.addAll(ack)
             out += IrcAction.EmitStatus(tr(R.string.session_cap_ack, ack.joinToString(" ")))
 
+            // draft/pre-away: set the stored away message before registration completes.
+            val preAway = enabledCaps.contains("draft/pre-away") || enabledCaps.contains("pre-away")
+            if (preAway && !preAwaySent && !registered && config.capPrefs.preAway) {
+                config.initialAwayMessage?.takeIf { it.isNotBlank() }?.let {
+                    preAwaySent = true
+                    out += IrcAction.Send("AWAY :$it")
+                }
+            }
+
             // Decrement pending count; only proceed when all chunks are resolved.
             if (pendingCapReqs > 0) pendingCapReqs--
 
@@ -353,20 +359,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             "904", "905", "906", "907" -> {
                 saslDone = true; saslInProgress = false
                 val reason = m.trailing ?: ""
-                // 904/905/906 are credential-rejection or aborted-auth — retrying with the
-                // same creds yields the same result. 907 ("already authenticated") is benign
-                // and is excluded from the AuthFailed signal so we don't accidentally halt
-                // reconnect after a successful re-auth race.
-                //
-                // We emit ONLY EmitAuthFailed (not also EmitError as before): the viewmodel's
-                // AuthFailed handler already prints a buffer line that includes the SASL
-                // reason and an actionable hint, so adding a separate EmitError just produces
-                // a redundant pair of red lines for one conceptual failure.
-                //
-                // Dedup via saslAuthFailedEmitted: bouncers sometimes deliver a second 906
-                // post-MOTD when relaying upstream-IRC SASL outcomes (soju does this if the
-                // bouncer's upstream auth also fails). The second numeric is the same logical
-                // event from the user's perspective.
+                // 904/905/906 mean the credentials were rejected, so emit AuthFailed once (bouncers
+                // can repeat the numeric). 907 is benign and excluded.
                 if (m.command != "907" && !saslAuthFailedEmitted) {
                     saslAuthFailedEmitted = true
                     out += IrcAction.EmitAuthFailed(
@@ -558,13 +552,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     }
 
     /**
-     * Build one or more "CAP REQ :..." lines for the capabilities the server supports.
-     *
-     * IRC lines are limited to 512 bytes.  A CAP REQ with many caps can easily exceed this.
-     * We split the list into chunks so that each line's cap payload stays under 400 bytes,
-     * leaving room for the command prefix and CRLF.
-     *
-     * Returns an empty list when there are no matching caps (caller should send "CAP END").
+     * Build the CAP REQ lines for the supported capabilities, split so each stays well under the
+     * 512-byte line limit. Empty when nothing matches (the caller sends CAP END).
      */
     private fun buildCapReqChunks(): List<String> {
         val filtered = buildCapReqList().filter { serverCaps.contains(it.lowercase()) }
@@ -595,19 +584,14 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     }
 
     /**
-     * Decide which mechanism to authenticate with, given the server's advertised list.
-     *
-     * Returns null when nothing usable is available, having emitted an error naming what
-     * the server does offer; the caller aborts SASL so registration continues instead of
-     * stalling. Appends any status/error lines to [out].
-     *
-     * Rules, in order:
-     *  - No list advertised (IRCv3.1-era `sasl` with no value): use the configured
-     *    mechanism and let the server answer. We can't do better than guessing.
-     *  - Configured mechanism is advertised: use it.
-     *  - PLAIN configured, SCRAM-SHA-256 offered: silently upgrade to TLS.
-     *  - EXTERNAL is never substituted in either direction: it authenticates with a client
-     *    certificate, so swapping to or from it changes the identity being asserted.
+     * Choose the SASL mechanism from the server's advertised list; null (after an error naming what
+     * the server offers) when nothing usable remains, so SASL is aborted rather than stalling.
+     *   - No list advertised: use the configured mechanism.
+     *   - Configured mechanism advertised: use it.
+     *   - PLAIN configured, SCRAM-SHA-256 offered: upgrade to SCRAM-SHA-256.
+     *   - SCRAM-SHA-256 configured, PLAIN offered: fall back to PLAIN over TLS with an error line;
+     *     refused on a plaintext connection.
+     *   - EXTERNAL is never substituted in either direction.
      */
     private fun chooseMechanism(out: MutableList<IrcAction>): SaslMechanism? {
         val configured = (config.sasl as SaslConfig.Enabled).mechanism
@@ -684,9 +668,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                     if (!config.useTls) {
                         out += IrcAction.EmitError(tr(R.string.session_sasl_plain_no_tls))
                         out += IrcAction.Send("AUTHENTICATE *")
-                        // Abort locally so CAP END is still sent even if the server
-                        // doesn't reply with 906 (the spec says it SHOULD; not all do).
-                        // Without this, registration stalls forever after a refused PLAIN.
+                        // Abort locally so CAP END is still sent when the server doesn't reply with
+                        // 906 (the spec says SHOULD, not MUST).
                         saslAbort(out)
                         return out
                     }
@@ -701,31 +684,13 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         saslAbort(out)
                         return out
                     }
-                    // Fall back to the connection username (bouncer login) or nick when no
-                    // explicit authcid is set. Sending an empty authcid (\u0000\u0000pass)
-                    // is rejected by most servers including ZNC.
-                    //
-                    // For bouncer profiles the authcid must be the *bouncer username*, not
-                    // the IRC nick — they're conceptually different (one is "how the
-                    // bouncer knows you", the other is "how IRC users see you") and using
-                    // the nick produces a 904 SASL fail with bouncers that have a separate
-                    // login. config.username is the field the user fills with their bouncer
-                    // account name, so prefer it for bouncer profiles. For direct IRCd the
-                    // two are usually the same; we still prefer username since IRCv3 SASL
-                    // PLAIN expects a stable identity, not a transient nickname.
-                    //
-                    // Migration guard: 1.6.1 used the IRC nick as the only fallback (no
-                    // username preference). Profiles created or last edited under 1.6.1
-                    // commonly carry username = "hexdroid" (the literal default) because the
-                    // old UI didn't visibly tie that field to SASL auth. If we blindly
-                    // preferred username here, those profiles would silently SASL as
-                    // "hexdroid/<network>" and the bouncer would reject the unknown account.
-                    // So we treat the literal default value as "unset" for the purpose of
-                    // authcid fallback - users who genuinely want their bouncer login to
-                    // be the string "hexdroid" can set the explicit saslAuthcid field.
-                    //
-                    // effectiveAuthIdentity then suffixes the result with /network and/or
-                    // @clientid per the bouncer kind so the bouncer can route the connection.
+                    // authcid fallback when none is set explicitly: the connection username, then
+                    // the nick. An empty authcid is rejected by most servers. For bouncers the
+                    // username is the bouncer login, which SASL must use; for direct servers it
+                    // usually matches the nick anyway. The literal default username ("hexdroid")
+                    // counts as unset, so a profile that never changed it authenticates as the
+                    // nick. effectiveAuthIdentity then appends /network and @clientid as the
+                    // bouncer kind requires.
                     val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() }
                         ?: config.username.takeIf { it.isNotBlank() && it != DEFAULT_USERNAME }
                         ?: config.nick
@@ -774,22 +739,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
             SaslMechanism.SCRAM_SHA_256 -> {
                 // Server sends "+" to prompt the client for the first message.
                 if (serverPayload == "+" && scram == null && (saslIncomingB64?.isNotEmpty() != true)) {
-                    // Pre-flight: refuse to start the exchange at all if we have no password.
-                    // ScramSha256Client.hi() derives PBKDF2 by hand over the UTF-8 bytes and
-                    // keys an HmacSHA256 Mac with them; SecretKeySpec rejects a zero-length key
-                    // with IllegalArgumentException. That would propagate out of
-                    // onServerMessage() and kill the connection coroutine.
-                    //
-                    // The empty-password case is real: after a backup-restore on a fresh
-                    // install, the SecretStore is empty (secrets are device-keystore-encrypted
-                    // and intentionally don't survive an uninstall), but the imported profile
-                    // still carries saslEnabled = true and saslMechanism = SCRAM_SHA_256. The
-                    // user hits Connect without re-entering their password and the app dies.
-                    //
-                    // Emit a clear error so the user knows what to do, then abort SASL the
-                    // same way the PLAIN-over-plaintext refusal does. Registration continues
-                    // without SASL (CAP END is sent), letting the user reach the server buffer
-                    // and read the diagnostic.
+                    // No password (typically a profile restored from backup, since secrets don't
+                    // survive a reinstall): report it and abort SASL, so registration continues and
+                    // the user can read why. SCRAM can't key its HMAC with an empty password.
                     val pass = s.password
                     if (pass.isNullOrEmpty()) {
                         out += IrcAction.EmitError(tr(R.string.session_sasl_scram_no_pw))
@@ -797,11 +749,7 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                         saslAbort(out)
                         return out
                     }
-                    // Authcid fallback: prefer the username field (bouncer login) over nick.
-                    // Same rationale as PLAIN — see the comment there for the full reasoning,
-                    // including the migration guard that treats the literal default username
-                    // ("hexdroid") as unset so 1.6.1-era profiles continue to SASL as their
-                    // nick rather than as the placeholder default value.
+                    // authcid fallback: as for PLAIN above.
                     val baseAuthcid = s.authcid?.takeIf { it.isNotBlank() }
                         ?: config.username.takeIf { it.isNotBlank() && it != DEFAULT_USERNAME }
                         ?: config.nick
@@ -839,14 +787,9 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
                 }
 
                 val sc = scram ?: return listOf(IrcAction.EmitError(tr(R.string.session_scram_state_missing)))
-                // Defensive try/catch around the SCRAM state machine: hi() can throw
-                // IllegalArgumentException on degenerate inputs (empty password — which
-                // the pre-flight above already filters, but belt-and-braces), and
-                // PBKDF2/HMAC providers can throw GeneralSecurityException for invalid
-                // algorithm parameters in rare device-specific cases. Without this
-                // catch, any such throw kills the connection coroutine via an
-                // uncaught exception, taking the whole connect down with it instead
-                // of degrading to a clean 904-style failure path.
+                // The SCRAM steps can throw on degenerate input or from a device's PBKDF2/HMAC
+                // provider; treat that as a SASL failure rather than letting it end the connection
+                // coroutine.
                 val next = try {
                     sc.onServerMessage(decoded)
                 } catch (t: Throwable) {
@@ -882,15 +825,8 @@ class IrcSession(private val config: IrcConfig, private val rng: SecureRandom) {
     }
 
     /**
-     * Emit `CAP END` if - and only if - negotiation is genuinely finished: every
-     * `CAP REQ` chunk has been answered AND no SASL exchange is still running.
-     *
-     * Every path that wants to close negotiation goes through here so the SASL guard
-     * cannot be forgotten on one of them. It was forgotten on `CAP NAK`: with a cap
-     * list long enough for [buildCapReqChunks] to split it, an ACK on the chunk
-     * carrying `sasl` starts the exchange and a NAK on a later chunk ended
-     * negotiation mid-AUTHENTICATE, which servers read as an abort - the connection
-     * then registers unauthenticated with no visible error.
+     * Send CAP END only once every CAP REQ chunk is answered and no SASL exchange is running. Every
+     * path that ends negotiation goes through here.
      */
     private fun maybeCapEnd(out: MutableList<IrcAction>) {
         if (capEnded) return

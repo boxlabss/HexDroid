@@ -278,7 +278,7 @@ fun AppRoot(
                 AppScreen.CHAT -> ChatScreen(
                     state = state,
                     onSelectBuffer = vm::openBuffer,
-                    onSend = vm::sendInput,
+                    onSend = vm::sendUserInput,
                     onSendReply = vm::sendToBuffer,
                     onSendReaction = { msgId, emoji, remove -> vm.sendReaction(msgId, emoji, remove) },
                     onDisconnect = vm::disconnectActive,
@@ -315,6 +315,7 @@ fun AppRoot(
                     onToggleNetworkExpanded = vm::toggleNetworkExpanded,
                     onTypingChanged = vm::notifyTypingChanged,
                     onMarkRead = vm::markBufferRead,
+                    onViewingLatest = vm::onViewingLatest,
                     onHighlightConsumed = vm::clearHighlightScroll,
                     onCloseFindOverlay = vm::closeFindOverlay,
                     onFindNavigate = vm::findNavigate,
@@ -366,7 +367,8 @@ fun AppRoot(
                         ?.let { vm.hasActiveStsPolicy(it) } == true,
                     onClearStsPolicy = {
                         state.editingNetwork?.host?.let { vm.clearStsPolicy(it) }
-                    }
+                    },
+                    onToggleOnePage = { vm.updateSettings { copy(settingsOnePage = !settingsOnePage) } },
                 )
 
                 AppScreen.LIST -> ListScreen(
@@ -424,6 +426,7 @@ fun AppRoot(
                         onPaste = { name, source -> vm.installScript(name, source) },
                         onRead = { name -> vm.readScript(name) },
                         onRevert = { name -> vm.revertScript(name) },
+                        onRestoreDefaults = { vm.restoreBundledScripts() },
                     )
                 }
 

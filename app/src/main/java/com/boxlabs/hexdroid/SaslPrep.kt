@@ -28,18 +28,9 @@ import java.text.Normalizer
 class SaslPrepException(message: String) : IllegalArgumentException(message)
 
 /**
- * SASLprep (RFC 4013), the stringprep profile RFC 5802 (SCRAM) and RFC 4616 (PLAIN)
- * both require to be applied to the authcid, authzid and password before use.
- *
- * The server stores a SCRAM verifier derived from the *prepared* password.
- * If it prepared and we don't, every non-ASCII password fails with a plain
- * "authentication failed" that the user cannot debug, the credential is correct, the
- * bytes just differ.
- * Scope: this implements the mapping, normalisation and prohibited-output steps.
- * The bidi rules (RFC 3454 s6) are enforced only in their cheap form. a string may
- * not mix RandALCat and LCat characters, and one that contains RandALCat must both
- * start and end with one. Unassigned-codepoint checking (s7, "stored strings") is
- * deliberately skipped: we are preparing query strings, where RFC 4013 permits it.
+ * SASLprep (RFC 4013), required for the authcid, authzid and password by SCRAM (RFC 5802) and PLAIN
+ * (RFC 4616); without it non-ASCII passwords fail. Implements mapping, normalisation and prohibited
+ * output, the basic bidi rule, and skips the unassigned-codepoint check as query strings allow.
  */
 object SaslPrep {
 

@@ -127,18 +127,10 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
         }
 
         is ScriptView.Ring -> {
-            // Children sit on the perimeter of an ellipse or, with the `stadium` flag, a
-            // capsule: ratio >= 1 is a vertical capsule (portrait poker table, seats flanking
-            // the sides), ratio < 1 a horizontal one (landscape/TV, seats across the top).
-            // Geometry lives in ringOffsets / stadiumRequiredRy / stadiumRequiredRx
-            // (HexView.kt, pure JVM) so it is unit-testable off-device. `ratio` is a unitless
-            // multiplier like `weight`, NOT a percentage: 1.0 (the default) is a true circle,
-            // 0.62 reproduces the old flattened ellipse.
-            //
-            // A child flagged `felt` is not a seat: it is sized by THIS layout to the exact
-            // path the seats sit on (2rx by 2ry) and centred, so seats straddle its rail by
-            // construction and the script never has to guess the felt's dimensions. In stadium
-            // mode the table also grows with the seat count so seats can never overlap.
+            // Seats sit on an ellipse or, with `stadium`, a capsule (ratio >= 1 vertical, < 1
+            // horizontal); `ratio` is a multiplier, 1.0 a circle. A `felt` child is sized to the
+            // seats' path and centred. In stadium mode the table grows with the seat count.
+            // Geometry is in HexView.kt.
             val ratio = (v.props.ratio ?: 1f).coerceIn(0.1f, 4f).toDouble()
             val stadium = v.props.stadium
             val wantRxDp = ((v.props.sizeDp ?: 150) * s)
@@ -177,9 +169,8 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
                 val feltPl = if (feltIdx >= 0) measurables[feltIdx].measure(
                     Constraints.fixed((rx * 2).roundToInt(), (ry * 2).roundToInt())
                 ) else null
-                // Size to the content: seats are CENTRED on the perimeter, so half of the
-                // widest and tallest one hangs outside it on each side. The old code reserved a
-                // fixed 96dp for that, which clipped any child taller than 96.
+                // Size to the content: seats are centred on the perimeter, so half of the widest
+                // and tallest seat hangs outside it on each side.
                 val w = (rx * 2).roundToInt() + childW
                 val h = (ry * 2).roundToInt() + childH
                 val offsets = ringOffsets(nSeats, rx, ry, stadium, childW.toDouble(), childH.toDouble())
@@ -304,9 +295,8 @@ private fun Render(v: ScriptView, onAction: (String, List<String>) -> Unit, modi
                                 .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFEDEDF2))))
                                 .padding(horizontal = (w * 0.07f).dp, vertical = (w * 0.05f).dp),
                         ) {
-                            // Corner index (rank over suit) and the centre pip are sized so they
-                            // never overlap: at aspectRatio 0.7 the card is ~1.43x tall as wide, and
-                            // the old 0.30/0.24 corner + 0.52 centre collided in the upper middle.
+                            // Corner index (rank over suit) and centre pip are sized not to overlap
+                            // at the card's 0.7 aspect ratio.
                             Column(Modifier.align(Alignment.TopStart)) {
                                 Text(rank, color = ink, fontWeight = FontWeight.Bold, fontSize = (w * 0.26f).sp, lineHeight = (w * 0.26f).sp)
                                 Text(suit, color = ink, fontSize = (w * 0.19f).sp, lineHeight = (w * 0.19f).sp)

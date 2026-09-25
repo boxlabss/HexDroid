@@ -16,6 +16,8 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.boxlabs.hexdroid.ui
 
 import com.boxlabs.hexdroid.ui.tour.TourTarget
@@ -25,6 +27,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -693,6 +697,9 @@ fun TransfersScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // Edge-to-edge: the keyboard doesn't shrink the window, so keep the content above it.
+                .consumeWindowInsets(padding)
+                .imePadding()
         ) {
             if (!railLayout) {
                 SectionTabs(

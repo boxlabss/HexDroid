@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">设置</string>
+    <string name="settings_view_one_page">单页显示</string>
+    <string name="settings_view_categories">分类显示</string>
     <string name="settings_intro_tour">入门教程</string>
     <string name="settings_intro_tour_desc">快速了解主要界面和快捷方式。</string>
     <string name="section_appearance">外观</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">启动时自动连接</string>
     <string name="setting_rejoin_on_kick">被踢后重新加入</string>
     <string name="setting_rejoin_on_kick_desc">在被踢出后自动重新加入频道。同一频道在 60 秒内的第二次被踢不会重新加入,以避免与 +i/+k/+b 模式形成循环。</string>
+    <string name="setting_nick_regain">取回主昵称</string>
+    <string name="setting_nick_regain_desc">因昵称被占用而使用备用昵称连接时，在几分钟内持续尝试切换回原昵称。</string>
     <string name="setting_enable_notifications">启用通知</string>
     <string name="setting_notify_highlights">高亮通知</string>
     <string name="setting_notify_pm">私信通知</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">踢出</string>
     <string name="chat_ban">封禁</string>
     <string name="chat_kick_ban_btn">踢出+封禁</string>
+    <string name="chat_ban_by">封禁依据</string>
+    <string name="chat_ban_type_host">主机</string>
+    <string name="chat_ban_type_nick">昵称</string>
+    <string name="chat_ban_type_account">账号</string>
+    <string name="chat_ban_type_domain">域名</string>
 
     <!-- Network screens -->
     <string name="networks_title">网络</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">在每个网络的 Raw 缓冲区中显示收发的每一行。密码会被隐藏。用于调试。</string>
     <string name="chat_show_less">收起</string>
     <string name="chat_not_delivered">未送达</string>
+    <string name="chat_status_read">已读</string>
     <string name="vm_multiline_rejected">服务器拒绝了该消息（%1$s）：%2$s</string>
     <string name="network_edit_cap_also">同时请求 %1$s</string>
     <string name="network_edit_caps_hint">基本IRCv3功能默认启用。开启以查看高级选项。</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">允许他人看到您正在输入消息时的状态（draft/typing）。默认为保护隐私而关闭。</string>
     <string name="setting_receive_typing">显示他人的输入状态</string>
     <string name="setting_receive_typing_desc">当频道或私信中有人正在输入时显示提示。</string>
+    <string name="setting_read_receipts">已读回执</string>
+    <string name="setting_read_receipts_desc">在私信中告知对方你已读其消息，并显示对方何时读了你的消息。仅适用于其他 HexDroid 用户。</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">频道已从 %1$s 重命名为 %2$s</string>
@@ -452,6 +464,13 @@
     <string name="chat_cd_launch_scripts">运行脚本</string>
     <string name="chat_cd_edit_topic">编辑主题</string>
     <string name="chat_cd_jump_unread">跳到未读处</string>
+    <string name="format_bold">粗体</string>
+    <string name="format_italic">斜体</string>
+    <string name="format_underline">下划线</string>
+    <string name="format_colour">颜色…</string>
+    <string name="format_clear">清除格式</string>
+    <string name="chat_art_show_as_text">以文本显示</string>
+    <string name="chat_unread_since">自 %2$s 起%1$s</string>
     <string name="chat_cd_scroll_bottom">滚动到底部</string>
     <string name="chat_cd_close_label">关闭 %1$s</string>
     <string name="chat_cd_cancel_reply">取消回复</string>
@@ -460,6 +479,8 @@
     <string name="chat_reply_to">回复 %1$s</string>
     <string name="chat_delete_message">删除消息</string>
     <string name="chat_delete_message_desc">通过服务器为所有人删除</string>
+    <string name="chat_delete_message_others_desc">若服务器允许，将为所有人删除</string>
+    <string name="chat_delete_message_no_id">无法删除：服务器未给这条消息分配 ID</string>
     <string name="chat_copy_messages">复制消息…</string>
     <string name="chat_copy_messages_desc">选择多条消息以复制</string>
 
@@ -1399,6 +1420,7 @@
     <!-- ScriptsScreen -->
     <string name="scripts_title">脚本</string>
     <string name="scripts_reload">重新加载</string>
+    <string name="scripts_restore_defaults">恢复默认脚本 (%1$d)</string>
     <string name="scripts_import_file">导入文件…</string>
     <string name="scripts_import">导入…</string>
     <string name="scripts_paste">粘贴…</string>
@@ -1492,7 +1514,7 @@
     <string name="cmd_unignore">将用户移出忽略名单</string>
     <string name="cmd_quit">退出 IRC 并断开连接</string>
     <string name="cmd_kick">将用户踢出频道</string>
-    <string name="cmd_ban">封禁：昵称（默认）、用户、主机、域名、账号</string>
+    <string name="cmd_ban">封禁：主机（默认）、昵称、用户、域名、账号</string>
     <string name="cmd_unban">解除封禁（若不是按昵称封禁，请粘贴 /banlist 中的完整掩码）</string>
     <string name="cmd_kb">踢出并封禁用户（掩码类型与 /ban 相同）</string>
     <string name="cmd_kickban">/kb 的别名</string>

@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Einstellungen</string>
+    <string name="settings_view_one_page">Eine Seite</string>
+    <string name="settings_view_categories">Kategorien</string>
     <string name="settings_intro_tour">Einführungstour</string>
     <string name="settings_intro_tour_desc">Ein kurzer Rundgang durch die wichtigsten Bildschirme und Kurzbefehle.</string>
     <string name="section_appearance">Darstellung</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Beim Start automatisch verbinden</string>
     <string name="setting_rejoin_on_kick">Nach Kick erneut betreten</string>
     <string name="setting_rejoin_on_kick_desc">Einen Kanal nach einem Kick automatisch wieder betreten. Ein zweiter Kick im selben Kanal innerhalb von 60 Sekunden führt zu keinem erneuten Betreten, um Schleifen bei den Modi +i/+k/+b zu vermeiden.</string>
+    <string name="setting_nick_regain">Primären Nick zurückerlangen</string>
+    <string name="setting_nick_regain_desc">Wenn du mit einem Ausweich-Nick verbindest, weil deiner belegt ist, wird einige Minuten lang versucht, zu ihm zurückzuwechseln.</string>
     <string name="setting_enable_notifications">Benachrichtigungen aktivieren</string>
     <string name="setting_notify_highlights">Highlight-Benachrichtigungen</string>
     <string name="setting_notify_pm">Benachrichtigungen für private Nachrichten</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Kicken</string>
     <string name="chat_ban">Bannen</string>
     <string name="chat_kick_ban_btn">Kicken+Bannen</string>
+    <string name="chat_ban_by">Bannen nach</string>
+    <string name="chat_ban_type_host">Host</string>
+    <string name="chat_ban_type_nick">Nick</string>
+    <string name="chat_ban_type_account">Konto</string>
+    <string name="chat_ban_type_domain">Domain</string>
 
     <!-- Network screens -->
     <string name="networks_title">Netzwerke</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Jede gesendete und empfangene Zeile in einem Raw-Puffer pro Netzwerk anzeigen. Passwörter werden ausgeblendet. Für die Fehlersuche.</string>
     <string name="chat_show_less">Weniger anzeigen</string>
     <string name="chat_not_delivered">Nicht zugestellt</string>
+    <string name="chat_status_read">Gelesen</string>
     <string name="vm_multiline_rejected">Der Server hat die Nachricht abgelehnt (%1$s): %2$s</string>
     <string name="network_edit_cap_also">fordert außerdem %1$s an</string>
     <string name="network_edit_caps_hint">Grundlegende IRCv3-Funktionen sind standardmäßig aktiviert. Einschalten, um erweiterte Optionen zu sehen.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Andere sehen, wenn du gerade eine Nachricht verfasst (draft/typing). Aus Datenschutzgründen standardmäßig deaktiviert.</string>
     <string name="setting_receive_typing">Schreibhinweise anderer anzeigen</string>
     <string name="setting_receive_typing_desc">Zeigt an, wenn jemand anderes in einem Kanal oder privaten Chat eine Nachricht verfasst.</string>
+    <string name="setting_read_receipts">Lesebestätigungen</string>
+    <string name="setting_read_receipts_desc">Zeigt in privaten Nachrichten anderen, wann du ihre Nachrichten gelesen hast, und dir, wann sie deine gelesen haben. Funktioniert nur mit anderen HexDroid-Nutzern.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Kanal von %1$s in %2$s umbenannt</string>
@@ -452,6 +464,13 @@
     <string name="chat_cd_launch_scripts">Skripte starten</string>
     <string name="chat_cd_edit_topic">Thema bearbeiten</string>
     <string name="chat_cd_jump_unread">Zu ungelesenen springen</string>
+    <string name="format_bold">Fett</string>
+    <string name="format_italic">Kursiv</string>
+    <string name="format_underline">Unterstrichen</string>
+    <string name="format_colour">Farbe…</string>
+    <string name="format_clear">Formatierung entfernen</string>
+    <string name="chat_art_show_as_text">Als Text anzeigen</string>
+    <string name="chat_unread_since">%1$s seit %2$s</string>
     <string name="chat_cd_scroll_bottom">Nach unten scrollen</string>
     <string name="chat_cd_close_label">%1$s schließen</string>
     <string name="chat_cd_cancel_reply">Antwort abbrechen</string>
@@ -460,6 +479,8 @@
     <string name="chat_reply_to">Auf %1$s antworten</string>
     <string name="chat_delete_message">Nachricht löschen</string>
     <string name="chat_delete_message_desc">Entfernt sie über den Server für alle</string>
+    <string name="chat_delete_message_others_desc">Entfernt sie für alle, sofern der Server es dir erlaubt</string>
+    <string name="chat_delete_message_no_id">Kann nicht gelöscht werden: Der Server hat dieser Nachricht keine ID gegeben</string>
     <string name="chat_copy_messages">Nachrichten kopieren…</string>
     <string name="chat_copy_messages_desc">Mehrere Nachrichten zum Kopieren auswählen</string>
 
@@ -1399,6 +1420,7 @@
     <!-- ScriptsScreen -->
     <string name="scripts_title">Skripte</string>
     <string name="scripts_reload">Neu laden</string>
+    <string name="scripts_restore_defaults">Standardskripte wiederherstellen (%1$d)</string>
     <string name="scripts_import_file">Datei importieren…</string>
     <string name="scripts_import">Importieren…</string>
     <string name="scripts_paste">Einfügen…</string>
@@ -1492,7 +1514,7 @@
     <string name="cmd_unignore">Entfernt einen Benutzer aus der Ignorierliste</string>
     <string name="cmd_quit">Beendet IRC und trennt die Verbindung</string>
     <string name="cmd_kick">Kickt einen Benutzer aus dem Kanal</string>
-    <string name="cmd_ban">Bann: Nick (Standard), User, Host, Domain, Konto</string>
+    <string name="cmd_ban">Bann: Host (Standard), Nick, User, Domain, Konto</string>
     <string name="cmd_unban">Hebt einen Bann auf (bei Nicht-Nick-Banns die exakte Maske aus /banlist einfügen)</string>
     <string name="cmd_kb">Kickt und bannt einen Benutzer (gleiche Maskentypen wie /ban)</string>
     <string name="cmd_kickban">Alias für /kb</string>

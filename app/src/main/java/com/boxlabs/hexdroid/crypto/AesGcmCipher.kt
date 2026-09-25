@@ -23,28 +23,10 @@ import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 
 /**
- * AES-256-GCM encryption for the `+AGM` wire scheme.
- *
- * Wire format inside the base64 blob:
- *
- *     byte  0       version  (0x01)
- *     bytes 1..12   nonce    (12 random bytes per message)
- *     bytes 13..N   ciphertext
- *     bytes N..N+15 GCM auth tag (16 bytes)
- *
- * The full IRC line is `+AGM <base64(version || nonce || ciphertext || tag)>`.
- *
- * The target name (channel or nick, lowercased + UTF-8 encoded) is fed as Additional
- * Authenticated Data so a ciphertext can't be replayed across channels: if Alice's
- * `#secret` message is re-injected into `#public`, the AAD differs and the GCM tag
- * fails, the receiver renders a tampering indicator instead of a confusing decrypt.
- *
- * Nonce uniqueness with a fresh-per-message 96-bit random value:
- *   collision probability after 2^32 messages = ~2^-32 ≈ negligible.
- * The cipher does NOT counter-derive nonces because counter state can be lost across
- * process restarts and a counter reset under the same key is catastrophic for GCM
- * (an attacker who sees two ciphertexts with the same nonce can recover the keystream
- * and forge arbitrary messages). Random nonces avoid that failure mode entirely.
+ * AES-256-GCM for the `+AGM` scheme. The line is `+AGM <base64(0x01 || nonce(12) || ciphertext ||
+ * tag(16))>`. The lowercased target is the AAD, so a ciphertext can't be replayed into another
+ * channel. Nonces are random per message, never counters, since a counter reset under the same key
+ * would break GCM.
  */
 internal class AesGcmCipher(private val key: ByteArray) : E2eCipher {
     init {

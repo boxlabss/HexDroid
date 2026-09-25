@@ -25,33 +25,15 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 
 /**
- * Handles the inline-reply action attached to highlight/PM notifications.
- *
- * Android delivers a broadcast here so the app doesn't need to come to the
- * foreground. We pull the typed text, the original sender nick, and the
- * original message snippet, then send via the ViewModel.
- *
- * If the app process was dead when the reply fired, Android restarts it and
- * delivers the broadcast but the ViewModel will have no live connections.
- * In that case [sendToBuffer] silently finds no runtime and returns without
- * sending. To prevent replies being silently dropped, we check whether the
- * send succeeded and update the notification with feedback so the user knows
- * to reopen the app and reconnect before replying.
+ * Handles the inline reply on highlight and PM notifications, without bringing the app forward. If
+ * the process was restarted and has no live connection, the send fails, and the notification is
+ * updated to say so rather than dropping the reply silently.
  */
 class NotificationReplyReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
-        // Outer guard. BroadcastReceivers are sandboxed by Android — a throw doesn't kill
-        // the host app process directly — but it does surface to the user as the
-        // "Unfortunately, <app> has stopped" system dialog and gets reported through
-        // Play Console's vitals as a crash. The body below touches a lot of fragile
-        // bridges (Intent extras, RemoteInput parsing, app-singleton lookup via cast,
-        // ViewModel calls that may have side-effect throws, NotificationManagerCompat
-        // calls that can fail on locked devices), so a single catch-all here keeps the
-        // worst-case "tap reply, see crash dialog" path from ever happening. Specific
-        // expected errors (missing extras, no live connection) are still handled
-        // structurally above with early returns; this is the safety net for the
-        // genuinely unexpected.
+        // Outer guard: a throw here shows the system crash dialog. Expected cases (missing extras,
+        // no live connection) are handled above; this catches the unexpected.
         try {
             handleReply(ctx, intent)
         } catch (t: Throwable) {

@@ -177,6 +177,8 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         descRes = R.string.setting_reconnect_interval_desc, keywords = "reconnect delay seconds"),
     SettingsSearchEntry(R.string.setting_rejoin_on_kick, SettingsCategory.IRC,
         descRes = R.string.setting_rejoin_on_kick_desc, keywords = "kick rejoin"),
+    SettingsSearchEntry(R.string.setting_nick_regain, SettingsCategory.IRC,
+        descRes = R.string.setting_nick_regain_desc, keywords = "nick regain reclaim ghost alternate fallback"),
 
     // Notifications
     SettingsSearchEntry(R.string.setting_enable_notifications, SettingsCategory.NOTIFICATIONS,
@@ -209,6 +211,8 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         descRes = R.string.setting_send_typing_desc, keywords = "typing indicator"),
     SettingsSearchEntry(R.string.setting_receive_typing, SettingsCategory.PRIVACY,
         descRes = R.string.setting_receive_typing_desc, keywords = "typing indicator"),
+    SettingsSearchEntry(R.string.setting_read_receipts, SettingsCategory.PRIVACY,
+        descRes = R.string.setting_read_receipts_desc, keywords = "read receipts seen ticks private message"),
     SettingsSearchEntry(R.string.setting_ctcp_replies, SettingsCategory.PRIVACY,
         descRes = R.string.setting_ctcp_replies_desc, keywords = "ctcp version time ping finger clientinfo source"),
 

@@ -37,12 +37,8 @@ data class IrcMessage(
 }
 
 /**
- * Decode an IRCv3 message-tag-escaped value per the message-tags spec:
- *   \: → ;   \s → space   \\ → \   \r → CR   \n → LF   trailing \ → dropped.
- *
- * Exposed at top level so other parsers that share the tag-escape grammar
- * (notably the BOUNCER NETWORK attribute parser in IrcCore) can decode without
- * re-implementing the state machine. Keep the two implementations in sync.
+ * Decode a message-tag value: \: to ;, \s to space, \\ to \, \r and \n to CR and LF; a trailing \
+ * is dropped.
  */
 internal fun unescapeIrcTagValue(s: String): String {
     val out = StringBuilder(s.length)
@@ -67,6 +63,22 @@ internal fun unescapeIrcTagValue(s: String): String {
         } else {
             out.append(c)
             i++
+        }
+    }
+    return out.toString()
+}
+
+/** Encode [s] for an outgoing message-tag value: the inverse of [unescapeIrcTagValue]. */
+internal fun escapeIrcTagValue(s: String): String {
+    val out = StringBuilder(s.length + 8)
+    for (c in s) {
+        when (c) {
+            ';' -> out.append("\\:")
+            ' ' -> out.append("\\s")
+            '\\' -> out.append("\\\\")
+            '\r' -> out.append("\\r")
+            '\n' -> out.append("\\n")
+            else -> out.append(c)
         }
     }
     return out.toString()

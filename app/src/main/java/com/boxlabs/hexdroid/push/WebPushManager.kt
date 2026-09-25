@@ -22,14 +22,9 @@ import android.content.Context
 import org.unifiedpush.android.connector.UnifiedPush
 
 /**
- * Owns the device's Web Push subscription: the endpoint a distributor gave us, the keys
- * servers encrypt with, and the registrations we have told each network about.
- *
- * The point of the feature is that a bouncer can wake the app for a message while no TCP
- * connection is open, so the keep-alive foreground service stops being the only way to
- * hear about a highlight.
- *
- * The transport is UnifiedPush
+ * Owns the device's Web Push subscription over UnifiedPush: the distributor's endpoint, the
+ * encryption keys and the per-network registrations, so a bouncer can notify with no connection
+ * open.
  */
 object WebPushManager {
 
@@ -71,12 +66,8 @@ object WebPushManager {
     }
 
     /**
-     * The VAPID key the current subscription was requested with, or null when it was
-     * requested without one.
-     *
-     * A keyless subscription still works with distributors that don't enforce signing,
-     * but a server that does sign will have its pushes dropped, so callers use this to
-     * notice a subscription that predates knowing any server's key.
+     * The VAPID key the current subscription was requested with, or null if none, so callers can
+     * spot a keyless subscription a signing server's pushes would be dropped from.
      */
     fun subscribedVapid(ctx: Context): String? = prefs(ctx).getString(KEY_VAPID, null)
 
@@ -94,15 +85,9 @@ object WebPushManager {
     fun availableDistributors(ctx: Context): List<String> = UnifiedPush.getDistributors(ctx)
 
     /**
-     * Ask the saved distributor for an endpoint.
-     *
-     * [vapid] is the server's application-server key, which the distributor uses to reject
-     * pushes that are not signed by that server. Because it is per-server and a
-     * subscription is per-device, the first connected server's key wins; a user pointing
-     * one install at two webpush servers with different keys would need a subscription per
-     * server, which the spec supports but this does not yet.
-     *
-     * The endpoint arrives asynchronously at [HexPushService.onNewEndpoint].
+     * Ask the saved distributor for an endpoint, bound to [vapid], the server's key. One
+     * subscription per device, so the first connected server's key wins. The endpoint arrives at
+     * [HexPushService.onNewEndpoint].
      */
     fun register(ctx: Context, vapid: String?) {
         if (UnifiedPush.getAckDistributor(ctx) == null) {

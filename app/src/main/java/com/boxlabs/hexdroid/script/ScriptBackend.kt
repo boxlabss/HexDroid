@@ -24,15 +24,10 @@ interface ScriptBackend {
     val scriptExtension: String
 
     /**
-     * Stand up a fresh, sandboxed interpreter scope and install the host API by
-     * calling into [callbacks]. Must be safe to call again after [reset].
+     * Create a fresh sandboxed interpreter scope and install the host API from [callbacks]. Safe to
+     * call again after [reset].
      *
-     * @param callbacks the engine-side implementation of the host API (registerEvent,
-     *                  echo, msg, http, …). The backend wires its native function
-     *                  objects to these.
-     * @param budget    per-call instruction/time ceiling the backend must enforce by
-     *                  whatever mechanism it has (Rhino: observeInstructionCount;
-     *                  luak: a DebugLib count hook).
+     * @param budget Per-call instruction/time limit the backend must enforce.
      */
     fun start(callbacks: EngineCallbacks, budget: Budget)
 

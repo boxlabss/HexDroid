@@ -133,9 +133,9 @@ class SecretStore(private val ctx: Context) {
         data object NotSet : SecretResult()
         data class Value(val secret: String) : SecretResult()
         /**
-         * FIX #7: The Keystore key was invalidated (biometric change, factory reset of
-         * Keystore, etc.). The stored ciphertext has been cleared. The caller should warn
-         * the user and prompt them to re-enter the credential in Network Settings.
+         * The Keystore key was invalidated (biometric change, Keystore reset). The stored
+         * ciphertext has been cleared; the caller should ask the user to re-enter the credential in
+         * Network Settings.
          */
         data object KeystoreInvalidated : SecretResult()
     }
@@ -463,29 +463,11 @@ class SecretStore(private val ctx: Context) {
 
     data class StoredClientCert(val certId: String, val label: String?)
 
-    // -------------------------------------------------------------------------
-    // End-to-end encryption key storage
-    //
-    // Per-(networkId, target) symmetric keys for the +AGM and +OK wire schemes.
-    // Stored via the same Android-Keystore-wrapped AES-GCM envelope already used
-    // for SASL/server passwords - the on-device persistence layer is unchanged,
-    // only the namespace is new ("e2e:…" prefix). This means E2E keys benefit
-    // from the same KeyPermanentlyInvalidatedException handling: if the user
-    // changes their lock screen, key bytes become unrecoverable and the affected
-    // channels gracefully degrade to "no key configured" rather than misbehaving.
-    //
-    // Two preference entries per key:
-    //   e2e:<netId>:<target>:scheme    = "AGM" | "BLOWFISH"
-    //   e2e:<netId>:<target>:key       = encrypted base64
-    //
-    // The target component is the lowercase channel/nick. The IrcCore caller is
-    // expected to lowercase before calling - this layer does not casefold.
-    //
-    // E2E keys are intentionally NOT included in the backup payload (see
-    // SettingsRepository.exportBackup). A reinstall therefore re-pairs all
-    // channels, which matches the security expectation users have for E2E and
-    // mirrors how Signal/Whatsapp handle device-key portability.
-    // -------------------------------------------------------------------------
+    // ── End-to-end encryption keys ──
+    // Per-(networkId, target) keys for +AGM and +OK, in the same Keystore-wrapped envelope as
+    // passwords, under an "e2e:" prefix: e2e:<netId>:<target>:scheme and e2e:<netId>:<target>:key.
+    // Targets are lowercased by the caller. Invalidated keys read as "no key". Not included in
+    // backups.
 
     /**
      * Lightweight tuple returned by [listE2eKeys] for hydrating the in-memory
@@ -497,13 +479,8 @@ class SecretStore(private val ctx: Context) {
     private fun e2eSchemeName(networkId: String, target: String) = "e2e:$networkId:$target:scheme"
 
     /**
-     * Store [keyBytes] for ([networkId], [target]) under [schemeName] (e.g. "AGM"
-     * or "BLOWFISH"). Overwrites any existing entry.
-     *
-     * The encryption envelope is the same AES-GCM-with-Keystore-master-key used
-     * by [setSaslPassword]; failure to encrypt throws the same exceptions
-     * (IllegalStateException / KeyPermanentlyInvalidatedException), to be
-     * handled by callers as in the SASL save path.
+     * Store [keyBytes] for ([networkId], [target]) under [schemeName], replacing any entry. Throws
+     * like [setSaslPassword] when encryption fails.
      */
     fun setE2eKey(networkId: String, target: String, schemeName: String, keyBytes: ByteArray) {
         val enc = encryptToB64(keyBytes)
@@ -582,15 +559,9 @@ class SecretStore(private val ctx: Context) {
         prefs.edit().remove("age:pins").apply()
     }
 
-    // ---- +AGE held-PM outbox (durable store-and-forward for messages queued behind a handshake) ----
-    //
-    // When a +AGE PM is composed before the peer's ratchet handshake completes, the message is HELD
-    // rather than sent in clear or under a key the peer can't read. That queue was memory-only, so an
-    // app kill in the hold window lost the message, the exact failure HexDroid exists to avoid. We
-    // persist it through the same Android-Keystore-wrapped AES-GCM envelope as the +AGE identity, so
-    // the held plaintext is encrypted at rest and unrecoverable if the Keystore key is invalidated
-    // (lock-screen change, etc.), degrading to "held messages lost" rather than leaking. One blob per
-    // network; the bridge serialises/deserialises the peer -> messages map itself.
+    // ── +AGE held-PM outbox ──
+    // PMs held until the peer's handshake completes, persisted (encrypted, like the identity) so an
+    // app kill doesn't lose them. One blob per network; the bridge serialises it.
 
     fun getAgePmOutbox(networkId: String): ByteArray? {
         val enc = prefs.getString("age:pmoutbox:$networkId", null) ?: return null

@@ -40,6 +40,8 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Impostazioni</string>
+    <string name="settings_view_one_page">Pagina unica</string>
+    <string name="settings_view_categories">Categorie</string>
     <string name="settings_intro_tour">Tour introduttivo</string>
     <string name="settings_intro_tour_desc">Una breve guida alle schermate principali e alle scorciatoie.</string>
     <string name="section_appearance">Aspetto</string>
@@ -93,6 +95,8 @@
     <string name="setting_auto_connect_startup">Connetti automaticamente all\'avvio</string>
     <string name="setting_rejoin_on_kick">Rientra dopo un kick</string>
     <string name="setting_rejoin_on_kick_desc">Rientra automaticamente in un canale dopo essere stato espulso. Un secondo kick sullo stesso canale entro 60 secondi non viene seguito da un rientro, per evitare loop contro le modalità +i/+k/+b.</string>
+    <string name="setting_nick_regain">Recupera il nick principale</string>
+    <string name="setting_nick_regain_desc">Se ti connetti con un nick alternativo perché il tuo è occupato, continua a provare a tornare al tuo per qualche minuto.</string>
     <string name="setting_enable_notifications">Abilita notifiche</string>
     <string name="setting_notify_highlights">Notifiche evidenziazioni</string>
     <string name="setting_notify_pm">Notifiche messaggi privati</string>
@@ -178,6 +182,11 @@
     <string name="chat_kick">Espelli</string>
     <string name="chat_ban">Banna</string>
     <string name="chat_kick_ban_btn">Espelli+Banna</string>
+    <string name="chat_ban_by">Ban per</string>
+    <string name="chat_ban_type_host">Host</string>
+    <string name="chat_ban_type_nick">Nick</string>
+    <string name="chat_ban_type_account">Account</string>
+    <string name="chat_ban_type_domain">Dominio</string>
 
     <!-- Network screens -->
     <string name="networks_title">Reti</string>
@@ -255,6 +264,7 @@
     <string name="settings_raw_log_desc">Mostra ogni riga inviata e ricevuta in un buffer Raw per rete. Le password sono nascoste. Per il debug.</string>
     <string name="chat_show_less">Mostra meno</string>
     <string name="chat_not_delivered">Non consegnato</string>
+    <string name="chat_status_read">Letto</string>
     <string name="vm_multiline_rejected">Il server ha rifiutato il messaggio (%1$s): %2$s</string>
     <string name="network_edit_cap_also">richiede anche %1$s</string>
     <string name="network_edit_caps_hint">Le funzionalità IRCv3 di base sono abilitate per impostazione predefinita. Attiva per vedere le opzioni avanzate.</string>
@@ -334,6 +344,8 @@
     <string name="setting_send_typing_desc">Consenti agli altri di vedere quando stai scrivendo un messaggio (draft/typing). Disabilitato per impostazione predefinita per la privacy.</string>
     <string name="setting_receive_typing">Mostra indicatori di digitazione degli altri</string>
     <string name="setting_receive_typing_desc">Mostra un indicatore quando qualcun altro sta scrivendo in un canale o in privato.</string>
+    <string name="setting_read_receipts">Conferme di lettura</string>
+    <string name="setting_read_receipts_desc">Nei messaggi privati fa sapere agli altri quando hai letto i loro messaggi e mostra quando hanno letto i tuoi. Funziona solo con altri utenti HexDroid.</string>
 
     <!-- draft/channel-rename -->
     <string name="channel_renamed">Canale rinominato da %1$s in %2$s</string>
@@ -452,6 +464,13 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="chat_cd_launch_scripts">Avvia gli script</string>
     <string name="chat_cd_edit_topic">Modifica l\'argomento</string>
     <string name="chat_cd_jump_unread">Vai ai non letti</string>
+    <string name="format_bold">Grassetto</string>
+    <string name="format_italic">Corsivo</string>
+    <string name="format_underline">Sottolineato</string>
+    <string name="format_colour">Colore…</string>
+    <string name="format_clear">Cancella formattazione</string>
+    <string name="chat_art_show_as_text">Mostra come testo</string>
+    <string name="chat_unread_since">%1$s dalle %2$s</string>
     <string name="chat_cd_scroll_bottom">Scorri in fondo</string>
     <string name="chat_cd_close_label">Chiudi %1$s</string>
     <string name="chat_cd_cancel_reply">Annulla la risposta</string>
@@ -460,6 +479,8 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="chat_reply_to">Rispondi a %1$s</string>
     <string name="chat_delete_message">Elimina il messaggio</string>
     <string name="chat_delete_message_desc">Lo rimuove per tutti tramite il server</string>
+    <string name="chat_delete_message_others_desc">Lo rimuove per tutti, se il server te lo consente</string>
+    <string name="chat_delete_message_no_id">Impossibile eliminarlo: il server non ha assegnato un ID a questo messaggio</string>
     <string name="chat_copy_messages">Copia messaggi…</string>
     <string name="chat_copy_messages_desc">Seleziona più messaggi da copiare</string>
 
@@ -1399,6 +1420,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <!-- ScriptsScreen -->
     <string name="scripts_title">Script</string>
     <string name="scripts_reload">Ricarica</string>
+    <string name="scripts_restore_defaults">Ripristina gli script predefiniti (%1$d)</string>
     <string name="scripts_import_file">Importa un file…</string>
     <string name="scripts_import">Importa…</string>
     <string name="scripts_paste">Incolla…</string>
@@ -1492,7 +1514,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="cmd_unignore">Rimuove un utente dalla lista degli ignorati</string>
     <string name="cmd_quit">Esce da IRC e si disconnette</string>
     <string name="cmd_kick">Espelle un utente dal canale</string>
-    <string name="cmd_ban">Ban: nick (predefinito), utente, host, dominio, account</string>
+    <string name="cmd_ban">Ban: host (predefinito), nick, utente, dominio, account</string>
     <string name="cmd_unban">Rimuove un ban (incolla la maschera esatta da /banlist se non è un ban per nick)</string>
     <string name="cmd_kb">Espelle e banna un utente (stessi tipi di maschera di /ban)</string>
     <string name="cmd_kickban">Alias di /kb</string>

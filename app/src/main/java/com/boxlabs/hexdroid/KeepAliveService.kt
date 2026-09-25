@@ -29,31 +29,10 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 
 /**
- * Foreground service used to keep the process alive for "Always connected".
- *
- * On Android 15+, "dataSync" foreground services can be timed out after 6 hours in a 24-hour
- * window, so this service uses the "specialUse" FGS type in the manifest.
- *
- * WakeLock strategy
- *
- * We do NOT hold a permanent PARTIAL_WAKE_LOCK for the lifetime of this service.
- * The foreground service itself prevents the process from being killed, and the OS network
- * stack keeps TCP sockets alive independently of whether our CPU is spinning. A permanent
- * wake lock would keep the CPU running at full speed all night — a significant battery drain.
- *
- * Instead we use two targeted patterns:
- *
- * 1. [acquireScopedWakeLock] / [releaseScopedWakeLock] - for the connect/TLS handshake burst.
- *    The lock is held from the start of the coroutine until the `events()` flow returns, covering
- *    the CPU-intensive initial handshake so Android can't suspend us mid-handshake.
- *
- * 2. [withWakeLock] - wrapper for the auto-reconnect loop. Acquires a
- *    short-timeout lock, runs the block, then releases it.
- *
- * The WifiLock IS held permanently: it prevents Wi-Fi from powering down the association
- * (which would kill the TCP socket) while keeping the normal Wi-Fi power-saving mode active
- * between packets. WIFI_MODE_FULL (not HIGH_PERF) is intentional — HIGH_PERF disables
- * power-save and roughly doubles Wi-Fi current draw with no benefit for an idle IRC client.
+ * Foreground service keeping the process alive for "Always connected". Uses the specialUse FGS
+ * type, since dataSync is time-limited on Android 15+. No permanent wake lock: a scoped one covers
+ * the connect and TLS handshake, and [withWakeLock] covers each reconnect. A WifiLock
+ * (WIFI_MODE_FULL, not HIGH_PERF) is held so Wi-Fi keeps its association with normal power saving.
  */
 class KeepAliveService : Service() {
 
@@ -132,23 +111,12 @@ class KeepAliveService : Service() {
         super.onCreate()
         isRunning = true
 
-        // startForeground() must be called within ~5s of the service being created, but on
-        // Android 12+ (API 31+) the system can REFUSE the foreground start with
-        // ForegroundServiceStartNotAllowedException when the service was created without a
-        // valid background-FGS exemption. The most common trigger is the OS itself
-        // restarting this service after killing it under memory pressure / Doze
-        // (START_STICKY) while the app is in the background — that restart path does NOT
-        // go through our guarded call sites in IrcViewModel, so the guard has to live
-        // here. An unguarded startForeground() throw in onCreate takes down the whole
-        // process (the reported FATAL EXCEPTION at KeepAliveService.onCreate).
-        //
-        // If we can't become a foreground service right now, stop cleanly and bail:
-        //   - swallowing the exception avoids the process crash, and
-        //   - stopSelf() avoids the follow-on ForegroundServiceDidNotStartInTimeException
-        //     that fires if a started service never reaches startForeground().
-        // Our own foregrounding logic (maybeStartKeepAlive / updateConnectionNotification)
-        // will start the service again, correctly, the next time the app is visible or a
-        // valid FGS exemption exists.
+        // startForeground() can be refused on Android 12+ when the service was created without a
+        // background-FGS exemption, most often when the OS restarts it (START_STICKY) in the
+        // background, which bypasses the guarded call sites in IrcViewModel. If it is refused, stop
+        // cleanly: the exception is swallowed, and stopSelf() avoids
+        // ForegroundServiceDidNotStartInTimeException. The app starts the service again when it's
+        // visible or has an exemption.
         val startedForeground = runCatching {
             val initialNotification = NotificationHelper(applicationContext)
                 .buildConnectionNotification("", "HexDroid IRC", "Connecting...")
@@ -181,6 +149,9 @@ class KeepAliveService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** The network, label and status the foreground notification currently shows. */
+    private var postedKey: String? = null
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_UPDATE
         if (action == ACTION_STOP) {
@@ -193,14 +164,14 @@ class KeepAliveService : Service() {
         val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL) ?: "HexDroid IRC"
         val status = intent?.getStringExtra(EXTRA_STATUS) ?: "Connected"
 
-        // Building the notification can throw on some Samsung firmware when the
-        // ActivityManager's per-UID PendingIntent rate limit fires. We've wrapped each
-        // PendingIntent.getActivity in NotificationHelper.safePi to swallow the
-        // SecurityException, but a final outer guard here protects against unrelated
-        // surprises (OOM during builder.build(), system-server transient errors, etc.).
-        // If building fails entirely we leave the existing foreground notification in
-        // place rather than crashing the service. START_STICKY ensures the OS will
-        // hand us another onStartCommand later, giving the rate limit time to clear.
+        // Already showing exactly this: nothing to do. Building and reposting costs several calls
+        // into the system on the main thread, which slow ROMs can't afford on every update.
+        val key = "$networkId\u0000$serverLabel\u0000$status"
+        if (key == postedKey) return START_STICKY
+
+        // Building the notification can throw (a PendingIntent rate limit on some Samsung firmware,
+        // OOM, system-server errors). On failure keep the current notification; START_STICKY brings
+        // another onStartCommand later.
         val n = runCatching {
             NotificationHelper(applicationContext)
                 .buildConnectionNotification(networkId, serverLabel, status)
@@ -213,15 +184,13 @@ class KeepAliveService : Service() {
             ServiceCompat.startForeground(this, NotificationHelper.NOTIF_ID_CONNECTION, n, fgsType)
         }.isSuccess
         if (!foregroundOk) {
-            // Same Android 12+/14+ background-FGS-start restriction as onCreate. Don't
-            // linger as a started-but-not-foreground service: that risks the
-            // ForegroundServiceDidNotStartInTimeException crash and, under START_STICKY,
-            // a restart loop where the OS keeps recreating a service that can't go
-            // foreground. Stop and return START_NOT_STICKY so the OS leaves us alone;
-            // the connection layer restarts us through the guarded path when allowed.
+            // Same background-FGS restriction as onCreate: stop rather than linger as a started,
+            // non-foreground service, and return START_NOT_STICKY so the OS doesn't keep recreating
+            // it. The connection layer restarts it through the guarded path.
             stopSelf()
             return START_NOT_STICKY
         }
+        postedKey = key
         return START_STICKY
     }
 

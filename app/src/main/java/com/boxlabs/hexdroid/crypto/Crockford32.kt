@@ -19,14 +19,9 @@
 package com.boxlabs.hexdroid.crypto
 
 /**
- * Crockford-style base32 used for human-comparable safety numbers across every E2E
- * scheme. The per-key `+AGM`/`+OK` fingerprint ([E2eFingerprint]) and the `+AGE`
- * identity fingerprint ([com.boxlabs.hexdroid.crypto.AgeFingerprint]) both render
- * through here, so the verification UX (and the alphabet) stays identical and there is
- * exactly one copy of this logic.
- *
- * No 0/1/I/O in the alphabet, to stay unambiguous when read aloud over voice/Signal.
- * Symbols are emitted MSB-first, 5 bits at a time.
+ * Crockford base32 for safety numbers, shared by the per-key fingerprints ([E2eFingerprint]) and
+ * +AGE identities ([AgeFingerprint]). No 0/1/I/O, so it reads aloud unambiguously; emitted
+ * MSB-first.
  */
 object Crockford32 {
 

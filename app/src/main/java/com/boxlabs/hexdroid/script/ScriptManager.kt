@@ -36,6 +36,8 @@ data class ScriptInfo(
 data class ScriptsUiState(
     val scripts: List<ScriptInfo>,
     val backendName: String,     // the active engine's extension, for the "add" hint
+    /** Bundled scripts the user removed, which [ScriptManager.restoreBundled] can bring back. */
+    val missingBundled: List<String> = emptyList(),
 )
 
 /**
@@ -103,16 +105,10 @@ class ScriptManager(
         prefs.getStringSet(KEY_SUPPRESSED, emptySet())!!.toMutableSet()
 
     /**
-     * Copy bundled scripts shipped under assets/hex; into the store on first sight,
-     * and refresh already-installed bundled scripts to a newer shipped version, so that built-in
-     * features  both appear without an import AND actually update when a new APK
-     * ships a newer copy. A script the user has explicitly removed is not re-seeded (KEY_SUPPRESSED).
-     *
-     * How "did the user edit this?" is decided:
-     * we remember the SHA-256 of the last shipped source for each bundled script
-     * (KEY_SHIPPED). On a later launch, if the on-disk copy still matches that baseline the user
-     * hasn't touched it, so we overwrite it with the new shipped source and move the baseline
-     * forward.
+     * Copy bundled scripts from assets into the store on first sight, and update installed ones
+     * when a newer version ships, unless the user removed them (KEY_SUPPRESSED). A copy is only
+     * overwritten if it still matches the SHA-256 of the last shipped source (KEY_SHIPPED), so user
+     * edits are kept.
      */
     fun seedBundled(subdir: String = engine.scriptExtension) {
         val dot = ".${engine.scriptExtension}"
@@ -187,7 +183,27 @@ class ScriptManager(
     private fun bundledNames(): Set<String> =
         runCatching { assetCtx.assets.list(engine.scriptExtension)?.toSet() ?: emptySet() }.getOrDefault(emptySet())
 
-    fun state(): ScriptsUiState = ScriptsUiState(list(), engine.scriptExtension)
+    fun state(): ScriptsUiState = ScriptsUiState(list(), engine.scriptExtension, missingBundled())
+
+    /** Bundled scripts that aren't installed because the user removed them. */
+    private fun missingBundled(): List<String> {
+        val have = store.list().toSet()
+        val gone = suppressedSet()
+        return bundledNames().filter { it in gone && it !in have }.sorted()
+    }
+
+    /**
+     * Reinstall the bundled scripts the user removed, as shipped and disabled, like a first
+     * install. Returns their names.
+     */
+    fun restoreBundled(): List<String> {
+        val missing = missingBundled()
+        if (missing.isEmpty()) return missing
+        prefs.edit().putStringSet(KEY_SUPPRESSED, suppressedSet().apply { removeAll(missing.toSet()) }).apply()
+        seedBundled()
+        reloadAll()
+        return missing
+    }
 
     /** Drop everything and re-load all enabled scripts; refresh per-script status; fire LOAD. */
     fun reloadAll() {
@@ -252,10 +268,11 @@ class ScriptManager(
     fun remove(name: String) {
         store.delete(name)
         val real = ensureExt(name)
-        prefs.edit()
-            .putStringSet(KEY_DISABLED, disabledSet().apply { remove(name); remove(real) })
-            .putStringSet(KEY_SUPPRESSED, suppressedSet().apply { add(real) })
-            .apply()
+        val ed = prefs.edit().putStringSet(KEY_DISABLED, disabledSet().apply { remove(name); remove(real) })
+        // A removed bundled script stays removed across launches until restored; a user script
+        // has no shipped copy to come back, so its name isn't recorded.
+        if (real in bundledNames()) ed.putStringSet(KEY_SUPPRESSED, suppressedSet().apply { add(real) })
+        ed.apply()
         reloadAll()
     }
 

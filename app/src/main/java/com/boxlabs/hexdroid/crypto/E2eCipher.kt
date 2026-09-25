@@ -19,40 +19,22 @@
 package com.boxlabs.hexdroid.crypto
 
 /**
- * Abstract end-to-end cipher contract. Each scheme (AES-GCM, Blowfish, future ratchet-
- * based) implements this interface and is dispatched by [E2eCodec] based on the wire
- * prefix of the incoming line.
- *
- * Implementations must be thread-safe with respect to encrypt/decrypt being called
- * concurrently from different IRC events (typical pattern: the IrcCore reader thread
- * calls decrypt, the user-input coroutine calls encrypt). [AesGcmCipher] satisfies
- * this by using `javax.crypto.Cipher` instances per call - cheap, hardware-accelerated.
+ * An end-to-end cipher, dispatched by [E2eCodec] on the wire prefix. Must be thread-safe: decrypt
+ * runs on the reader thread while encrypt runs from input.
  */
 internal interface E2eCipher {
     val scheme: E2eScheme
 
     /**
-     * Encrypt [plaintext] and return the full wire-form line including the scheme
-     * prefix, ready to drop into PRIVMSG / NOTICE.
-     *
-     * [aadContext] is the canonical conversation identifier (computed by [E2eCodec]:
-     * the channel name for channels, or the sorted nick-pair for queries). Schemes
-     * that support authenticated encryption mix it into the auth tag so a ciphertext
-     * intended for one conversation cannot be replayed into another. Schemes without
-     * AAD support (Blowfish) ignore it.
+     * Encrypt [plaintext] into a full wire line with the scheme prefix. [aadContext] identifies the
+     * conversation (see [E2eCodec]); authenticated schemes bind it into the tag so a ciphertext
+     * can't be replayed elsewhere. Blowfish ignores it.
      */
     fun encrypt(plaintext: String, aadContext: String): String
 
     /**
-     * Attempt to decrypt [wireText] which must start with this scheme's prefix. Returns
-     * the recovered plaintext, or null if:
-     *   - the prefix is wrong
-     *   - the payload is malformed (bad base64, wrong version, too short)
-     *   - the auth tag fails (wrong key, tampered, replayed-across-conversations)
-     *
-     * [aadContext] must be the same canonical conversation identifier the sender used
-     * (see [encrypt]). Callers should treat null as "leave the wire line visible with
-     * a tamper hint".
+     * Decrypt [wireText], or null for a wrong prefix, a malformed payload or a failed tag.
+     * [aadContext] must match the sender's. Callers show the wire text with a tamper hint on null.
      */
     fun decrypt(wireText: String, aadContext: String): String?
 }

@@ -88,13 +88,8 @@ data class DccChatOffer(
 }
 
 /**
- * Parsed CTCP `DCC RESUME <filename> <port> <position> [token]`.
- *
- * The receiver sends RESUME after detecting a partial download matching an active
- * (port>0) or passive (port=0+token) offer. The sender replies with DCC ACCEPT carrying
- * the same triple/quadruple if it agrees to resume.
- *
- * Filename may be quoted ("name with spaces"); the parser accepts either form.
+ * Parsed CTCP `DCC RESUME <filename> <port> <position> [token]`, sent by the receiver for a partial
+ * download; the sender answers with DCC ACCEPT. The filename may be quoted.
  */
 data class DccResume(
     val filename: String,
@@ -163,18 +158,9 @@ sealed class DccTransferState {
 }
 
 /**
- * DCC Manager handles file send/receive and DCC CHAT socket lifecycle.
- *
- * Security notes:
- *  - [bindFirstAvailable] iterates ports min..max; each failed `ServerSocket()` call cleans
- *    up its own OS resources before throwing, so there is no leak on the error path.
- *  - Passive DCC offers are validated: port must be 0 AND token must be present. Malformed
- *    offers (port=0, no token) throw [IllegalArgumentException] before any socket is opened.
- *  - Turbo DCC (TSEND) skips per-chunk ACKs; the caller is responsible for confirming file
- *    integrity out-of-band (e.g. hash check).
- *  - Remote IPs are validated before connecting: loopback, link-local, wildcard, and multicast
- *    addresses are rejected. RFC-1918 private addresses are intentionally allowed to support
- *    LAN DCC between devices on the same network.
+ * DCC file send/receive and DCC CHAT socket lifecycle. Passive offers must have port 0 and a token.
+ * Remote IPs are validated before connecting (see [validateRemoteIp]). Turbo DCC skips per-chunk
+ * ACKs.
  */
 class DccManager(ctx: Context) {
 
@@ -182,12 +168,8 @@ class DccManager(ctx: Context) {
     private val ctx: Context = ctx.applicationContext
 
     /**
-     * Open an outbound TCP socket to [host]:[port], through [proxy] when it's enabled,
-     * otherwise directly. The proxy is passed explicitly by each caller  so concurrent
-     * transfers on different networks can't race over which proxy applies.
-     *
-     * Socket options match the prior direct-`Socket(host, port)` behaviour (tcpNoDelay +
-     * keepAlive are set by the individual callers after this returns).
+     * Open an outbound TCP socket to [host]:[port], through [proxy] when it is enabled. The proxy
+     * is passed per call so concurrent transfers on different networks can't race over it.
      */
     private fun openOutbound(host: String, port: Int, proxy: ProxyConfig): Socket {
         return if (proxy.enabled) {
@@ -225,12 +207,8 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * The single up, non-loopback interface carrying an IPv6 link-local address, or null.
-     *
-     * Used to attach a scope id when dialing a bare fe80:: DCC target. Tries NetworkInterface first
-     * (guarded per-interface so one throwing interface can't abort the scan) and, when that comes
-     * back empty, resolves the active network's interface NAME via ConnectivityManager/LinkProperties
-     * and re-looks-it-up with NetworkInterface.getByName.
+     * The single up, non-loopback interface with an IPv6 link-local address, or null. Used to scope
+     * a bare fe80:: DCC target. Falls back to ConnectivityManager when NetworkInterface finds none.
      */
     private fun linkLocalInterface(): NetworkInterface? {
         try {
@@ -274,19 +252,8 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Rejects IPs that are structurally invalid targets for a DCC connection.
-     *
-     * RFC-1918 private addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) are intentionally
-     * allowed here — LAN DCC between devices on the same network is a normal and common use
-     * case (e.g. sharing files with someone on the same Wi-Fi). The SSRF risk for these
-     * addresses is low because DCC is a raw TCP connection, not an HTTP request, so it cannot
-     * be easily weaponised to exfiltrate data from a local HTTP service.
-     *
-     * We still block:
-     *  - Loopback (127.x.x.x / ::1): no legitimate DCC offer uses localhost.
-     *  - Link-local (169.254.x.x / fe80::): APIPA / router-link addresses; not routable.
-     *  - Wildcard (0.0.0.0 / ::): meaningless as a connect target.
-     *  - Multicast: not a unicast endpoint.
+     * Rejects IPs that cannot be a DCC target: loopback, link-local, wildcard and multicast.
+     * Private (RFC 1918) addresses are allowed for LAN DCC.
      */
     private fun validateRemoteIp(ip: String) {
         val addr = try {
@@ -344,15 +311,9 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Open the existing file at [savedPath] in append mode for resuming a DCC transfer.
-     *
-     * Returns the same kind of `OutputStream + savedPath` pair as [createDccOutputStream]
-     * so the rest of the receive path doesn't need to special-case resume. The savedPath
-     * is echoed back so callers don't need to remember whether it was originally a file://
-     * path or a content:// URI.
-     *
-     * The returned stream is positioned at the existing end-of-file: subsequent writes
-     * append. Callers must NOT seek or truncate it.
+     * Open the partial file at [savedPath] in append mode to resume a DCC transfer. Returns the
+     * same pair as [createDccOutputStream]; the stream is positioned at end of file and must not be
+     * seeked or truncated.
      */
     fun openDccOutputStreamForResume(savedPath: String): Pair<OutputStream, String> {
         val stream: OutputStream = if (savedPath.startsWith("content://")) {
@@ -490,15 +451,8 @@ class DccManager(ctx: Context) {
 
     /**
      * Every unicast address on an up, non-loopback interface, as (interfaceName, address) pairs.
-     *
-     * PRIMARY source is java.net.NetworkInterface, which keeps the original enumeration order and
-     * behaviour whenever it works.iterated PER INTERFACE inside its own try/catch, so a
-     * single interface whose isUp()/inetAddresses access throws (seen on some Android Wi-Fi stacks)
-     * can no longer abort the whole enumeration and leave us with nothing.
-     *
-     * FALLBACK is ConnectivityManager/LinkProperties, a public, enumeration-independent source that
-     * still reports the active network's link-local / ULA / global addresses when the java.net view
-     * comes back empty.
+     * Reads java.net.NetworkInterface one interface at a time, so one that throws doesn't end the
+     * scan, and falls back to ConnectivityManager/LinkProperties when that comes back empty.
      */
     private fun enumInterfaceAddrs(): List<Pair<String, java.net.InetAddress>> {
         val out = ArrayList<Pair<String, java.net.InetAddress>>()
@@ -548,13 +502,8 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * First usable global/ULA IPv6 address in dotted (colon) notation, or null when the
-     * device has no routable IPv6. Loopback, link-local (fe80::), wildcard and multicast are
-     * skipped. Any scope id ("%wlan0") is stripped
-     *
-     * Note: when several IPv6 addresses are present we return the first match, which
-     * may be an RFC-4941 privacy/temporary address or a stable one depending on enumeration
-     * order.
+     * First global or ULA IPv6 address, or null when the device has none. Loopback, link-local,
+     * wildcard and multicast are skipped, and any scope id is stripped.
      */
     fun localIpv6OrNull(): String? =
         enumInterfaceAddrs().firstOrNull { (_, a) ->
@@ -576,22 +525,15 @@ class DccManager(ctx: Context) {
         }?.second?.hostAddress?.substringBefore('%')
 
     /**
-     * The local address to advertise in a DCC offer's address field.
-     *
-     * DESIGN: classic DCC encodes IPv4 as a 32-bit integer; the de-facto IPv6 convention
-     * puts the literal colon-form address in the same field, detected by the  receiver via the ':'.
-     * We PREFER IPv4 (the integer form) whenever a v4 address exists,
-     * because far more clients understand it, and only fall back to the IPv6 literal on a
-     * v6-only network. Returns "0" when no usable address is found
+     * The address to advertise in a DCC offer: the IPv4 integer form whenever an IPv4 address
+     * exists, since more clients understand it, otherwise the IPv6 literal. "0" when none is
+     * usable.
      */
     fun dccAddressField(): String {
         localIpv4OrNull()?.let { return ipv4ToLongBestEffort(it).toString() }
         localIpv6OrNull()?.let { return it }
-        // Isolated IPv6 link (no v4, no ULA/global v6): advertise link-local rather than "0",
-        // which a peer would otherwise parse as the 0.0.0.0 wildcard and refuse. See DLC/local DCC.
-        // localIpv6LinkLocalOrNull now consults ConnectivityManager/LinkProperties when the java.net
-        // enumeration is empty, so an isolated IPv6 LAN (the reported "error about 0.0.0.0" case)
-        // surfaces its fe80:: address here instead of falling through to "0".
+        // Isolated IPv6 link (no IPv4, ULA or global IPv6): advertise the link-local address rather
+        // than "0", which a peer would parse as the 0.0.0.0 wildcard and refuse.
         localIpv6LinkLocalOrNull()?.let { return it }
         // Last resort: interface enumeration returned nothing usable (observed on some IPv6-only
         // Android Wi-Fi setups, where it left us advertising "0" and the peer then refused the
@@ -633,20 +575,13 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Standard DCC RECEIVE (we connect to sender's ip:port).
+     * Standard DCC RECEIVE: connect to the sender's ip:port.
      *
-     * @param customFolderUri Optional SAF URI for custom download folder (null = Downloads)
-     * @param resumeOffset Byte offset to resume from. 0 = fresh transfer. When non-zero,
-     *   [resumeSavedPath] MUST be supplied and point at an existing partial file; the
-     *   transfer will open it in append mode rather than creating a new file. The caller
-     *   is responsible for sending DCC RESUME and awaiting DCC ACCEPT before invoking
-     *   this with a non-zero offset — this method does not speak the CTCP protocol itself.
-     * @param resumeSavedPath The path/URI of the partial file to append to. Required iff
-     *   [resumeOffset] > 0.
-     * @param onSavedPath Invoked with the saved path as soon as the output file is opened
-     *   (before any bytes are received). Lets the caller record the path for partial-transfer
-     *   tracking even if the transfer subsequently errors out.
-     * @return The path/URI where the file was saved.
+     * @param customFolderUri SAF folder, or null for Downloads.
+     * @param resumeOffset Byte offset to resume from; non-zero requires [resumeSavedPath]. The
+     *   caller handles DCC RESUME/ACCEPT first.
+     * @param onSavedPath Called with the saved path as soon as the file is opened.
+     * @return The path or URI the file was saved to.
      */
     suspend fun receive(
         offer: DccOffer,
@@ -696,11 +631,9 @@ class DccManager(ctx: Context) {
         val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion(onCancelling = true) { runCatching { sock.close() } }
         try {
             sock.use { s ->
-                // Wrap in a BufferedOutputStream to reduce IPC round-trips for SAF/MediaStore
-                // streams, but keep a reference so we can flush it explicitly before the inner
-                // stream is closed. Without this flush, small files (<256 KB) are fully
-                // received into the buffer but never written: the outer outputStream.use{}
-                // closes the raw stream, silently discarding the buffered bytes.
+                // Buffered to cut IPC round trips on SAF/MediaStore streams. Kept as a reference so
+                // it can be flushed before the inner stream closes, which would otherwise drop the
+                // buffered tail of the file.
                 val buffered = java.io.BufferedOutputStream(outputStream, 256 * 1024)
                 try {
                     received = receiveFromSocket(s, buffered, offer.size, offer.turbo, resumeOffset) { sent, total ->
@@ -734,14 +667,8 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Passive/Reverse DCC RECEIVE.
-     *
-     * The remote sender offered port 0 + token. We open a listening port, reply with the port,
-     * then accept the incoming connection and receive.
-     *
-     * @param customFolderUri Optional SAF URI for custom download folder (null = Downloads)
-     * @param resumeOffset / [resumeSavedPath] / [onSavedPath] — see [receive].
-     * @return The path/URI where the file was saved
+     * Passive DCC RECEIVE: the sender offered port 0 and a token, so listen, reply with our port,
+     * and receive on the incoming connection. Parameters as for [receive].
      */
     suspend fun receivePassive(
         offer: DccOffer,
@@ -874,19 +801,9 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Post-transfer completeness check for an incoming DCC file.
-     *
-     *  - 0 bytes received        -> remove the empty placeholder (mirrors the in-flight
-     *                               `!receivedAnyBytes` cleanup; harmless if already gone).
-     *  - received < offer size   -> the file is truncated. If [deleteOnTruncation] is true
-     *                               (fresh transfer with no resume support attempted) we
-     *                               delete it and throw [DccIncompleteException]. If false
-     *                               (resumed transfer, OR the caller intends to offer a
-     *                               future resume), we preserve the partial bytes and still
-     *                               throw [DccIncompleteException] so the caller knows the
-     *                               transfer didn't complete.
-     *  - offer size unknown (0)  -> nothing to verify against; accept whatever arrived.
-     *  - received >= offer size  -> success; leave the file in place.
+     * Post-transfer check for an incoming DCC file: an empty file is removed; a truncated one is
+     * deleted when [deleteOnTruncation], else kept for resume, and either way
+     * [DccIncompleteException] is thrown; with no advertised size, anything is accepted.
      */
     private fun verifyCompleteOrCleanup(
         savedPath: String,
@@ -905,13 +822,10 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Standard (active) DCC SEND: we listen on a port in portMin..portMax and send when peer connects.
+     * Active DCC SEND: listen on a port in portMin..portMax and send when the peer connects.
      *
-     * @param awaitStartOffset Called after the peer connects but before we begin reading the
-     *   file. The returned offset is the byte position to seek to before sending. Use this to
-     *   wait for a DCC RESUME / ACCEPT exchange, the VM emits the CTCP and completes a
-     *   deferred when the peer's RESUME arrives. If you have no resume support, return 0L
-     *   immediately (the default).
+     * @param awaitStartOffset Called once connected, before reading the file; returns the byte
+     *   offset to start from (e.g. after a RESUME/ACCEPT exchange), or 0.
      */
     suspend fun sendFile(
         file: File,
@@ -1023,26 +937,11 @@ class DccManager(ctx: Context) {
     }
 
     /**
-     * Receive bytes from [sock] into [outputStream], ACKing progress per the DCC convention.
+     * Receive from [sock] into [outputStream], ACKing as bytes arrive. Reading and writing run on
+     * separate threads joined by a bounded queue (about 4 MB), so slow storage never stalls the
+     * socket. Progress is reported about ten times a second, plus once at the end.
      *
-     * Throughput design:
-     *  - The socket reader and the storage writer run on separate threads, communicating via
-     *    a bounded queue. Without this, a slow MediaStore/SAF write stalls the socket read,
-     *    the TCP receive window collapses, and the sender throttles. With it, network reads
-     *    overlap with storage writes and the receive window stays open.
-     *  - The queue is bounded (16 × 256 KB ≈ 4 MB) so a genuinely slow storage layer still
-     *    backpressures the reader rather than ballooning RAM.
-     *  - 256 KB read buffer + 1 MB SO_RCVBUF reduce per-iteration overhead and let the
-     *    kernel buffer a meaningful BDP on higher-RTT links.
-     *  - DCC ACKs are sent from the reader as soon as bytes are *received* (not after they
-     *    hit disk). The wire-level contract is "we have these bytes" and we do — they're
-     *    in our process. This unblocks lockstep senders without waiting for storage I/O.
-     *  - [onProgress] is throttled to ~10× per second so we don't fire a StateFlow copy on
-     *    every 256 KB chunk. A final progress callback always fires after the loop so the
-     *    UI doesn't get stuck at, say, 99.7 %.
-     *
-     * @return the total number of bytes actually written. The caller compares this against
-     *   the advertised offer size to decide success vs. truncation (see [verifyCompleteOrCleanup]).
+     * @return Total bytes written.
      */
     private fun receiveFromSocket(
         sock: Socket,
@@ -1066,10 +965,8 @@ class DccManager(ctx: Context) {
         val ackBuf = ByteArray(if (ack64) 8 else 4)
         val expected: Long? = expectedSize.takeIf { it > 0L }
 
-        // Hard ceiling for transfers without an advertised size: 8 GB. Without this,
-        // a malicious sender that omits the size field could keep writing forever and
-        // fill the device's storage. With a known size we still cap at the advertised
-        // size so a sender that lies (offers 1 KB then sends 10 GB) can't bypass.
+        // Upper bound on bytes accepted: the advertised size, or 8 GB when none is given, so a
+        // sender can't fill storage by omitting or understating the size.
         val maxAccept: Long = expected ?: (8L * 1024 * 1024 * 1024)
 
         // Producer/consumer plumbing. Locals-shared-across-threads aren't @Volatile-able
@@ -1313,8 +1210,8 @@ class DccManager(ctx: Context) {
 }
 
     private fun bindFirstAvailable(min: Int, max: Int): ServerSocket {
-        val a = min.coerceIn(1, 65535)
-        val b = max.coerceIn(1, 65535)
+        val a = minOf(min, max).coerceIn(1, 65535)
+        val b = maxOf(min, max).coerceIn(1, 65535)
         for (p in a..b) {
             try {
                 return ServerSocket(p)
