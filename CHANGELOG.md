@@ -1,7 +1,7 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
-## [1.7.6]
+## [1.7.6] 2026-09-26
 ### Added
 - Select text in the message box to make it bold, italic, underlined or coloured, and the message box now shows formatting as it will look.
 - Optional read receipts for private messages (Settings > Privacy, off by default). When both people use HexDroid with it on, a double tick shows your message has been read.
