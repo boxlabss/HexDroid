@@ -1,0 +1,16 @@
+New:
+- Select text to make it bold, italic, underlined or coloured
+- Optional read receipts in PMs (Settings > Privacy)
+- One-page Settings and network editor
+- Delete messages where the server allows
+- Regain primary nick option
+- More script events
+
+Improved:
+- Bans default to *!*@host, applied instantly
+- ASCII art: monospace, sideways scroll, fewer misfires
+- App 1 MB smaller
+
+Fixed:
+- Unwanted reconnects after disconnecting
+- Keyed channel rejoins, away status, /who
