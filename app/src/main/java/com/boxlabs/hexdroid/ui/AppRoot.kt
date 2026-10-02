@@ -369,6 +369,9 @@ fun AppRoot(
                         state.editingNetwork?.host?.let { vm.clearStsPolicy(it) }
                     },
                     onToggleOnePage = { vm.updateSettings { copy(settingsOnePage = !settingsOnePage) } },
+                    onCertFingerprint = vm::networkCertFingerprint,
+                    onAddCertToServices = vm::addCertToServices,
+                    accountServiceFor = vm::accountService,
                 )
 
                 AppScreen.LIST -> ListScreen(
@@ -394,6 +397,9 @@ fun AppRoot(
                     tourActive = tourActive,
                     tourTarget = currentTourStep?.target,
                     onExportBackup = vm::exportBackup,
+                    onMeasureLogs = vm::internalLogsSize,
+                    onExportLogs = vm::exportInternalLogs,
+                    onDeleteLogs = vm::deleteInternalLogs,
                     onImportBackup = vm::importBackup,
                     onClearBackupMessage = vm::clearBackupMessage,
                     onWebPushToggled = vm::applyWebPushSetting,

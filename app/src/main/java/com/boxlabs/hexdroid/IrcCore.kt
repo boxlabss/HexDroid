@@ -172,8 +172,10 @@ data class CapPrefs(
 )
 
 data class TlsClientCert(
-    val pkcs12: ByteArray,
-    val password: String? = null
+    val pkcs12: ByteArray = ByteArray(0),
+    val password: String? = null,
+    /** An Android Keystore alias (see [NetworkCertificates]), used instead of [pkcs12]. */
+    val keystoreAlias: String? = null,
 )
 
 data class IrcConfig(
@@ -762,7 +764,12 @@ data class Notice(
      * Channel user mode change (e.g. MODE #chan +o Nick).
      * @prefix is one of '~','&','@','%','+' depending on mode, or null if not a rank mode.
      */
-    data class ChannelUserMode(val channel: String, val nick: String, val prefix: Char?, val adding: Boolean, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
+    data class ChannelUserMode(
+        val channel: String, val nick: String, val prefix: Char?, val adding: Boolean,
+        val timeMs: Long? = null, val isHistory: Boolean = false,
+        /** Who set the mode, when the MODE line names them. */
+        val byNick: String? = null,
+    ) : IrcEvent()
 
     // MODE line for a channel (includes channel modes and user rank mode changes)
     data class ChannelModeLine(val channel: String, val line: String, val timeMs: Long? = null, val isHistory: Boolean = false) : IrcEvent()
@@ -1669,7 +1676,7 @@ class IrcClient(val config: IrcConfig) {
      * Route the replies of a WHOIS for [fold] back to [buffer]. Removed when the reply ends (318,
      * 401, 406); at the cap the oldest entry is evicted.
      */
-    private fun rememberWhoisBuffer(fold: String, buffer: String) {
+    private fun rememberWhoisBuffer(fold: String, buffer: String) = synchronized(pendingWhoisBufferByNick) {
         // Re-inserted so a repeat WHOIS counts as the newest entry.
         pendingWhoisBufferByNick.remove(fold)
         if (pendingWhoisBufferByNick.size >= MAX_PENDING_WHOIS) {
@@ -1811,6 +1818,12 @@ class IrcClient(val config: IrcConfig) {
 
     /** CHATHISTORY ISUPPORT token: max messages the server returns per request. 0 = unset. */
     @Volatile private var chatHistoryLimit: Int = 0
+
+    /** Set when this network's own certificate couldn't be made or read, so none was presented. */
+    @Volatile private var netCertUnavailable = false
+
+    /** Set when this connection created the network's certificate, which is announced once. */
+    @Volatile private var netCertCreated = false
 
     /** UTF8ONLY ISUPPORT token: the server only accepts UTF-8. */
     @Volatile private var utf8OnlyServer: Boolean = false
@@ -2334,7 +2347,7 @@ class IrcClient(val config: IrcConfig) {
      * Drop [pendingBansByNick] entries older than [PENDING_BAN_TIMEOUT_MS]. Called
      * whenever a new entry is queued or a WHOIS reply arrives so the map doesn't grow.
      */
-    private fun pruneExpiredPendingBans() {
+    private fun pruneExpiredPendingBans() = synchronized(pendingBansByNick) {
         val cutoff = System.currentTimeMillis() - PENDING_BAN_TIMEOUT_MS
         val toRemove = mutableListOf<String>()
         for ((fold, list) in pendingBansByNick) {
@@ -2455,15 +2468,17 @@ class IrcClient(val config: IrcConfig) {
         // Queue and WHOIS.
         pruneExpiredPendingBans()
         val fold = casefold(nick)
-        pendingBansByNick.getOrPut(fold) { mutableListOf() }.add(
-            PendingBan(
-                channel = channel,
-                type = type,
-                quiet = quiet,
-                alsoKick = alsoKick,
-                kickReason = kickReason,
+        synchronized(pendingBansByNick) {
+            pendingBansByNick.getOrPut(fold) { mutableListOf() }.add(
+                PendingBan(
+                    channel = channel,
+                    type = type,
+                    quiet = quiet,
+                    alsoKick = alsoKick,
+                    kickReason = kickReason,
+                )
             )
-        )
+        }
         // Also stash the current buffer so WHOIS reply surfaces there.
         rememberWhoisBuffer(fold, channel)
         sendRaw("WHOIS $nick $nick")  // double-nick form gets idle + full info on most ircds
@@ -2491,7 +2506,7 @@ class IrcClient(val config: IrcConfig) {
      */
     private suspend fun completePendingBans(nick: String, user: String?, host: String?, account: String?) {
         val fold = casefold(nick)
-        val queued = pendingBansByNick.remove(fold) ?: return
+        val queued = synchronized(pendingBansByNick) { pendingBansByNick.remove(fold) } ?: return
         pruneExpiredPendingBans()
         val now = System.currentTimeMillis()
         for (pb in queued) {
@@ -2534,10 +2549,10 @@ class IrcClient(val config: IrcConfig) {
                 val user = msg.params.getOrNull(2)
                 val host = msg.params.getOrNull(3)
                 val fold = casefold(nick)
-                if (!pendingBansByNick.containsKey(fold)) return
                 // HOST/USER/DOMAIN bans can complete from this reply alone.
                 // ACCOUNT bans need 330 too, so we stash the user/host pair until then.
-                val hasAccountQueued = pendingBansByNick[fold]?.any { it.type == BanMaskType.ACCOUNT } == true
+                val queuedHere = synchronized(pendingBansByNick) { pendingBansByNick[fold]?.toList() } ?: return
+                val hasAccountQueued = queuedHere.any { it.type == BanMaskType.ACCOUNT }
                 if (!hasAccountQueued) {
                     completePendingBans(nick, user, host, account = null)
                 } else {
@@ -2559,7 +2574,7 @@ class IrcClient(val config: IrcConfig) {
                 val nick = msg.params.getOrNull(1) ?: return
                 val fold = casefold(nick)
                 val (u, h) = pendingWhoisHostByNick.remove(fold) ?: ("" to "")
-                if (pendingBansByNick.containsKey(fold)) {
+                if (synchronized(pendingBansByNick) { pendingBansByNick.containsKey(fold) }) {
                     completePendingBans(nick, u.ifBlank { null }, h.ifBlank { null }, account = null)
                 }
             }
@@ -3304,7 +3319,7 @@ class IrcClient(val config: IrcConfig) {
 
 						// Update nick prefixes for rank modes (op/voice/etc).
 						parseChannelUserModes(target, modeStr, args).forEach { (nick, prefix, adding) ->
-							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = isHistoryMode))
+							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = isHistoryMode, byNick = msg.prefixNick()))
 						}
 
 						// Surface the simple-mode delta so the ViewModel can keep the channel's
@@ -5289,6 +5304,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         registered = true
         registrationWatchdogJob.cancel()  // 001 received — connection is live
         send(IrcEvent.Registered(me))
+        if (netCertUnavailable) send(IrcEvent.ServerText(tr(R.string.core_netcert_unavailable)))
+        if (netCertCreated) send(IrcEvent.ServerText(tr(R.string.core_netcert_created)))
         // draft/metadata-2: subscribe now if it wasn't already done during registration
         // (only servers advertising `before-connect` accept METADATA that early).
         // takeMetadataSubLine() self-guards, so this is a no-op when it already went out.
@@ -5875,6 +5892,9 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				send(IrcEvent.ServerLine(line))
 				val msg = parser.parse(line) ?: continue
 				noteSender(msg)
+				// A line a handler can't cope with is logged and skipped. It must not end the connection:
+				// a bouncer would replay it after reconnecting, and the client would loop.
+				try {
 
 				// Count the line against its chathistory batch before anything decides
 				// whether to display it. Whether a batch was empty is a fact about the wire,
@@ -6177,11 +6197,13 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					if (msg.command !in whoisCodes) return@run null
 					val nick = msg.params.getOrNull(1) ?: return@run null
 					val fold = casefold(nick)
-					val buf = pendingWhoisBufferByNick[fold] ?: return@run null
-					if (msg.command == "318" || msg.command == "401" || msg.command == "406") {
-						pendingWhoisBufferByNick.remove(fold)
+					synchronized(pendingWhoisBufferByNick) {
+						val buf = pendingWhoisBufferByNick[fold]
+						if (buf != null && (msg.command == "318" || msg.command == "401" || msg.command == "406")) {
+							pendingWhoisBufferByNick.remove(fold)
+						}
+						buf
 					}
-					buf
 				}
 				val specialNumericCodes = setOf(
 					"315",           // RPL_ENDOFWHO (sent after WHOX nicklist query; suppress from buffers)
@@ -6260,6 +6282,15 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				}
 
 				handleMessageCommand(msg, irc, serverTimeMs, playbackHistory, nowMs)
+				} catch (e: kotlinx.coroutines.CancellationException) {
+					throw e
+				} catch (e: kotlinx.coroutines.channels.ClosedSendChannelException) {
+					throw e
+				} catch (e: java.io.IOException) {
+					throw e
+				} catch (t: Throwable) {
+					android.util.Log.w("IrcCore", "skipped a line that failed to process: ${msg.command}", t)
+				}
 			}
 
 			// If the user requested a disconnect, don't surface "EOF" as an error.
@@ -6614,7 +6645,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			// must encode every aspect of the context's behaviour, see SslContextKey above.
 			val cacheKey = SslContextKey(
 				allowInvalidCerts = config.allowInvalidCerts,
-				clientCertContentHash = config.clientCert?.pkcs12?.let { java.util.Arrays.hashCode(it) } ?: 0,
+				clientCertContentHash = config.clientCert?.let { c -> c.keystoreAlias?.hashCode() ?: java.util.Arrays.hashCode(c.pkcs12) } ?: 0,
 				clientCertPasswordHash = config.clientCert?.password?.hashCode() ?: 0,
 				tlsTofuFingerprint = config.tlsTofuFingerprint,
 			)
@@ -6627,12 +6658,27 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 				val tm = if (pinMode) arrayOf<TrustManager>(InsecureTrustManager()) else null
 				val km: Array<KeyManager>? = config.clientCert?.let { cert ->
 					try {
-						val ks = KeyStore.getInstance("PKCS12")
-						val pwdChars = cert.password?.toCharArray()
-						ByteArrayInputStream(cert.pkcs12).use { ks.load(it, pwdChars) }
-						val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-						kmf.init(ks, pwdChars)
-						kmf.keyManagers
+						val alias = cert.keystoreAlias
+						if (alias != null) {
+							// A per-network certificate is made the first time it's needed. This
+							// runs on the connect thread, since Keystore generation is slow. If the
+							// Keystore can't make or read it, connect without one rather than not at all.
+							try {
+								if (NetworkCertificates.ensure(alias)) netCertCreated = true
+								arrayOf<KeyManager>(KeystoreKeyManager(alias))
+							} catch (t: Throwable) {
+								android.util.Log.w("IrcCore", "network certificate unavailable", t)
+								netCertUnavailable = true
+								null
+							}
+						} else {
+							val ks = KeyStore.getInstance("PKCS12")
+							val pwdChars = cert.password?.toCharArray()
+							ByteArrayInputStream(cert.pkcs12).use { ks.load(it, pwdChars) }
+							val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+							kmf.init(ks, pwdChars)
+							kmf.keyManagers
+						}
 					} catch (t: Throwable) {
 						throw IllegalStateException(
 							"Client certificate could not be loaded: " + (t.message ?: t::class.java.simpleName),

@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
+## [1.7.7] 2026
+### Added
+- Delete logs option when no folder is selected, Export logs as .zip
+- mIRC-style headers to scripting. eg `on 1:TEXT:*http://*:#help,#dev:{`
+
 ## [1.7.6] 2026-09-26
 ### Added
 - Select text in the message box to make it bold, italic, underlined or coloured, and the message box now shows formatting as it will look.

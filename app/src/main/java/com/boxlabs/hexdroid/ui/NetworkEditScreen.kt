@@ -44,6 +44,9 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.*
+import android.widget.Toast
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -94,6 +97,12 @@ fun NetworkEditScreen(
     stsPolicyActive: Boolean = false,
     onClearStsPolicy: (() -> Unit)? = null,
     onToggleOnePage: () -> Unit = {},
+    /** Fingerprint of the network's own certificate, creating it if needed. */
+    onCertFingerprint: suspend (networkId: String) -> String? = { null },
+    /** Add the fingerprint to the account via [service] (NickServ or AuthServ); false when not connected. */
+    onAddCertToServices: (networkId: String, fingerprint: String, service: String) -> Boolean = { _, _, _ -> false },
+    /** The account service to preselect for a network. */
+    accountServiceFor: (networkId: String) -> String = { "NickServ" },
 ) {
     val n0 = state.editingNetwork ?: run {
         Text(stringResource(R.string.network_no_network_selected))
@@ -114,6 +123,7 @@ fun NetworkEditScreen(
     // TLS client certificate selection
     var tlsClientCertId by remember(n0.id) { mutableStateOf(n0.tlsClientCertId) }
     var tlsClientCertLabel by remember(n0.id, n0.tlsClientCertId) { mutableStateOf(n0.tlsClientCertLabel ?: "") }
+    var autoClientCert by remember(n0.id) { mutableStateOf(n0.autoClientCert) }
 
     var certFormat by remember(n0.id) { mutableStateOf(ClientCertFormat.PEM_BUNDLE) }
     var certFormatExpanded by remember(n0.id) { mutableStateOf(false) }
@@ -426,6 +436,7 @@ fun NetworkEditScreen(
                                 serverPassword = serverPassword.trim().takeIf { it.isNotBlank() },
                                 tlsClientCertId = tlsClientCertId,
                                 tlsClientCertLabel = tlsClientCertLabel.trim().takeIf { it.isNotBlank() },
+                                autoClientCert = autoClientCert,
                                 nick = nick.trim().ifBlank { "HexDroidUser" },
                                 altNick = altNick.trim().takeIf { it.isNotBlank() },
                                 username = username.trim().ifBlank { "hexdroid" },
@@ -1054,6 +1065,69 @@ fun NetworkEditScreen(
                         pendingCertLabel != null -> pendingCertLabel
                         tlsClientCertLabel.isNotBlank() -> tlsClientCertLabel
                         else -> null
+                    }
+
+                    // The network's own certificate, used when none is imported.
+                    if (activeLabel == null) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(stringResource(R.string.netcert_title), modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = autoClientCert,
+                                onCheckedChange = { autoClientCert = it },
+                                modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.netcert_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (autoClientCert) {
+                            // Only a saved network gets a key now; a new one gets it on first connect.
+                            val saved = state.networks.any { it.id == n0.id }
+                            var certFp by remember(n0.id) { mutableStateOf<String?>(null) }
+                            LaunchedEffect(n0.id, saved) { if (saved) certFp = onCertFingerprint(n0.id) }
+                            val fp = certFp
+                            if (fp == null) {
+                                Text(stringResource(R.string.netcert_pending), style = MaterialTheme.typography.bodySmall)
+                            } else {
+                                // Selectable, so it can be long-pressed and copied.
+                                SelectionContainer {
+                                    Text(
+                                        stringResource(R.string.netcert_fingerprint, fp),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    )
+                                }
+                                // Atheme/Anope use NickServ CERT ADD; X3/srvx use AuthServ ADDCERTFP.
+                                var service by remember(n0.id) { mutableStateOf(accountServiceFor(n0.id)) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    listOf("NickServ", "AuthServ").forEach { name ->
+                                        FilterChip(
+                                            selected = service == name,
+                                            onClick = { service = name },
+                                            label = { Text(name) },
+                                            modifier = Modifier.focusHighlight(RoundedCornerShape(8.dp)),
+                                        )
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        val sent = onAddCertToServices(n0.id, fp, service)
+                                        Toast.makeText(
+                                            ctx,
+                                            if (sent) ctx.getString(R.string.netcert_add_sent, service)
+                                            else ctx.getString(R.string.netcert_not_connected),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                                ) { Text(stringResource(R.string.netcert_add_nickserv, service)) }
+                            }
+                        }
                     }
 
                     if (activeLabel != null) {

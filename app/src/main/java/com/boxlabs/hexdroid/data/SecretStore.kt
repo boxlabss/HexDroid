@@ -298,12 +298,25 @@ class SecretStore(private val ctx: Context) {
         return TlsClientCert(pkcs12 = pkcs12, password = pwd)
     }
 
+    /** Read up to [limit] bytes (InputStream.readNBytes needs API 33). */
+    private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        while (out.size() < limit) {
+            val n = read(buf, 0, minOf(buf.size, limit - out.size()))
+            if (n < 0) break
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
     private fun readBytesFromUri(uri: Uri): ByteArray {
         val maxBytes = 2 * 1024 * 1024 // 2 MB — no real certificate is larger than this
         val stream = ctx.contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("Unable to open file")
         return stream.use { input ->
-            val bytes = input.readBytes()
+            // Read at most one byte past the cap, so a huge file can't exhaust memory.
+            val bytes = input.readNBytesCompat(maxBytes + 1)
             if (bytes.size > maxBytes)
                 throw IllegalArgumentException("File is too large (max 2 MB for a client certificate)")
             bytes

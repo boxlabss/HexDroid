@@ -200,6 +200,40 @@ class LogWriter(private val ctx: Context) {
     }
 
     /** Flush and close all open log file handles (internal and SAF). Call when logging is disabled or app exits. */
+    /** Bytes used by logs in app storage (not a chosen folder). */
+    fun internalLogsSize(): Long =
+        File(ctx.filesDir, "logs").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /**
+     * Delete every log in app storage. Open files are closed before and again after, so a line
+     * written meanwhile can't leave a handle to a deleted file; later lines start fresh files.
+     */
+    fun deleteInternalLogs() {
+        closeAll()
+        File(ctx.filesDir, "logs").deleteRecursively()
+        closeAll()
+    }
+
+    /**
+     * Zip every log in app storage into [out], with paths relative to the logs folder
+     * (`<network>/<buffer>.txt`). Open files are closed first so buffered lines are included.
+     * Returns the number of files written.
+     */
+    fun exportInternalLogs(out: java.io.OutputStream): Int {
+        closeAll()
+        val root = File(ctx.filesDir, "logs")
+        var count = 0
+        java.util.zip.ZipOutputStream(out.buffered()).use { zip ->
+            root.walkTopDown().filter { it.isFile }.forEach { f ->
+                zip.putNextEntry(java.util.zip.ZipEntry(f.relativeTo(root).invariantSeparatorsPath))
+                f.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+                count++
+            }
+        }
+        return count
+    }
+
     fun closeAll() {
         // Take the handles out of the caches before closing them, so a write racing this
         // call finds an empty cache and opens a tracked handle rather than a leaked one.

@@ -53,6 +53,10 @@ class HexScriptBackend : ScriptBackend {
             val msg = "load error: ${e.message ?: e.javaClass.simpleName}"; cb.log("[$name] $msg"); return msg
         }
         for (b in blocks) owners[b] = name
+        // A handler for an event that is never raised would load cleanly and never run; say so.
+        for (b in blocks) if (b.kind == HexBlock.Kind.EVENT && !b.name.startsWith("SIGNAL:") && b.name !in KNOWN_EVENTS) {
+            cb.log("[$name] warning: 'on ${b.name}' is not an event HexDroid raises, so this handler never runs")
+        }
         for (b in blocks) when (b.kind) {
             HexBlock.Kind.EVENT -> cb.registerEvent(b.name, b)              // engine uppercases the key
             HexBlock.Kind.ALIAS -> { aliases[b.name.lowercase()] = b; cb.registerCommand(b.name.lowercase(), b) }
@@ -68,6 +72,7 @@ class HexScriptBackend : ScriptBackend {
         for (h in handlers) {
             val block = h as? HexBlock ?: continue
             if (!filterMatches(block, text)) continue
+            if (!targetMatches(block, event)) continue
             val env = envForEvent(event.copy(text = text), cb, owners[block])
             val flow = runBody(block.body, env)
             text = env.fields["text"] ?: text         // `rewrite` updates env text
@@ -83,6 +88,7 @@ class HexScriptBackend : ScriptBackend {
             // Channel events filter on the channel (`on JOIN:#help`), everything else on the text.
             val subject = if (block.name in CHANNEL_EVENTS) event.buffer else event.text
             if (!filterMatches(block, subject)) continue
+            if (!targetMatches(block, event)) continue
             runBody(block.body, envForEvent(event, cb, owners[block]))
         }
     }
@@ -96,9 +102,26 @@ class HexScriptBackend : ScriptBackend {
         runBody(block.body, envForEvent(event, cb, owners[block], userInitiated = true))
     }
 
-    private val CHANNEL_EVENTS = setOf("JOIN", "PART", "KICK")
+    private val CHANNEL_EVENTS = setOf("JOIN", "PART", "KICK", "MODE")
+
+    /** The mIRC target field: `?` private only, `#` channels only, else a comma list of channel globs. */
+    private fun targetMatches(block: HexBlock, event: EventData): Boolean {
+        val t = block.target ?: return true
+        return when (t) {
+            "?" -> event.isPrivate
+            "#" -> !event.isPrivate
+            else -> !event.isPrivate && t.split(',').any { it.isNotBlank() && glob(it.trim(), event.buffer) }
+        }
+    }
+
+    /** Events the app raises (besides SIGNAL:*), for the load-time warning. */
+    private val KNOWN_EVENTS = setOf(
+        "LOAD", "TEXT", "ACTION", "INPUT", "NUMERIC", "JOIN", "PART", "QUIT", "KICK", "MODE", "NICK",
+        "NOTICE", "CONNECT", "DISCONNECT",
+    )
 
     private fun filterMatches(block: HexBlock, text: String): Boolean {
+        block.regex?.let { return it.containsMatchIn(text) }
         val f = block.filter ?: return true
         return glob(f, text)
     }

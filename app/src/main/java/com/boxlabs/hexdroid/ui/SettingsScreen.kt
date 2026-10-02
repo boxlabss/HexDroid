@@ -92,6 +92,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -162,7 +164,6 @@ private fun <T> List<T>.indexOfMinBy(selector: (T) -> Float): Int {
 // Copy a font file from a content URI to internal storage
 private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: String): String? {
     return try {
-        val inputStream = ctx.contentResolver.openInputStream(uri) ?: return null
         val fontsDir = File(ctx.filesDir, "fonts").apply { mkdirs() }
 
         // Get original filename or use a default
@@ -173,12 +174,13 @@ private fun copyFontToInternal(ctx: android.content.Context, uri: Uri, prefix: S
                 if (idx >= 0) it.getString(idx) else null
             } else null
         } ?: "custom_font.ttf"
+        // The display name comes from another app: keep only a plain file name.
+        val safeName = fileName.substringAfterLast('/').substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._ -]"), "_").trim().ifBlank { "custom_font.ttf" }
 
-        val destFile = File(fontsDir, "${prefix}_$fileName")
-        destFile.outputStream().use { out ->
-            inputStream.copyTo(out)
-        }
-        inputStream.close()
+        val destFile = File(fontsDir, "${prefix}_$safeName")
+        val inputStream = ctx.contentResolver.openInputStream(uri) ?: return null
+        inputStream.use { input -> destFile.outputStream().use { out -> input.copyTo(out) } }
         destFile.absolutePath
     } catch (e: Exception) {
         null
@@ -447,6 +449,10 @@ fun SettingsScreen(
     tourActive: Boolean = false,
     tourTarget: TourTarget? = null,
     onExportBackup: (Uri) -> Unit = {},
+    /** Bytes used by logs in app storage. */
+    onMeasureLogs: suspend () -> Long = { 0L },
+    onExportLogs: (Uri) -> Unit = {},
+    onDeleteLogs: (onDone: () -> Unit) -> Unit = {},
     onImportBackup: (Uri) -> Unit = {},
     onClearBackupMessage: () -> Unit = {},
     onWebPushToggled: (Boolean) -> Unit = {},
@@ -475,6 +481,20 @@ fun SettingsScreen(
     val backupFileName = remember {
         val ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         "hexdroid_backup_$ts.json"
+    }
+
+    // Logs in app storage can't be reached from outside the app, so Logging offers their size,
+    // an export to a zip of the user's choosing, and deletion.
+    var logsBytes by remember { mutableStateOf<Long?>(null) }
+    var confirmDeleteLogs by remember { mutableStateOf(false) }
+    val logsScope = rememberCoroutineScope()
+    // Measured with or without a chosen folder: logs written to app storage before a folder was
+    // picked stay there, and need the same way out.
+    LaunchedEffect(s.logFolderUri) { logsBytes = onMeasureLogs() }
+    val exportLogsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri: Uri? ->
+        if (uri != null) onExportLogs(uri)
     }
 
     val exportBackupLauncher = rememberLauncherForActivityResult(
@@ -1569,6 +1589,38 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    // Logs in app storage: what they take, and a way to export or delete them. Shown
+                    // without a folder, and with one while older logs remain in app storage. Nothing
+                    // is shown until the size has been measured.
+                    val bytes = logsBytes
+                    val usingFolder = !s.logFolderUri.isNullOrBlank()
+                    if (bytes != null && (!usingFolder || bytes > 0L)) {
+                        val size = android.text.format.Formatter.formatShortFileSize(ctx, bytes)
+                        Text(
+                            when {
+                                bytes == 0L -> stringResource(R.string.setting_logs_none)
+                                usingFolder -> stringResource(R.string.setting_logs_size_leftover, size)
+                                else -> stringResource(R.string.setting_logs_size, size)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        if (bytes > 0L) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                                        exportLogsLauncher.launch("hexdroid_logs_$ts.zip")
+                                    },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                                ) { Text(stringResource(R.string.setting_logs_export)) }
+                                OutlinedButton(
+                                    onClick = { confirmDeleteLogs = true },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                                ) { Text(stringResource(R.string.setting_logs_delete)) }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1805,6 +1857,23 @@ fun SettingsScreen(
     }
 
     // Backup / restore result dialog
+    if (confirmDeleteLogs) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteLogs = false },
+            title = { Text(stringResource(R.string.setting_logs_delete_title)) },
+            text = { Text(stringResource(R.string.setting_logs_delete_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteLogs = false
+                    onDeleteLogs { logsScope.launch { logsBytes = onMeasureLogs() } }
+                }) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteLogs = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
     if (showBackupResultDialog && state.backupMessage != null) {
         AlertDialog(
             onDismissRequest = {
@@ -1812,9 +1881,7 @@ fun SettingsScreen(
                 onClearBackupMessage()
             },
             title = {
-                val isError = state.backupMessage.startsWith("Backup failed") ||
-                    state.backupMessage.startsWith("Restore failed")
-                Text(if (isError) stringResource(R.string.setting_backup_error) else stringResource(R.string.setting_backup_done))
+                Text(stringResource(if (state.backupIsError) R.string.setting_backup_error else R.string.setting_backup_done))
             },
             text = { Text(state.backupMessage) },
             confirmButton = {

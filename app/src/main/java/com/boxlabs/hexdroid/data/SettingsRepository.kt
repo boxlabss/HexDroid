@@ -500,155 +500,162 @@ class SettingsRepository(private val ctx: Context) {
             val arr = JSONArray(json)
             val out = mutableListOf<NetworkProfile>()
             for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                out += NetworkProfile(
-                    id = o.optString("id"),
-                    name = o.optString("name", "Network"),
-                    host = o.optString("host"),
-                    port = o.optInt("port", 6697),
-                    useTls = o.optBoolean("useTls", true),
-                    allowInsecurePlaintext = o.optBoolean("allowInsecurePlaintext", false),
-                    allowInvalidCerts = o.optBoolean("allowInvalidCerts", false),
-                    serverPassword = o.optString("serverPassword", "").takeIf { it.isNotBlank() },
-
-                    tlsClientCertId = o.optString("tlsClientCertId", "").takeIf { it.isNotBlank() },
-                    tlsClientCertLabel = o.optString("tlsClientCertLabel", "").takeIf { it.isNotBlank() },
-
-                    nick = o.optString("nick", "HexDroidUser"),
-                    altNick = o.optString("altNick", "").takeIf { it.isNotBlank() },
-                    username = o.optString("username", "hexdroid"),
-                    realname = o.optString("realname", "HexDroid IRC"),
-
-                    saslEnabled = o.optBoolean("saslEnabled", false),
-                    saslMechanism = SaslMechanism.valueOf(o.optString("saslMechanism", SaslMechanism.PLAIN.name)),
-                    saslAuthcid = o.optString("saslAuthcid", "").takeIf { it.isNotBlank() },
-                    saslPassword = null,
-
-                    caps = CapPrefs(
-                        messageTags = o.optBoolean("cap_messageTags", true),
-                        serverTime = o.optBoolean("cap_serverTime", true),
-                        echoMessage = o.optBoolean("cap_echoMessage", true),
-                        labeledResponse = o.optBoolean("cap_labeledResponse", true),
-                        batch = o.optBoolean("cap_batch", true),
-                        draftChathistory = o.optBoolean("cap_draftChathistory", true),
-                        draftEventPlayback = o.optBoolean("cap_draftEventPlayback", true),
-                        utf8Only = o.optBoolean("cap_utf8Only", true),
-                        accountNotify = o.optBoolean("cap_accountNotify", true),
-                        awayNotify = o.optBoolean("cap_awayNotify", true),
-                        chghost = o.optBoolean("cap_chghost", true),
-                        extendedJoin = o.optBoolean("cap_extendedJoin", true),
-                        inviteNotify = o.optBoolean("cap_inviteNotify", true),
-                        multiPrefix = o.optBoolean("cap_multiPrefix", true),
-                        setname = o.optBoolean("cap_setname", true),
-                        userhostInNames = o.optBoolean("cap_userhostInNames", false),
-                        draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
-                        draftReadMarker = o.optBoolean("cap_draftReadMarker", true),
-                        monitor = o.optBoolean("cap_monitor", true),
-                        accountTag = o.optBoolean("cap_accountTag", true),
-                        typingIndicator = o.optBoolean("cap_typingIndicator", true),
-                        sojuNoImplicitNames = o.optBoolean("cap_sojuNoImplicitNames", true),
-                        standardReplies = o.optBoolean("cap_standardReplies", true),
-                        preAway = o.optBoolean("cap_preAway", true),
-                        messageIds = o.optBoolean("cap_messageIds", true),
-                        sojuRead = o.optBoolean("cap_sojuRead", true),
-                        whox = o.optBoolean("cap_whox", true),
-                        channelRename = o.optBoolean("cap_channelRename", true),
-                        extendedMonitor = o.optBoolean("cap_extendedMonitor", true),
-                        messageReactions = o.optBoolean("cap_messageReactions", true),
-                        noImplicitNames = o.optBoolean("cap_noImplicitNames", false),
-                        multiline = o.optBoolean("cap_multiline", true),
-                        messageRedaction = o.optBoolean("cap_messageRedaction", true),
-                        accountRegistration = o.optBoolean("cap_accountRegistration", true),
-                        extendedIsupport = o.optBoolean("cap_extendedIsupport", true),
-                        metadata2 = o.optBoolean("cap_metadata2", true),
-                        filehostUploads = o.optBoolean("cap_filehostUploads", true),
-                    ),
-
-                    autoJoin = o.optJSONArray("autoJoin")?.let { aj ->
-                        (0 until aj.length()).mapNotNull { j ->
-                            val line = aj.optString(j)
-                            parseAutoJoinLine(line)
-                        }
-                    } ?: emptyList(),
-
-                    autoConnect = o.optBoolean("autoConnect", false),
-                    autoReconnect = o.optBoolean("autoReconnect", true),
-
-                    ignoredNicks = o.optJSONArray("ignoreList")?.let { ig ->
-                        (0 until ig.length()).mapNotNull { j ->
-                            ig.optString(j)?.trim()?.takeIf { it.isNotBlank() }
-                        }.distinctBy { it.lowercase() }
-                    } ?: emptyList(),
-
-                    dccAutoAcceptNicks = o.optJSONArray("dccAutoAccept")?.let { aa ->
-                        (0 until aa.length()).mapNotNull { j ->
-                            aa.optString(j)?.trim()?.takeIf { it.isNotBlank() }
-                        }.distinctBy { it.lowercase() }
-                    } ?: emptyList(),
-
-                    notifyOnErrors = o.optBoolean("notifyOnErrors", false),
-                    highlightIgnoreMasks = o.optJSONArray("highlightIgnoreMasks")?.let { hm ->
-                        (0 until hm.length()).mapNotNull { j ->
-                            hm.optString(j)?.trim()?.takeIf { it.isNotBlank() }
-                        }.distinct()
-                    } ?: emptyList(),
-
-                    autoCommandDelaySeconds = o.optInt("autoCommandDelaySeconds", 0),
-                    serviceAuthCommand = o.optString("serviceAuthCommand", "").takeIf { it.isNotBlank() },
-                    autoCommandsText = o.optString("autoCommandsText", ""),
-
-                    encoding = o.optString("encoding", "auto"),
-                    sortOrder = o.optInt("sortOrder", 0),
-                    isFavourite = o.optBoolean("isFavourite", false),
-                    showInSidebar = o.optBoolean("showInSidebar", true),
-                    isBouncer = o.optBoolean("isBouncer", false),
-                    // Migration: profiles written before BouncerKind existed used
-                    // bouncerNetworkName with the soju-style `user/network` syntax.
-                    // Default kind to SOJU when only the legacy field is present so existing
-                    // setups continue to work unchanged. New profiles always write bouncerKind
-                    // explicitly and are unaffected.
-                    bouncerKind = run {
-                        val raw = o.optString("bouncerKind", "")
-                        if (raw.isNotBlank()) {
-                            runCatching { com.boxlabs.hexdroid.BouncerKind.valueOf(raw) }
-                                .getOrDefault(com.boxlabs.hexdroid.BouncerKind.NONE)
-                        } else if (o.optString("bouncerNetworkName", "").isNotBlank()) {
-                            com.boxlabs.hexdroid.BouncerKind.SOJU
-                        } else {
-                            com.boxlabs.hexdroid.BouncerKind.NONE
-                        }
-                    },
-                    bouncerNetworkName = o.optString("bouncerNetworkName", "").takeIf { it.isNotBlank() },
-                    bouncerClientId = o.optString("bouncerClientId", "").takeIf { it.isNotBlank() },
-                    tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
-                    tlsAcceptedIdentities = run {
-                        val arr = o.optJSONArray("tlsAcceptedIdentities") ?: return@run emptySet()
-                        buildSet { for (i in 0 until arr.length()) arr.optString(i)?.takeIf { it.isNotBlank() }?.let { add(it) } }
-                    },
-                    // Absent key means the profile predates the hostname check, so it gets the
-                    // grace. The field is always written back, so this only ever fires once.
-                    tlsHostnameGrace = o.optBoolean("tlsHostnameGrace", true),
-                    tlsTofuFingerprints = run {
-                        val arr = o.optJSONArray("tlsTofuFingerprints") ?: return@run emptySet()
-                        val s = LinkedHashSet<String>(arr.length())
-                        for (i in 0 until arr.length()) {
-                            arr.optString(i, "").takeIf { it.isNotBlank() }?.let(s::add)
-                        }
-                        s
-                    },
-                    proxyType = run {
-                        val raw = o.optString("proxyType", "")
-                        if (raw.isNotBlank()) {
-                            runCatching { com.boxlabs.hexdroid.connection.ProxyType.valueOf(raw) }
-                                .getOrDefault(com.boxlabs.hexdroid.connection.ProxyType.NONE)
-                        } else com.boxlabs.hexdroid.connection.ProxyType.NONE
-                    },
-                    proxyHost = o.optString("proxyHost", ""),
-                    proxyPort = o.optInt("proxyPort", com.boxlabs.hexdroid.connection.ProxyConfig.TOR_ORBOT_PORT),
-                    proxyUsername = o.optString("proxyUsername", "").takeIf { it.isNotBlank() },
-                    // proxyPassword is stored encrypted via SecretStore
-                    proxyPassword = null,
-                )
+                // Each profile parses on its own: one that can't be read is skipped, and the
+                // others are kept, rather than all of them being replaced by the defaults.
+                val o = arr.optJSONObject(i) ?: continue
+                runCatching {
+                    NetworkProfile(
+                        id = o.optString("id"),
+                        name = o.optString("name", "Network"),
+                        host = o.optString("host"),
+                        port = o.optInt("port", 6697),
+                        useTls = o.optBoolean("useTls", true),
+                        allowInsecurePlaintext = o.optBoolean("allowInsecurePlaintext", false),
+                        allowInvalidCerts = o.optBoolean("allowInvalidCerts", false),
+                        serverPassword = o.optString("serverPassword", "").takeIf { it.isNotBlank() },
+    
+                        tlsClientCertId = o.optString("tlsClientCertId", "").takeIf { it.isNotBlank() },
+                        tlsClientCertLabel = o.optString("tlsClientCertLabel", "").takeIf { it.isNotBlank() },
+                        autoClientCert = o.optBoolean("autoClientCert", true),
+    
+                        nick = o.optString("nick", "HexDroidUser"),
+                        altNick = o.optString("altNick", "").takeIf { it.isNotBlank() },
+                        username = o.optString("username", "hexdroid"),
+                        realname = o.optString("realname", "HexDroid IRC"),
+    
+                        saslEnabled = o.optBoolean("saslEnabled", false),
+                        saslMechanism = runCatching {
+                            SaslMechanism.valueOf(o.optString("saslMechanism", SaslMechanism.PLAIN.name))
+                        }.getOrDefault(SaslMechanism.PLAIN),
+                        saslAuthcid = o.optString("saslAuthcid", "").takeIf { it.isNotBlank() },
+                        saslPassword = null,
+    
+                        caps = CapPrefs(
+                            messageTags = o.optBoolean("cap_messageTags", true),
+                            serverTime = o.optBoolean("cap_serverTime", true),
+                            echoMessage = o.optBoolean("cap_echoMessage", true),
+                            labeledResponse = o.optBoolean("cap_labeledResponse", true),
+                            batch = o.optBoolean("cap_batch", true),
+                            draftChathistory = o.optBoolean("cap_draftChathistory", true),
+                            draftEventPlayback = o.optBoolean("cap_draftEventPlayback", true),
+                            utf8Only = o.optBoolean("cap_utf8Only", true),
+                            accountNotify = o.optBoolean("cap_accountNotify", true),
+                            awayNotify = o.optBoolean("cap_awayNotify", true),
+                            chghost = o.optBoolean("cap_chghost", true),
+                            extendedJoin = o.optBoolean("cap_extendedJoin", true),
+                            inviteNotify = o.optBoolean("cap_inviteNotify", true),
+                            multiPrefix = o.optBoolean("cap_multiPrefix", true),
+                            setname = o.optBoolean("cap_setname", true),
+                            userhostInNames = o.optBoolean("cap_userhostInNames", false),
+                            draftRelaymsg = o.optBoolean("cap_draftRelaymsg", false),
+                            draftReadMarker = o.optBoolean("cap_draftReadMarker", true),
+                            monitor = o.optBoolean("cap_monitor", true),
+                            accountTag = o.optBoolean("cap_accountTag", true),
+                            typingIndicator = o.optBoolean("cap_typingIndicator", true),
+                            sojuNoImplicitNames = o.optBoolean("cap_sojuNoImplicitNames", true),
+                            standardReplies = o.optBoolean("cap_standardReplies", true),
+                            preAway = o.optBoolean("cap_preAway", true),
+                            messageIds = o.optBoolean("cap_messageIds", true),
+                            sojuRead = o.optBoolean("cap_sojuRead", true),
+                            whox = o.optBoolean("cap_whox", true),
+                            channelRename = o.optBoolean("cap_channelRename", true),
+                            extendedMonitor = o.optBoolean("cap_extendedMonitor", true),
+                            messageReactions = o.optBoolean("cap_messageReactions", true),
+                            noImplicitNames = o.optBoolean("cap_noImplicitNames", false),
+                            multiline = o.optBoolean("cap_multiline", true),
+                            messageRedaction = o.optBoolean("cap_messageRedaction", true),
+                            accountRegistration = o.optBoolean("cap_accountRegistration", true),
+                            extendedIsupport = o.optBoolean("cap_extendedIsupport", true),
+                            metadata2 = o.optBoolean("cap_metadata2", true),
+                            filehostUploads = o.optBoolean("cap_filehostUploads", true),
+                        ),
+    
+                        autoJoin = o.optJSONArray("autoJoin")?.let { aj ->
+                            (0 until aj.length()).mapNotNull { j ->
+                                val line = aj.optString(j)
+                                parseAutoJoinLine(line)
+                            }
+                        } ?: emptyList(),
+    
+                        autoConnect = o.optBoolean("autoConnect", false),
+                        autoReconnect = o.optBoolean("autoReconnect", true),
+    
+                        ignoredNicks = o.optJSONArray("ignoreList")?.let { ig ->
+                            (0 until ig.length()).mapNotNull { j ->
+                                ig.optString(j)?.trim()?.takeIf { it.isNotBlank() }
+                            }.distinctBy { it.lowercase() }
+                        } ?: emptyList(),
+    
+                        dccAutoAcceptNicks = o.optJSONArray("dccAutoAccept")?.let { aa ->
+                            (0 until aa.length()).mapNotNull { j ->
+                                aa.optString(j)?.trim()?.takeIf { it.isNotBlank() }
+                            }.distinctBy { it.lowercase() }
+                        } ?: emptyList(),
+    
+                        notifyOnErrors = o.optBoolean("notifyOnErrors", false),
+                        highlightIgnoreMasks = o.optJSONArray("highlightIgnoreMasks")?.let { hm ->
+                            (0 until hm.length()).mapNotNull { j ->
+                                hm.optString(j)?.trim()?.takeIf { it.isNotBlank() }
+                            }.distinct()
+                        } ?: emptyList(),
+    
+                        autoCommandDelaySeconds = o.optInt("autoCommandDelaySeconds", 0),
+                        serviceAuthCommand = o.optString("serviceAuthCommand", "").takeIf { it.isNotBlank() },
+                        autoCommandsText = o.optString("autoCommandsText", ""),
+    
+                        encoding = o.optString("encoding", "auto"),
+                        sortOrder = o.optInt("sortOrder", 0),
+                        isFavourite = o.optBoolean("isFavourite", false),
+                        showInSidebar = o.optBoolean("showInSidebar", true),
+                        isBouncer = o.optBoolean("isBouncer", false),
+                        // Migration: profiles written before BouncerKind existed used
+                        // bouncerNetworkName with the soju-style `user/network` syntax.
+                        // Default kind to SOJU when only the legacy field is present so existing
+                        // setups continue to work unchanged. New profiles always write bouncerKind
+                        // explicitly and are unaffected.
+                        bouncerKind = run {
+                            val raw = o.optString("bouncerKind", "")
+                            if (raw.isNotBlank()) {
+                                runCatching { com.boxlabs.hexdroid.BouncerKind.valueOf(raw) }
+                                    .getOrDefault(com.boxlabs.hexdroid.BouncerKind.NONE)
+                            } else if (o.optString("bouncerNetworkName", "").isNotBlank()) {
+                                com.boxlabs.hexdroid.BouncerKind.SOJU
+                            } else {
+                                com.boxlabs.hexdroid.BouncerKind.NONE
+                            }
+                        },
+                        bouncerNetworkName = o.optString("bouncerNetworkName", "").takeIf { it.isNotBlank() },
+                        bouncerClientId = o.optString("bouncerClientId", "").takeIf { it.isNotBlank() },
+                        tlsTofuFingerprint = o.optString("tlsTofuFingerprint", "").takeIf { it.isNotBlank() },
+                        tlsAcceptedIdentities = run {
+                            val arr = o.optJSONArray("tlsAcceptedIdentities") ?: return@run emptySet()
+                            buildSet { for (i in 0 until arr.length()) arr.optString(i)?.takeIf { it.isNotBlank() }?.let { add(it) } }
+                        },
+                        // Absent key means the profile predates the hostname check, so it gets the
+                        // grace. The field is always written back, so this only ever fires once.
+                        tlsHostnameGrace = o.optBoolean("tlsHostnameGrace", true),
+                        tlsTofuFingerprints = run {
+                            val arr = o.optJSONArray("tlsTofuFingerprints") ?: return@run emptySet()
+                            val s = LinkedHashSet<String>(arr.length())
+                            for (i in 0 until arr.length()) {
+                                arr.optString(i, "").takeIf { it.isNotBlank() }?.let(s::add)
+                            }
+                            s
+                        },
+                        proxyType = run {
+                            val raw = o.optString("proxyType", "")
+                            if (raw.isNotBlank()) {
+                                runCatching { com.boxlabs.hexdroid.connection.ProxyType.valueOf(raw) }
+                                    .getOrDefault(com.boxlabs.hexdroid.connection.ProxyType.NONE)
+                            } else com.boxlabs.hexdroid.connection.ProxyType.NONE
+                        },
+                        proxyHost = o.optString("proxyHost", ""),
+                        proxyPort = o.optInt("proxyPort", com.boxlabs.hexdroid.connection.ProxyConfig.TOR_ORBOT_PORT),
+                        proxyUsername = o.optString("proxyUsername", "").takeIf { it.isNotBlank() },
+                        // proxyPassword is stored encrypted via SecretStore
+                        proxyPassword = null,
+                    )
+                }.getOrNull()?.let { out += it }
             }
             out
         } catch (_: Throwable) { defaultNetworks() }
@@ -667,6 +674,7 @@ class SettingsRepository(private val ctx: Context) {
             o.put("allowInvalidCerts", n.allowInvalidCerts)
             o.put("tlsClientCertId", n.tlsClientCertId ?: "")
             o.put("tlsClientCertLabel", n.tlsClientCertLabel ?: "")
+            o.put("autoClientCert", n.autoClientCert)
 
             o.put("nick", n.nick)
             o.put("altNick", n.altNick ?: "")
@@ -1194,6 +1202,12 @@ data class NetworkProfile(
     // Optional TLS client certificate (PKCS#12) stored encrypted on-device.
     val tlsClientCertId: String? = null,
     val tlsClientCertLabel: String? = null,
+    /**
+     * Present a certificate generated for this network alone (see NetworkCertificates) when no
+     * certificate is imported. On unless switched off, including profiles saved before it existed;
+     * the network's server buffer says so the first time it's presented.
+     */
+    val autoClientCert: Boolean = true,
 
     val nick: String,
     val altNick: String?,

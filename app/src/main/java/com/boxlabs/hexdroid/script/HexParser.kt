@@ -20,11 +20,21 @@ package com.boxlabs.hexdroid.script
 
 /** A top-level .hex block: an event handler or an alias. The opaque handler token the
  *  engine stores in its registry IS one of these. */
+/** The start of an mIRC event header: a level, then the event name. */
+private val MIRC_HEAD = Regex("^[@!+&^=$]*(\\*|\\d+)?:[A-Za-z]+(:|$)")
+
+/** An mIRC access level: `*`, a number, or either with prefixes such as `@` and `!`. */
+private val MIRC_LEVEL = Regex("^[@!+&^=$]*(\\*|\\d+)?$")
+
 class HexBlock(
     val kind: Kind,
     val name: String,        // event key (e.g. "TEXT", "SIGNAL:TR_DONE") or alias name
     val filter: String?,     // optional glob filter for `on TEXT:*help*`
     val body: List<HexStmt>,
+    /** mIRC-style target: `#` channels, `?` private, or a comma list of channel globs. */
+    val target: String? = null,
+    /** Match text given as a regex (mIRC's `$` prefix); used instead of [filter] when set. */
+    val regex: Regex? = null,
 ) {
     enum class Kind { EVENT, ALIAS }
 }
@@ -83,8 +93,23 @@ class HexParser(source: String) {
 
     private fun parseEvent(): HexBlock {
         skipWs()
-        val header = readWord()                     // e.g. TEXT, ACTION, SIGNAL:tr_done, TEXT:*help*
+        skipWs()
+        val headerStart = pos
+        var header = readWord()                     // e.g. TEXT, ACTION, SIGNAL:tr_done, TEXT:*help*
+        // An mIRC header's match text may contain spaces (`on *:TEXT:!seen *:#:{`), so it runs to
+        // the `:{` that opens the body, or to the first `{` on the line.
+        if (MIRC_HEAD.containsMatchIn(header) && (pos >= src.length || src[pos] != '{')) {
+            val eol = src.indexOf('\n', headerStart).let { if (it < 0) src.length else it }
+            val colonBrace = src.indexOf(":{", headerStart).takeIf { it in headerStart until eol }
+            val end = if (colonBrace != null) colonBrace + 1
+                else src.indexOf('{', headerStart).takeIf { it in headerStart until eol }
+            if (end != null && end > pos) {
+                header = src.substring(headerStart, end).trim()
+                pos = end
+            }
+        }
         val body = parseBraceBody()
+        mircHeader(header, body)?.let { return it }
         val colon = header.indexOf(':')
         return if (colon < 0) {
             HexBlock(HexBlock.Kind.EVENT, header.uppercase(), null, body)
@@ -156,6 +181,64 @@ class HexParser(source: String) {
     // ---- top-level scanners (over the whole source) ----
 
     private fun skipWs() { while (pos < src.length && src[pos].isWhitespace()) pos++ }
+
+    /**
+     * The mIRC header form `<level>:<EVENT>:<match>:<target>:`, for scripts pasted from mIRC. The
+     * level, and any prefix such as `@` or `!`, is accepted and ignored; HexDroid has no user
+     * levels. For TEXT, ACTION and NOTICE the match text is everything between the event and the
+     * last field (so it may contain colons) and the last field is the target. Channel events take
+     * the target as their channel list. Null when [header] isn't in this form, so the native
+     * `on EVENT:filter` is parsed as before.
+     */
+    private fun mircHeader(header: String, body: List<HexStmt>): HexBlock? {
+        val h = header.removeSuffix(":")
+        val first = h.indexOf(':')
+        if (first < 0) return null
+        if (!MIRC_LEVEL.matches(h.substring(0, first))) return null
+        val rest = h.substring(first + 1)
+        val second = rest.indexOf(':')
+        val event = (if (second < 0) rest else rest.substring(0, second)).uppercase()
+        if (event.isEmpty() || !event.all { it.isLetter() }) return null
+        val after = if (second < 0) "" else rest.substring(second + 1)
+        fun field(s: String?) = s?.takeIf { it.isNotEmpty() && it != "*" }
+        val regexMatch = '$' in h.substring(0, first)
+        return when (event) {
+            "TEXT", "ACTION", "NOTICE" -> {
+                val last = after.lastIndexOf(':')
+                val match = if (last < 0) after else after.substring(0, last)
+                val target = if (last < 0) null else after.substring(last + 1)
+                val rx = if (regexMatch) mircRegex(match) else null
+                HexBlock(HexBlock.Kind.EVENT, event, if (rx != null) null else field(match), body, field(target), rx)
+            }
+            // mIRC names signals in the match field, and START is its load event.
+            "SIGNAL" -> HexBlock(HexBlock.Kind.EVENT, "SIGNAL:${after.substringBefore(':').uppercase()}", null, body)
+            "START" -> HexBlock(HexBlock.Kind.EVENT, "LOAD", null, body)
+            "JOIN", "PART", "KICK", "MODE" -> HexBlock(HexBlock.Kind.EVENT, event, null, body, field(after))
+            else -> HexBlock(HexBlock.Kind.EVENT, event, null, body)
+        }
+    }
+
+    /**
+     * mIRC regex match text, `/pattern/flags`, with flags i, m, s and x; others are ignored.
+     * Null when [match] isn't in that form.
+     */
+    private fun mircRegex(match: String): Regex? {
+        if (!match.startsWith("/")) return null
+        val end = match.lastIndexOf('/')
+        if (end <= 0) return null
+        val opts = mutableSetOf<RegexOption>()
+        for (c in match.substring(end + 1)) when (c) {
+            'i' -> opts += RegexOption.IGNORE_CASE
+            'm' -> opts += RegexOption.MULTILINE
+            's' -> opts += RegexOption.DOT_MATCHES_ALL
+            'x' -> opts += RegexOption.COMMENTS
+        }
+        return try {
+            Regex(match.substring(1, end), opts)
+        } catch (e: Exception) {
+            throw HexError("bad regex in event header: ${e.message}")
+        }
+    }
 
     private fun readWord(): String {
         skipWs()

@@ -53,10 +53,11 @@ object NotifiedMessages {
             if (key in seen) return false
 
             val kept = (seen + key).takeLast(MAX_ENTRIES)
-            // commit() rather than apply(): a push notification is frequently the last
-            // thing this process does before the system reclaims it, and an unflushed
-            // write would let the live connection notify for the same message again.
-            prefs.edit().putString(KEY_RECENT, kept.joinToString("\n")).commit()
+            // Written synchronously only off the main thread, where it can't stall the UI. On the
+            // main thread apply() is enough: Android flushes pending writes when a service finishes
+            // handling a start, which covers the push service, the case that needs it durable.
+            val edit = prefs.edit().putString(KEY_RECENT, kept.joinToString("\n"))
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) edit.apply() else edit.commit()
             return true
         }
     }

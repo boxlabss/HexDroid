@@ -645,6 +645,8 @@ data class UiState(
     val dccTransfers: List<DccTransferState> = emptyList(),
 
     val backupMessage: String? = null,
+    /** True when [backupMessage] reports a failed backup or restore. */
+    val backupIsError: Boolean = false,
 
     /**
      * Transient toast/feedback after a bouncer-network discover-and-clone import attempt.
@@ -3609,6 +3611,36 @@ fun startAddNetwork() {
         lastConnStatusLine.remove(netId)
     }
 
+    /**
+     * The fingerprint of [networkId]'s own certificate, creating it if needed (off the main
+     * thread). Null when the Keystore can't make one.
+     */
+    suspend fun networkCertFingerprint(networkId: String): String? = withContext(Dispatchers.IO) {
+        val alias = NetworkCertificates.aliasFor(networkId)
+        runCatching { NetworkCertificates.ensure(alias) }
+        NetworkCertificates.fingerprint(alias)
+    }
+
+    /** Networks whose account service is AuthServ (X3/srvx), learned from its notices. */
+    private val authServNetworks: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** The account service to offer for [networkId]: AuthServ once it has spoken there, else NickServ. */
+    fun accountService(networkId: String): String =
+        if (networkId in authServNetworks) "AuthServ" else "NickServ"
+
+    /**
+     * Ask the account service ([service], NickServ or AuthServ) to add [fingerprint] to the account
+     * the user is identified to on [networkId], so later logins can use SASL EXTERNAL. False when
+     * that network isn't connected.
+     */
+    fun addCertToServices(networkId: String, fingerprint: String, service: String): Boolean {
+        val rt = runtimes[networkId] ?: return false
+        if (_state.value.connections[networkId]?.connected != true) return false
+        val command = if (service.equals("AuthServ", ignoreCase = true)) "ADDCERTFP $fingerprint" else "CERT ADD $fingerprint"
+        viewModelScope.launch { runCatching { rt.client.sendRaw("PRIVMSG $service :$command") } }
+        return true
+    }
+
     fun deleteNetwork(id: String) {
         viewModelScope.launch {
             repo.deleteNetwork(id)
@@ -3620,6 +3652,7 @@ fun startAddNetwork() {
             // the same network slug is later re-created).
             runCatching { repo.secretStore.clearAllE2eKeysForNetwork(id) }
             e2eKeyStore.forgetNetwork(id)
+            withContext(Dispatchers.IO) { NetworkCertificates.delete(NetworkCertificates.aliasFor(id)) }
             // Drop self-send replay-dedup signatures for this network's buffers.
             val pfx = "$id::"
             recentSelfSends.keys.filter { it.startsWith(pfx) }.forEach { recentSelfSends.remove(it) }
@@ -3661,7 +3694,7 @@ fun startAddNetwork() {
 
     /** Clear the transient backup/restore result message (called after the UI has shown it). */
     fun clearBackupMessage() {
-        _state.update { it.copy(backupMessage = null) }
+        _state.update { it.copy(backupMessage = null, backupIsError = false) }
     }
 
     /**
@@ -3671,6 +3704,40 @@ fun startAddNetwork() {
      * Passwords and TLS client certificates are excluded - they are tied to device-specific
      * Android Keystore keys and cannot be transferred.
      */
+    /** Bytes used by logs kept in app storage. */
+    suspend fun internalLogsSize(): Long =
+        withContext(Dispatchers.IO) { runCatching { logs.internalLogsSize() }.getOrDefault(0L) }
+
+    /**
+     * Delete every log kept in app storage, then call [onDone] on the main thread. Runs in the
+     * ViewModel's scope, so leaving Settings doesn't lose the result. Scrollback already loaded
+     * stays in memory.
+     */
+    fun deleteInternalLogs(onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { logs.deleteInternalLogs() }.isSuccess }
+            logsToast(if (ok) R.string.setting_logs_deleted else R.string.setting_logs_delete_failed)
+            onDone()
+        }
+    }
+
+    /** Zip every log kept in app storage into [uri], a document the user chose to create. */
+    fun exportInternalLogs(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    appContext.contentResolver.openOutputStream(uri)?.use { logs.exportInternalLogs(it) }
+                        ?: throw java.io.IOException("no output stream")
+                }.isSuccess
+            }
+            logsToast(if (ok) R.string.setting_logs_exported else R.string.setting_logs_export_failed)
+        }
+    }
+
+    private suspend fun logsToast(res: Int) = withContext(Dispatchers.Main) {
+        android.widget.Toast.makeText(appContext, appContext.getString(res), android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     fun exportBackup(uri: android.net.Uri) {
         val st = _state.value
         viewModelScope.launch(Dispatchers.IO) {
@@ -3682,7 +3749,7 @@ fun startAddNetwork() {
                 appContext.getString(R.string.vm_backup_saved)
             }
             val msg = result.getOrElse { e -> appContext.getString(R.string.vm_backup_failed, e.message) }
-            _state.update { it.copy(backupMessage = msg) }
+            _state.update { it.copy(backupMessage = msg, backupIsError = result.isFailure) }
         }
     }
 
@@ -3752,7 +3819,7 @@ fun startAddNetwork() {
                 appContext.getString(R.string.vm_restore_done)
             }
             val msg = result.getOrElse { e -> appContext.getString(R.string.vm_restore_failed, e.message) }
-            _state.update { it.copy(backupMessage = msg) }
+            _state.update { it.copy(backupMessage = msg, backupIsError = result.isFailure) }
         }
     }
 
@@ -4103,7 +4170,22 @@ fun startAddNetwork() {
     private fun refreshScripts() { runCatching { _scriptsState.value = scriptManager.state() } }
 
     /** Load all enabled scripts (seeding bundled ones first). Call once after IrcCore is ready. */
-    fun initScripts() { _scriptLaunchers.value = emptyList(); runCatching { scriptManager.seedBundled(); scriptManager.reloadAll() }; refreshScripts() }
+    /**
+     * Load scripts, once. Called as the ViewModel starts, so scripts run when the app starts in
+     * the background (after a reboot, or restarted by the keep-alive service) with no screen
+     * open; the UI's call is then a no-op.
+     */
+    fun initScripts() {
+        if (scriptsStarted) return
+        scriptsStarted = true
+        _scriptLaunchers.value = emptyList()
+        runCatching { scriptManager.seedBundled(); scriptManager.reloadAll() }
+        refreshScripts()
+    }
+    private var scriptsStarted = false
+
+    // Posted rather than run inline, so it starts once construction has finished.
+    init { viewModelScope.launch(Dispatchers.Main) { initScripts() } }
 
     // ---- Scripts UI plumbing (every mutation refreshes the StateFlow) ----
     fun scriptsUiState(): com.boxlabs.hexdroid.script.ScriptsUiState = scriptManager.state()
@@ -5000,7 +5082,11 @@ fun startAddNetwork() {
         }
         val serverPassword = repo.secretStore.getServerPassword(profile.id)
         val proxyPassword = repo.secretStore.getProxyPassword(profile.id)
+        // An imported certificate wins; otherwise the network's own one, when switched on.
         val tlsCert = repo.secretStore.loadTlsClientCert(profile.id, profile.tlsClientCertId)
+            ?: if (profile.useTls && profile.autoClientCert) {
+                TlsClientCert(keystoreAlias = NetworkCertificates.aliasFor(profile.id))
+            } else null
         val cfgBase = profile.toIrcConfig(
                         saslPasswordOverride = saslPassword,
                         serverPasswordOverride = serverPassword,
@@ -7477,9 +7563,14 @@ fun startAddNetwork() {
                 val haltSuffix = if (shouldHalt)
                     " " + appContext.getString(R.string.vm_auth_halt_suffix)
                 else ""
+                // EXTERNAL with the network's own certificate: a reinstall, restore or data clear
+                // makes a new one, which the account doesn't know yet.
+                val netCertHint = if (isSaslFailure && profile != null && profile.saslMechanism == SaslMechanism.EXTERNAL &&
+                    profile.tlsClientCertId == null && profile.autoClientCert
+                ) " " + appContext.getString(R.string.vm_auth_sasl_netcert) else ""
                 appendConnStatus(
                     netId = netId,
-                    text = "*** ${ev.reason} — $hint$haltSuffix",
+                    text = "*** ${ev.reason} — $hint$haltSuffix$netCertHint",
                     from = "AUTH",
                     isHighlight = false,
                     doNotify = false,
@@ -8480,8 +8571,9 @@ if (code == "442") {
                 val st = _state.value
                 val suppressUnread = ev.isHistory && !st.settings.ircHistoryCountsAsUnread
                 if (!ev.isServer && isNickIgnored(netId, ev.from)) return
+                if (!ev.isHistory && ev.from.equals("AuthServ", ignoreCase = true)) authServNetworks += netId
                 if (!ev.isHistory) scriptEvent(
-                    "NOTICE", netId, if (ev.isPrivate) ev.from else ev.target, ev.from, ev.text,
+                    "NOTICE", netId, if (ev.isPrivate) "" else ev.target, ev.from, ev.text,
                     isMyNick(netId, ev.from), isPrivate = ev.isPrivate,
                     fields = mapOf("isserver" to ev.isServer.toString()),
                 )
@@ -9197,6 +9289,19 @@ if (code == "442") {
                 if (!ev.isHistory) {
                     val chanKey = resolveBufferKey(netId, ev.channel)
                     updateUserMode(netId, chanKey, ev.nick, ev.prefix, ev.adding)
+                    // Scripts see the change as a mode letter ("+v"), mapped from the prefix symbol.
+                    val conn = _state.value.connections[netId]
+                    val symbols = conn?.prefixSymbols ?: "~&@%+"
+                    val modes = conn?.prefixModes ?: "qaohv"
+                    val letter = ev.prefix?.let { p -> modes.getOrNull(symbols.indexOf(p)) }
+                    if (letter != null) scriptEvent(
+                        "MODE", netId, ev.channel, ev.byNick, isMe = isMyNick(netId, ev.nick),
+                        fields = mapOf(
+                            "mode" to (if (ev.adding) "+" else "-") + letter,
+                            "victim" to ev.nick,
+                            "prefix" to ev.prefix.toString(),
+                        ),
+                    )
                 }
             }
             is IrcEvent.ChannelListStart -> {
