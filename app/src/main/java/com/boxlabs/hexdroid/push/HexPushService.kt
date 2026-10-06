@@ -80,7 +80,8 @@ class HexPushService : PushService() {
             "PRIVMSG", "NOTICE" -> {
                 val target = msg.params.getOrNull(0) ?: return
                 val body = msg.trailing?.takeIf { it.isNotBlank() } ?: return
-                notifyMessage(from, target, body, anchor, policy)
+                val text = displayText(from, body) ?: return
+                notifyMessage(from, target, text, anchor, policy)
             }
             // Read through allParams: the channel is a trailing parameter only when the
             // server wrote it with a colon, and RFC 2812 does not.
@@ -92,14 +93,36 @@ class HexPushService : PushService() {
         }
     }
 
+    /**
+     * What a pushed message body should show, or null when it isn't something to notify about.
+     * A `/me` reads `* nick text`; other CTCP requests and +AGE protocol lines are skipped; an
+     * encrypted message, which can't be decrypted here, shows as one.
+     */
+    private fun displayText(from: String, body: String): String? {
+        if (body.startsWith("\u0001")) {
+            val ctcp = body.trim('\u0001')
+            if (!ctcp.startsWith("ACTION ")) return null
+            return "* $from " + stripIrcFormatting(ctcp.removePrefix("ACTION "))
+        }
+        if (body.startsWith("AGE ")) {
+            return when (body.substringAfter("AGE ").substringBefore(' ')) {
+                "CHAT", "PM" -> getString(com.boxlabs.hexdroid.R.string.push_encrypted)
+                else -> null
+            }
+        }
+        if (com.boxlabs.hexdroid.crypto.E2eScheme.detect(body) != null) {
+            return getString(com.boxlabs.hexdroid.R.string.push_encrypted)
+        }
+        return stripIrcFormatting(body)
+    }
+
     private fun notifyMessage(
         from: String,
         target: String,
-        rawBody: String,
+        text: String,
         msgAnchor: String?,
         policy: PushNotifyPolicy.Policy,
     ) {
-        val text = stripIrcFormatting(rawBody)
         val helper = NotificationHelper(applicationContext)
 
         // A channel target means we were highlighted (the server only pushes messages of
@@ -124,7 +147,7 @@ class HexPushService : PushService() {
             helper.notifyHighlight(
                 networkId = netId,
                 buffer = buffer,
-                text = "$from: $text",
+                text = if (text.startsWith("* $from ")) text else "$from: $text",
                 playSound = policy.playSound,
                 displayTitle = buffer,
                 from = from,

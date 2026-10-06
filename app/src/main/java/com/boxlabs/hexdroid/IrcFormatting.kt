@@ -21,6 +21,12 @@ package com.boxlabs.hexdroid
 // Compose imports are used by AnsiStyleState.toSpanStyle() — fully-qualified references
 // are used inline so this file stays free of @Composable annotations and Activity context.
 
+/** An ASCII digit, the only kind a colour code may use. */
+internal fun Char.isAsciiDigit(): Boolean = this in '0'..'9'
+
+/** An ASCII hex digit, for \u0004 colours. */
+internal fun Char.isAsciiHexDigit(): Boolean = this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
+
 /**
  * Strip mIRC colours (\u0003 and \u0004 hex), style toggles, ANSI CSI sequences and other control
  * characters except \n, \r and \t.
@@ -47,30 +53,27 @@ fun stripIrcFormatting(input: String): String {
             '\u0003' -> { // mIRC color: \x03[fg][,bg]
                 i++
                 var n = 0
-                while (i < input.length && n < 2 && input[i].isDigit()) { i++; n++ }
+                while (i < input.length && n < 2 && input[i].isAsciiDigit()) { i++; n++ }
                 // only consume the comma when at least one digit follows it,
                 // otherwise a colour reset like "\x03,word" would silently eat the comma.
                 if (i < input.length && input[i] == ',' &&
-                    i + 1 < input.length && input[i + 1].isDigit()) {
+                    i + 1 < input.length && input[i + 1].isAsciiDigit()) {
                     i++
                     n = 0
-                    while (i < input.length && n < 2 && input[i].isDigit()) { i++; n++ }
+                    while (i < input.length && n < 2 && input[i].isAsciiDigit()) { i++; n++ }
                 }
                 continue
             }
             '\u0004' -> { // 24-bit hex colour: \x04RRGGBB[,RRGGBB]
                 i++
                 var n = 0
-                while (i < input.length && n < 6 &&
-                       (input[i].isDigit() || input[i].lowercaseChar() in 'a'..'f')) { i++; n++ }
+                while (i < input.length && n < 6 && input[i].isAsciiHexDigit()) { i++; n++ }
                 // same comma guard for the 24-bit colour case.
                 if (i < input.length && input[i] == ',' &&
-                    i + 1 < input.length &&
-                    (input[i + 1].isDigit() || input[i + 1].lowercaseChar() in 'a'..'f')) {
+                    i + 1 < input.length && input[i + 1].isAsciiHexDigit()) {
                     i++
                     n = 0
-                    while (i < input.length && n < 6 &&
-                           (input[i].isDigit() || input[i].lowercaseChar() in 'a'..'f')) { i++; n++ }
+                    while (i < input.length && n < 6 && input[i].isAsciiHexDigit()) { i++; n++ }
                 }
                 continue
             }
@@ -203,9 +206,7 @@ internal fun parseAnsiRuns(input: String): List<AnsiRun> {
 
                 if (finalByte == 'm') {
                     // SGR — parse semicolon-separated params
-                    val paramStr = input.substring(paramStart, i - 1)
-                    val params = if (paramStr.isBlank()) listOf(0)
-                                 else paramStr.split(';').mapNotNull { it.trim().toIntOrNull() }
+                    val params = sgrParams(input.substring(paramStart, i - 1))
                     var pi = 0
                     while (pi < params.size) {
                         when (val p = params[pi]) {
@@ -239,6 +240,12 @@ internal fun parseAnsiRuns(input: String): List<AnsiRun> {
                                 }
                             }
                             39               -> st.fg = null
+                            58               -> {     // underline colour: not drawn, its arguments skipped
+                                when (params.getOrNull(pi + 1)) {
+                                    5 -> pi += 2
+                                    2 -> pi += 4
+                                }
+                            }
                             in 40..47        -> st.bg = ANSI_STANDARD[p - 40]
                             48               -> {
                                 when (params.getOrNull(pi + 1)) {
@@ -280,6 +287,34 @@ internal fun parseAnsiRuns(input: String): List<AnsiRun> {
         }
     }
     flush()
+    return out
+}
+
+/**
+ * SGR parameters as numbers. An empty parameter is 0. Colon sub-parameters of 38, 48 and 58
+ * (`38:2::r:g:b`, `38:5:n`) are flattened to the semicolon form; any other colon form keeps only
+ * its first number.
+ */
+internal fun sgrParams(paramStr: String): List<Int> {
+    if (paramStr.isBlank()) return listOf(0)
+    val out = ArrayList<Int>()
+    for (part in paramStr.split(';')) {
+        val p = part.trim()
+        if (':' !in p) {
+            val n = p.toIntOrNull()
+            if (n != null) out.add(n) else if (p.isEmpty()) out.add(0)
+            continue
+        }
+        val sub = p.split(':').map { it.trim().toIntOrNull() ?: 0 }
+        val head = sub.first()
+        if (head == 38 || head == 48 || head == 58) {
+            // `38:2:<colourspace>:r:g:b` carries a colourspace id before the channels.
+            val flat = if (sub.getOrNull(1) == 2 && sub.size >= 6) sub.take(2) + sub.drop(3) else sub
+            out.addAll(flat)
+        } else {
+            out.add(head)
+        }
+    }
     return out
 }
 

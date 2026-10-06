@@ -53,9 +53,6 @@ data class BufferLog(
 
         /** Already known and not added. [log] still records its identity. */
         data class Duplicate(override val log: BufferLog) : Insert
-
-        /** Added at the end in place of the earlier copies it matched. */
-        data class Replaced(override val log: BufferLog) : Insert
     }
 
     /** The outcome of merging a block of messages into the log. */
@@ -74,8 +71,6 @@ data class BufferLog(
      * placed at or before it.
      * [skewSeconds]: how far apart two copies may be stamped and still match
      * ([OWN_SIGNATURE_SKEW_SECONDS] for our own lines).
-     * [repeatsOnJoin]: for lines resent on every join; earlier copies are removed and [msg] is
-     * appended once.
      */
     fun insert(
         msg: UiMessage,
@@ -85,7 +80,6 @@ data class BufferLog(
         nowMs: Long = System.currentTimeMillis(),
         floorMs: Long? = null,
         skewSeconds: Long = SIGNATURE_SKEW_SECONDS,
-        repeatsOnJoin: Boolean = false,
     ): Insert {
         val sig = signatureOf(msg)
         // Stamped well in the past means a replay whatever the caller called it: a server
@@ -95,19 +89,6 @@ data class BufferLog(
             origin == MessageOrigin.REPLAY || msg.timeMs < nowMs - REPLAY_SUSPICION_MS
         val duplicateById = knownDuplicate || (msg.msgId != null && seenIds.contains(msg.msgId))
         val duplicateBySig = !duplicateById && couldBeReplay && matchesKnownSignature(msg, seenSigs, skewSeconds)
-
-        if (repeatsOnJoin && !knownDuplicate) {
-            val copies = indicesOfCopies(msg, skewSeconds = null)
-            val builder = messages.builder()
-            for (i in copies.asReversed()) builder.removeAt(i)
-            builder.add(msg)
-            val next = copy(
-                messages = builder.build(),
-                seenIds = if (msg.msgId != null) seenIds.adding(msg.msgId) else seenIds,
-                seenSigs = seenSigs.adding(sig),
-            ).trimmed(cap)
-            return if (copies.isEmpty()) Insert.Added(next) else Insert.Replaced(next)
-        }
 
         if (duplicateById || duplicateBySig) {
             val base = if (duplicateBySig) adoptingId(msg, skewSeconds) else this
@@ -357,9 +338,9 @@ data class BufferLog(
 
     /**
      * Ascending indices of the messages that are copies of [msg], by msgid or by sender and
-     * text stamped within [skewSeconds], or at any time when that is null.
+     * text stamped within [skewSeconds].
      */
-    private fun indicesOfCopies(msg: UiMessage, skewSeconds: Long?): List<Int> {
+    private fun indicesOfCopies(msg: UiMessage, skewSeconds: Long): List<Int> {
         val sec = msg.timeMs / 1000
         val who = normaliseSender(msg)
         val body = normaliseBody(msg)
@@ -367,7 +348,7 @@ data class BufferLog(
         for (i in messages.indices) {
             val m = messages[i]
             val sameId = msg.msgId != null && m.msgId == msg.msgId
-            val sameSig = (skewSeconds == null || kotlin.math.abs(m.timeMs / 1000 - sec) <= skewSeconds) &&
+            val sameSig = kotlin.math.abs(m.timeMs / 1000 - sec) <= skewSeconds &&
                 normaliseSender(m) == who && normaliseBody(m) == body
             if (sameId || sameSig) out.add(i)
         }

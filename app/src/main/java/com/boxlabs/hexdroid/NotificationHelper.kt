@@ -39,12 +39,21 @@ class NotificationHelper(private val ctx: Context) {
          *  can set a distinct sound in Android system settings. Falls back to the global
          *  channel on API < 26 where channels don't exist. */
         fun networkHighlightChannelId(networkName: String, sound: Boolean): String {
-            val safe = networkName.replace(Regex("[^A-Za-z0-9_]"), "_").take(40)
+            val safe = channelSafeName(networkName)
             return if (sound) "hexdroid_net_${safe}_sound" else "hexdroid_net_${safe}_silent"
         }
-        fun networkPmChannelId(networkName: String): String {
+        fun networkPmChannelId(networkName: String): String =
+            "hexdroid_net_${channelSafeName(networkName)}_pm"
+
+        /**
+         * [networkName] reduced to channel-id characters. A name with non-ASCII characters also
+         * gets a hash of the original, so names in other scripts don't all reduce to underscores
+         * and share one channel.
+         */
+        private fun channelSafeName(networkName: String): String {
             val safe = networkName.replace(Regex("[^A-Za-z0-9_]"), "_").take(40)
-            return "hexdroid_net_${safe}_pm"
+            return if (networkName.all { it.code < 0x80 }) safe
+            else safe + "_" + Integer.toHexString(networkName.hashCode())
         }
 
         const val NOTIF_ID_CONNECTION = 1001
@@ -57,6 +66,8 @@ class NotificationHelper(private val ctx: Context) {
          *  Format: "msgid:<ircMsgId>" when the server provides one,
          *  otherwise "ts:<epochMs>|<nick>|<textPrefix80>". */
         const val EXTRA_MSG_ANCHOR = "extra_msg_anchor"
+        /** Server msgid of the message a notification is for, so an inline reply can quote it. */
+        const val EXTRA_REPLY_MSGID = "extra_reply_msgid"
         /** The notification's own ID, included so the reply receiver can cancel it. */
         const val EXTRA_NOTIF_ID   = "extra_notif_id"
         /** RemoteInput key for the inline-reply text typed in the notification drawer. */
@@ -128,21 +139,21 @@ class NotificationHelper(private val ctx: Context) {
         val soundId  = networkHighlightChannelId(networkName, sound = true)
         val pmId     = networkPmChannelId(networkName)
         if (nm.getNotificationChannel(soundId) != null) return  // already created
-        val silent = NotificationChannel(silentId, "$networkName Highlights (Silent)", NotificationManager.IMPORTANCE_DEFAULT).apply {
+        val silent = NotificationChannel(silentId, ctx.getString(R.string.notif_channel_net_highlight_silent, networkName), NotificationManager.IMPORTANCE_DEFAULT).apply {
             setSound(null, android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             enableVibration(false)
             group = "hexdroid_networks"
         }
-        val sound = NotificationChannel(soundId, "$networkName Highlights", NotificationManager.IMPORTANCE_DEFAULT).apply {
+        val sound = NotificationChannel(soundId, ctx.getString(R.string.notif_channel_net_highlight_sound, networkName), NotificationManager.IMPORTANCE_DEFAULT).apply {
             group = "hexdroid_networks"
         }
-        val pm = NotificationChannel(pmId, "$networkName Private Messages", NotificationManager.IMPORTANCE_DEFAULT).apply {
+        val pm = NotificationChannel(pmId, ctx.getString(R.string.notif_channel_net_pm, networkName), NotificationManager.IMPORTANCE_DEFAULT).apply {
             group = "hexdroid_networks"
         }
         runCatching {
-            nm.createNotificationChannelGroup(android.app.NotificationChannelGroup("hexdroid_networks", "IRC Networks"))
+            nm.createNotificationChannelGroup(android.app.NotificationChannelGroup("hexdroid_networks", ctx.getString(R.string.notif_channel_group_networks)))
             nm.createNotificationChannel(silent)
             nm.createNotificationChannel(sound)
             nm.createNotificationChannel(pm)
@@ -161,22 +172,22 @@ class NotificationHelper(private val ctx: Context) {
             ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         } catch (_: Throwable) { return }
 
-        val conn = NotificationChannel(CH_CONNECTION, "IRC Connection", NotificationManager.IMPORTANCE_LOW).apply {
+        val conn = NotificationChannel(CH_CONNECTION, ctx.getString(R.string.notif_channel_connection), NotificationManager.IMPORTANCE_LOW).apply {
             setShowBadge(false)
-            description = "Connection status while HexDroid IRC is connected"
+            description = ctx.getString(R.string.notif_channel_connection_desc)
         }
-        val highlightSilent = NotificationChannel(CH_HIGHLIGHT_SILENT, "IRC Highlights (Silent)", NotificationManager.IMPORTANCE_DEFAULT).apply {
+        val highlightSilent = NotificationChannel(CH_HIGHLIGHT_SILENT, ctx.getString(R.string.notif_channel_highlight_silent), NotificationManager.IMPORTANCE_DEFAULT).apply {
             setSound(null, AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build())
             enableVibration(false)
         }
-        val highlightSound = NotificationChannel(CH_HIGHLIGHT_SOUND, "IRC Highlights", NotificationManager.IMPORTANCE_DEFAULT)
-        val pm  = NotificationChannel(CH_PM,  "IRC Private Messages", NotificationManager.IMPORTANCE_DEFAULT)
-        val dcc = NotificationChannel(CH_DCC, "DCC Requests",         NotificationManager.IMPORTANCE_HIGH)
-        val error = NotificationChannel(CH_ERROR, "IRC Errors", NotificationManager.IMPORTANCE_DEFAULT).apply {
-            description = "Server and connection errors (only when enabled per network)"
+        val highlightSound = NotificationChannel(CH_HIGHLIGHT_SOUND, ctx.getString(R.string.notif_channel_highlight_sound), NotificationManager.IMPORTANCE_DEFAULT)
+        val pm  = NotificationChannel(CH_PM, ctx.getString(R.string.notif_channel_pm), NotificationManager.IMPORTANCE_DEFAULT)
+        val dcc = NotificationChannel(CH_DCC, ctx.getString(R.string.notif_channel_dcc), NotificationManager.IMPORTANCE_HIGH)
+        val error = NotificationChannel(CH_ERROR, ctx.getString(R.string.notif_channel_errors), NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = ctx.getString(R.string.notif_channel_errors_desc)
         }
 
         try {
@@ -250,7 +261,7 @@ class NotificationHelper(private val ctx: Context) {
      * A mutable PendingIntent for [NotificationReplyReceiver] carrying [networkId], [buffer] and
      * [notifId]. Must be FLAG_MUTABLE so the system can attach the RemoteInput results.
      */
-    private fun replyPendingIntent(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): PendingIntent? {
+    private fun replyPendingIntent(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = "", replyMsgId: String? = null): PendingIntent? {
         val i = Intent(ctx, NotificationReplyReceiver::class.java).apply {
             action = ACTION_INLINE_REPLY
             putExtra(EXTRA_NETWORK_ID, networkId)
@@ -258,6 +269,7 @@ class NotificationHelper(private val ctx: Context) {
             putExtra(EXTRA_NOTIF_ID, notifId)
             if (from.isNotBlank()) putExtra(EXTRA_FROM, from)
             if (originalText.isNotBlank()) putExtra(EXTRA_ORIGINAL_TEXT, originalText)
+            if (!replyMsgId.isNullOrBlank()) putExtra(EXTRA_REPLY_MSGID, replyMsgId)
         }
         // FLAG_MUTABLE is required  - Android needs to attach the RemoteInput results bundle
         // to the intent before delivery. On API < 31 the constant doesn't exist yet but
@@ -269,15 +281,16 @@ class NotificationHelper(private val ctx: Context) {
         return safePi { PendingIntent.getBroadcast(ctx, nextPiRequestCode(), i, flags) }
     }
 
-    private fun buildReplyAction(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = ""): NotificationCompat.Action? {
+    private fun buildReplyAction(networkId: String, buffer: String, notifId: Int, from: String = "", originalText: String = "", msgAnchor: String? = null): NotificationCompat.Action? {
         return runCatching {
             val remoteInput = RemoteInput.Builder(EXTRA_REPLY_TEXT)
-                .setLabel("Reply…")
+                .setLabel(ctx.getString(R.string.notif_reply_hint))
                 .build()
+            val replyMsgId = msgAnchor?.takeIf { it.startsWith("msgid:") }?.removePrefix("msgid:")
             NotificationCompat.Action.Builder(
                 0,  // no icon
-                "Reply",
-                replyPendingIntent(networkId, buffer, notifId, from, originalText),
+                ctx.getString(R.string.notif_reply),
+                replyPendingIntent(networkId, buffer, notifId, from, originalText, replyMsgId),
             )
                 .addRemoteInput(remoteInput)
                 .setAllowGeneratedReplies(true)
@@ -289,7 +302,7 @@ class NotificationHelper(private val ctx: Context) {
         ensureChannels()
         val b = NotificationCompat.Builder(ctx, CH_CONNECTION)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("Connected to $serverLabel")
+            .setContentTitle(serverLabel)
             .setContentText(status)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -300,9 +313,9 @@ class NotificationHelper(private val ctx: Context) {
         openBufferPendingIntent(networkId, "*server*", stableRequestCode = CONNECTION_PI_REQUEST_CODE)
             ?.let { b.setContentIntent(it) }
         actionPendingIntent(networkId, ACTION_QUIT, stableRequestCode = CONNECTION_QUIT_PI_REQUEST_CODE)
-            ?.let { b.addAction(0, "Quit", it) }
+            ?.let { b.addAction(0, ctx.getString(R.string.notif_quit), it) }
         actionPendingIntent(networkId, ACTION_EXIT, stableRequestCode = CONNECTION_EXIT_PI_REQUEST_CODE)
-            ?.let { b.addAction(0, "Exit", it) }
+            ?.let { b.addAction(0, ctx.getString(R.string.menu_exit), it) }
         return b.build()
     }
 
@@ -345,7 +358,7 @@ class NotificationHelper(private val ctx: Context) {
         // up by id and would report the reply as undeliverable however well connected the
         // user actually is. Offering no Reply button is better than offering one that always fails.
         if (networkId.isNotBlank()) {
-            buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+            buildReplyAction(networkId, buffer, notifId, from, originalText, msgAnchor)?.let { builder.addAction(it) }
         }
         NotificationManagerCompat.from(ctx).notify(notifTagFor(networkId, buffer), notifId, builder.build())
         return true
@@ -382,7 +395,7 @@ class NotificationHelper(private val ctx: Context) {
         openBufferPendingIntent(networkId, buffer, msgId, msgAnchor)?.let { builder.setContentIntent(it) }
         // See notifyHighlight: no network means no deliverable reply.
         if (networkId.isNotBlank()) {
-            buildReplyAction(networkId, buffer, notifId, from, originalText)?.let { builder.addAction(it) }
+            buildReplyAction(networkId, buffer, notifId, from, originalText, msgAnchor)?.let { builder.addAction(it) }
         }
         NotificationManagerCompat.from(ctx).notify(notifTagFor(networkId, buffer), notifId, builder.build())
         return true
@@ -392,8 +405,8 @@ class NotificationHelper(private val ctx: Context) {
         ensureChannels()
         val builder = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("DCC complete")
-            .setContentText("$filename saved to $where")
+            .setContentTitle(ctx.getString(R.string.notif_dcc_file_done_title))
+            .setContentText(ctx.getString(R.string.notif_dcc_file_done_text, filename, where))
             .setAutoCancel(true)
         openTransfersPendingIntent(networkId)?.let { builder.setContentIntent(it) }
         NotificationManagerCompat.from(ctx).notify(nextNotifId(), builder.build())
@@ -415,11 +428,11 @@ class NotificationHelper(private val ctx: Context) {
         val acceptPi = safePi { PendingIntent.getActivity(ctx, nextPiRequestCode(), acceptIntent, piFlags) }
         val builder = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Incoming file from $from")
+            .setContentTitle(ctx.getString(R.string.notif_dcc_incoming_file_title, from))
             .setContentText(filename)
             .setAutoCancel(true)
         openTransfersPendingIntent(networkId)?.let { builder.setContentIntent(it) }
-        if (acceptPi != null) builder.addAction(0, "Accept", acceptPi)
+        if (acceptPi != null) builder.addAction(0, ctx.getString(R.string.transfers_accept), acceptPi)
         NotificationManagerCompat.from(ctx).notify(notifId, builder.build())
     }
 
@@ -432,11 +445,11 @@ class NotificationHelper(private val ctx: Context) {
 
         val builder = NotificationCompat.Builder(ctx, CH_DCC)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle("Incoming DCC chat from $from")
-            .setContentText("Tap to open — or use Transfers to accept / reject")
+            .setContentTitle(ctx.getString(R.string.notif_dcc_incoming_chat_title, from))
+            .setContentText(ctx.getString(R.string.notif_dcc_incoming_chat_text))
             .setAutoCancel(true)
         contentIntent?.let { builder.setContentIntent(it) }
-        openTransfersPendingIntent(networkId)?.let { builder.addAction(0, "Open Transfers", it) }
+        openTransfersPendingIntent(networkId)?.let { builder.addAction(0, ctx.getString(R.string.notif_open_transfers), it) }
         NotificationManagerCompat.from(ctx).notify(nextNotifId(), builder.build())
     }
 }

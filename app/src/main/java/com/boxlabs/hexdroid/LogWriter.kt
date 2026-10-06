@@ -199,7 +199,6 @@ class LogWriter(private val ctx: Context) {
         }
     }
 
-    /** Flush and close all open log file handles (internal and SAF). Call when logging is disabled or app exits. */
     /** Bytes used by logs in app storage (not a chosen folder). */
     fun internalLogsSize(): Long =
         File(ctx.filesDir, "logs").walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -234,18 +233,24 @@ class LogWriter(private val ctx: Context) {
         return count
     }
 
+    /**
+     * Flush and close all open log file handles (internal and SAF). Each is closed under its
+     * file's write lock, so a line being written finishes first. Call when logging is disabled or
+     * the app exits.
+     */
     fun closeAll() {
-        // Take the handles out of the caches before closing them, so a write racing this
-        // call finds an empty cache and opens a tracked handle rather than a leaked one.
-        // writeLocks is deliberately kept: a write in flight holds a lock from it, and a
-        // fresh object for the same key would let two threads interleave a line.
+        // Handles leave the caches first, so a later write opens a fresh, tracked one.
         val internalSnapshot = openWriters.drain()
         lastFlushMs.clear()
-        for ((_, writer) in internalSnapshot) runCatching { writer.close() }
+        for ((key, writer) in internalSnapshot) {
+            synchronized(writeLockFor(key)) { runCatching { writer.close() } }
+        }
 
         val safSnapshot = safWriters.drain()
         safFileCache.clear()
-        for ((_, stream) in safSnapshot) runCatching { stream.close() }
+        for ((key, stream) in safSnapshot) {
+            synchronized(writeLockFor(key)) { runCatching { stream.close() } }
+        }
     }
 
     fun readTail(networkName: String, buffer: String, maxLines: Int, logFolderUri: String?): List<String> {

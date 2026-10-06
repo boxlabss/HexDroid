@@ -86,7 +86,8 @@ class HexScriptBackend : ScriptBackend {
             val block = h as? HexBlock ?: continue
             if (event.owner != null && owners[block] != event.owner) continue
             // Channel events filter on the channel (`on JOIN:#help`), everything else on the text.
-            val subject = if (block.name in CHANNEL_EVENTS) event.buffer else event.text
+            // INVITE carries its channel in $chan rather than as the buffer.
+            val subject = if (block.name in CHANNEL_EVENTS) (event.fields["chan"] ?: event.buffer) else event.text
             if (!filterMatches(block, subject)) continue
             if (!targetMatches(block, event)) continue
             runBody(block.body, envForEvent(event, cb, owners[block]))
@@ -102,7 +103,10 @@ class HexScriptBackend : ScriptBackend {
         runBody(block.body, envForEvent(event, cb, owners[block], userInitiated = true))
     }
 
-    private val CHANNEL_EVENTS = setOf("JOIN", "PART", "KICK", "MODE")
+    private val CHANNEL_EVENTS = setOf(
+        "JOIN", "PART", "KICK", "MODE", "OP", "DEOP", "VOICE", "DEVOICE", "HELP", "DEHELP",
+        "BAN", "UNBAN", "RAWMODE", "TOPIC", "INVITE",
+    )
 
     /** The mIRC target field: `?` private only, `#` channels only, else a comma list of channel globs. */
     private fun targetMatches(block: HexBlock, event: EventData): Boolean {
@@ -110,14 +114,16 @@ class HexScriptBackend : ScriptBackend {
         return when (t) {
             "?" -> event.isPrivate
             "#" -> !event.isPrivate
-            else -> !event.isPrivate && t.split(',').any { it.isNotBlank() && glob(it.trim(), event.buffer) }
+            else -> !event.isPrivate && t.split(',').any { it.isNotBlank() && glob(it.trim(), event.fields["chan"] ?: event.buffer) }
         }
     }
 
     /** Events the app raises (besides SIGNAL:*), for the load-time warning. */
     private val KNOWN_EVENTS = setOf(
         "LOAD", "TEXT", "ACTION", "INPUT", "NUMERIC", "JOIN", "PART", "QUIT", "KICK", "MODE", "NICK",
-        "NOTICE", "CONNECT", "DISCONNECT",
+        "NOTICE", "CONNECT", "DISCONNECT", "OP", "DEOP", "VOICE", "DEVOICE", "HELP", "DEHELP",
+        "BAN", "UNBAN", "RAWMODE", "TOPIC", "INVITE", "CTCP", "CTCPREPLY", "SNOTICE", "NOTIFY",
+        "UNOTIFY", "APPACTIVE", "FILERCVD", "FILESENT",
     )
 
     private fun filterMatches(block: HexBlock, text: String): Boolean {
@@ -241,8 +247,20 @@ class HexScriptBackend : ScriptBackend {
             "push" -> { val (nm, rest) = head(raw); varRef(varName(nm), env)?.let { HexValues.push(it, evalVal(rest, env)) } }
             "setat" -> doSetAt(raw, env)
             "rewrite" -> env.fields["text"] = expand(raw, env)
-            "echo" -> { val (t, txt) = splitTarget(expand(raw, env)); cb.echo(t, null, txt) }
-            "msg" -> { val (t, txt) = splitTarget(expand(raw, env)); if (t != null) cb.sendMessage(t, txt) }
+            "echo" -> {
+                val (t, txt) = targetAndText(raw, env)
+                // switches: -a the active buffer, -s the server buffer.
+                when (t) {
+                    "-a" -> cb.echo(null, null, txt)
+                    "-s" -> cb.echo("*server*", null, txt)
+                    else -> cb.echo(t, null, txt)
+                }
+            }
+            "msg" -> {
+                val (t, txt) = targetAndText(raw, env)
+                if (t != null) cb.sendMessage(t, txt)
+                else cb.log("msg: no target (an empty variable?), nothing sent")
+            }
             "raw" -> cb.sendRaw(expand(raw, env))
             "signal" -> { val a = expand(raw, env).trim().split(' '); if (a.isNotEmpty()) cb.raiseEvent("SIGNAL:${a[0].uppercase()}", emptyMap(), a.drop(1)) }
             "timer" -> doTimer(raw, env)
@@ -606,8 +624,8 @@ class HexScriptBackend : ScriptBackend {
         "len" -> (a.getOrNull(0)?.length ?: 0).toString()
         "lower" -> a.getOrNull(0)?.lowercase() ?: ""
         "upper" -> a.getOrNull(0)?.uppercase() ?: ""
-        "left" -> a.getOrNull(0)?.take(a.getOrNull(1)?.toIntOrNull() ?: 0) ?: ""
-        "right" -> a.getOrNull(0)?.takeLast(a.getOrNull(1)?.toIntOrNull() ?: 0) ?: ""
+        "left" -> { val t = a.getOrNull(0) ?: ""; val n = (a.getOrNull(1)?.toIntOrNull() ?: 0).coerceIn(-t.length, t.length); if (n >= 0) t.take(n) else t.dropLast(-n) }
+        "right" -> { val t = a.getOrNull(0) ?: ""; val n = (a.getOrNull(1)?.toIntOrNull() ?: 0).coerceIn(-t.length, t.length); if (n >= 0) t.takeLast(n) else t.drop(-n) }
         "replace" -> (a.getOrNull(0) ?: "").replace(a.getOrNull(1) ?: "", a.getOrNull(2) ?: "")
         "trim" -> (a.getOrNull(0) ?: "").trim()
         "contains" -> (a.getOrNull(0) ?: "").contains(a.getOrNull(1) ?: "").toString()
@@ -641,7 +659,6 @@ class HexScriptBackend : ScriptBackend {
         else -> { cb.log("hex: unknown function \$$name()"); "" }
     }
 
-    /** Flat top-level JSON string extractor: $json(body, key). v1 = flat keys only. */
     /**
      * $json(body, path): extract a value by dotted path (e.g. "data.items.0.name"). Supports nested
      * objects, array indices, and non-string leaves (numbers/bools). For a plain (dot-free) key that
@@ -681,10 +698,17 @@ class HexScriptBackend : ScriptBackend {
             is HexVal.Lst -> v.items.joinToString(",", "[", "]") { write(it) }
             is HexVal.Str -> if (isNum(v.s)) v.s else "\"${esc(v.s)}\""
         }
-        private fun isNum(s: String): Boolean = s.matches(Regex("-?\\d+(\\.\\d+)?"))
+        /** A string JSON reads as the same number: no leading zeros, no exponent. */
+        private val JSON_NUM = Regex("-?(0|[1-9]\\d*)(\\.\\d+)?")
+        private fun isNum(s: String): Boolean = JSON_NUM.matches(s)
         private fun esc(s: String): String = buildString {
-            for (c in s) when (c) {
-                '"' -> append("\\\""); '\\' -> append("\\\\"); '\n' -> append("\\n"); '\r' -> append("\\r"); '\t' -> append("\\t")
+            for (c in s) when {
+                c == '"' -> append("\\\"")
+                c == '\\' -> append("\\\\")
+                c == '\n' -> append("\\n")
+                c == '\r' -> append("\\r")
+                c == '\t' -> append("\\t")
+                c < ' ' -> append("\\u").append(c.code.toString(16).padStart(4, '0'))
                 else -> append(c)
             }
         }
@@ -1013,12 +1037,20 @@ class HexScriptBackend : ScriptBackend {
 
     private fun varName(token: String): String = token.removePrefix("%").trim()
 
-    private fun splitTarget(s: String): Pair<String?, String> {
-        val t = s.trim()
-        val sp = t.indexOf(' ')
-        if (sp < 0) return null to t
-        return t.substring(0, sp) to t.substring(sp + 1)
+    /**
+     * Split `echo`/`msg` arguments into target and text by the statement as written: the first
+     * word is the target expression and the rest the text, each expanded on its own. A target
+     * that expands to nothing (as `$chan` does in QUIT or NICK) is null, so the text's first word
+     * is never taken as a buffer or nick. A single word is text with no target.
+     */
+    private fun targetAndText(raw: String, env: Env): Pair<String?, String> {
+        val r = raw.trim()
+        val sp = r.indexOf(' ')
+        if (sp < 0) return null to expand(r, env)
+        val target = expand(r.substring(0, sp), env).trim().takeIf { it.isNotEmpty() }
+        return target to expand(r.substring(sp + 1).trimStart(), env)
     }
+
 
     private fun matchParen(s: String, open: Int): Int {
         var depth = 0

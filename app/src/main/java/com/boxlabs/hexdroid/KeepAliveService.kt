@@ -119,7 +119,7 @@ class KeepAliveService : Service() {
         // visible or has an exemption.
         val startedForeground = runCatching {
             val initialNotification = NotificationHelper(applicationContext)
-                .buildConnectionNotification("", "HexDroid IRC", "Connecting...")
+                .buildConnectionNotification("", getString(R.string.app_name), getString(R.string.vm_status_connecting))
             val fgsType = if (android.os.Build.VERSION.SDK_INT >= 34) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             } else 0
@@ -161,8 +161,8 @@ class KeepAliveService : Service() {
         }
 
         val networkId = intent?.getStringExtra(EXTRA_NETWORK_ID) ?: ""
-        val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL) ?: "HexDroid IRC"
-        val status = intent?.getStringExtra(EXTRA_STATUS) ?: "Connected"
+        val serverLabel = intent?.getStringExtra(EXTRA_SERVER_LABEL) ?: getString(R.string.app_name)
+        val status = intent?.getStringExtra(EXTRA_STATUS) ?: getString(R.string.vm_status_connected)
 
         // Already showing exactly this: nothing to do. Building and reposting costs several calls
         // into the system on the main thread, which slow ROMs can't afford on every update.

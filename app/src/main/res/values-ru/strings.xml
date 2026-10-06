@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">Панель сетей над полем ввода</string>
     <string name="setting_network_tabs_bottom_desc">Показывать переключатель каналов внизу чата.</string>
     <string name="setting_portrait_nicklist_overlay">Боковая панель со списком псевдонимов</string>
-    <string name="setting_portrait_nicklist_overlay_desc">Показывает список псевдонимов в виде боковой панели вместо всплывающего окна.</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Показывать список ников в виде боковой панели с изменяемым размером вместо всплывающего окна. Если включено, кнопка списка ников постоянно показывает или скрывает его.</string>
     <string name="setting_ignore_list">Список игнорируемых</string>
     <string name="setting_ignore_list_desc">Скрыть сообщения и предложения DCC от определённых псевдонимов (для каждой сети).</string>
     <string name="setting_quit_message">Сообщение об отключении</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">Включить DCC</string>
     <string name="setting_open_app_settings">Открыть настройки приложения</string>
     <string name="setting_battery_optimization">Список оптимизации батареи</string>
+    <string name="setting_ctcp_replies">Отвечать на запросы CTCP</string>
+    <string name="setting_ctcp_replies_desc">Отключить ответы на VERSION, TIME, PING и подобные.</string>
+    <string name="setting_show_nick_icons">Показывать значки ников</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Чат и сообщения</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Ник</string>
     <string name="chat_ban_type_account">Аккаунт</string>
     <string name="chat_ban_type_domain">Домен</string>
+    <string name="chat_react_custom">Своя реакция</string>
+    <string name="chat_react_custom_hint">Эмодзи или слово</string>
+    <string name="chat_react_send">Отреагировать</string>
+    <string name="chat_reply_not_loaded">Ответ на более раннее сообщение</string>
 
     <!-- Network screens -->
     <string name="networks_title">Сети</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">Забыть политику STS для этого хоста</string>
     <string name="list_retry">Повторить</string>
     <string name="network_trust_extra_pinned_cert">Доверять и этому серверу (round-robin DNS)</string>
+    <string name="network_trust_cert_names">Доверять этим именам сертификата</string>
+    <string name="network_cert_names_accepted">Принятые имена сертификата</string>
+    <string name="network_clear_cert_names">Больше не доверять этим именам</string>
     <string name="network_nick">Ник</string>
     <string name="network_alt_nick">Резервный ник</string>
     <string name="network_username">Имя пользователя</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Расширенные возможности IRCv3</string>
     <string name="core_nick_change_refused">Сервер не позволяет сменить псевдоним: %1$s</string>
+    <string name="core_ctcp_reply_disabled">Проигнорирован CTCP %1$s от %2$s (ответы отключены)</string>
     <string name="settings_raw_log">Журнал сырого протокола</string>
     <string name="settings_raw_log_desc">Показывать каждую отправленную и полученную строку в буфере Raw для каждой сети. Пароли скрываются. Для отладки.</string>
     <string name="chat_show_less">Показать меньше</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">Сервер отклонил сообщение (%1$s): %2$s</string>
     <string name="network_edit_cap_also">также запрашивает %1$s</string>
     <string name="network_edit_caps_hint">Базовые функции IRCv3 включены по умолчанию. Включите для просмотра расширенных параметров.</string>
-    <string name="network_edit_bouncer_caps">Функции баунсера (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">Функции баунсера</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">Передача файлов</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">Входящий DCC-чат от %1$s</string>
-    <string name="notif_dcc_incoming_chat_text">Нажмите для открытия — или используйте Передачи</string>
+    <string name="notif_dcc_incoming_chat_text">Нажмите, чтобы открыть, или используйте «Передачи», чтобы принять/отклонить</string>
     <string name="notif_dcc_incoming_file_title">Входящий файл от %1$s</string>
     <string name="notif_dcc_file_done_title">DCC завершено</string>
     <string name="notif_dcc_file_done_text">%1$s сохранено в %2$s</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">Альтернативный ник</string>
     <string name="network_username_label">Имя пользователя (ident)</string>
     <string name="network_bouncer_username_label">Имя пользователя</string>
-    <string name="network_username_bouncer_hint">Для профилей bouncer\'а это ваше <b>имя для входа на bouncer</b> — то же имя, с которым вы настроили учетную запись bouncer\'а. Не ваш ник в IRC.</string>
+    <string name="network_username_bouncer_hint">Для профилей bouncer\'а это ваше <b>имя для входа на bouncer</b></string>
     <string name="network_realname_label">Настоящее имя</string>
     <string name="network_use_tls_label">Использовать TLS</string>
     <string name="network_allow_plaintext">Разрешить открытый текст</string>
     <string name="network_auto_connect_label">Подключаться при запуске</string>
     <string name="network_show_in_switcher_label">Показывать в переключателе каналов</string>
-    <string name="network_auto_reconnect_label">Автоматически переподключаться</string>
-    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">Автоматически переподключаться при обрыве</string>
+    <string name="network_bouncer_label">Режим bouncer\'а</string>
     <string name="network_bouncer_kind_label">Тип bouncer\'а</string>
     <string name="network_bouncer_kind_none">Нет / не указан</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">Универсальный  (user/network)</string>
     <string name="network_bouncer_network_label">Имя сети (необязательно)</string>
-    <string name="network_bouncer_network_help">На какую upstream-сеть на bouncer\'е нацелен этот профиль (напр. \"libera\", \"oftc\"). Объединяется с полем имени пользователя bouncer\'а выше на проводе — отправляется в USER и, в зависимости от выбранного метода аутентификации, в SASL или строке PASS — с использованием синтаксиса выбранного типа bouncer\'а.</string>
+    <string name="network_bouncer_network_help">К какой вышестоящей сети на bouncer\'е относится этот профиль (например, \"afternet\", \"libera\"). Объединяется с полем имени пользователя bouncer\'а выше и, в зависимости от выбранного способа аутентификации, отправляется в SASL или в строке PASS.</string>
     <string name="network_bouncer_clientid_label">ID клиента (необязательно)</string>
     <string name="network_bouncer_clientid_help">Короткий идентификатор этого устройства, напр. \"phone\" или \"hexdroid\". Включает буферы и историю для каждого клиента, если bouncer это поддерживает (ZNC clientbuffer, история для каждого клиента в soju). Оставьте пустым, чтобы все клиенты использовали один общий буфер.</string>
     <string name="network_server_password_label">Пароль сервера (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">Пароль</string>
     <string name="network_sasl_recommended_for_bouncers">Рекомендуется для bouncer\'ов — оставьте поле имени пользователя пустым, чтобы использовать имя пользователя bouncer\'а из раздела «Общие» выше.</string>
     <string name="network_cert_format_label">Формат сертификата</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">Пароль ключа (если зашифрован)</string>
@@ -410,9 +421,9 @@
     <string name="networks_drag_reorder">Перетащите для изменения порядка</string>
     <string name="networks_insecure_title">Небезопасное соединение заблокировано</string>
     <string name="networks_local_title">Требуется доступ к локальной сети</string>
-    <string name="networks_local_body">Для подключения к {0} требуется разрешение локальной сети.
+    <string name="networks_local_body">Для подключения к {0} требуется разрешение «Локальная сеть».
 
-Это новое требование Android 17 для подключения к серверам в локальной сети.</string>
+        Это новое требование Android 17 для подключения к серверам в вашей локальной сети (домашняя сеть, bouncer и т. п.).</string>
     <string name="networks_local_grant">Дать разрешение</string>
     <string name="networks_insecure_body">Незашифрованные IRC-соединения не защищены и могут раскрыть ваши сообщения и пароль.</string>
     <string name="networks_insecure_body2">Для подключения к %1$s без TLS необходимо явно разрешить незашифрованные подключения для этой сети.</string>
@@ -459,6 +470,8 @@
     <string name="menu_reconnect">Переподключиться</string>
     <string name="menu_disconnect">Отключиться</string>
     <string name="menu_exit">Выход</string>
+    <string name="menu_float">Плавающее окно</string>
+    <string name="float_needs_permission">Разрешите HexDroid показываться поверх других приложений, чтобы использовать плавающее окно</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Запустить скрипты</string>
@@ -523,10 +536,25 @@
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Очистить</string>
+    <string name="script_pick_file_title">Выбрать файл для скрипта?</string>
+    <string name="script_pick_file_body">Скрипт просит выбрать файл для загрузки. Он получит только выбранный файл и ничего больше с устройства.</string>
+    <string name="script_pick_file_body_in">Скрипт в %1$s просит выбрать файл для загрузки. Он получит только выбранный файл и ничего больше с устройства.</string>
+    <string name="script_pick_file_choose">Выбрать файл</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Подключение</string>
+    <string name="network_section_connection_desc">Адрес сервера, порт, TLS</string>
+    <string name="network_section_identity_desc">Ник, запасной ник, имя пользователя, настоящее имя</string>
+    <string name="network_section_autoconnect_desc">Подключение при запуске, переподключение, пароль сервера</string>
+    <string name="network_section_sasl_desc">Вход в службы при подключении</string>
+    <string name="network_section_tls_cert_desc">Сертификат для вашей идентификации</string>
+    <string name="network_section_autojoin_desc">Каналы для входа при подключении</string>
+    <string name="network_section_postcmds_desc">Команды, выполняемые после подключения</string>
+    <string name="network_section_proxy_desc">Направлять эту сеть через прокси</string>
+    <string name="network_section_encoding_desc">Кодировка для этой сети</string>
+    <string name="network_section_notifications_desc">Оповещения об ошибках и игнорируемые упоминания</string>
+    <string name="network_section_ircv3_desc">Возможности, запрашиваемые у сервера</string>
     <string name="network_section_identity">Идентичность</string>
     <string name="network_section_autoconnect">Авто-подключение &amp; Пароль</string>
     <string name="network_section_sasl">Аутентификация SASL</string>
@@ -562,14 +590,14 @@
     <string name="network_cert_selected">Выбран: %1$s</string>
     <string name="network_cert_none">Сертификат не выбран.</string>
     <string name="netcert_title">Сертификат для этой сети</string>
-    <string name="netcert_desc">HexDroid предъявляет сертификат, созданный только для этой сети. Он не меняется при смене ника или IP, поэтому можно входить через SASL EXTERNAL, а операторы сети могут узнавать это устройство. Для каждой сети создаётся свой сертификат, поэтому сети не могут связать вас между собой. Он не попадает в резервные копии: после переустановки создаётся новый.</string>
+    <string name="netcert_desc">HexDroid предъявляет сертификат, созданный только для этой сети, поэтому можно входить через SASL EXTERNAL.</string>
     <string name="netcert_pending">Создаётся при первом подключении</string>
     <string name="netcert_fingerprint">Отпечаток: %1$s</string>
     <string name="netcert_add_nickserv">Добавить в аккаунт %1$s</string>
     <string name="netcert_add_sent">Сертификат отправлен в %1$s. Посмотрите ответ в буфере сервера, затем переключите SASL на EXTERNAL.</string>
     <string name="netcert_not_connected">Сначала подключитесь к этой сети и идентифицируйтесь в её сервисах</string>
     <string name="core_netcert_unavailable">*** Не удалось создать сертификат этой сети, поэтому вы подключены без него.</string>
-    <string name="core_netcert_created">*** Теперь HexDroid предъявляет сертификат, созданный только для этой сети, поэтому можно входить через SASL EXTERNAL, а сеть может узнавать это устройство. Это можно отключить в настройках TLS-сертификата сети.</string>
+    <string name="core_netcert_created">*** Теперь HexDroid предъявляет сертификат, созданный только для этой сети, поэтому можно входить через SASL EXTERNAL. Это можно отключить в настройках TLS-сертификата сети.</string>
     <string name="vm_auth_sasl_netcert">Если HexDroid был переустановлен или восстановлен, сертификат этой сети новый: идентифицируйтесь паролем, затем снова добавьте его в аккаунт в настройках сертификата сети.</string>
     <string name="network_cert_pem_hint">Файл .pem должен содержать и сертификат, и закрытый ключ.</string>
     <string name="network_cert_choose_pem">Выбрать .pem / .crt / .cer</string>
@@ -633,7 +661,7 @@
     <string name="theme_terminal">Терминал</string>
     <string name="section_media_previews">Медиапревью</string>
     <string name="setting_image_previews">Включить превью изображений и видео</string>
-    <string name="setting_image_previews_desc">Показывать встроенные превью для изображений и ссылок YouTube в чате. Ссылки Twitter/X разрешаются через fxtwitter.com (сторонний сервис) — идентификаторы твитов отправляются этому сервису при загрузке превью.</string>
+    <string name="setting_image_previews_desc">Разрешить превью изображений и ссылок YouTube в чате. Ссылки Twitter/X разрешаются через fxtwitter.com - Превью не загружаются автоматически.</string>
     <string name="setting_previews_wifi_only">Только Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Загружать превью только при подключении к Wi-Fi, чтобы не тратить мобильные данные.</string>
     <string name="theme_system_default">Системный по умолчанию</string>
@@ -795,7 +823,7 @@
     <string name="bouncer_networks_clone_dismiss">Закрыть</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">Для bouncer\'ов предпочтительнее включить SASL ниже — это современный путь аутентификации. Если вместо этого используете это поле PASS, введите только пароль; имя пользователя bouncer\'а и сеть из полей выше добавляются автоматически (отправляется как <b>username/network:password</b>, или <b>username@clientid/network:password</b> для ZNC). Если предпочитаете ввести <b>username/network:password</b> самостоятельно, это тоже работает.</string>
+    <string name="network_server_password_bouncer_hint">Для bouncer\'ов рекомендуется SASL. Если вы всё же используете это поле PASS, введите только пароль; имя пользователя bouncer\'а и сеть из полей выше подставляются в начало автоматически. Ввод полного <b>username/network:password</b> тоже работает.</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">Изменить метаданные</string>
@@ -1051,7 +1079,7 @@
     <string name="vm_halted_tls">Автоподключение остановлено: ошибка TLS вряд ли исчезнет сама. Измените настройки доверия сертификатам, затем переподключитесь вручную.</string>
     <string name="vm_halted_unreachable">Автоподключение остановлено: сервер недоступен (имя хоста не разрешается или порт закрыт). Проверьте хост и порт в настройках сети, затем переподключитесь вручную.</string>
     <string name="vm_tls_tofu_pinned">TLS: отпечаток сертификата изучен и закреплён (TOFU). Будущие подключения будут проверять: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Несовпадение имени хоста в сертификате: подключение к %1$s, но SAN сертификата: %2$s. Подключение разрешено.</string>
+    <string name="vm_cert_hostname_mismatch">Несовпадение имени хоста в сертификате! Подключение к %1$s, но сертификат выдан для: %2$s - Подключение отклонено. Автопереподключение остановлено. Если это нужный сервер и у него просто неправильно настроенный или устаревший сертификат, откройте настройки сети и нажмите «Доверять этим именам сертификата». Если вы этого не ожидали, не принимайте: кто-то может перехватывать подключение.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">DCC RESUME от %1$s для %2$s проигнорирован — нет соответствующей активной отправки.</string>
@@ -1167,6 +1195,8 @@
     <string name="core_disconnected">Отключено</string>
     <string name="core_disconnect_server_error">Ошибка сервера: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">Отпечаток TLS-сертификата изменился</string>
+    <string name="core_disconnect_tls_hostname_mismatch">Сертификат TLS недействителен для этого хоста</string>
+    <string name="vm_cert_hostname_grace">Несовпадение имени хоста в сертификате: подключение к %1$s, но сертификат выдан для: %2$s. Раньше HexDroid этого не проверял, поэтому эти имена однократно приняты, чтобы профиль продолжал работать, и подключение повторяется. Если вы этого не ожидали, откройте настройки сети и нажмите «Больше не доверять этим именам».</string>
     <string name="core_disconnect_connect_failed">Не удалось подключиться: %1$s</string>
     <string name="core_disconnect_connection_error">Ошибка подключения: %1$s</string>
     <string name="core_disconnect_registration_timeout">Тайм-аут регистрации</string>
@@ -1414,6 +1444,7 @@
     <string name="vm_ev_message_deleted">(сообщение удалено %1$s)</string>
     <string name="vm_ev_message_deleted_reason">(сообщение удалено %1$s: %2$s)</string>
     <string name="vm_history_divider">── История чата • Последнее сообщение: %1$s ──</string>
+    <string name="vm_history_gap">── Некоторых более старых сообщений всё ещё нет. Откройте этот разговор снова, чтобы продолжить их загрузку ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">Сети (%1$d): %2$s</string>
@@ -1528,7 +1559,8 @@
     <string name="cmd_gsearch">Ищет сообщения во всех буферах этой сети</string>
     <string name="cmd_gfind">То же, что /gsearch</string>
     <string name="cmd_nick">Меняет ваш ник</string>
-    <string name="cmd_away">Отмечает вас отсутствующим; /away без аргументов снимает отметку</string>
+    <string name="cmd_away">Отмечает вас как отсутствующего [reason]</string>
+    <string name="cmd_back">Снимает статус отсутствия</string>
     <string name="cmd_whois">Запрашивает подробные сведения о пользователе</string>
     <string name="cmd_who">Ищет пользователей по маске</string>
     <string name="cmd_ignore">Игнорирует пользователя (без аргументов показывает список)</string>
@@ -1769,4 +1801,22 @@
     <string name="setting_webpush_no_distributor">Push-распространитель не установлен. Установите его (например, ntfy), чтобы использовать эту функцию.</string>
     <string name="setting_webpush_distributor_current">%1$s (используется)</string>
     <string name="vm_webpush_failed">Push-уведомления: сервер отклонил подписку (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">Действия (/me) нельзя отправлять, пока для %1$s включён +AGE, поэтому ничего не отправлено.</string>
+    <string name="notif_reply">Ответить</string>
+    <string name="notif_reply_hint">Ответить…</string>
+    <string name="notif_quit">Отключиться</string>
+    <string name="notif_reply_not_sent_title">Ответ не отправлен: нет подключения</string>
+    <string name="notif_reply_not_sent_text">Откройте HexDroid и переподключитесь, чтобы отправить ответ %1$s</string>
+    <string name="notif_channel_connection_desc">Состояние соединения, пока HexDroid IRC подключён</string>
+    <string name="notif_channel_errors">Ошибки IRC</string>
+    <string name="notif_channel_errors_desc">Ошибки сервера и соединения (только если включены для сети)</string>
+    <string name="notif_channel_group_networks">Сети IRC</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: упоминания (тихий)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: упоминания</string>
+    <string name="notif_channel_net_pm">%1$s: личные сообщения</string>
+    <string name="setting_hide_hostnames">Скрывать имена хостов в сообщениях о входе/выходе</string>
+    <string name="vm_ev_has_joined_nohost">%1$s вошёл в %2$s</string>
+    <string name="vm_ev_has_left_nohost">%1$s покинул %2$s</string>
+    <string name="vm_ev_has_quit_nohost">%1$s отключился</string>
+    <string name="push_encrypted">Зашифрованное сообщение</string>
 </resources>

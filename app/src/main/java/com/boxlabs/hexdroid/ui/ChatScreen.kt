@@ -267,6 +267,8 @@ import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.UiMessage
 import com.boxlabs.hexdroid.UiSettings
 import com.boxlabs.hexdroid.UiState
+import com.boxlabs.hexdroid.isAsciiDigit
+import com.boxlabs.hexdroid.isAsciiHexDigit
 import com.boxlabs.hexdroid.parseAnsiRuns
 import com.boxlabs.hexdroid.stripIrcFormatting
 import com.boxlabs.hexdroid.ui.components.LagBar
@@ -6212,8 +6214,8 @@ fun ChatScreen(
                 // Links contained in the message. Inline links open by tap position
                 // only, which D-pad and keyboard navigation can never reach, so this
                 // list is the accessible path (Android TV, ChromeOS, hardware keys).
-                val ctxUrls = remember(ctxMsg.id) {
-                    urlRegex.findAll(ctxMsg.text).map { it.value }.distinct().take(5).toList()
+                val ctxUrls = remember(ctxMsg.id, ctxMsg.text) {
+                    messageUrls(ctxMsg.text).distinct().take(5).toList()
                 }
                 if (ctxUrls.isNotEmpty()) HorizontalDivider()
                 for (url in ctxUrls) {
@@ -7009,8 +7011,8 @@ private fun SingleMessageItem(
         if (imagePreviewsEnabled) {
             // m.text, not bodyText: a link below the fold is still worth previewing, and
             // the preview list must not shuffle when the user expands the message.
-            val msgUrls = remember(m.id) {
-                urlRegex.findAll(m.text).map { it.value }.take(3).toList()
+            val msgUrls = remember(m.id, m.text) {
+                messageUrls(m.text).take(3).toList()
             }
             for (previewUrl in msgUrls) {
                 InlinePreview(url = previewUrl, previewsEnabled = true, wifiOnly = imagePreviewsWifiOnly)
@@ -7178,7 +7180,7 @@ private fun colourFormat(v: TextFieldValue, fg: Int?, bg: Int?): TextFieldValue 
         append((fg ?: 99).toString().padStart(2, '0'))
         if (bg != null) append(',').append(bg.toString().padStart(2, '0'))
     }
-    fun guard(next: Char?) = if (next != null && (next.isDigit() || next == ',')) "\u0002\u0002" else ""
+    fun guard(next: Char?) = if (next != null && (next.isAsciiDigit() || next == ',')) "\u0002\u0002" else ""
     val t = v.text
     val s = v.selection.min
     val e = v.selection.max
@@ -7230,11 +7232,11 @@ private class MircInputTransformation : VisualTransformation {
             if (c == '\u0003') {
                 var j = i + 1
                 val fgDigits = StringBuilder()
-                while (j < raw.length && fgDigits.length < 2 && raw[j].isDigit()) fgDigits.append(raw[j++])
+                while (j < raw.length && fgDigits.length < 2 && raw[j].isAsciiDigit()) fgDigits.append(raw[j++])
                 val bgDigits = StringBuilder()
-                if (fgDigits.isNotEmpty() && j + 1 < raw.length && raw[j] == ',' && raw[j + 1].isDigit()) {
+                if (fgDigits.isNotEmpty() && j + 1 < raw.length && raw[j] == ',' && raw[j + 1].isAsciiDigit()) {
                     j++
-                    while (j < raw.length && bgDigits.length < 2 && raw[j].isDigit()) bgDigits.append(raw[j++])
+                    while (j < raw.length && bgDigits.length < 2 && raw[j].isAsciiDigit()) bgDigits.append(raw[j++])
                 }
                 if (fgDigits.isEmpty()) { fg = null; bg = null }
                 else {
@@ -7291,15 +7293,27 @@ private data class LinkSpan(
     val annotation: String,
 )
 
+/**
+ * Split sentence punctuation off the end of [token]. A closing bracket that pairs with an opening
+ * one in the token stays, as in `https://en.wikipedia.org/wiki/Foo_(bar)`.
+ */
 private fun splitTrailingPunctuation(token: String): Pair<String, String> {
     var t = token
     val sb = StringBuilder()
     while (t.isNotEmpty() && trailingPunct.contains(t.last())) {
+        val open = when (t.last()) { ')' -> '('; ']' -> '['; '}' -> '{'; else -> null }
+        if (open != null && t.count { it == open } >= t.count { it == t.last() }) break
         sb.insert(0, t.last())
         t = t.dropLast(1)
     }
     return t to sb.toString()
 }
+
+/** The URLs in a message's text, without formatting codes or trailing punctuation. */
+private fun messageUrls(text: String): Sequence<String> =
+    urlRegex.findAll(stripIrcFormatting(text))
+        .map { splitTrailingPunctuation(it.value).first }
+        .filter { it.contains("://") && !it.endsWith("://") }
 
 private fun computeLinkSpans(text: String): List<LinkSpan> {
     // Fast path: this runs two regexes, and mIRC-coloured text (especially ASCII art) is split
@@ -7570,10 +7584,10 @@ private fun parseMircRuns(input: String): List<MircRun> {
 
     fun parseOneOrTwoDigits(startIndex: Int): Pair<Int?, Int> {
         var i = startIndex
-        if (i >= input.length || !input[i].isDigit()) return (null to i)
+        if (i >= input.length || !input[i].isAsciiDigit()) return (null to i)
         val first = input[i]
         i++
-        if (i < input.length && input[i].isDigit()) {
+        if (i < input.length && input[i].isAsciiDigit()) {
             val num = ("$first${input[i]}").toIntOrNull()
             i++
             return (num to i)
@@ -7581,7 +7595,7 @@ private fun parseMircRuns(input: String): List<MircRun> {
         return (first.toString().toIntOrNull() to i)
     }
 
-    fun isHexDigit(c: Char): Boolean = c.isDigit() || c.lowercaseChar() in 'a'..'f'
+    fun isHexDigit(c: Char): Boolean = c.isAsciiHexDigit()
 
     /**
      * Read up to six hex digits, returning the opaque colour they spell and the index after
@@ -7611,7 +7625,7 @@ private fun parseMircRuns(input: String): List<MircRun> {
                 // and leaving that form unconsumed prints the digits into the picture.
                 var sawBg = false
                 if (i < input.length && input[i] == ',' &&
-                    i + 1 < input.length && input[i + 1].isDigit()) {
+                    i + 1 < input.length && input[i + 1].isAsciiDigit()) {
                     i++
                     val (bg, n2) = parseOneOrTwoDigits(i)
                     i = n2
@@ -7900,7 +7914,7 @@ private fun looksLikeArt(text: String): Boolean {
             '' -> {
                 if (i + 1 < text.length && text[i + 1] == '[') {
                     var j = i + 2
-                    while (j < text.length && (text[j].isDigit() || text[j] == ';')) j++
+                    while (j < text.length && (text[j].isAsciiDigit() || text[j] == ';' || text[j] == ':')) j++
                     if (j < text.length && text[j] == 'm') return true  // ANSI SGR colour
                     i = j + 1
                 } else i++

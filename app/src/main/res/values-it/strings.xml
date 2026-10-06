@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">Barra delle reti sopra il campo di input</string>
     <string name="setting_network_tabs_bottom_desc">Mostra il selettore dei canali in fondo alla chat.</string>
     <string name="setting_portrait_nicklist_overlay">Pannello nick laterale</string>
-    <string name="setting_portrait_nicklist_overlay_desc">Mostra l\'elenco nick come pannello laterale ridimensionabile invece di un popup.</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Mostra l\'elenco nick come pannello laterale ridimensionabile invece di un popup. Se attivo, il pulsante dell\'elenco nick mostra o nasconde in modo persistente.</string>
     <string name="setting_ignore_list">Lista ignorati</string>
     <string name="setting_ignore_list_desc">Nascondi messaggi e offerte DCC da specifici nick (per rete).</string>
     <string name="setting_quit_message">Messaggio di uscita</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">Abilita DCC</string>
     <string name="setting_open_app_settings">Apri impostazioni app</string>
     <string name="setting_battery_optimization">Lista ottimizzazione batteria</string>
+    <string name="setting_ctcp_replies">Rispondi alle richieste CTCP</string>
+    <string name="setting_ctcp_replies_desc">Disattiva le risposte a VERSION, TIME, PING e simili.</string>
+    <string name="setting_show_nick_icons">Mostra icone dei nick</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Chat e messaggi</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Nick</string>
     <string name="chat_ban_type_account">Account</string>
     <string name="chat_ban_type_domain">Dominio</string>
+    <string name="chat_react_custom">Reazione personalizzata</string>
+    <string name="chat_react_custom_hint">Emoji o parola</string>
+    <string name="chat_react_send">Reagisci</string>
+    <string name="chat_reply_not_loaded">Risposta a un messaggio precedente</string>
 
     <!-- Network screens -->
     <string name="networks_title">Reti</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">Dimentica il criterio STS per questo host</string>
     <string name="list_retry">Riprova</string>
     <string name="network_trust_extra_pinned_cert">Fidati anche di questo server (DNS round-robin)</string>
+    <string name="network_trust_cert_names">Considera attendibili questi nomi del certificato</string>
+    <string name="network_cert_names_accepted">Nomi del certificato accettati</string>
+    <string name="network_clear_cert_names">Non considerare più attendibili questi nomi</string>
     <string name="network_nick">Nickname</string>
     <string name="network_alt_nick">Nickname alternativo</string>
     <string name="network_username">Nome utente</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Caps IRCv3 avanzate</string>
     <string name="core_nick_change_refused">Il server non consente di cambiare nick: %1$s</string>
+    <string name="core_ctcp_reply_disabled">CTCP %1$s da %2$s ignorato (risposte disattivate)</string>
     <string name="settings_raw_log">Log grezzo del protocollo</string>
     <string name="settings_raw_log_desc">Mostra ogni riga inviata e ricevuta in un buffer Raw per rete. Le password sono nascoste. Per il debug.</string>
     <string name="chat_show_less">Mostra meno</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">Il server ha rifiutato il messaggio (%1$s): %2$s</string>
     <string name="network_edit_cap_also">richiede anche %1$s</string>
     <string name="network_edit_caps_hint">Le funzionalità IRCv3 di base sono abilitate per impostazione predefinita. Attiva per vedere le opzioni avanzate.</string>
-    <string name="network_edit_bouncer_caps">Caps bouncer (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">Caps bouncer</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">Trasferimenti file</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">Chat DCC in arrivo da %1$s</string>
-    <string name="notif_dcc_incoming_chat_text">Tocca per aprire — o usa Trasferimenti</string>
+    <string name="notif_dcc_incoming_chat_text">Tocca per aprire o usa Trasferimenti per accettare o rifiutare</string>
     <string name="notif_dcc_incoming_file_title">File in arrivo da %1$s</string>
     <string name="notif_dcc_file_done_title">DCC completato</string>
     <string name="notif_dcc_file_done_text">%1$s salvato in %2$s</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">Nick alternativo</string>
     <string name="network_username_label">Nome utente (ident)</string>
     <string name="network_bouncer_username_label">Nome utente</string>
-    <string name="network_username_bouncer_hint">Per i profili bouncer, questo è il tuo <b>nome di accesso sul bouncer</b> — lo stesso nome con cui hai configurato l\'account del bouncer. Non il tuo nick IRC.</string>
+    <string name="network_username_bouncer_hint">Per i profili bouncer, questo è il tuo <b>nome di accesso sul bouncer</b></string>
     <string name="network_realname_label">Nome reale</string>
     <string name="network_use_tls_label">Usa TLS</string>
     <string name="network_allow_plaintext">Consenti testo in chiaro</string>
     <string name="network_auto_connect_label">Connetti all\'avvio</string>
     <string name="network_show_in_switcher_label">Mostra nel selettore dei canali</string>
-    <string name="network_auto_reconnect_label">Riconnessione automatica</string>
-    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">Riconnessione automatica alla disconnessione</string>
+    <string name="network_bouncer_label">Modalità bouncer</string>
     <string name="network_bouncer_kind_label">Tipo di bouncer</string>
     <string name="network_bouncer_kind_none">Nessuno / non specificato</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">Generico  (user/network)</string>
     <string name="network_bouncer_network_label">Nome rete (opzionale)</string>
-    <string name="network_bouncer_network_help">Quale rete upstream sul bouncer punta questo profilo (es. \"libera\", \"oftc\"). Combinato con il campo nome utente del bouncer sopra sul filo — inviato in USER e, a seconda del metodo di autenticazione scelto, in SASL o nella riga PASS — usando la sintassi del tipo di bouncer selezionato.</string>
+    <string name="network_bouncer_network_help">Quale rete upstream sul bouncer usa questo profilo (es. \"afternet\", \"libera\"). Viene combinata con il campo nome utente del bouncer sopra e, a seconda del metodo di autenticazione scelto, inviata in SASL o nella riga PASS.</string>
     <string name="network_bouncer_clientid_label">ID client (opzionale)</string>
     <string name="network_bouncer_clientid_help">Un breve identificatore per questo dispositivo, ad es. \"phone\" o \"hexdroid\". Abilita buffer e cronologia per client quando il bouncer lo supporta (ZNC clientbuffer, cronologia per client di soju). Lascia vuoto per condividere un singolo buffer tra tutti i client.</string>
     <string name="network_server_password_label">Password server (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">Password</string>
     <string name="network_sasl_recommended_for_bouncers">Consigliato per i bouncer — lascia il campo nome utente vuoto per usare il nome utente del bouncer dalla sezione Generale sopra.</string>
     <string name="network_cert_format_label">Formato certificato</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">Password chiave (se cifrata)</string>
@@ -410,9 +421,9 @@
     <string name="networks_drag_reorder">Trascina per riordinare</string>
     <string name="networks_insecure_title">Connessione non sicura bloccata</string>
     <string name="networks_local_title">Accesso rete locale richiesto</string>
-    <string name="networks_local_body">La connessione a {0} richiede il permesso di rete locale.
+    <string name="networks_local_body">La connessione a {0} richiede il permesso Rete locale.
 
-Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete locale.</string>
+        È un nuovo requisito di Android 17 per connettersi ai server della tua rete locale (rete domestica, bouncer, ecc.).</string>
     <string name="networks_local_grant">Concedi permesso</string>
     <string name="networks_insecure_body">Le connessioni IRC non cifrate non sono protette e possono esporre i tuoi messaggi e la tua password.</string>
     <string name="networks_insecure_body2">Per connetterti a %1$s senza TLS, devi consentire esplicitamente le connessioni non cifrate per questa rete.</string>
@@ -459,6 +470,8 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="menu_reconnect">Riconnetti</string>
     <string name="menu_disconnect">Disconnetti</string>
     <string name="menu_exit">Esci</string>
+    <string name="menu_float">Finestra mobile</string>
+    <string name="float_needs_permission">Consenti a HexDroid di apparire sopra le altre app per usare la finestra mobile</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Avvia gli script</string>
@@ -523,10 +536,25 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Cancella</string>
+    <string name="script_pick_file_title">Scegliere un file per uno script?</string>
+    <string name="script_pick_file_body">Uno script ti chiede di scegliere un file da caricare. Riceve solo il file che scegli, e nient\'altro del dispositivo.</string>
+    <string name="script_pick_file_body_in">Uno script in %1$s ti chiede di scegliere un file da caricare. Riceve solo il file che scegli, e nient\'altro del dispositivo.</string>
+    <string name="script_pick_file_choose">Scegli file</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Connessione</string>
+    <string name="network_section_connection_desc">Indirizzo del server, porta, TLS</string>
+    <string name="network_section_identity_desc">Nick, nick alternativo, nome utente, nome reale</string>
+    <string name="network_section_autoconnect_desc">Connessione all\'avvio, riconnessione, password del server</string>
+    <string name="network_section_sasl_desc">Accedi ai servizi alla connessione</string>
+    <string name="network_section_tls_cert_desc">Certificato usato per identificarti</string>
+    <string name="network_section_autojoin_desc">Canali in cui entrare alla connessione</string>
+    <string name="network_section_postcmds_desc">Comandi da eseguire una volta connessi</string>
+    <string name="network_section_proxy_desc">Instrada questa rete tramite un proxy</string>
+    <string name="network_section_encoding_desc">Set di caratteri per questa rete</string>
+    <string name="network_section_notifications_desc">Avvisi di errore e menzioni ignorate</string>
+    <string name="network_section_ircv3_desc">Capacità da richiedere al server</string>
     <string name="network_section_identity">Identità</string>
     <string name="network_section_autoconnect">Connessione automatica &amp; Password</string>
     <string name="network_section_sasl">Autenticazione SASL</string>
@@ -562,14 +590,14 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="network_cert_selected">Selezionato: %1$s</string>
     <string name="network_cert_none">Nessun certificato selezionato.</string>
     <string name="netcert_title">Certificato per questa rete</string>
-    <string name="netcert_desc">HexDroid presenta un certificato creato solo per questa rete. Resta lo stesso quando cambi nick o IP, così puoi accedere con SASL EXTERNAL e gli operatori della rete possono riconoscere questo dispositivo. Ogni rete ne riceve uno diverso, quindi le reti non possono collegarti tra loro. Non viene incluso nei backup: reinstallando ne viene creato uno nuovo.</string>
+    <string name="netcert_desc">HexDroid presenta un certificato creato solo per questa rete, così puoi accedere con SASL EXTERNAL.</string>
     <string name="netcert_pending">Creato alla prima connessione</string>
     <string name="netcert_fingerprint">Impronta: %1$s</string>
     <string name="netcert_add_nickserv">Aggiungi all\'account %1$s</string>
     <string name="netcert_add_sent">Certificato inviato a %1$s. Controlla la risposta nel buffer del server, poi imposta SASL su EXTERNAL.</string>
     <string name="netcert_not_connected">Prima connettiti a questa rete e identificati con i suoi servizi</string>
     <string name="core_netcert_unavailable">*** Non è stato possibile creare il certificato di questa rete, quindi sei connesso senza.</string>
-    <string name="core_netcert_created">*** HexDroid ora presenta un certificato creato solo per questa rete, così puoi accedere con SASL EXTERNAL e la rete può riconoscere questo dispositivo. Puoi disattivarlo nelle impostazioni del certificato TLS della rete.</string>
+    <string name="core_netcert_created">*** HexDroid ora presenta un certificato creato solo per questa rete, così puoi accedere con SASL EXTERNAL. Puoi disattivarlo nelle impostazioni del certificato TLS della rete.</string>
     <string name="vm_auth_sasl_netcert">Se HexDroid è stato reinstallato o ripristinato, il certificato di questa rete è nuovo: identificati con la password, poi aggiungilo di nuovo al tuo account dalle impostazioni del certificato della rete.</string>
     <string name="network_cert_pem_hint">Il .pem deve includere sia il certificato che la chiave privata.</string>
     <string name="network_cert_choose_pem">Scegli .pem / .crt / .cer</string>
@@ -633,7 +661,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="theme_terminal">Terminale</string>
     <string name="section_media_previews">Anteprime multimediali</string>
     <string name="setting_image_previews">Abilita anteprime di immagini e video</string>
-    <string name="setting_image_previews_desc">Mostra anteprime in linea per immagini e link YouTube pubblicati nella chat. I link Twitter/X vengono risolti tramite fxtwitter.com (servizio di terze parti): gli ID dei tweet vengono inviati a quel servizio al caricamento dell\'anteprima.</string>
+    <string name="setting_image_previews_desc">Consenti le anteprime di immagini e link YouTube pubblicati nella chat. I link Twitter/X vengono risolti tramite fxtwitter.com - Le anteprime non sono automatiche.</string>
     <string name="setting_previews_wifi_only">Solo Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Carica le anteprime solo con il Wi-Fi per evitare l’uso dei dati mobili.</string>
     <string name="theme_system_default">Predefinito di sistema</string>
@@ -795,7 +823,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="bouncer_networks_clone_dismiss">Ignora</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">Per i bouncer, preferisci abilitare SASL sotto — è il percorso di autenticazione moderno. Se usi questo campo PASS invece, inserisci solo la password; il nome utente del bouncer e la rete dai campi sopra vengono anteposti automaticamente (inviato come <b>username/network:password</b>, o <b>username@clientid/network:password</b> per ZNC). Se preferisci digitare <b>username/network:password</b> tu stesso, funziona anche.</string>
+    <string name="network_server_password_bouncer_hint">Per i bouncer è consigliato SASL. Se usi invece questo campo PASS, inserisci solo la password; il nome utente del bouncer e la rete dai campi sopra vengono anteposti automaticamente. Funziona anche digitare l\'intero <b>username/network:password</b>.</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">Modifica i metadati</string>
@@ -1051,7 +1079,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="vm_halted_tls">Riconnessione automatica interrotta: è improbabile che un errore TLS si risolva da sé. Modifica le impostazioni di fiducia dei certificati, poi riconnettiti manualmente.</string>
     <string name="vm_halted_unreachable">Riconnessione automatica interrotta: server non raggiungibile (il nome host non si risolve o la porta è chiusa). Controlla host e porta nelle impostazioni di rete, poi riconnettiti manualmente.</string>
     <string name="vm_tls_tofu_pinned">TLS: impronta del certificato appresa e fissata (TOFU). Le connessioni future verificheranno: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Nome host del certificato non corrispondente: connesso a %1$s ma i SAN del certificato sono: %2$s. Connessione consentita.</string>
+    <string name="vm_cert_hostname_mismatch">Nome host del certificato non corrispondente! Connesso a %1$s ma il certificato è emesso per: %2$s - Connessione rifiutata. Riconnessione automatica interrotta. Se è il server che intendevi e ha solo un certificato configurato male o datato, apri le impostazioni della rete e tocca «Considera attendibili questi nomi del certificato». Se non te lo aspettavi, non accettarlo: qualcuno potrebbe intercettare la connessione.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">DCC RESUME da %1$s per %2$s ignorato — nessun invio corrispondente in corso.</string>
@@ -1167,6 +1195,8 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="core_disconnected">Disconnesso</string>
     <string name="core_disconnect_server_error">Errore del server: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">L\'impronta del certificato TLS è cambiata</string>
+    <string name="core_disconnect_tls_hostname_mismatch">Il certificato TLS non è valido per questo host</string>
+    <string name="vm_cert_hostname_grace">Nome host del certificato non corrispondente: connesso a %1$s ma il certificato è emesso per: %2$s. HexDroid prima non lo controllava, quindi questi nomi sono stati accettati una volta per far continuare a funzionare questo profilo, e la connessione viene ritentata. Se non te lo aspettavi, apri le impostazioni della rete e tocca «Non considerare più attendibili questi nomi».</string>
     <string name="core_disconnect_connect_failed">Connessione non riuscita: %1$s</string>
     <string name="core_disconnect_connection_error">Errore di connessione: %1$s</string>
     <string name="core_disconnect_registration_timeout">Timeout della registrazione</string>
@@ -1414,6 +1444,7 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="vm_ev_message_deleted">(messaggio eliminato da %1$s)</string>
     <string name="vm_ev_message_deleted_reason">(messaggio eliminato da %1$s: %2$s)</string>
     <string name="vm_history_divider">── Cronologia della chat • Ultimo messaggio: %1$s ──</string>
+    <string name="vm_history_gap">── Mancano ancora alcuni messaggi precedenti. Riapri questa conversazione per continuare a caricarli ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">Reti (%1$d): %2$s</string>
@@ -1528,7 +1559,8 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="cmd_gsearch">Cerca tra i messaggi di tutti i buffer di questa rete</string>
     <string name="cmd_gfind">Alias di /gsearch</string>
     <string name="cmd_nick">Cambia il tuo nick</string>
-    <string name="cmd_away">Imposta l\'assenza; /away senza argomenti la rimuove</string>
+    <string name="cmd_away">Ti segna come assente [reason]</string>
+    <string name="cmd_back">Rimuove lo stato di assenza</string>
     <string name="cmd_whois">Richiede informazioni dettagliate su un utente</string>
     <string name="cmd_who">Cerca gli utenti che corrispondono a una maschera</string>
     <string name="cmd_ignore">Ignora un utente (senza argomenti elenca gli ignorati)</string>
@@ -1769,4 +1801,22 @@ Questo è un nuovo requisito di Android 17 per connettersi a server sulla rete l
     <string name="setting_webpush_no_distributor">Nessun distributore push installato. Installane uno (ad esempio ntfy) per usare questa opzione.</string>
     <string name="setting_webpush_distributor_current">%1$s (in uso)</string>
     <string name="vm_webpush_failed">Notifiche push: il server ha rifiutato l’iscrizione (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">Non è possibile inviare azioni (/me) mentre +AGE è attivo per %1$s, quindi non è stato inviato nulla.</string>
+    <string name="notif_reply">Rispondi</string>
+    <string name="notif_reply_hint">Rispondi…</string>
+    <string name="notif_quit">Disconnetti</string>
+    <string name="notif_reply_not_sent_title">Risposta non inviata: non connesso</string>
+    <string name="notif_reply_not_sent_text">Apri HexDroid e riconnettiti per inviare la tua risposta a %1$s</string>
+    <string name="notif_channel_connection_desc">Stato della connessione mentre HexDroid IRC è connesso</string>
+    <string name="notif_channel_errors">Errori IRC</string>
+    <string name="notif_channel_errors_desc">Errori del server e di connessione (solo se attivati per rete)</string>
+    <string name="notif_channel_group_networks">Reti IRC</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: menzioni (silenzioso)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: menzioni</string>
+    <string name="notif_channel_net_pm">%1$s: messaggi privati</string>
+    <string name="setting_hide_hostnames">Nascondi gli hostname nei messaggi entra/esci/quit</string>
+    <string name="vm_ev_has_joined_nohost">%1$s è entrato in %2$s</string>
+    <string name="vm_ev_has_left_nohost">%1$s ha lasciato %2$s</string>
+    <string name="vm_ev_has_quit_nohost">%1$s si è disconnesso</string>
+    <string name="push_encrypted">Messaggio cifrato</string>
 </resources>

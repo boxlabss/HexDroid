@@ -2,7 +2,7 @@
     <string name="app_name">‏HexDroid IRC</string>
 
     <!-- Welcome / Setup Screen -->
-    <string name="welcome_title">مرحبًا في HexDroid IRC</string>
+    <string name="welcome_title">مرحبًا في HexDroid</string>
     <string name="welcome_subtitle">دعنا نعدّك قبل البدء.</string>
     <string name="welcome_language_label">اللغة</string>
     <string name="welcome_nick_label">الاسم المستعار</string>
@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">شريط الشبكات فوق حقل الإدخال</string>
     <string name="setting_network_tabs_bottom_desc">إظهار مبدّل القنوات في أسفل الدردشة.</string>
     <string name="setting_portrait_nicklist_overlay">لوحة جانبية للمستخدمين</string>
-    <string name="setting_portrait_nicklist_overlay_desc">عرض قائمة المستخدمين كلوحة جانبية قابلة لتغيير الحجم (كما في الوضع الأفقي) بدلاً من ورقة سفلية منبثقة. عند التفعيل، يعمل الزر كإظهار/إخفاء دائم.</string>
+    <string name="setting_portrait_nicklist_overlay_desc">عرض قائمة المستخدمين كلوحة جانبية قابلة لتغيير الحجم بدلاً من نافذة منبثقة. عند التفعيل، يعمل زر قائمة المستخدمين كإظهار/إخفاء دائم.</string>
     <string name="setting_ignore_list">قائمة التجاهل</string>
     <string name="setting_ignore_list_desc">إخفاء الرسائل وعروض DCC من أسماء مستعارة محددة (لكل شبكة).</string>
     <string name="setting_quit_message">رسالة الخروج</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">تمكين DCC</string>
     <string name="setting_open_app_settings">فتح إعدادات التطبيق</string>
     <string name="setting_battery_optimization">قائمة تحسين البطارية</string>
+    <string name="setting_ctcp_replies">الرد على طلبات CTCP</string>
+    <string name="setting_ctcp_replies_desc">تعطيل الردود على VERSION وTIME وPING وما شابهها.</string>
+    <string name="setting_show_nick_icons">إظهار أيقونات النيك</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">الدردشة والرسائل</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">النيك</string>
     <string name="chat_ban_type_account">الحساب</string>
     <string name="chat_ban_type_domain">النطاق</string>
+    <string name="chat_react_custom">تفاعل مخصّص</string>
+    <string name="chat_react_custom_hint">رمز تعبيري أو كلمة</string>
+    <string name="chat_react_send">تفاعل</string>
+    <string name="chat_reply_not_loaded">رد على رسالة سابقة</string>
 
     <!-- Network screens -->
     <string name="networks_title">الشبكات</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">نسيان سياسة STS لهذا المضيف</string>
     <string name="list_retry">إعادة المحاولة</string>
     <string name="network_trust_extra_pinned_cert">ثق أيضاً بهذا الخادم (DNS بالتناوب)</string>
+    <string name="network_trust_cert_names">الوثوق بأسماء الشهادة هذه</string>
+    <string name="network_cert_names_accepted">أسماء الشهادة المقبولة</string>
+    <string name="network_clear_cert_names">التوقف عن الوثوق بهذه الأسماء</string>
     <string name="network_nick">الاسم المستعار</string>
     <string name="network_alt_nick">الاسم البديل</string>
     <string name="network_username">اسم المستخدم</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">إمكانيات IRCv3 المتقدمة</string>
     <string name="core_nick_change_refused">الخادم لا يسمح بتغيير الاسم المستعار: %1$s</string>
+    <string name="core_ctcp_reply_disabled">تم تجاهل CTCP %1$s من %2$s (الردود معطّلة)</string>
     <string name="settings_raw_log">سجل البروتوكول الخام</string>
     <string name="settings_raw_log_desc">إظهار كل سطر مُرسل ومستلم في مخزن Raw لكل شبكة. تُخفى كلمات المرور. لأغراض تصحيح الأخطاء.</string>
     <string name="chat_show_less">إظهار أقل</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">رفض الخادم الرسالة (%1$s): %2$s</string>
     <string name="network_edit_cap_also">ويطلب أيضًا %1$s</string>
     <string name="network_edit_caps_hint">ميزات IRCv3 الأساسية مفعلة افتراضياً. شغّل لرؤية الخيارات المتقدمة.</string>
-    <string name="network_edit_bouncer_caps">إمكانيات الباونسر (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">إمكانيات الباونسر</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">عمليات النقل</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">محادثة DCC واردة من %1$s</string>
-    <string name="notif_dcc_incoming_chat_text">اضغط للفتح — أو استخدم النقلات</string>
+    <string name="notif_dcc_incoming_chat_text">اضغط للفتح أو استخدم النقلات للقبول أو الرفض</string>
     <string name="notif_dcc_incoming_file_title">ملف وارد من %1$s</string>
     <string name="notif_dcc_file_done_title">اكتمل DCC</string>
     <string name="notif_dcc_file_done_text">تم حفظ %1$s في %2$s</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">الاسم المستعار البديل</string>
     <string name="network_username_label">اسم المستخدم (ident)</string>
     <string name="network_bouncer_username_label">اسم المستخدم</string>
-    <string name="network_username_bouncer_hint">بالنسبة لملفات تعريف الـ bouncer، هذا هو <b>اسم تسجيل الدخول الخاص بك على الـ bouncer</b> — نفس الاسم الذي أنشأت به حساب الـ bouncer. ليس لقبك على IRC.</string>
+    <string name="network_username_bouncer_hint">بالنسبة لملفات تعريف الـ bouncer، هذا هو <b>اسم تسجيل الدخول الخاص بك على الـ bouncer</b></string>
     <string name="network_realname_label">الاسم الحقيقي</string>
     <string name="network_use_tls_label">استخدام TLS</string>
     <string name="network_allow_plaintext">السماح بالنص العادي</string>
     <string name="network_auto_connect_label">الاتصال عند التشغيل</string>
     <string name="network_show_in_switcher_label">إظهار في مبدّل القنوات</string>
-    <string name="network_auto_reconnect_label">إعادة الاتصال تلقائياً</string>
-    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">إعادة الاتصال تلقائيًا عند الانقطاع</string>
+    <string name="network_bouncer_label">وضع Bouncer</string>
     <string name="network_bouncer_kind_label">نوع الـ bouncer</string>
     <string name="network_bouncer_kind_none">لا شيء / غير محدد</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">عام  (user/network)</string>
     <string name="network_bouncer_network_label">اسم الشبكة (اختياري)</string>
-    <string name="network_bouncer_network_help">أي شبكة upstream على الـ bouncer يستهدفها هذا الملف الشخصي (مثل \"libera\"، \"oftc\"). يُجمع مع حقل اسم مستخدم الـ bouncer أعلاه على السلك — يُرسل في USER، واعتماداً على طريقة المصادقة التي تختارها، في SASL أو سطر PASS — باستخدام صياغة نوع الـ bouncer المختار.</string>
+    <string name="network_bouncer_network_help">الشبكة الأصلية على الـ bouncer التي يستهدفها هذا الملف الشخصي (مثل \"afternet\" أو \"libera\"). تُدمج مع حقل اسم مستخدم الـ bouncer أعلاه، وتُرسل في SASL أو في سطر PASS حسب طريقة المصادقة التي تختارها.</string>
     <string name="network_bouncer_clientid_label">معرّف العميل (اختياري)</string>
     <string name="network_bouncer_clientid_help">معرّف قصير لهذا الجهاز، مثل \"phone\" أو \"hexdroid\". يُمكّن المخازن وسجل المحادثات لكل عميل عندما يدعم الـ bouncer ذلك (ZNC clientbuffer، سجل المحادثات لكل عميل في soju). اتركه فارغاً لمشاركة مخزن واحد بين جميع العملاء.</string>
     <string name="network_server_password_label">كلمة مرور الخادم (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">كلمة المرور</string>
     <string name="network_sasl_recommended_for_bouncers">موصى به للـ bouncer — اترك حقل اسم المستخدم فارغاً لاستخدام اسم مستخدم الـ bouncer من قسم \"عام\" أعلاه.</string>
     <string name="network_cert_format_label">تنسيق الشهادة</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">كلمة مرور المفتاح (إن كان مشفراً)</string>
@@ -412,7 +423,7 @@
     <string name="networks_local_title">مطلوب إذن الشبكة المحلية</string>
     <string name="networks_local_body">الاتصال بـ {0} يتطلب إذن الشبكة المحلية.
 
-هذا متطلب جديد في Android 17 للاتصال بالخوادم على الشبكة المحلية.</string>
+        هذا متطلب جديد في Android 17 للاتصال بالخوادم على شبكتك المحلية (الشبكة المنزلية، الـ bouncer، وغيرها).</string>
     <string name="networks_local_grant">منح الإذن</string>
     <string name="networks_insecure_body">اتصالات IRC غير المشفرة ليست محمية ويمكنها كشف رسائلك وكلمة مرورك.</string>
     <string name="networks_insecure_body2">للاتصال بـ %1$s بدون TLS، يجب السماح صراحةً بالاتصالات غير المشفرة لهذه الشبكة.</string>
@@ -459,6 +470,8 @@
     <string name="menu_reconnect">إعادة الاتصال</string>
     <string name="menu_disconnect">قطع الاتصال</string>
     <string name="menu_exit">خروج</string>
+    <string name="menu_float">نافذة عائمة</string>
+    <string name="float_needs_permission">اسمح لـ HexDroid بالظهور فوق التطبيقات الأخرى لاستخدام النافذة العائمة</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">تشغيل السكربتات</string>
@@ -523,10 +536,25 @@
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">مسح</string>
+    <string name="script_pick_file_title">اختيار ملف لسكربت؟</string>
+    <string name="script_pick_file_body">يطلب منك سكربت اختيار ملف لرفعه. لن يتلقى إلا الملف الذي تختاره، ولا شيء آخر على الجهاز.</string>
+    <string name="script_pick_file_body_in">يطلب منك سكربت في %1$s اختيار ملف لرفعه. لن يتلقى إلا الملف الذي تختاره، ولا شيء آخر على الجهاز.</string>
+    <string name="script_pick_file_choose">اختيار ملف</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">الاتصال</string>
+    <string name="network_section_connection_desc">عنوان الخادم، المنفذ، TLS</string>
+    <string name="network_section_identity_desc">النيك، النيك البديل، اسم المستخدم، الاسم الحقيقي</string>
+    <string name="network_section_autoconnect_desc">الاتصال عند البدء، إعادة الاتصال، كلمة مرور الخادم</string>
+    <string name="network_section_sasl_desc">تسجيل الدخول إلى الخدمات عند الاتصال</string>
+    <string name="network_section_tls_cert_desc">الشهادة المستخدمة للتعريف بك</string>
+    <string name="network_section_autojoin_desc">القنوات التي يتم الانضمام إليها عند الاتصال</string>
+    <string name="network_section_postcmds_desc">أوامر تُنفَّذ بعد الاتصال</string>
+    <string name="network_section_proxy_desc">توجيه هذه الشبكة عبر وكيل</string>
+    <string name="network_section_encoding_desc">مجموعة المحارف لهذه الشبكة</string>
+    <string name="network_section_notifications_desc">تنبيهات الأخطاء والإشارات المتجاهلة</string>
+    <string name="network_section_ircv3_desc">الإمكانيات المطلوبة من الخادم</string>
     <string name="network_section_identity">الهوية</string>
     <string name="network_section_autoconnect">الاتصال التلقائي &amp; كلمة المرور</string>
     <string name="network_section_sasl">مصادقة SASL</string>
@@ -562,14 +590,14 @@
     <string name="network_cert_selected">المحدد: %1$s</string>
     <string name="network_cert_none">لم يتم اختيار شهادة.</string>
     <string name="netcert_title">شهادة لهذه الشبكة</string>
-    <string name="netcert_desc">يقدّم HexDroid شهادة مخصّصة لهذه الشبكة فقط. تبقى كما هي عند تغيير اسمك المستعار أو عنوان IP، فيمكنك تسجيل الدخول عبر SASL EXTERNAL ويستطيع مشغّلو الشبكة التعرّف على هذا الجهاز. لكل شبكة شهادة مختلفة، فلا تستطيع الشبكات الربط بينك. لا تُنسخ احتياطيًا: إعادة التثبيت تُنشئ شهادة جديدة.</string>
+    <string name="netcert_desc">يقدّم HexDroid شهادة مخصّصة لهذه الشبكة فقط، لتتمكن من تسجيل الدخول عبر SASL EXTERNAL.</string>
     <string name="netcert_pending">تُنشأ عند أول اتصال</string>
     <string name="netcert_fingerprint">البصمة: %1$s</string>
     <string name="netcert_add_nickserv">إضافة إلى حساب %1$s</string>
     <string name="netcert_add_sent">أُرسلت الشهادة إلى %1$s. راجع مخزن الخادم لرؤية الرد، ثم غيّر SASL إلى EXTERNAL.</string>
     <string name="netcert_not_connected">اتصل بهذه الشبكة وعرّف نفسك لدى خدماتها أولًا</string>
     <string name="core_netcert_unavailable">*** تعذّر إنشاء شهادة هذه الشبكة، لذا أنت متصل بدونها.</string>
-    <string name="core_netcert_created">*** يقدّم HexDroid الآن شهادة مخصّصة لهذه الشبكة، فيمكنك تسجيل الدخول عبر SASL EXTERNAL وتستطيع الشبكة التعرّف على هذا الجهاز. يمكنك إيقاف ذلك من إعدادات شهادة TLS للشبكة.</string>
+    <string name="core_netcert_created">*** يقدّم HexDroid الآن شهادة مخصّصة لهذه الشبكة فقط، لتتمكن من تسجيل الدخول عبر SASL EXTERNAL. يمكنك إيقاف ذلك من إعدادات شهادة TLS للشبكة.</string>
     <string name="vm_auth_sasl_netcert">إن أُعيد تثبيت HexDroid أو استعادته، فشهادة هذه الشبكة جديدة: عرّف نفسك بكلمة المرور، ثم أضفها إلى حسابك مجددًا من إعدادات شهادة الشبكة.</string>
     <string name="network_cert_pem_hint">يجب أن يتضمن ملف .pem كلاً من شهادتك والمفتاح الخاص.</string>
     <string name="network_cert_choose_pem">اختيار .pem / .crt / .cer</string>
@@ -633,7 +661,7 @@
     <string name="theme_terminal">تيرمينال</string>
     <string name="section_media_previews">معاينات الوسائط</string>
     <string name="setting_image_previews">تمكين معاينات الصور والفيديو</string>
-    <string name="setting_image_previews_desc">عرض معاينات مضمّنة للصور وروابط يوتيوب المُرسَلة في الدردشة. يتم حل روابط Twitter/X عبر fxtwitter.com (خدمة طرف ثالث) — تُرسَل معرّفات التغريدات إلى هذه الخدمة عند تحميل معاينة.</string>
+    <string name="setting_image_previews_desc">السماح بمعاينات الصور وروابط YouTube المنشورة في الدردشة. تُحلّ روابط Twitter/X عبر fxtwitter.com - المعاينات ليست تلقائية.</string>
     <string name="setting_previews_wifi_only">Wi-Fi فقط</string>
     <string name="setting_previews_wifi_only_desc">تحميل المعاينات فقط عند الاتصال بشبكة Wi-Fi لتجنب استهلاك بيانات الهاتف.</string>
     <string name="theme_system_default">إعداد النظام الافتراضي</string>
@@ -795,7 +823,7 @@
     <string name="bouncer_networks_clone_dismiss">تجاهل</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">للـ bouncer، يُفضل تفعيل SASL أدناه — فهو طريقة المصادقة الحديثة. إذا كنت ستستخدم حقل PASS هذا بدلاً من ذلك، أدخل كلمة المرور فقط؛ يُضاف اسم مستخدم الـ bouncer والشبكة من الحقول أعلاه تلقائياً (تُرسل بصيغة <b>username/network:password</b>، أو <b>username@clientid/network:password</b> لـ ZNC). إذا كنت تفضل كتابة <b>username/network:password</b> الكاملة بنفسك، فهذا يعمل أيضاً.</string>
+    <string name="network_server_password_bouncer_hint">للـ bouncer يُنصح باستخدام SASL. إذا استخدمت حقل PASS هذا بدلاً من ذلك، فأدخل كلمة المرور فقط؛ يُضاف اسم مستخدم الـ bouncer والشبكة من الحقول أعلاه في البداية تلقائيًا. كتابة <b>username/network:password</b> كاملة تعمل أيضًا.</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">تعديل البيانات الوصفية</string>
@@ -1051,7 +1079,7 @@
     <string name="vm_halted_tls">أُوقفت إعادة الاتصال التلقائية: من غير المرجّح أن يُحل خطأ TLS من تلقاء نفسه. عدّل إعدادات الثقة بالشهادات، ثم أعد الاتصال يدوياً.</string>
     <string name="vm_halted_unreachable">أُوقفت إعادة الاتصال التلقائية: الخادم غير قابل للوصول (اسم المضيف لا يُحل أو المنفذ مغلق). تحقّق من المضيف والمنفذ في إعدادات الشبكة، ثم أعد الاتصال يدوياً.</string>
     <string name="vm_tls_tofu_pinned">‏TLS: تم تعلّم بصمة الشهادة وتثبيتها (TOFU). ستتحقق الاتصالات المستقبلية من: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">عدم تطابق اسم المضيف في الشهادة: متصل بـ %1$s لكن أسماء SAN في الشهادة هي: %2$s. سُمح بالاتصال.</string>
+    <string name="vm_cert_hostname_mismatch">عدم تطابق اسم المضيف في الشهادة! متصل بـ %1$s لكن الشهادة صادرة لـ: %2$s - رُفض الاتصال. أُوقفت إعادة الاتصال التلقائية. إذا كان هذا هو الخادم الذي تقصده وكانت شهادته مضبوطة بشكل خاطئ أو قديمة فحسب، فافتح إعدادات الشبكة واضغط «الوثوق بأسماء الشهادة هذه». إذا لم تكن تتوقع ذلك فلا تقبله: قد يكون هناك من يعترض الاتصال.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">تم تجاهل DCC RESUME من %1$s لـ %2$s — لا يوجد إرسال مطابق قيد التنفيذ.</string>
@@ -1167,6 +1195,8 @@
     <string name="core_disconnected">غير متصل</string>
     <string name="core_disconnect_server_error">خطأ الخادم: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">تغيّرت بصمة شهادة TLS</string>
+    <string name="core_disconnect_tls_hostname_mismatch">شهادة TLS غير صالحة لهذا المضيف</string>
+    <string name="vm_cert_hostname_grace">عدم تطابق اسم المضيف في الشهادة: متصل بـ %1$s لكن الشهادة صادرة لـ: %2$s. لم يكن HexDroid يتحقق من ذلك سابقًا، لذا قُبلت هذه الأسماء مرة واحدة ليستمر هذا الملف الشخصي في العمل، وتجري إعادة محاولة الاتصال. إذا لم تكن تتوقع ذلك، فافتح إعدادات الشبكة واضغط «التوقف عن الوثوق بهذه الأسماء».</string>
     <string name="core_disconnect_connect_failed">فشل الاتصال: %1$s</string>
     <string name="core_disconnect_connection_error">خطأ في الاتصال: %1$s</string>
     <string name="core_disconnect_registration_timeout">انتهت مهلة التسجيل</string>
@@ -1414,6 +1444,7 @@
     <string name="vm_ev_message_deleted">(حذف %1$s الرسالة)</string>
     <string name="vm_ev_message_deleted_reason">(حذف %1$s الرسالة: %2$s)</string>
     <string name="vm_history_divider">── سجل الدردشة • آخر رسالة: %1$s ──</string>
+    <string name="vm_history_gap">── لا تزال بعض الرسائل الأقدم مفقودة. أعد فتح هذه المحادثة لمتابعة تحميلها ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">شبكات (%1$d): %2$s</string>
@@ -1528,7 +1559,8 @@
     <string name="cmd_gsearch">يبحث في رسائل جميع المخازن المؤقتة لهذه الشبكة</string>
     <string name="cmd_gfind">اختصار لـ ‎/gsearch</string>
     <string name="cmd_nick">يغيّر النيك الخاص بك</string>
-    <string name="cmd_away">يضبط حالة الغياب؛ ‎/away بدون معطيات يلغيها</string>
+    <string name="cmd_away">يضبط حالة الغياب [reason]</string>
+    <string name="cmd_back">يلغي حالة الغياب</string>
     <string name="cmd_whois">يطلب معلومات تفصيلية عن مستخدم</string>
     <string name="cmd_who">يستعلم عن المستخدمين المطابقين لقناع</string>
     <string name="cmd_ignore">يتجاهل مستخدماً (بدون معطيات يسرد المتجاهَلين)</string>
@@ -1769,4 +1801,22 @@
     <string name="setting_webpush_no_distributor">لا يوجد موزّع إشعارات مثبَّت. ثبِّت واحدًا (مثل ntfy) لاستخدام هذه الميزة.</string>
     <string name="setting_webpush_distributor_current">%1$s (قيد الاستخدام)</string>
     <string name="vm_webpush_failed">الإشعارات الفورية: رفض الخادم الاشتراك (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">لا يمكن إرسال الأفعال (/me) أثناء تفعيل +AGE في %1$s، لذا لم يُرسل شيء.</string>
+    <string name="notif_reply">رد</string>
+    <string name="notif_reply_hint">رد…</string>
+    <string name="notif_quit">قطع الاتصال</string>
+    <string name="notif_reply_not_sent_title">لم يُرسل الرد: غير متصل</string>
+    <string name="notif_reply_not_sent_text">افتح HexDroid وأعد الاتصال لإرسال ردك إلى %1$s</string>
+    <string name="notif_channel_connection_desc">حالة الاتصال أثناء اتصال HexDroid IRC</string>
+    <string name="notif_channel_errors">أخطاء IRC</string>
+    <string name="notif_channel_errors_desc">أخطاء الخادم والاتصال (فقط عند تفعيلها لكل شبكة)</string>
+    <string name="notif_channel_group_networks">شبكات IRC</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: إشارات (صامت)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: إشارات</string>
+    <string name="notif_channel_net_pm">%1$s: الرسائل الخاصة</string>
+    <string name="setting_hide_hostnames">إخفاء أسماء المضيفين في رسائل الدخول والخروج</string>
+    <string name="vm_ev_has_joined_nohost">انضم %1$s إلى %2$s</string>
+    <string name="vm_ev_has_left_nohost">غادر %1$s القناة %2$s</string>
+    <string name="vm_ev_has_quit_nohost">خرج %1$s</string>
+    <string name="push_encrypted">رسالة مشفّرة</string>
 </resources>

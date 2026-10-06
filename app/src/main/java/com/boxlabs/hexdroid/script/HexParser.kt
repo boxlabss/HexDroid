@@ -93,16 +93,16 @@ class HexParser(source: String) {
 
     private fun parseEvent(): HexBlock {
         skipWs()
-        skipWs()
         val headerStart = pos
         var header = readWord()                     // e.g. TEXT, ACTION, SIGNAL:tr_done, TEXT:*help*
-        // An mIRC header's match text may contain spaces (`on *:TEXT:!seen *:#:{`), so it runs to
-        // the `:{` that opens the body, or to the first `{` on the line.
-        if (MIRC_HEAD.containsMatchIn(header) && (pos >= src.length || src[pos] != '{')) {
+        // An mIRC header's match text may contain spaces (`on *:TEXT:!seen *:#:{`) or braces
+        // (`/^\d{3}$/`), so it runs to the `:{` that opens the body, or else to the first `{` on
+        // the line that follows whitespace.
+        if (MIRC_HEAD.containsMatchIn(header)) {
             val eol = src.indexOf('\n', headerStart).let { if (it < 0) src.length else it }
             val colonBrace = src.indexOf(":{", headerStart).takeIf { it in headerStart until eol }
             val end = if (colonBrace != null) colonBrace + 1
-                else src.indexOf('{', headerStart).takeIf { it in headerStart until eol }
+                else (headerStart + 1 until eol).firstOrNull { src[it] == '{' && src[it - 1].isWhitespace() }
             if (end != null && end > pos) {
                 header = src.substring(headerStart, end).trim()
                 pos = end
@@ -203,7 +203,7 @@ class HexParser(source: String) {
         fun field(s: String?) = s?.takeIf { it.isNotEmpty() && it != "*" }
         val regexMatch = '$' in h.substring(0, first)
         return when (event) {
-            "TEXT", "ACTION", "NOTICE" -> {
+            "TEXT", "ACTION", "NOTICE", "CTCP" -> {
                 val last = after.lastIndexOf(':')
                 val match = if (last < 0) after else after.substring(0, last)
                 val target = if (last < 0) null else after.substring(last + 1)
@@ -213,7 +213,10 @@ class HexParser(source: String) {
             // mIRC names signals in the match field, and START is its load event.
             "SIGNAL" -> HexBlock(HexBlock.Kind.EVENT, "SIGNAL:${after.substringBefore(':').uppercase()}", null, body)
             "START" -> HexBlock(HexBlock.Kind.EVENT, "LOAD", null, body)
-            "JOIN", "PART", "KICK", "MODE" -> HexBlock(HexBlock.Kind.EVENT, event, null, body, field(after))
+            "JOIN", "PART", "KICK", "MODE", "OP", "DEOP", "VOICE", "DEVOICE", "HELP", "DEHELP",
+            "BAN", "UNBAN", "RAWMODE", "TOPIC", "INVITE" -> HexBlock(HexBlock.Kind.EVENT, event, null, body, field(after))
+            // Match text only, no target field.
+            "SNOTICE", "CTCPREPLY", "FILERCVD", "FILESENT" -> HexBlock(HexBlock.Kind.EVENT, event, field(after), body)
             else -> HexBlock(HexBlock.Kind.EVENT, event, null, body)
         }
     }

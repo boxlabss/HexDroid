@@ -485,6 +485,13 @@ class EncodingLineReader(
      */
     fun readLine(): String? {
         if (!autoDetect || encodingLocked) {
+            if (autoDetect && !currentEncoding.equals("UTF-8", ignoreCase = true)) {
+                // Detected legacy encoding: a line that is valid UTF-8 still decodes as UTF-8,
+                // so clients on the same network that send UTF-8 stay readable.
+                val bytes = readRawLine() ?: return null
+                return if (EncodingHelper.isValidUtf8(bytes)) String(bytes, Charsets.UTF_8)
+                else String(bytes, EncodingHelper.getCharset(currentEncoding))
+            }
             // Fast path: locked or explicit encoding - read and decode directly.
             val (line, _) = EncodingHelper.readLine(
                 input, currentEncoding, autoDetect = false,
@@ -504,46 +511,13 @@ class EncodingLineReader(
             encodingLocked = true
             corpus.reset()
             votes.clear()
-            // Fall through to the locked fast path on this call.
-            val (line, _) = EncodingHelper.readLine(
-                input, currentEncoding, autoDetect = false,
-                onTruncated = { truncatedLineCount++ }
-            )
-            return line
+            // Read this line as a locked reader would.
+            return readLine()
         }
 
         // Detection path: read raw bytes first so we can inspect them before decoding.
-        val buffer = ByteArrayOutputStream(512)
-        var b: Int
-        while (true) {
-            b = input.read()
-            if (b == -1) {
-                // EOF - decode whatever we have and return.
-                if (buffer.size() == 0) return null
-                break
-            }
-            when (b) {
-                '\n'.code -> break
-                '\r'.code -> { /* skip CR */ }
-                else -> {
-                    // Mirror the static readLine's overflow policy: drain and drop
-                    // rather than throw so oversized bouncer lines never kill the
-                    // socket. Returning "" lets the caller skip this line cleanly.
-                    if (buffer.size() >= MAX_LINE_BYTES) {
-                        while (true) {
-                            val skip = input.read()
-                            if (skip == -1 || skip == '\n'.code) break
-                        }
-                        truncatedLineCount++
-                        return ""
-                    }
-                    buffer.write(b)
-                }
-            }
-        }
-        if (b == -1 && buffer.size() == 0) return null
-
-        val bytes = buffer.toByteArray()
+        val bytes = readRawLine() ?: return null
+        if (bytes.isEmpty()) return ""
 
         // Pure ASCII: encoding-neutral, skip vote accounting, decode as UTF-8.
         val hasHighBytes = bytes.any { it.toInt() and 0xFF >= 0x80 }
@@ -604,6 +578,33 @@ class EncodingLineReader(
         // even before the lock commits.
         val decodeWith = if (votes.isNotEmpty()) leader else bestEncoding
         return String(bytes, EncodingHelper.getCharset(decodeWith))
+    }
+
+    /**
+     * The next line's bytes without CR or LF; null at EOF with nothing read. A line over
+     * [MAX_LINE_BYTES] is drained and dropped: empty, and counted in [truncatedLineCount].
+     */
+    private fun readRawLine(): ByteArray? {
+        val buffer = ByteArrayOutputStream(512)
+        while (true) {
+            val b = input.read()
+            if (b == -1) return if (buffer.size() == 0) null else buffer.toByteArray()
+            when (b) {
+                '\n'.code -> return buffer.toByteArray()
+                '\r'.code -> Unit
+                else -> {
+                    if (buffer.size() >= MAX_LINE_BYTES) {
+                        while (true) {
+                            val skip = input.read()
+                            if (skip == -1 || skip == '\n'.code) break
+                        }
+                        truncatedLineCount++
+                        return ByteArray(0)
+                    }
+                    buffer.write(b)
+                }
+            }
+        }
     }
 
     /**

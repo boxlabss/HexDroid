@@ -1,10 +1,19 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
-## [1.7.7] 2026
+## [1.7.7] 2026-09-06
 ### Added
 - Delete logs option when no folder is selected, Export logs as .zip
-- mIRC-style headers to scripting. eg `on 1:TEXT:*http://*:#help,#dev:{`
+- Expanded .hex engine (docs at https://hexdroid.org/scripting)
+- Each network now gets its own TLS client certificate, so you can auth with SASL EXTERNAL.
+- Option to hide hostnames in join, part and quit messages (Settings > Chat).
+
+### Fixed
+- Replies now go over +AGE.
+- Notifications, their actions and their channel names always being in English, and the connection notification saying "Connected to" while reconnecting.
+- Replying from a notification now quotes the message on servers that support replies.
+- ANSI art losing a colour reset written as an empty parameter, and colon-style ANSI colours.
+- Push notifications showing ACTION for a /me
 
 ## [1.7.6] 2026-09-26
 ### Added

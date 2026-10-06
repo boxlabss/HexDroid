@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">Netwerkbalk boven het invoerveld</string>
     <string name="setting_network_tabs_bottom_desc">Toont de kanaalwisselaar onderaan de chat.</string>
     <string name="setting_portrait_nicklist_overlay">Zijpaneel nicklijst</string>
-    <string name="setting_portrait_nicklist_overlay_desc">Toon de nicklijst als een schaalbaar zijpaneel in plaats van een pop-up.</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Toon de nicklijst als een schaalbaar zijpaneel in plaats van een pop-up. Als dit aan staat, werkt de nicklijstknop als blijvend tonen/verbergen.</string>
     <string name="setting_ignore_list">Negeerlijst</string>
     <string name="setting_ignore_list_desc">Verberg berichten en DCC-aanbiedingen van specifieke nicks (per netwerk).</string>
     <string name="setting_quit_message">Afsluitbericht</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">DCC inschakelen</string>
     <string name="setting_open_app_settings">App-instellingen openen</string>
     <string name="setting_battery_optimization">Batterijoptimalisatielijst</string>
+    <string name="setting_ctcp_replies">Reageren op CTCP-verzoeken</string>
+    <string name="setting_ctcp_replies_desc">Antwoorden op VERSION, TIME, PING en dergelijke uitschakelen.</string>
+    <string name="setting_show_nick_icons">Nick-pictogrammen tonen</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Chat &amp; berichten</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Nick</string>
     <string name="chat_ban_type_account">Account</string>
     <string name="chat_ban_type_domain">Domein</string>
+    <string name="chat_react_custom">Eigen reactie</string>
+    <string name="chat_react_custom_hint">Emoji of woord</string>
+    <string name="chat_react_send">Reageren</string>
+    <string name="chat_reply_not_loaded">Antwoord op een eerder bericht</string>
 
     <!-- Network screens -->
     <string name="networks_title">Netwerken</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">STS-beleid voor deze host vergeten</string>
     <string name="list_retry">Opnieuw</string>
     <string name="network_trust_extra_pinned_cert">Vertrouw ook deze server (round-robin DNS)</string>
+    <string name="network_trust_cert_names">Deze certificaatnamen vertrouwen</string>
+    <string name="network_cert_names_accepted">Geaccepteerde certificaatnamen</string>
+    <string name="network_clear_cert_names">Deze namen niet meer vertrouwen</string>
     <string name="network_nick">Bijnaam</string>
     <string name="network_alt_nick">Alternatieve bijnaam</string>
     <string name="network_username">Gebruikersnaam</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Geavanceerde IRCv3-caps</string>
     <string name="core_nick_change_refused">De server staat het wijzigen van je nick niet toe: %1$s</string>
+    <string name="core_ctcp_reply_disabled">CTCP %1$s van %2$s genegeerd (antwoorden staan uit)</string>
     <string name="settings_raw_log">Ruw protocollogboek</string>
     <string name="settings_raw_log_desc">Toont elke verzonden en ontvangen regel in een Raw-buffer per netwerk. Wachtwoorden worden verborgen. Voor foutopsporing.</string>
     <string name="chat_show_less">Minder tonen</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">De server heeft het bericht geweigerd (%1$s): %2$s</string>
     <string name="network_edit_cap_also">vraagt ook %1$s aan</string>
     <string name="network_edit_caps_hint">Basis IRCv3-functies standaard ingeschakeld. Schakel in voor geavanceerde opties.</string>
-    <string name="network_edit_bouncer_caps">Bouncer-caps (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">Bouncer-caps</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">Bestandsoverdrachten</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">Inkomende DCC-chat van %1$s</string>
-    <string name="notif_dcc_incoming_chat_text">Tik om te openen — of gebruik Overdrachten</string>
+    <string name="notif_dcc_incoming_chat_text">Tik om te openen of gebruik Overdrachten om te accepteren/weigeren</string>
     <string name="notif_dcc_incoming_file_title">Inkomend bestand van %1$s</string>
     <string name="notif_dcc_file_done_title">DCC voltooid</string>
     <string name="notif_dcc_file_done_text">%1$s opgeslagen in %2$s</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">Alternatieve nick</string>
     <string name="network_username_label">Gebruikersnaam (ident)</string>
     <string name="network_bouncer_username_label">Gebruikersnaam</string>
-    <string name="network_username_bouncer_hint">Voor bouncerprofielen is dit je <b>inlognaam op de bouncer</b> — dezelfde naam waarmee je het bounceraccount hebt opgezet. Niet je IRC-bijnaam.</string>
+    <string name="network_username_bouncer_hint">Voor bouncerprofielen is dit je <b>inlognaam op de bouncer</b></string>
     <string name="network_realname_label">Echte naam</string>
     <string name="network_use_tls_label">TLS gebruiken</string>
     <string name="network_allow_plaintext">Onversleuteld toestaan</string>
     <string name="network_auto_connect_label">Verbinden bij opstarten</string>
     <string name="network_show_in_switcher_label">Tonen in kanaalwisselaar</string>
-    <string name="network_auto_reconnect_label">Automatisch opnieuw verbinden</string>
-    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">Automatisch opnieuw verbinden na verbreken</string>
+    <string name="network_bouncer_label">Bouncermodus</string>
     <string name="network_bouncer_kind_label">Bouncer-type</string>
     <string name="network_bouncer_kind_none">Geen / niet gespecificeerd</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">Algemeen  (user/network)</string>
     <string name="network_bouncer_network_label">Netwerknaam (optioneel)</string>
-    <string name="network_bouncer_network_help">Welk upstream-netwerk op de bouncer dit profiel target (bv. \"libera\", \"oftc\"). Wordt op de lijn gecombineerd met het bouncergebruikersnaamveld hierboven — verzonden in USER en, afhankelijk van de gekozen authenticatiemethode, in SASL of de PASS-regel — volgens de syntaxis van het gekozen bouncertype.</string>
+    <string name="network_bouncer_network_help">Welk upstream-netwerk op de bouncer dit profiel gebruikt (bijv. \"afternet\", \"libera\"). Wordt gecombineerd met het bouncergebruikersnaamveld hierboven en, afhankelijk van de gekozen authenticatiemethode, verstuurd in SASL of de PASS-regel.</string>
     <string name="network_bouncer_clientid_label">Client-ID (optioneel)</string>
     <string name="network_bouncer_clientid_help">Een korte identificatie voor dit apparaat, bv. \"phone\" of \"hexdroid\". Schakelt buffers en geschiedenis per client in wanneer de bouncer dit ondersteunt (ZNC clientbuffer, soju per-client history). Laat leeg om één buffer met alle clients te delen.</string>
     <string name="network_server_password_label">Serverwachtwoord (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">Wachtwoord</string>
     <string name="network_sasl_recommended_for_bouncers">Aanbevolen voor bouncers — laat het gebruikersnaamveld leeg om de bouncergebruikersnaam uit het gedeelte Algemeen hierboven te gebruiken.</string>
     <string name="network_cert_format_label">Certificaatformaat</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">Sleutelwachtwoord (indien versleuteld)</string>
@@ -410,9 +421,9 @@
     <string name="networks_drag_reorder">Slepen om te herordenen</string>
     <string name="networks_insecure_title">Onveilige verbinding geblokkeerd</string>
     <string name="networks_local_title">Lokale netwerktoegang vereist</string>
-    <string name="networks_local_body">Verbinding met {0} vereist de lokale netwerktoestemming.
+    <string name="networks_local_body">Verbinden met {0} vereist de toestemming Lokaal netwerk.
 
-Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokale netwerk.</string>
+        Dit is een nieuwe vereiste van Android 17 voor verbindingen met servers op je lokale netwerk (thuisnetwerk, bouncer, enz.).</string>
     <string name="networks_local_grant">Toestemming verlenen</string>
     <string name="networks_insecure_body">Onversleutelde IRC-verbindingen zijn niet beveiligd en kunnen uw berichten en wachtwoord blootstellen.</string>
     <string name="networks_insecure_body2">Om verbinding te maken met %1$s zonder TLS, moet u onversleutelde verbindingen expliciet toestaan voor dit netwerk.</string>
@@ -459,6 +470,8 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="menu_reconnect">Opnieuw verbinden</string>
     <string name="menu_disconnect">Verbreken</string>
     <string name="menu_exit">Afsluiten</string>
+    <string name="menu_float">Zwevend venster</string>
+    <string name="float_needs_permission">Sta HexDroid toe om over andere apps heen te tonen om het zwevende venster te gebruiken</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Scripts starten</string>
@@ -523,10 +536,25 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Wissen</string>
+    <string name="script_pick_file_title">Een bestand kiezen voor een script?</string>
+    <string name="script_pick_file_body">Een script vraagt je een bestand te kiezen om te uploaden. Het krijgt alleen het bestand dat je kiest, en verder niets op het apparaat.</string>
+    <string name="script_pick_file_body_in">Een script in %1$s vraagt je een bestand te kiezen om te uploaden. Het krijgt alleen het bestand dat je kiest, en verder niets op het apparaat.</string>
+    <string name="script_pick_file_choose">Bestand kiezen</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Verbinding</string>
+    <string name="network_section_connection_desc">Serveradres, poort, TLS</string>
+    <string name="network_section_identity_desc">Nick, alternatieve nick, gebruikersnaam, echte naam</string>
+    <string name="network_section_autoconnect_desc">Verbinden bij start, opnieuw verbinden, serverwachtwoord</string>
+    <string name="network_section_sasl_desc">Bij verbinden inloggen bij services</string>
+    <string name="network_section_tls_cert_desc">Certificaat waarmee je je identificeert</string>
+    <string name="network_section_autojoin_desc">Kanalen om bij verbinden te betreden</string>
+    <string name="network_section_postcmds_desc">Opdrachten die na het verbinden worden uitgevoerd</string>
+    <string name="network_section_proxy_desc">Dit netwerk via een proxy laten lopen</string>
+    <string name="network_section_encoding_desc">Tekenset voor dit netwerk</string>
+    <string name="network_section_notifications_desc">Foutmeldingen en genegeerde vermeldingen</string>
+    <string name="network_section_ircv3_desc">Capabilities die bij de server worden aangevraagd</string>
     <string name="network_section_identity">Identiteit</string>
     <string name="network_section_autoconnect">Automatisch verbinden &amp; Wachtwoord</string>
     <string name="network_section_sasl">SASL-authenticatie</string>
@@ -562,14 +590,14 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="network_cert_selected">Geselecteerd: %1$s</string>
     <string name="network_cert_none">Geen certificaat geselecteerd.</string>
     <string name="netcert_title">Certificaat voor dit netwerk</string>
-    <string name="netcert_desc">HexDroid gebruikt een certificaat dat alleen voor dit netwerk is gemaakt. Het blijft hetzelfde als je van nick of IP wisselt, zodat je kunt inloggen met SASL EXTERNAL en de operators van het netwerk dit apparaat kunnen herkennen. Elk netwerk krijgt een ander, zodat netwerken je niet aan elkaar kunnen koppelen. Het wordt niet geback-upt: na herinstalleren wordt een nieuw gemaakt.</string>
+    <string name="netcert_desc">HexDroid gebruikt een certificaat dat alleen voor dit netwerk is gemaakt, zodat je kunt inloggen met SASL EXTERNAL.</string>
     <string name="netcert_pending">Wordt gemaakt bij de eerste verbinding</string>
     <string name="netcert_fingerprint">Vingerafdruk: %1$s</string>
     <string name="netcert_add_nickserv">Toevoegen aan %1$s-account</string>
     <string name="netcert_add_sent">Certificaat naar %1$s verzonden. Bekijk het antwoord in de serverbuffer en zet SASL daarna op EXTERNAL.</string>
     <string name="netcert_not_connected">Maak eerst verbinding met dit netwerk en identificeer je bij de services</string>
     <string name="core_netcert_unavailable">*** Het certificaat van dit netwerk kon niet worden gemaakt, dus je bent zonder verbonden.</string>
-    <string name="core_netcert_created">*** HexDroid gebruikt nu een certificaat dat alleen voor dit netwerk is gemaakt, zodat je kunt inloggen met SASL EXTERNAL en het netwerk dit apparaat kan herkennen. Je kunt dit uitzetten in de TLS-certificaatinstellingen van het netwerk.</string>
+    <string name="core_netcert_created">*** HexDroid gebruikt nu een certificaat dat alleen voor dit netwerk is gemaakt, zodat je kunt inloggen met SASL EXTERNAL. Je kunt dit uitzetten in de TLS-certificaatinstellingen van het netwerk.</string>
     <string name="vm_auth_sasl_netcert">Als HexDroid opnieuw is geïnstalleerd of hersteld, is het certificaat van dit netwerk nieuw: identificeer je met je wachtwoord en voeg het daarna opnieuw toe aan je account via de certificaatinstellingen van het netwerk.</string>
     <string name="network_cert_pem_hint">De .pem moet zowel uw certificaat als uw privésleutel bevatten.</string>
     <string name="network_cert_choose_pem">.pem / .crt / .cer kiezen</string>
@@ -633,7 +661,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Mediavoorbeelden</string>
     <string name="setting_image_previews">Afbeeldings- en videovoorbeelden inschakelen</string>
-    <string name="setting_image_previews_desc">Inline voorbeelden tonen voor afbeeldingen en YouTube-links in de chat. Twitter/X-links worden verwerkt via fxtwitter.com (externe dienst) — tweet-ID\'s worden naar die dienst gestuurd bij het laden van een voorbeeld.</string>
+    <string name="setting_image_previews_desc">Voorbeelden toestaan voor afbeeldingen en YouTube-links in de chat. Twitter/X-links worden verwerkt via fxtwitter.com - Voorbeelden zijn niet automatisch.</string>
     <string name="setting_previews_wifi_only">Alleen Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Voorbeelden alleen laden bij Wi-Fi-verbinding om mobiele data te besparen.</string>
     <string name="theme_system_default">Systeemstandaard</string>
@@ -795,7 +823,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="bouncer_networks_clone_dismiss">Sluiten</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">Voor bouncers verdient SASL hieronder de voorkeur — dat is de moderne authenticatieroute. Als je dit PASS-veld in plaats daarvan gebruikt, voer alleen het wachtwoord in; de bouncergebruikersnaam en het netwerk uit de velden hierboven worden automatisch ervoor geplaatst (verzonden als <b>username/network:password</b>, of <b>username@clientid/network:password</b> voor ZNC). Als je liever zelf <b>username/network:password</b> typt, werkt dat ook.</string>
+    <string name="network_server_password_bouncer_hint">Voor bouncers wordt SASL aanbevolen. Gebruik je in plaats daarvan dit PASS-veld, voer dan alleen het wachtwoord in; de bouncergebruikersnaam en het netwerk uit de velden hierboven worden automatisch ervoor gezet. De volledige <b>username/network:password</b> intypen werkt ook.</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">Metadata bewerken</string>
@@ -1051,7 +1079,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="vm_halted_tls">Automatisch opnieuw verbinden gestopt: een TLS-fout lost zichzelf zelden op. Pas de vertrouwensinstellingen voor certificaten aan en verbind daarna handmatig opnieuw.</string>
     <string name="vm_halted_unreachable">Automatisch opnieuw verbinden gestopt: server onbereikbaar (de hostnaam wordt niet omgezet of de poort is dicht). Controleer host en poort in de netwerkinstellingen en verbind daarna handmatig opnieuw.</string>
     <string name="vm_tls_tofu_pinned">TLS: certificaatvingerafdruk geleerd en vastgezet (TOFU). Toekomstige verbindingen controleren: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Hostnaam van certificaat komt niet overeen: verbonden met %1$s maar de SAN-namen van het certificaat zijn: %2$s. Verbinding toegestaan.</string>
+    <string name="vm_cert_hostname_mismatch">Hostnaam van certificaat komt niet overeen! Verbonden met %1$s maar het certificaat is uitgegeven voor: %2$s - Verbinding geweigerd. Automatisch opnieuw verbinden gestopt. Is dit de server die je bedoelde en heeft hij alleen een verkeerd ingesteld of verouderd certificaat, open dan de netwerkinstellingen en tik op \'Deze certificaatnamen vertrouwen\'. Had je dit niet verwacht, accepteer het dan niet: iemand onderschept mogelijk de verbinding.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">DCC RESUME van %1$s voor %2$s genegeerd — geen bijbehorende verzending bezig.</string>
@@ -1167,6 +1195,8 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="core_disconnected">Verbinding verbroken</string>
     <string name="core_disconnect_server_error">Serverfout: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">Vingerafdruk van TLS-certificaat gewijzigd</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS-certificaat is niet geldig voor deze host</string>
+    <string name="vm_cert_hostname_grace">Hostnaam van certificaat komt niet overeen: verbonden met %1$s maar het certificaat is uitgegeven voor: %2$s. HexDroid controleerde dit eerder niet, dus deze namen zijn eenmalig geaccepteerd zodat dit profiel blijft werken, en de verbinding wordt opnieuw geprobeerd. Had je dit niet verwacht, open dan de netwerkinstellingen en tik op \'Deze namen niet meer vertrouwen\'.</string>
     <string name="core_disconnect_connect_failed">Verbinden mislukt: %1$s</string>
     <string name="core_disconnect_connection_error">Verbindingsfout: %1$s</string>
     <string name="core_disconnect_registration_timeout">Time-out bij registratie</string>
@@ -1414,6 +1444,7 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="vm_ev_message_deleted">(bericht verwijderd door %1$s)</string>
     <string name="vm_ev_message_deleted_reason">(bericht verwijderd door %1$s: %2$s)</string>
     <string name="vm_history_divider">── Chatgeschiedenis • Laatste bericht: %1$s ──</string>
+    <string name="vm_history_gap">── Sommige oudere berichten ontbreken nog. Open dit gesprek opnieuw om ze verder te laden ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">%1$d netwerken: %2$s</string>
@@ -1528,7 +1559,8 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="cmd_gsearch">Zoekt in de berichten van alle buffers op dit netwerk</string>
     <string name="cmd_gfind">Alias voor /gsearch</string>
     <string name="cmd_nick">Wijzigt je nick</string>
-    <string name="cmd_away">Stelt afwezigheid in; /away zonder argumenten wist die</string>
+    <string name="cmd_away">Markeert je als afwezig [reason]</string>
+    <string name="cmd_back">Heft de afwezigheid op</string>
     <string name="cmd_whois">Vraagt gedetailleerde informatie over een gebruiker op</string>
     <string name="cmd_who">Zoekt gebruikers die op een masker passen</string>
     <string name="cmd_ignore">Negeert een gebruiker (zonder argumenten toont de lijst)</string>
@@ -1769,4 +1801,22 @@ Dit is een nieuwe Android 17-vereiste voor verbindingen met servers op het lokal
     <string name="setting_webpush_no_distributor">Geen pushdistributeur geïnstalleerd. Installeer er een (bijvoorbeeld ntfy) om dit te gebruiken.</string>
     <string name="setting_webpush_distributor_current">%1$s (in gebruik)</string>
     <string name="vm_webpush_failed">Pushmeldingen: de server heeft het abonnement geweigerd (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">Acties (/me) kunnen niet worden verstuurd zolang +AGE aan staat voor %1$s, dus er is niets verstuurd.</string>
+    <string name="notif_reply">Beantwoorden</string>
+    <string name="notif_reply_hint">Beantwoorden…</string>
+    <string name="notif_quit">Verbreken</string>
+    <string name="notif_reply_not_sent_title">Antwoord niet verstuurd: geen verbinding</string>
+    <string name="notif_reply_not_sent_text">Open HexDroid en maak opnieuw verbinding om je antwoord aan %1$s te versturen</string>
+    <string name="notif_channel_connection_desc">Verbindingsstatus terwijl HexDroid IRC verbonden is</string>
+    <string name="notif_channel_errors">IRC-fouten</string>
+    <string name="notif_channel_errors_desc">Server- en verbindingsfouten (alleen als per netwerk ingeschakeld)</string>
+    <string name="notif_channel_group_networks">IRC-netwerken</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: vermeldingen (stil)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: vermeldingen</string>
+    <string name="notif_channel_net_pm">%1$s: privéberichten</string>
+    <string name="setting_hide_hostnames">Hostnamen verbergen bij betreden/verlaten/afsluiten</string>
+    <string name="vm_ev_has_joined_nohost">%1$s is %2$s binnengekomen</string>
+    <string name="vm_ev_has_left_nohost">%1$s heeft %2$s verlaten</string>
+    <string name="vm_ev_has_quit_nohost">%1$s is vertrokken</string>
+    <string name="push_encrypted">Versleuteld bericht</string>
 </resources>

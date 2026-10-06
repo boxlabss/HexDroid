@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">输入框上方显示网络栏</string>
     <string name="setting_network_tabs_bottom_desc">在聊天底部显示频道切换器。</string>
     <string name="setting_portrait_nicklist_overlay">侧边面板昵称列表</string>
-    <string name="setting_portrait_nicklist_overlay_desc">将昵称列表显示为可调整大小的侧边面板，而不是弹出窗口。</string>
+    <string name="setting_portrait_nicklist_overlay_desc">将昵称列表显示为可调整大小的侧边面板，而不是弹出窗口。启用后，昵称列表按钮会持续保持显示/隐藏状态。</string>
     <string name="setting_ignore_list">忽略列表</string>
     <string name="setting_ignore_list_desc">隐藏特定昵称的消息和 DCC 请求（按网络）。</string>
     <string name="setting_quit_message">退出消息</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">启用 DCC</string>
     <string name="setting_open_app_settings">打开应用设置</string>
     <string name="setting_battery_optimization">电池优化列表</string>
+    <string name="setting_ctcp_replies">响应 CTCP 请求</string>
+    <string name="setting_ctcp_replies_desc">关闭对 VERSION、TIME、PING 等请求的回复。</string>
+    <string name="setting_show_nick_icons">显示昵称图标</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">聊天与消息</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">昵称</string>
     <string name="chat_ban_type_account">账号</string>
     <string name="chat_ban_type_domain">域名</string>
+    <string name="chat_react_custom">自定义回应</string>
+    <string name="chat_react_custom_hint">表情或文字</string>
+    <string name="chat_react_send">回应</string>
+    <string name="chat_reply_not_loaded">回复一条较早的消息</string>
 
     <!-- Network screens -->
     <string name="networks_title">网络</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">忘记此主机的 STS 策略</string>
     <string name="list_retry">重试</string>
     <string name="network_trust_extra_pinned_cert">也信任此服务器 (轮询 DNS)</string>
+    <string name="network_trust_cert_names">信任这些证书名称</string>
+    <string name="network_cert_names_accepted">已接受的证书名称</string>
+    <string name="network_clear_cert_names">不再信任这些名称</string>
     <string name="network_nick">昵称</string>
     <string name="network_alt_nick">备用昵称</string>
     <string name="network_username">用户名</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">高级IRCv3功能</string>
     <string name="core_nick_change_refused">服务器不允许更改昵称：%1$s</string>
+    <string name="core_ctcp_reply_disabled">已忽略来自 %2$s 的 CTCP %1$s（回复已关闭）</string>
     <string name="settings_raw_log">原始协议日志</string>
     <string name="settings_raw_log_desc">在每个网络的 Raw 缓冲区中显示收发的每一行。密码会被隐藏。用于调试。</string>
     <string name="chat_show_less">收起</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">服务器拒绝了该消息（%1$s）：%2$s</string>
     <string name="network_edit_cap_also">同时请求 %1$s</string>
     <string name="network_edit_caps_hint">基本IRCv3功能默认启用。开启以查看高级选项。</string>
-    <string name="network_edit_bouncer_caps">跳板机功能 (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">跳板机功能</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">文件传输</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">来自 %1$s 的 DCC 聊天</string>
-    <string name="notif_dcc_incoming_chat_text">点击打开 — 或使用传输</string>
+    <string name="notif_dcc_incoming_chat_text">点击打开，或在传输中接受/拒绝</string>
     <string name="notif_dcc_incoming_file_title">来自 %1$s 的文件</string>
     <string name="notif_dcc_file_done_title">DCC 完成</string>
     <string name="notif_dcc_file_done_text">%1$s 已保存到 %2$s</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">备用昵称</string>
     <string name="network_username_label">用户名 (ident)</string>
     <string name="network_bouncer_username_label">用户名</string>
-    <string name="network_username_bouncer_hint">对于 bouncer 配置文件，这是你的 <b>bouncer 登录名</b> — 与你设置 bouncer 账户时使用的名称相同。不是你的 IRC 昵称。</string>
+    <string name="network_username_bouncer_hint">对于 bouncer 配置文件，这是你的 <b>bouncer 登录名</b></string>
     <string name="network_realname_label">真实姓名</string>
     <string name="network_use_tls_label">使用 TLS</string>
     <string name="network_allow_plaintext">允许明文</string>
     <string name="network_auto_connect_label">启动时连接</string>
     <string name="network_show_in_switcher_label">在频道切换器中显示</string>
-    <string name="network_auto_reconnect_label">自动重新连接</string>
-    <string name="network_bouncer_label">代理 (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">断开后自动重新连接</string>
+    <string name="network_bouncer_label">Bouncer 模式</string>
     <string name="network_bouncer_kind_label">Bouncer 类型</string>
     <string name="network_bouncer_kind_none">无 / 未指定</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">通用  (user/network)</string>
     <string name="network_bouncer_network_label">网络名称 (可选)</string>
-    <string name="network_bouncer_network_help">此配置文件在 bouncer 上要面向的上游网络（如 \"libera\"、\"oftc\"）。在线路上与上方的 bouncer 用户名字段组合 — 在 USER 中发送，并根据所选的身份验证方法在 SASL 或 PASS 行中发送 — 使用所选 bouncer 类型的语法。</string>
+    <string name="network_bouncer_network_help">此配置文件在 bouncer 上对应的上游网络（例如 \"afternet\"、\"libera\"）。它会与上方的 bouncer 用户名字段组合，并根据你选择的认证方式放在 SASL 或 PASS 行中发送。</string>
     <string name="network_bouncer_clientid_label">客户端 ID (可选)</string>
     <string name="network_bouncer_clientid_help">此设备的短标识符,例如 \"phone\" 或 \"hexdroid\"。当 bouncer 支持时(ZNC clientbuffer、soju 的每客户端历史),启用按客户端的缓冲区和历史记录。留空以让所有客户端共享单个缓冲区。</string>
     <string name="network_server_password_label">服务器密码 (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">密码</string>
     <string name="network_sasl_recommended_for_bouncers">推荐用于 bouncer — 留空用户名字段以使用上方\"常规\"部分的 bouncer 用户名。</string>
     <string name="network_cert_format_label">证书格式</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">密钥密码（如已加密）</string>
@@ -412,7 +423,7 @@
     <string name="networks_local_title">需要本地网络访问权限</string>
     <string name="networks_local_body">连接到 {0} 需要本地网络权限。
 
-这是 Android 17 对连接本地网络服务器的新要求。</string>
+        这是 Android 17 对连接本地网络服务器（家庭网络、bouncer 等）的新要求。</string>
     <string name="networks_local_grant">授予权限</string>
     <string name="networks_insecure_body">未加密的 IRC 连接不受保护，可能暴露您的消息和密码。</string>
     <string name="networks_insecure_body2">要在不使用 TLS 的情况下连接到 %1$s，您必须为此网络明确允许未加密的连接。</string>
@@ -459,6 +470,8 @@
     <string name="menu_reconnect">重新连接</string>
     <string name="menu_disconnect">断开连接</string>
     <string name="menu_exit">退出</string>
+    <string name="menu_float">悬浮窗</string>
+    <string name="float_needs_permission">允许 HexDroid 显示在其他应用上层，以使用悬浮窗</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">运行脚本</string>
@@ -523,10 +536,25 @@
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">清除</string>
+    <string name="script_pick_file_title">为脚本选择文件？</string>
+    <string name="script_pick_file_body">有脚本请求你选择要上传的文件。它只会收到你选择的文件，不会获得设备上的其他任何内容。</string>
+    <string name="script_pick_file_body_in">%1$s 中的脚本请求你选择要上传的文件。它只会收到你选择的文件，不会获得设备上的其他任何内容。</string>
+    <string name="script_pick_file_choose">选择文件</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">连接</string>
+    <string name="network_section_connection_desc">服务器地址、端口、TLS</string>
+    <string name="network_section_identity_desc">昵称、备用昵称、用户名、真实姓名</string>
+    <string name="network_section_autoconnect_desc">启动时连接、重新连接、服务器密码</string>
+    <string name="network_section_sasl_desc">连接时登录服务</string>
+    <string name="network_section_tls_cert_desc">用于识别你身份的证书</string>
+    <string name="network_section_autojoin_desc">连接时加入的频道</string>
+    <string name="network_section_postcmds_desc">连接后要运行的命令</string>
+    <string name="network_section_proxy_desc">通过代理连接此网络</string>
+    <string name="network_section_encoding_desc">此网络的字符集</string>
+    <string name="network_section_notifications_desc">错误提醒和忽略的提及</string>
+    <string name="network_section_ircv3_desc">向服务器请求的功能</string>
     <string name="network_section_identity">身份</string>
     <string name="network_section_autoconnect">自动连接 &amp; 密码</string>
     <string name="network_section_sasl">SASL 认证</string>
@@ -562,14 +590,14 @@
     <string name="network_cert_selected">已选择: %1$s</string>
     <string name="network_cert_none">未选择证书。</string>
     <string name="netcert_title">此网络专用证书</string>
-    <string name="netcert_desc">HexDroid 会出示仅为此网络创建的证书。更换昵称或 IP 时它保持不变，因此你可以用 SASL EXTERNAL 登录，网络管理员也能识别此设备。每个网络使用不同的证书，因此各网络无法相互关联你。它不会被备份：重新安装会创建新的证书。</string>
+    <string name="netcert_desc">HexDroid 会出示仅为此网络创建的证书，因此你可以用 SASL EXTERNAL 登录。</string>
     <string name="netcert_pending">首次连接时创建</string>
     <string name="netcert_fingerprint">指纹：%1$s</string>
     <string name="netcert_add_nickserv">添加到 %1$s 帐户</string>
     <string name="netcert_add_sent">已将证书发送给 %1$s。请在服务器缓冲区查看回复，然后将 SASL 改为 EXTERNAL。</string>
     <string name="netcert_not_connected">请先连接此网络并在其服务中完成身份验证</string>
     <string name="core_netcert_unavailable">*** 无法创建此网络的证书，因此你在没有证书的情况下连接。</string>
-    <string name="core_netcert_created">*** HexDroid 现在会出示仅为此网络创建的证书，因此你可以用 SASL EXTERNAL 登录，网络也能识别此设备。你可以在该网络的 TLS 证书设置中关闭此功能。</string>
+    <string name="core_netcert_created">*** HexDroid 现在会出示仅为此网络创建的证书，因此你可以用 SASL EXTERNAL 登录。可在该网络的 TLS 证书设置中关闭此功能。</string>
     <string name="vm_auth_sasl_netcert">如果重新安装或恢复了 HexDroid，此网络的证书是新的：请先用密码完成身份验证，然后在网络的证书设置中重新将它添加到你的帐户。</string>
     <string name="network_cert_pem_hint">.pem 应包含您的证书和私钥。</string>
     <string name="network_cert_choose_pem">选择 .pem / .crt / .cer</string>
@@ -633,7 +661,7 @@
     <string name="theme_terminal">终端</string>
     <string name="section_media_previews">媒体预览</string>
     <string name="setting_image_previews">启用图片和视频预览</string>
-    <string name="setting_image_previews_desc">在聊天中以内嵌方式预览图片和 YouTube 链接。Twitter/X 链接通过 fxtwitter.com（第三方服务）解析——加载预览时，推文 ID 会被发送至该服务。</string>
+    <string name="setting_image_previews_desc">允许预览聊天中发布的图片和 YouTube 链接。Twitter/X 链接通过 fxtwitter.com 解析 - 预览不会自动加载。</string>
     <string name="setting_previews_wifi_only">仅限 Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">仅在连接 Wi-Fi 时加载预览，以避免消耗移动数据流量。</string>
     <string name="theme_system_default">系统默认</string>
@@ -795,7 +823,7 @@
     <string name="bouncer_networks_clone_dismiss">关闭</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">对于 bouncer，建议启用下方的 SASL — 这是现代化的认证路径。如果你改用此 PASS 字段，只需输入密码；上方字段中的 bouncer 用户名和网络会自动添加（发送为 <b>username/network:password</b>，对于 ZNC 则为 <b>username@clientid/network:password</b>）。如果你更愿意自己输入完整的 <b>username/network:password</b>，也可以。</string>
+    <string name="network_server_password_bouncer_hint">对于 bouncer，建议使用 SASL。如果改用此 PASS 字段，只需输入密码；上方字段中的 bouncer 用户名和网络会自动加在前面。直接输入完整的 <b>username/network:password</b> 也可以。</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">编辑元数据</string>
@@ -1051,7 +1079,7 @@
     <string name="vm_halted_tls">自动重连已停止：TLS 错误通常不会自行恢复。请调整证书信任设置，然后手动重连。</string>
     <string name="vm_halted_unreachable">自动重连已停止：无法访问服务器（主机名无法解析或端口已关闭）。请在网络设置中检查主机和端口，然后手动重连。</string>
     <string name="vm_tls_tofu_pinned">TLS：已记录并固定证书指纹（TOFU）。今后的连接将校验：%1$s</string>
-    <string name="vm_cert_hostname_mismatch">证书主机名不匹配：已连接到 %1$s，但证书的 SAN 为：%2$s。已允许此连接。</string>
+    <string name="vm_cert_hostname_mismatch">证书主机名不匹配！已连接到 %1$s，但证书颁发给：%2$s - 已拒绝连接。已停止自动重新连接。如果这确实是你要连接的服务器，只是证书配置有误或较旧，请打开网络设置并点按“信任这些证书名称”。如果这出乎你的意料，请不要接受：可能有人正在拦截连接。</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">已忽略 %1$s 针对 %2$s 的 DCC RESUME — 没有对应的传输正在进行。</string>
@@ -1167,6 +1195,8 @@
     <string name="core_disconnected">已断开</string>
     <string name="core_disconnect_server_error">服务器错误：%1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS 证书指纹已更改</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS 证书对此主机无效</string>
+    <string name="vm_cert_hostname_grace">证书主机名不匹配：已连接到 %1$s，但证书颁发给：%2$s。HexDroid 以前不检查这一点，因此已一次性接受这些名称以保证此配置继续可用，并正在重试连接。如果这出乎你的意料，请打开网络设置并点按“不再信任这些名称”。</string>
     <string name="core_disconnect_connect_failed">连接失败：%1$s</string>
     <string name="core_disconnect_connection_error">连接错误：%1$s</string>
     <string name="core_disconnect_registration_timeout">注册超时</string>
@@ -1414,6 +1444,7 @@
     <string name="vm_ev_message_deleted">（%1$s 删除了一条消息）</string>
     <string name="vm_ev_message_deleted_reason">（%1$s 删除了一条消息：%2$s）</string>
     <string name="vm_history_divider">── 聊天记录 • 最后一条消息：%1$s ──</string>
+    <string name="vm_history_gap">── 仍缺少部分较早的消息。重新打开此对话以继续加载 ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">%1$d 个网络：%2$s</string>
@@ -1528,7 +1559,8 @@
     <string name="cmd_gsearch">在此网络的所有缓冲区中搜索消息</string>
     <string name="cmd_gfind">/gsearch 的别名</string>
     <string name="cmd_nick">更改你的昵称</string>
-    <string name="cmd_away">设置离开状态；不带参数的 /away 可取消</string>
+    <string name="cmd_away">将你标记为离开 [reason]</string>
+    <string name="cmd_back">取消离开状态</string>
     <string name="cmd_whois">查询用户的详细信息</string>
     <string name="cmd_who">查询与掩码匹配的用户</string>
     <string name="cmd_ignore">忽略某个用户（不带参数时列出忽略名单）</string>
@@ -1769,4 +1801,22 @@
     <string name="setting_webpush_no_distributor">未安装推送分发器。请安装一个（例如 ntfy）后使用。</string>
     <string name="setting_webpush_distributor_current">%1$s（使用中）</string>
     <string name="vm_webpush_failed">推送通知：服务器拒绝了订阅（%1$s: %2$s）。</string>
+    <string name="vm_age_no_action">%1$s 开启了 +AGE 时无法发送动作（/me），因此未发送任何内容。</string>
+    <string name="notif_reply">回复</string>
+    <string name="notif_reply_hint">回复…</string>
+    <string name="notif_quit">断开连接</string>
+    <string name="notif_reply_not_sent_title">回复未发送：未连接</string>
+    <string name="notif_reply_not_sent_text">打开 HexDroid 并重新连接，即可将回复发送给 %1$s</string>
+    <string name="notif_channel_connection_desc">HexDroid IRC 连接期间的连接状态</string>
+    <string name="notif_channel_errors">IRC 错误</string>
+    <string name="notif_channel_errors_desc">服务器和连接错误（仅在为网络启用时）</string>
+    <string name="notif_channel_group_networks">IRC 网络</string>
+    <string name="notif_channel_net_highlight_silent">%1$s：提及（静音）</string>
+    <string name="notif_channel_net_highlight_sound">%1$s：提及</string>
+    <string name="notif_channel_net_pm">%1$s：私信</string>
+    <string name="setting_hide_hostnames">在加入/离开/退出消息中隐藏主机名</string>
+    <string name="vm_ev_has_joined_nohost">%1$s加入了 %2$s</string>
+    <string name="vm_ev_has_left_nohost">%1$s离开了 %2$s</string>
+    <string name="vm_ev_has_quit_nohost">%1$s已退出</string>
+    <string name="push_encrypted">加密消息</string>
 </resources>

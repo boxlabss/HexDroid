@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">DCC aktivieren</string>
     <string name="setting_open_app_settings">App-Einstellungen öffnen</string>
     <string name="setting_battery_optimization">Liste der Akkuoptimierung</string>
+    <string name="setting_ctcp_replies">Auf CTCP-Anfragen antworten</string>
+    <string name="setting_ctcp_replies_desc">Antworten auf VERSION, TIME, PING und Ähnliches deaktivieren.</string>
+    <string name="setting_show_nick_icons">Nick-Symbole anzeigen</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Chat &amp; Nachrichten</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Nick</string>
     <string name="chat_ban_type_account">Konto</string>
     <string name="chat_ban_type_domain">Domain</string>
+    <string name="chat_react_custom">Eigene Reaktion</string>
+    <string name="chat_react_custom_hint">Emoji oder Wort</string>
+    <string name="chat_react_send">Reagieren</string>
+    <string name="chat_reply_not_loaded">Antwort auf eine frühere Nachricht</string>
 
     <!-- Network screens -->
     <string name="networks_title">Netzwerke</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">STS-Richtlinie für diesen Host vergessen</string>
     <string name="list_retry">Erneut versuchen</string>
     <string name="network_trust_extra_pinned_cert">Diesem Server ebenfalls vertrauen (Round-Robin-DNS)</string>
+    <string name="network_trust_cert_names">Diesen Zertifikatsnamen vertrauen</string>
+    <string name="network_cert_names_accepted">Akzeptierte Zertifikatsnamen</string>
+    <string name="network_clear_cert_names">Diesen Namen nicht mehr vertrauen</string>
     <string name="network_nick">Nickname</string>
     <string name="network_alt_nick">Alternativer Nickname</string>
     <string name="network_username">Benutzername</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Erweiterte IRCv3-Caps</string>
     <string name="core_nick_change_refused">Der Server lässt die Änderung des Nicks nicht zu: %1$s</string>
+    <string name="core_ctcp_reply_disabled">CTCP %1$s von %2$s ignoriert (Antworten sind aus)</string>
     <string name="settings_raw_log">Rohes Protokoll-Log</string>
     <string name="settings_raw_log_desc">Jede gesendete und empfangene Zeile in einem Raw-Puffer pro Netzwerk anzeigen. Passwörter werden ausgeblendet. Für die Fehlersuche.</string>
     <string name="chat_show_less">Weniger anzeigen</string>
@@ -459,6 +470,8 @@
     <string name="menu_reconnect">Neu verbinden</string>
     <string name="menu_disconnect">Trennen</string>
     <string name="menu_exit">Beenden</string>
+    <string name="menu_float">Schwebendes Fenster</string>
+    <string name="float_needs_permission">Erlaube HexDroid, über anderen Apps angezeigt zu werden, um das schwebende Fenster zu nutzen</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Skripte starten</string>
@@ -523,10 +536,25 @@
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Leeren</string>
+    <string name="script_pick_file_title">Datei für ein Skript auswählen?</string>
+    <string name="script_pick_file_body">Ein Skript möchte, dass du eine Datei zum Hochladen auswählst. Es erhält nur die Datei, die du auswählst, und sonst nichts auf dem Gerät.</string>
+    <string name="script_pick_file_body_in">Ein Skript in %1$s möchte, dass du eine Datei zum Hochladen auswählst. Es erhält nur die Datei, die du auswählst, und sonst nichts auf dem Gerät.</string>
+    <string name="script_pick_file_choose">Datei auswählen</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Verbindung</string>
+    <string name="network_section_connection_desc">Serveradresse, Port, TLS</string>
+    <string name="network_section_identity_desc">Nick, Ausweich-Nick, Benutzername, echter Name</string>
+    <string name="network_section_autoconnect_desc">Beim Start verbinden, neu verbinden, Serverpasswort</string>
+    <string name="network_section_sasl_desc">Beim Verbinden bei den Services anmelden</string>
+    <string name="network_section_tls_cert_desc">Zertifikat, mit dem du dich ausweist</string>
+    <string name="network_section_autojoin_desc">Kanäle, die beim Verbinden betreten werden</string>
+    <string name="network_section_postcmds_desc">Befehle, die nach dem Verbinden ausgeführt werden</string>
+    <string name="network_section_proxy_desc">Dieses Netzwerk über einen Proxy leiten</string>
+    <string name="network_section_encoding_desc">Zeichensatz für dieses Netzwerk</string>
+    <string name="network_section_notifications_desc">Fehlerhinweise und ignorierte Highlights</string>
+    <string name="network_section_ircv3_desc">Capabilities, die beim Server angefragt werden</string>
     <string name="network_section_identity">Identität</string>
     <string name="network_section_autoconnect">Automatisch verbinden &amp; Passwort</string>
     <string name="network_section_sasl">SASL-Authentifizierung</string>
@@ -562,14 +590,14 @@
     <string name="network_cert_selected">Ausgewählt: %1$s</string>
     <string name="network_cert_none">Kein Zertifikat ausgewählt.</string>
     <string name="netcert_title">Zertifikat für dieses Netzwerk</string>
-    <string name="netcert_desc">HexDroid verwendet ein Zertifikat, das nur für dieses Netzwerk erstellt wurde. Es bleibt gleich, wenn du Nick oder IP wechselst, sodass du dich per SASL EXTERNAL anmelden kannst und die Operatoren des Netzwerks dieses Gerät wiedererkennen. Jedes Netzwerk bekommt ein anderes, damit Netzwerke dich nicht untereinander verknüpfen können. Es wird nicht gesichert: Eine Neuinstallation erzeugt ein neues.</string>
+    <string name="netcert_desc">HexDroid verwendet ein Zertifikat, das nur für dieses Netzwerk erstellt wurde, sodass du dich per SASL EXTERNAL anmelden kannst.</string>
     <string name="netcert_pending">Wird beim ersten Verbinden erstellt</string>
     <string name="netcert_fingerprint">Fingerabdruck: %1$s</string>
     <string name="netcert_add_nickserv">Zum %1$s-Konto hinzufügen</string>
     <string name="netcert_add_sent">Zertifikat an %1$s gesendet. Prüfe die Antwort im Serverpuffer und stelle SASL dann auf EXTERNAL um.</string>
     <string name="netcert_not_connected">Verbinde dich zuerst mit diesem Netzwerk und identifiziere dich bei dessen Services</string>
     <string name="core_netcert_unavailable">*** Das Zertifikat dieses Netzwerks konnte nicht erstellt werden, daher bist du ohne verbunden.</string>
-    <string name="core_netcert_created">*** HexDroid verwendet jetzt ein Zertifikat nur für dieses Netzwerk, sodass du dich per SASL EXTERNAL anmelden kannst und das Netzwerk dieses Gerät wiedererkennt. Du kannst das in den TLS-Zertifikatseinstellungen des Netzwerks ausschalten.</string>
+    <string name="core_netcert_created">*** HexDroid verwendet jetzt ein Zertifikat nur für dieses Netzwerk, sodass du dich per SASL EXTERNAL anmelden kannst. Du kannst das in den TLS-Zertifikatseinstellungen des Netzwerks ausschalten.</string>
     <string name="vm_auth_sasl_netcert">Wurde HexDroid neu installiert oder wiederhergestellt, ist das Zertifikat dieses Netzwerks neu: Identifiziere dich mit deinem Passwort und füge es dann in den Zertifikatseinstellungen des Netzwerks erneut deinem Konto hinzu.</string>
     <string name="network_cert_pem_hint">Die .pem-Datei sollte sowohl dein Zertifikat als auch den privaten Schlüssel enthalten.</string>
     <string name="network_cert_choose_pem">PEM wählen</string>
@@ -1051,7 +1079,7 @@
     <string name="vm_halted_tls">Automatische Wiederverbindung gestoppt: Ein TLS-Fehler behebt sich selten von selbst. Passe die Zertifikatsvertrauenseinstellungen an und verbinde dann manuell neu.</string>
     <string name="vm_halted_unreachable">Automatische Wiederverbindung gestoppt: Server nicht erreichbar (Hostname löst nicht auf oder der Port ist geschlossen). Prüfe Host und Port in den Netzwerkeinstellungen und verbinde dann manuell neu.</string>
     <string name="vm_tls_tofu_pinned">TLS: Zertifikat-Fingerabdruck gelernt und angeheftet (TOFU). Künftige Verbindungen prüfen: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Zertifikat-Hostname stimmt nicht überein: verbunden mit %1$s, aber die SANs des Zertifikats lauten: %2$s. Verbindung zugelassen.</string>
+    <string name="vm_cert_hostname_mismatch">Zertifikat-Hostname stimmt nicht überein! Verbunden mit %1$s, aber das Zertifikat ist ausgestellt für: %2$s - Verbindung abgelehnt. Automatische Wiederverbindung gestoppt. Wenn das der gewünschte Server ist und er nur ein falsch eingerichtetes oder veraltetes Zertifikat hat, öffne die Netzwerkeinstellungen und tippe auf „Diesen Zertifikatsnamen vertrauen“. Wenn du das nicht erwartet hast, akzeptiere es nicht: Jemand könnte die Verbindung abfangen.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">DCC RESUME von %1$s für %2$s ignoriert — kein passender Sendevorgang aktiv.</string>
@@ -1167,6 +1195,8 @@
     <string name="core_disconnected">Getrennt</string>
     <string name="core_disconnect_server_error">Serverfehler: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS-Zertifikat-Fingerabdruck geändert</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS-Zertifikat ist für diesen Host nicht gültig</string>
+    <string name="vm_cert_hostname_grace">Zertifikat-Hostname stimmt nicht überein: verbunden mit %1$s, aber das Zertifikat ist ausgestellt für: %2$s. HexDroid hat das bisher nicht geprüft, daher wurden diese Namen einmalig akzeptiert, damit dieses Profil weiter funktioniert, und die Verbindung wird erneut versucht. Wenn du das nicht erwartet hast, öffne die Netzwerkeinstellungen und tippe auf „Diesen Namen nicht mehr vertrauen“.</string>
     <string name="core_disconnect_connect_failed">Verbindungsaufbau fehlgeschlagen: %1$s</string>
     <string name="core_disconnect_connection_error">Verbindungsfehler: %1$s</string>
     <string name="core_disconnect_registration_timeout">Zeitüberschreitung bei der Registrierung</string>
@@ -1414,6 +1444,7 @@
     <string name="vm_ev_message_deleted">(Nachricht von %1$s gelöscht)</string>
     <string name="vm_ev_message_deleted_reason">(Nachricht von %1$s gelöscht: %2$s)</string>
     <string name="vm_history_divider">── Chatverlauf • Letzte Nachricht: %1$s ──</string>
+    <string name="vm_history_gap">── Einige ältere Nachrichten fehlen noch. Öffne diese Unterhaltung erneut, um sie weiter zu laden ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">%1$d Netzwerke: %2$s</string>
@@ -1528,7 +1559,8 @@
     <string name="cmd_gsearch">Durchsucht die Nachrichten aller Puffer dieses Netzwerks</string>
     <string name="cmd_gfind">Alias für /gsearch</string>
     <string name="cmd_nick">Ändert deinen Nicknamen</string>
-    <string name="cmd_away">Setzt Abwesenheit; /away ohne Argumente hebt sie auf</string>
+    <string name="cmd_away">Setzt dich auf abwesend [reason]</string>
+    <string name="cmd_back">Hebt die Abwesenheit auf</string>
     <string name="cmd_whois">Fragt ausführliche Infos zu einem Benutzer ab</string>
     <string name="cmd_who">Fragt Benutzer ab, die auf eine Maske passen</string>
     <string name="cmd_ignore">Ignoriert einen Benutzer (ohne Argumente = Liste anzeigen)</string>
@@ -1769,4 +1801,22 @@
     <string name="setting_webpush_no_distributor">Kein Push-Verteiler installiert. Installiere einen (zum Beispiel ntfy), um dies zu nutzen.</string>
     <string name="setting_webpush_distributor_current">%1$s (in Verwendung)</string>
     <string name="vm_webpush_failed">Push-Benachrichtigungen: Der Server hat das Abonnement abgelehnt (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">Aktionen (/me) können nicht gesendet werden, solange +AGE für %1$s aktiv ist; es wurde nichts gesendet.</string>
+    <string name="notif_reply">Antworten</string>
+    <string name="notif_reply_hint">Antworten…</string>
+    <string name="notif_quit">Trennen</string>
+    <string name="notif_reply_not_sent_title">Antwort nicht gesendet: keine Verbindung</string>
+    <string name="notif_reply_not_sent_text">Öffne HexDroid und verbinde dich neu, um deine Antwort an %1$s zu senden</string>
+    <string name="notif_channel_connection_desc">Verbindungsstatus, solange HexDroid IRC verbunden ist</string>
+    <string name="notif_channel_errors">IRC-Fehler</string>
+    <string name="notif_channel_errors_desc">Server- und Verbindungsfehler (nur wenn pro Netzwerk aktiviert)</string>
+    <string name="notif_channel_group_networks">IRC-Netzwerke</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: Highlights (lautlos)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: Highlights</string>
+    <string name="notif_channel_net_pm">%1$s: Private Nachrichten</string>
+    <string name="setting_hide_hostnames">Hostnamen in Join-/Part-/Quit-Meldungen ausblenden</string>
+    <string name="vm_ev_has_joined_nohost">%1$s hat %2$s betreten</string>
+    <string name="vm_ev_has_left_nohost">%1$s hat %2$s verlassen</string>
+    <string name="vm_ev_has_quit_nohost">%1$s hat die Verbindung beendet</string>
+    <string name="push_encrypted">Verschlüsselte Nachricht</string>
 </resources>

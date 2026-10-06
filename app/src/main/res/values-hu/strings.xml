@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">DCC bekapcsolása</string>
     <string name="setting_open_app_settings">Alkalmazásbeállítások megnyitása</string>
     <string name="setting_battery_optimization">Akku optimalizálási lista</string>
+    <string name="setting_ctcp_replies">Válasz a CTCP-kérésekre</string>
+    <string name="setting_ctcp_replies_desc">A VERSION, TIME, PING és hasonló kérésekre adott válaszok kikapcsolása.</string>
+    <string name="setting_show_nick_icons">Becenév-ikonok megjelenítése</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Csevegés és üzenetek</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Becenév</string>
     <string name="chat_ban_type_account">Fiók</string>
     <string name="chat_ban_type_domain">Tartomány</string>
+    <string name="chat_react_custom">Egyéni reakció</string>
+    <string name="chat_react_custom_hint">Emoji vagy szó</string>
+    <string name="chat_react_send">Reagálás</string>
+    <string name="chat_reply_not_loaded">Válasz egy korábbi üzenetre</string>
 
     <!-- Network screens -->
     <string name="networks_title">Hálózatok</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">STS házirend elfelejtése ehhez a kiszolgálóhoz</string>
     <string name="list_retry">Újra</string>
     <string name="network_trust_extra_pinned_cert">Ez a szerver is megbízható (round-robin DNS)</string>
+    <string name="network_trust_cert_names">Tanúsítványnevek elfogadása</string>
+    <string name="network_cert_names_accepted">Elfogadott tanúsítványnevek</string>
+    <string name="network_clear_cert_names">Nevek elfogadásának visszavonása</string>
     <string name="network_nick">Becenév</string>
     <string name="network_alt_nick">Másod becenév</string>
     <string name="network_username">Felhasználónév</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Haladó IRCv3 képességek</string>
     <string name="core_nick_change_refused">A kiszolgáló nem engedi a becenév módosítását: %1$s</string>
+    <string name="core_ctcp_reply_disabled">Figyelmen kívül hagyott CTCP %1$s tőle: %2$s (a válaszok ki vannak kapcsolva)</string>
     <string name="settings_raw_log">Nyers protokollnapló</string>
     <string name="settings_raw_log_desc">Minden elküldött és fogadott sor megjelenítése hálózatonként egy Raw pufferben. A jelszavak rejtve maradnak. Hibakereséshez.</string>
     <string name="chat_show_less">Kevesebb megjelenítése</string>
@@ -459,6 +470,8 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="menu_reconnect">Újrakapcsolódás</string>
     <string name="menu_disconnect">Lecsatlakozás</string>
     <string name="menu_exit">Kilépés</string>
+    <string name="menu_float">Lebegő ablak</string>
+    <string name="float_needs_permission">Engedélyezd, hogy a HexDroid más alkalmazások fölött jelenjen meg, a lebegő ablak használatához</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Szkriptek indítása</string>
@@ -523,10 +536,25 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Töröl</string>
+    <string name="script_pick_file_title">Fájl kiválasztása egy szkript számára?</string>
+    <string name="script_pick_file_body">Egy szkript arra kér, hogy válassz egy feltöltendő fájlt. Csak a kiválasztott fájlt kapja meg, semmi mást az eszközről.</string>
+    <string name="script_pick_file_body_in">Egy szkript itt: %1$s arra kér, hogy válassz egy feltöltendő fájlt. Csak a kiválasztott fájlt kapja meg, semmi mást az eszközről.</string>
+    <string name="script_pick_file_choose">Fájl kiválasztása</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Kapcsolat</string>
+    <string name="network_section_connection_desc">Szervercím, port, TLS</string>
+    <string name="network_section_identity_desc">Becenév, tartalék becenév, felhasználónév, valódi név</string>
+    <string name="network_section_autoconnect_desc">Kapcsolódás indításkor, újrakapcsolódás, szerverjelszó</string>
+    <string name="network_section_sasl_desc">Bejelentkezés a szolgáltatásokba kapcsolódáskor</string>
+    <string name="network_section_tls_cert_desc">A téged azonosító tanúsítvány</string>
+    <string name="network_section_autojoin_desc">Kapcsolódáskor belépendő csatornák</string>
+    <string name="network_section_postcmds_desc">Kapcsolódás után futtatandó parancsok</string>
+    <string name="network_section_proxy_desc">A hálózat forgalmának proxyn át vezetése</string>
+    <string name="network_section_encoding_desc">A hálózat karakterkészlete</string>
+    <string name="network_section_notifications_desc">Hibaértesítések és figyelmen kívül hagyott kiemelések</string>
+    <string name="network_section_ircv3_desc">A szervertől kért képességek</string>
     <string name="network_section_identity">Identitás</string>
     <string name="network_section_autoconnect">Auto-kapcsolódás &amp; Jelszó</string>
     <string name="network_section_sasl">SASL Hitelesítés</string>
@@ -562,14 +590,14 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="network_cert_selected">Választott: %1$s</string>
     <string name="network_cert_none">Nincs kiválasztott tanúsítvány.</string>
     <string name="netcert_title">Tanúsítvány ehhez a hálózathoz</string>
-    <string name="netcert_desc">A HexDroid egy csak ehhez a hálózathoz készült tanúsítványt használ. Becenév- vagy IP-váltáskor sem változik, így SASL EXTERNAL-lal léphetsz be, a hálózat operátorai pedig felismerhetik ezt az eszközt. Minden hálózat másikat kap, így a hálózatok nem tudnak összekapcsolni. Nem kerül a biztonsági mentésbe: újratelepítéskor új készül.</string>
+    <string name="netcert_desc">A HexDroid egy csak ehhez a hálózathoz készült tanúsítványt használ, így SASL EXTERNAL-lal léphetsz be.</string>
     <string name="netcert_pending">Az első csatlakozáskor jön létre</string>
     <string name="netcert_fingerprint">Ujjlenyomat: %1$s</string>
     <string name="netcert_add_nickserv">Hozzáadás a(z) %1$s-fiókhoz</string>
     <string name="netcert_add_sent">Tanúsítvány elküldve ide: %1$s. Nézd meg a választ a szerverpufferben, majd állítsd a SASL-t EXTERNAL-ra.</string>
     <string name="netcert_not_connected">Előbb csatlakozz ehhez a hálózathoz, és azonosítsd magad a szolgáltatásainál</string>
     <string name="core_netcert_unavailable">*** A hálózat tanúsítványát nem sikerült létrehozni, ezért nélküle csatlakoztál.</string>
-    <string name="core_netcert_created">*** A HexDroid mostantól egy csak ehhez a hálózathoz készült tanúsítványt használ, így SASL EXTERNAL-lal léphetsz be, a hálózat pedig felismerheti ezt az eszközt. Ezt a hálózat TLS-tanúsítvány beállításaiban kapcsolhatod ki.</string>
+    <string name="core_netcert_created">*** A HexDroid mostantól egy csak ehhez a hálózathoz készült tanúsítványt használ, így SASL EXTERNAL-lal léphetsz be. Ezt a hálózat TLS-tanúsítvány beállításaiban kapcsolhatod ki.</string>
     <string name="vm_auth_sasl_netcert">Ha a HexDroidot újratelepítették vagy visszaállították, a hálózat tanúsítványa új: azonosítsd magad a jelszavaddal, majd add hozzá újra a fiókodhoz a hálózat tanúsítványbeállításaiban.</string>
     <string name="network_cert_pem_hint">A .pem fájl kell tartalmazza mind a tanúsítványt, mind a privát kulcsot.</string>
     <string name="network_cert_choose_pem">PEM választás</string>
@@ -1051,7 +1079,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="vm_halted_tls">Az automatikus újracsatlakozás leállt: a TLS hiba valószínűleg nem oldódik meg magától. Módosítsd a tanúsítványokra vonatkozó bizalmi beállításokat, majd csatlakozz újra kézzel.</string>
     <string name="vm_halted_unreachable">Az automatikus újracsatlakozás leállt: a kiszolgáló nem érhető el (a gépnév nem oldható fel, vagy a port zárva van). Ellenőrizd a kiszolgálót és a portot a Hálózati beállításokban, majd csatlakozz újra kézzel.</string>
     <string name="vm_tls_tofu_pinned">TLS: A tanúsítvány ujjlenyomata megtanulva és rögzítve (TOFU). A további kapcsolatok ezt fogják ellenőrizni: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">A tanúsítvány gépneve nem egyezik: kapcsolódás ide: %1$s, de a tanúsítvány SAN értékei: %2$s. A kapcsolat engedélyezve.</string>
+    <string name="vm_cert_hostname_mismatch">A tanúsítvány gépneve nem egyezik! Kapcsolódás ide: %1$s, de a tanúsítványt erre állították ki: %2$s - A kapcsolat elutasítva. Az automatikus újracsatlakozás leállt. Ha ez a kívánt szerver, és csak rosszul beállított vagy régi tanúsítványa van, nyisd meg a hálózat beállításait, és koppints a „Tanúsítványnevek elfogadása” gombra. Ha erre nem számítottál, ne fogadd el: lehet, hogy valaki lehallgatja a kapcsolatot.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">DCC RESUME figyelmen kívül hagyva tőle: %1$s ehhez: %2$s — nincs megfelelő folyamatban lévő küldés.</string>
@@ -1167,6 +1195,8 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="core_disconnected">Kapcsolat bontva</string>
     <string name="core_disconnect_server_error">Kiszolgálóhiba: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">A TLS tanúsítvány ujjlenyomata megváltozott</string>
+    <string name="core_disconnect_tls_hostname_mismatch">A TLS-tanúsítvány nem érvényes erre a gépre</string>
+    <string name="vm_cert_hostname_grace">A tanúsítvány gépneve nem egyezik: kapcsolódás ide: %1$s, de a tanúsítványt erre állították ki: %2$s. A HexDroid ezt korábban nem ellenőrizte, ezért ezeket a neveket egyszer elfogadtuk, hogy a profil továbbra is működjön, és a kapcsolódás újrapróbálása folyamatban van. Ha erre nem számítottál, nyisd meg a hálózat beállításait, és koppints a „Nevek elfogadásának visszavonása” gombra.</string>
     <string name="core_disconnect_connect_failed">A kapcsolódás nem sikerült: %1$s</string>
     <string name="core_disconnect_connection_error">Kapcsolódási hiba: %1$s</string>
     <string name="core_disconnect_registration_timeout">Regisztrációs időtúllépés</string>
@@ -1414,6 +1444,7 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="vm_ev_message_deleted">(az üzenetet törölte: %1$s)</string>
     <string name="vm_ev_message_deleted_reason">(az üzenetet törölte: %1$s: %2$s)</string>
     <string name="vm_history_divider">── Csevegési előzmények • Utolsó üzenet: %1$s ──</string>
+    <string name="vm_history_gap">── Néhány régebbi üzenet még hiányzik. Nyisd meg újra ezt a beszélgetést a betöltésük folytatásához ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">%1$d hálózat: %2$s</string>
@@ -1528,7 +1559,8 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="cmd_gsearch">Keresés a hálózat összes pufferének üzeneteiben</string>
     <string name="cmd_gfind">A /gsearch másik neve</string>
     <string name="cmd_nick">A beceneved megváltoztatása</string>
-    <string name="cmd_away">Távollét beállítása; az /away argumentum nélkül törli</string>
+    <string name="cmd_away">Távolinak jelölés [reason]</string>
+    <string name="cmd_back">Visszatérés a távollétből</string>
     <string name="cmd_whois">Részletes információ lekérdezése egy felhasználóról</string>
     <string name="cmd_who">Maszkra illeszkedő felhasználók lekérdezése</string>
     <string name="cmd_ignore">Felhasználó figyelmen kívül hagyása (argumentum nélkül listáz)</string>
@@ -1769,4 +1801,22 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="setting_webpush_no_distributor">Nincs telepítve push-elosztó. Telepíts egyet (például ntfy), hogy használhasd.</string>
     <string name="setting_webpush_distributor_current">%1$s (használatban)</string>
     <string name="vm_webpush_failed">Push-értesítések: a kiszolgáló elutasította a feliratkozást (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">Amíg a +AGE be van kapcsolva itt: %1$s, műveletek (/me) nem küldhetők, így semmi sem lett elküldve.</string>
+    <string name="notif_reply">Válasz</string>
+    <string name="notif_reply_hint">Válasz…</string>
+    <string name="notif_quit">Kapcsolat bontása</string>
+    <string name="notif_reply_not_sent_title">A válasz nem lett elküldve: nincs kapcsolat</string>
+    <string name="notif_reply_not_sent_text">Nyisd meg a HexDroidot, és csatlakozz újra a válasz elküldéséhez ide: %1$s</string>
+    <string name="notif_channel_connection_desc">Kapcsolat állapota, amíg a HexDroid IRC csatlakozva van</string>
+    <string name="notif_channel_errors">IRC Hibák</string>
+    <string name="notif_channel_errors_desc">Szerver- és kapcsolati hibák (csak ha hálózatonként be van kapcsolva)</string>
+    <string name="notif_channel_group_networks">IRC Hálózatok</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: Kiemelések (Néma)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: Kiemelések</string>
+    <string name="notif_channel_net_pm">%1$s: Privát Üzenetek</string>
+    <string name="setting_hide_hostnames">Hosztnevek elrejtése a join/part/quit üzenetekben</string>
+    <string name="vm_ev_has_joined_nohost">%1$s belépett ide: %2$s</string>
+    <string name="vm_ev_has_left_nohost">%1$s elhagyta ezt: %2$s</string>
+    <string name="vm_ev_has_quit_nohost">%1$s kilépett</string>
+    <string name="push_encrypted">Titkosított üzenet</string>
 </resources>

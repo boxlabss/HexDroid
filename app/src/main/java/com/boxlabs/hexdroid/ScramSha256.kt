@@ -48,7 +48,7 @@ class ScramSha256Client(
     private val password: String = SaslPrep.prepare(password)
 
     private val gs2Header = "n,,"
-    private val clientFirstBare = "n=${saslName(username)},r=$clientNonce"
+    private val clientFirstBare = "n=${saslName(this.username)},r=$clientNonce"
     private val clientFirst = gs2Header + clientFirstBare
 
     private var serverFirst: String? = null

@@ -171,6 +171,9 @@ data class CapPrefs(
     val webPush: Boolean = true
 )
 
+/** One change in a channel MODE line: [adding], the mode letter, and its argument when it takes one. */
+data class ChannelModeChange(val adding: Boolean, val mode: Char, val arg: String?)
+
 data class TlsClientCert(
     val pkcs12: ByteArray = ByteArray(0),
     val password: String? = null,
@@ -715,6 +718,24 @@ data class Notice(
     object YoureDeOpered : IrcEvent()
     /** ChannelModeChanged — live MODE change on a channel (not 324 snapshot) */
     data class ChannelModeChanged(val channel: String, val modes: String) : IrcEvent()
+
+    /** A channel MODE line from [byNick]: as written ([modes], with arguments) and as single changes. */
+    data class ChannelModeChanges(
+        val channel: String,
+        val byNick: String?,
+        val modes: String,
+        val changes: List<ChannelModeChange>,
+        val isHistory: Boolean = false,
+    ) : IrcEvent()
+
+    /** A CTCP request (anything but ACTION) from [from]: [command] uppercased, then its arguments. */
+    data class CtcpRequest(
+        val from: String,
+        val target: String,
+        val command: String,
+        val args: String,
+        val isHistory: Boolean = false,
+    ) : IrcEvent()
 
     data class Joined(val channel: String, val nick: String, val userHost: String? = null, val timeMs: Long? = null, val isHistory: Boolean = false,
         /** IRCv3 extended-join: services account name sent in JOIN params[1], or null if not logged in ("*"). */
@@ -1643,15 +1664,22 @@ class IrcClient(val config: IrcConfig) {
         private val sslContextCache = java.util.concurrent.ConcurrentHashMap<SslContextKey, SSLContext>()
 
         /**
-         * Key for [sslContextCache]: trust mode, client certificate and password (by hash), and
-         * TOFU pin, since each changes the context's trust or key material.
+         * Key for [sslContextCache]: trust mode, client certificate (Keystore alias, or a digest of
+         * the PKCS#12 and its password), and TOFU pin, since each changes the context's trust or
+         * key material.
          */
         private data class SslContextKey(
             val allowInvalidCerts: Boolean,
-            val clientCertContentHash: Int,
-            val clientCertPasswordHash: Int,
+            val keystoreAlias: String?,
+            val pkcs12Sha256: String?,
+            val passwordSha256: String?,
             val tlsTofuFingerprint: String?,
         )
+
+        /** Lowercase hex SHA-256 of [bytes]. */
+        private fun sha256Hex(bytes: ByteArray): String =
+            java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+                .joinToString("") { b -> (b.toInt() and 0xff).toString(16).padStart(2, '0') }
     }
 
     @Volatile private var socket: Socket? = null
@@ -1662,6 +1690,10 @@ class IrcClient(val config: IrcConfig) {
      */
     @Volatile private var lastQuitCode: DisconnectCode = DisconnectCode.USER_QUIT
     private var triedAltNick = false
+    /** The last nick sent from the nick-in-use fallback below, before registration. */
+    private var lastNickTried: String? = null
+    /** NICKLEN learned from a server cutting a nick we sent, before 005 can say. */
+    private var observedNickLen: Int? = null
     // True once 001 (RPL_WELCOME) is received. After registration, 433 during pre-reg
     // IRCd's like Ergo sends the correct nick via 001 after SASL completes, so any
     // queued 433 responses for nicks tried before SASL finished should be ignored.
@@ -2610,7 +2642,8 @@ class IrcClient(val config: IrcConfig) {
 						val from = msg.prefixNick() ?: "?"
 						val rawTarget = msg.params.getOrNull(0) ?: return
 						val target = normalizeMsgTarget(rawTarget)
-						val textRaw = msg.trailing ?: ""
+						// The text is the last parameter, sent without a colon when it is one word.
+						val textRaw = msg.trailing ?: msg.params.getOrNull(1) ?: ""
 
 						// IRCv3 multiline: if this line is part of an open multiline batch
 						// for our session, accumulate its body into the batch state instead
@@ -2739,6 +2772,9 @@ class IrcClient(val config: IrcConfig) {
 								val spaceIdx = ctcpContent.indexOf(' ')
 								val ctcpCmd = (if (spaceIdx > 0) ctcpContent.substring(0, spaceIdx) else ctcpContent).uppercase()
 								val ctcpArgs = if (spaceIdx > 0) ctcpContent.substring(spaceIdx + 1) else ""
+								if (ctcpCmd != "ACTION") {
+									send(IrcEvent.CtcpRequest(from, target, ctcpCmd, ctcpArgs, isHistory = playbackHistory))
+								}
 
 								// Sanitise the sender nick used in outgoing NOTICE targets: strip
 								// CR/LF/NUL so a malicious server prefix cannot inject IRC commands.
@@ -2928,7 +2964,7 @@ class IrcClient(val config: IrcConfig) {
 						val from = msg.prefixNick() ?: (msg.prefix ?: "?")
 						val rawTarget = msg.params.getOrNull(0) ?: "*server*"
 						val target = normalizeMsgTarget(rawTarget)
-						val text = msg.trailing ?: ""
+						val text = msg.trailing ?: msg.params.getOrNull(1) ?: ""
 
 						// IRCv3 multiline: same buffering path as PRIVMSG above. Multiline
 						// batches can carry NOTICE rather than PRIVMSG (per spec - lines
@@ -3230,7 +3266,7 @@ class IrcClient(val config: IrcConfig) {
 						// trailing parameter, but a server may send the user itself as
 						// the trailing parameter when there's no comment (KICK #chan :user).
 						val victim = msg.params.getOrNull(1) ?: msg.trailing ?: return
-						val reason = if (msg.params.size >= 2) msg.trailing else null
+						val reason = msg.params.getOrNull(2) ?: if (msg.params.size >= 2) msg.trailing else null
 						val chanHist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
 						send(
 							IrcEvent.Kicked(
@@ -3259,7 +3295,7 @@ class IrcClient(val config: IrcConfig) {
 						}
 						val userHost = msg.prefix?.substringAfter('!', missingDelimiterValue = "")
 							?.takeIf { it.isNotBlank() }
-						val reason = msg.trailing
+						val reason = msg.trailing ?: msg.params.getOrNull(0)
 						send(IrcEvent.Quit(nick = nick, userHost = userHost, reason = reason, timeMs = serverTimeMs, isHistory = playbackHistory, historyChannel = playbackChannelFor(msg.tags)))
 					}
 
@@ -3274,7 +3310,7 @@ class IrcClient(val config: IrcConfig) {
 
 					"TOPIC" -> {
 						val chan = msg.params.firstOrNull() ?: return
-						val topic = msg.trailing
+						val topic = msg.trailing ?: msg.params.getOrNull(1)
 						val setter = msg.prefixNick()
 						send(IrcEvent.Topic(chan, topic, setter = setter, timeMs = serverTimeMs, isHistory = (playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs))))
 					}
@@ -3321,6 +3357,10 @@ class IrcClient(val config: IrcConfig) {
 						parseChannelUserModes(target, modeStr, args).forEach { (nick, prefix, adding) ->
 							send(IrcEvent.ChannelUserMode(target, nick, prefix, adding, timeMs = serverTimeMs, isHistory = isHistoryMode, byNick = msg.prefixNick()))
 						}
+						send(IrcEvent.ChannelModeChanges(
+							target, msg.prefixNick(), (listOf(modeStr) + args).joinToString(" "),
+							parseModeChanges(modeStr, args), isHistory = isHistoryMode,
+						))
 
 						// Surface the simple-mode delta so the ViewModel can keep the channel's
 						// stored mode string current (drives the Channel Tools toggles).
@@ -3399,7 +3439,7 @@ class IrcClient(val config: IrcConfig) {
 					"AWAY" -> {
 						val nick = msg.prefixNick() ?: return
 						if (nickEquals(nick, currentNick)) return  // skip our own reflected echo
-						send(IrcEvent.AwayChanged(nick, msg.trailing, timeMs = serverTimeMs))
+						send(IrcEvent.AwayChanged(nick, msg.trailing ?: msg.params.getOrNull(0), timeMs = serverTimeMs))
 					}
 
 					// draft/relaymsg: relay bot forwarded a message on behalf of another user.
@@ -3411,7 +3451,7 @@ class IrcClient(val config: IrcConfig) {
 						if (!config.capPrefs.draftRelaymsg) return
 						val target    = msg.params.getOrNull(0) ?: return
 						val relayNick = msg.params.getOrNull(1) ?: return
-						val text      = msg.trailing ?: return
+						val text      = msg.trailing ?: msg.params.getOrNull(2) ?: return
 						val isAction  = text.startsWith("\u0001ACTION ") && text.endsWith("\u0001")
 						val body      = if (isAction) text.removePrefix("\u0001ACTION ").removeSuffix("\u0001") else text
 						send(IrcEvent.ChatMessage(
@@ -3626,7 +3666,7 @@ class IrcClient(val config: IrcConfig) {
 						val newName = msg.params.getOrNull(1) ?: return
 						send(IrcEvent.ChannelRenamed(oldName = oldName, newName = newName, timeMs = serverTimeMs))
 						// Also emit a status line so the rename appears in the buffer history.
-						val reason = msg.trailing
+						val reason = msg.trailing ?: msg.params.getOrNull(2)
 						val text = if (reason.isNullOrBlank()) tr(R.string.core_channel_renamed, oldName, newName)
 						          else tr(R.string.core_channel_renamed_reason, oldName, newName, reason)
 						send(IrcEvent.ServerText(text, code = "RENAME"))
@@ -5526,7 +5566,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         // RPL_LIST: <me> <#chan> <visible> :topic
         val chan = msg.params.getOrNull(1) ?: return@handler
         val users = msg.params.getOrNull(2)?.toIntOrNull() ?: 0
-        val topic = (msg.trailing ?: "").let { stripIrcFormatting(it) }
+        val topic = (msg.trailing ?: msg.params.getOrNull(3) ?: "").let { stripIrcFormatting(it) }
         send(IrcEvent.ChannelListItem(chan, users, topic))
     },
     "323" to handler@{ _, _, _, _ -> send(IrcEvent.ChannelListEnd) },
@@ -5537,7 +5577,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
     // tell the LIST screen to show a retry affordance rather than an empty result.
     "263" to handler@{ msg, _, _, _ ->
         val command = msg.params.getOrNull(1) ?: ""
-        val detail = msg.trailing?.takeIf { it.isNotBlank() }
+        val detail = (msg.trailing ?: msg.params.getOrNull(2))?.takeIf { it.isNotBlank() }
         send(IrcEvent.ChannelListEnd)
         send(IrcEvent.TryAgain(command = command.uppercase(Locale.ROOT), message = detail))
     },
@@ -5546,7 +5586,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
     "332" to handler@{ msg, serverTimeMs, playbackHistory, nowMs ->
         // RPL_TOPIC: <me> <#chan> :topic
         val chan = msg.params.getOrNull(1) ?: return@handler
-        val topic = msg.trailing
+        val topic = msg.trailing ?: msg.params.getOrNull(2)
         val hist = playbackHistory || isHeuristicHistory(chan, serverTimeMs, nowMs)
         send(IrcEvent.TopicReply(chan, topic, timeMs = serverTimeMs, isHistory = hist))
     },
@@ -5594,7 +5634,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
         // With userhost-in-names CAP, entries are [prefix]nick!user@host - strip the
         // user@host so channel tracking, nick colouring, and case-folding work correctly.
         val chan = msg.params.getOrNull(2) ?: return@handler
-        val names = (msg.trailing ?: "").split(Regex("\\s+")).filter { it.isNotBlank() }
+        val names = (msg.trailing ?: msg.params.getOrNull(3) ?: "").split(Regex("\\s+")).filter { it.isNotBlank() }
             .map { raw ->
                 // Find where prefixes end and the nick!user@host begins.
                 // Use server-negotiated prefixSymbols (updated from 005 PREFIX) so non-standard
@@ -5945,14 +5985,23 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					// the 001 welcome is already issued with the correct nick. Acting on them
 					// would cause an endless collision loop.
 					if (!registered) {
+						// A server that cuts a long nick to its NICKLEN reports the cut nick, so a
+						// suffix appended past that length would be cut off again on every retry.
+						val sent = lastNickTried ?: config.nick
+						val rejected = msg.params.getOrNull(1)?.takeIf { it != "*" }
+						if (rejected != null && rejected.length < sent.length) observedNickLen = rejected.length
 						val alt = config.altNick
 						if (!triedAltNick && !alt.isNullOrBlank()) {
 							triedAltNick = true
+							lastNickTried = alt
 							writeLine("NICK $alt")
 							send(IrcEvent.Status(tr(R.string.core_nick_in_use_alt, alt)))
 						} else {
-							val rnd = (1000 + rng.nextInt(9000)).toString()
-							val next = (alt ?: config.nick) + "_" + rnd
+							val suffix = "_" + (1000 + rng.nextInt(9000)).toString()
+							val base = alt?.takeIf { it.isNotBlank() } ?: config.nick
+							val room = observedNickLen?.let { (it - suffix.length).coerceAtLeast(1) } ?: base.length
+							val next = base.take(room) + suffix
+							lastNickTried = next
 							writeLine("NICK $next")
 							send(IrcEvent.Status(tr(R.string.core_nick_in_use_next, next)))
 						}
@@ -6504,13 +6553,14 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			return if (isIpv6Literal(literal)) literal else null
 		}
 		if (f.contains('.')) {
-			// Dotted quad: exactly four octets, each 0..255, all numeric.
+			// Dotted quad: exactly four octets of one to three ASCII digits, each 0..255.
 			val octets = f.split('.')
 			if (octets.size != 4) return null
-			if (octets.any { (it.toIntOrNull() ?: -1) !in 0..255 }) return null
+			if (octets.any { it.length !in 1..3 || !it.all { c -> c.isAsciiDigit() } || it.toInt() > 255 }) return null
 			return f
 		}
 		// Classic 32-bit integer form (IPv4 only).
+		if (f.isEmpty() || !f.all { it.isAsciiDigit() }) return null
 		val v = f.toLongOrNull() ?: return null
 		if (v !in 0L..0xFFFFFFFFL) return null
 		return ipFromLong(v)
@@ -6532,7 +6582,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			val octets = v4.split('.')
 			if (octets.size != 4) return false
 			for (p in octets) {
-				if (p.isEmpty() || p.length > 3 || p.any { !it.isDigit() }) return false
+				if (p.isEmpty() || p.length > 3 || p.any { !it.isAsciiDigit() }) return false
 				if ((p.toIntOrNull() ?: -1) !in 0..255) return false
 			}
 			work = s.substring(0, lastColon) + ":0:0"
@@ -6643,17 +6693,22 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 			//
 			// SSLContext.init() may only be called ONCE per context instance, so the cache key
 			// must encode every aspect of the context's behaviour, see SslContextKey above.
+			val clientCert = config.clientCert
 			val cacheKey = SslContextKey(
 				allowInvalidCerts = config.allowInvalidCerts,
-				clientCertContentHash = config.clientCert?.let { c -> c.keystoreAlias?.hashCode() ?: java.util.Arrays.hashCode(c.pkcs12) } ?: 0,
-				clientCertPasswordHash = config.clientCert?.password?.hashCode() ?: 0,
+				keystoreAlias = clientCert?.keystoreAlias,
+				pkcs12Sha256 = clientCert?.takeIf { it.keystoreAlias == null }?.let { sha256Hex(it.pkcs12) },
+				passwordSha256 = clientCert?.password?.let { sha256Hex(it.toByteArray(Charsets.UTF_8)) },
 				tlsTofuFingerprint = config.tlsTofuFingerprint,
 			)
 			// Pin mode follows allowInvalidCerts: off, the standard CA and hostname checks apply
 			// and any stored pin is ignored; on, a permissive trust manager is used and the pin is
 			// checked (or learned) after the handshake.
 			val pinMode = config.allowInvalidCerts
-			val sslContext = sslContextCache.getOrPut(cacheKey) {
+			// A context built without the network's certificate (Keystore unavailable) is used for
+			// this connection only, so the next connect tries the Keystore again.
+			var cacheable = true
+			val sslContext = sslContextCache[cacheKey] ?: run {
 				val ctx = SSLContext.getInstance("TLS")
 				val tm = if (pinMode) arrayOf<TrustManager>(InsecureTrustManager()) else null
 				val km: Array<KeyManager>? = config.clientCert?.let { cert ->
@@ -6669,6 +6724,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 							} catch (t: Throwable) {
 								android.util.Log.w("IrcCore", "network certificate unavailable", t)
 								netCertUnavailable = true
+								cacheable = false
 								null
 							}
 						} else {
@@ -6687,7 +6743,7 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 					}
 				}
 				ctx.init(km, tm, SecureRandom())
-				ctx
+				if (cacheable) sslContextCache.putIfAbsent(cacheKey, ctx) ?: ctx else ctx
 			}
 
 			// Obtain the underlying TCP socket (direct Happy-Eyeballs, or through the SOCKS
@@ -7350,6 +7406,39 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 		}
 	}
 
+	/**
+	 * CHANMODES types A, B and C. Before the server has sent CHANMODES, the RFC 2811 defaults: b, e,
+	 * I and q; k; l.
+	 */
+	private fun chanModeTypes(): Triple<Set<Char>, Set<Char>, Set<Char>> {
+		val parts = chanModes?.split(",")
+		fun type(i: Int, default: Set<Char>) = parts?.getOrNull(i)?.toSet() ?: default
+		return Triple(type(0, setOf('b', 'e', 'I', 'q')), type(1, setOf('k')), type(2, setOf('l')))
+	}
+
+	/**
+	 * Every change in a MODE line with its argument, consuming arguments by CHANMODES type as
+	 * [parseChannelUserModes] does: prefix modes and types A and B always, C only when adding.
+	 */
+	private fun parseModeChanges(modeStr: String, args: List<String>): List<ChannelModeChange> {
+		val (typeA, typeB, typeC) = chanModeTypes()
+		val out = mutableListOf<ChannelModeChange>()
+		var adding = true
+		var argIdx = 0
+		for (c in modeStr) {
+			when (c) {
+				'+' -> adding = true
+				'-' -> adding = false
+				else -> {
+					val takesArg = c in prefixModeToSymbol || c in typeA || c in typeB || (c in typeC && adding)
+					val arg = if (takesArg) args.getOrNull(argIdx).also { argIdx++ } else null
+					out += ChannelModeChange(adding, c, arg)
+				}
+			}
+		}
+		return out
+	}
+
 	private fun parseChannelUserModes(
 		channel: String,
 		modeStr: String,
@@ -7357,12 +7446,8 @@ val numericHandlers: Map<String, suspend (IrcMessage, Long?, Boolean, Long) -> U
 	): List<Triple<String, Char?, Boolean>> {
 		// Returns (nick, prefix char, adding) for each prefix change, consuming every mode's
 		// argument by its CHANMODES type (A and B always, C only when adding, D never; prefix modes
-		// always) so arguments stay aligned. Unknown modes count as type A.
-		val cm = chanModes ?: ""
-		val cmParts = cm.split(",")
-		val typeA = cmParts.getOrNull(0)?.toSet() ?: setOf('b', 'e', 'I', 'q')
-		val typeB = cmParts.getOrNull(1)?.toSet() ?: setOf('k')
-		val typeC = cmParts.getOrNull(2)?.toSet() ?: setOf('l')
+		// always) so arguments stay aligned. Unknown modes count as type D.
+		val (typeA, typeB, typeC) = chanModeTypes()
 		// typeD: any mode not in A, B, C, or prefix — no parameter needed.
 
 		val results = mutableListOf<Triple<String, Char?, Boolean>>()

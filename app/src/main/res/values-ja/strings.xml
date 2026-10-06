@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">入力欄の上にネットワークバーを表示</string>
     <string name="setting_network_tabs_bottom_desc">チャンネル切り替えをチャットの下部に表示します。</string>
     <string name="setting_portrait_nicklist_overlay">サイドパネルニックリスト</string>
-    <string name="setting_portrait_nicklist_overlay_desc">ニックリストをポップアップではなくサイドパネルとして表示します。</string>
+    <string name="setting_portrait_nicklist_overlay_desc">ニックリストをポップアップではなく、サイズ変更できるサイドパネルとして表示します。有効にすると、ニックリストのボタンで表示/非表示が保持されます。</string>
     <string name="setting_ignore_list">無視リスト</string>
     <string name="setting_ignore_list_desc">特定のニックからのメッセージとDCCオファーを非表示にします。</string>
     <string name="setting_quit_message">QUITメッセージ</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">DCCを有効化</string>
     <string name="setting_open_app_settings">アプリ設定を開く</string>
     <string name="setting_battery_optimization">バッテリー最適化リスト</string>
+    <string name="setting_ctcp_replies">CTCP 要求に応答する</string>
+    <string name="setting_ctcp_replies_desc">VERSION、TIME、PING などへの応答を無効にします。</string>
+    <string name="setting_show_nick_icons">ニックのアイコンを表示</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">チャットとメッセージ</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">ニック</string>
     <string name="chat_ban_type_account">アカウント</string>
     <string name="chat_ban_type_domain">ドメイン</string>
+    <string name="chat_react_custom">カスタムリアクション</string>
+    <string name="chat_react_custom_hint">絵文字または単語</string>
+    <string name="chat_react_send">リアクション</string>
+    <string name="chat_reply_not_loaded">以前のメッセージへの返信</string>
 
     <!-- Network screens -->
     <string name="networks_title">ネットワーク</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">このホストのSTSポリシーを破棄</string>
     <string name="list_retry">再試行</string>
     <string name="network_trust_extra_pinned_cert">このサーバーも信頼する (ラウンドロビン DNS)</string>
+    <string name="network_trust_cert_names">これらの証明書名を信頼する</string>
+    <string name="network_cert_names_accepted">受け入れた証明書名</string>
+    <string name="network_clear_cert_names">これらの名前の信頼をやめる</string>
     <string name="network_nick">ニックネーム</string>
     <string name="network_alt_nick">代替ニック</string>
     <string name="network_username">ユーザー名</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">高度なIRCv3キャップ</string>
     <string name="core_nick_change_refused">サーバーがニックの変更を許可しません: %1$s</string>
+    <string name="core_ctcp_reply_disabled">%2$s からの CTCP %1$s を無視しました (応答はオフ)</string>
     <string name="settings_raw_log">生プロトコルログ</string>
     <string name="settings_raw_log_desc">送受信したすべての行をネットワークごとの Raw バッファに表示します。パスワードは隠されます。デバッグ用です。</string>
     <string name="chat_show_less">折りたたむ</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">サーバーがメッセージを拒否しました (%1$s): %2$s</string>
     <string name="network_edit_cap_also">%1$s も要求します</string>
     <string name="network_edit_caps_hint">基本的なIRCv3機能はデフォルトで有効です。高度なオプションを表示するにはオンにしてください。</string>
-    <string name="network_edit_bouncer_caps">バウンサーキャップ（soju/pounce）</string>
+    <string name="network_edit_bouncer_caps">バウンサーキャップ</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">ファイル転送</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">%1$sからのDCCチャット</string>
-    <string name="notif_dcc_incoming_chat_text">タップして開く — または転送を使用</string>
+    <string name="notif_dcc_incoming_chat_text">タップして開くか、転送から承認/拒否します</string>
     <string name="notif_dcc_incoming_file_title">%1$sからの受信ファイル</string>
     <string name="notif_dcc_file_done_title">DCC完了</string>
     <string name="notif_dcc_file_done_text">%1$sを%2$sに保存しました</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">代替ニック</string>
     <string name="network_username_label">ユーザー名 (ident)</string>
     <string name="network_bouncer_username_label">ユーザー名</string>
-    <string name="network_username_bouncer_hint">バウンサープロファイルでは、これは<b>バウンサーのログイン名</b>です — バウンサーアカウントを設定した時の名前と同じです。IRC のニックネームではありません。</string>
+    <string name="network_username_bouncer_hint">バウンサープロファイルでは、これは<b>バウンサーのログイン名</b>です</string>
     <string name="network_realname_label">本名</string>
     <string name="network_use_tls_label">TLSを使用</string>
     <string name="network_allow_plaintext">平文を許可</string>
     <string name="network_auto_connect_label">起動時に接続</string>
     <string name="network_show_in_switcher_label">チャンネル切り替えに表示</string>
-    <string name="network_auto_reconnect_label">自動再接続</string>
-    <string name="network_bouncer_label">バウンサー (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">切断時に自動再接続</string>
+    <string name="network_bouncer_label">バウンサーモード</string>
     <string name="network_bouncer_kind_label">バウンサー種別</string>
     <string name="network_bouncer_kind_none">なし / 未指定</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">汎用  (user/network)</string>
     <string name="network_bouncer_network_label">ネットワーク名 (任意)</string>
-    <string name="network_bouncer_network_help">このプロファイルがバウンサー上で対象とするアップストリームネットワーク (例: \"libera\"、\"oftc\")。回線上で上のバウンサーユーザー名フィールドと組み合わされ、USER で送信され、選択した認証方式に応じて SASL または PASS 行で送信されます — 選択したバウンサー種別の構文を使用します。</string>
+    <string name="network_bouncer_network_help">このプロファイルが対象とするバウンサー上のアップストリームネットワーク (例: \"afternet\"、\"libera\")。上のバウンサーユーザー名フィールドと組み合わされ、選んだ認証方式に応じて SASL または PASS 行で送信されます。</string>
     <string name="network_bouncer_clientid_label">クライアント ID (任意)</string>
     <string name="network_bouncer_clientid_help">このデバイスの短い識別子 (例: \"phone\" や \"hexdroid\")。バウンサーが対応している場合 (ZNC clientbuffer、soju のクライアント別履歴)、クライアントごとのバッファと履歴を有効にします。すべてのクライアントで単一のバッファを共有する場合は空欄にしてください。</string>
     <string name="network_server_password_label">サーバーパスワード (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">パスワード</string>
     <string name="network_sasl_recommended_for_bouncers">バウンサーには推奨 — ユーザー名フィールドを空のままにすると、上の「一般」セクションのバウンサーユーザー名が使用されます。</string>
     <string name="network_cert_format_label">証明書形式</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">鍵のパスワード (暗号化されている場合)</string>
@@ -412,7 +423,7 @@
     <string name="networks_local_title">ローカルネットワーク権限が必要</string>
     <string name="networks_local_body">{0}への接続にはローカルネットワーク権限が必要です。
 
-これはAndroid 17の新要件で、ローカルネットワーク上のサーバーへの接続に適用されます。</string>
+        これは Android 17 の新しい要件で、ローカルネットワーク上のサーバー (自宅のネットワーク、バウンサーなど) への接続に適用されます。</string>
     <string name="networks_local_grant">権限を許可</string>
     <string name="networks_insecure_body">暗号化されていないIRC接続は保護されておらず、メッセージとパスワードが漏洩する可能性があります。</string>
     <string name="networks_insecure_body2">TLSなしで%1$sに接続するには、このネットワークの暗号化されていない接続を明示的に許可する必要があります。</string>
@@ -459,6 +470,8 @@
     <string name="menu_reconnect">再接続</string>
     <string name="menu_disconnect">切断</string>
     <string name="menu_exit">終了</string>
+    <string name="menu_float">フローティングウィンドウ</string>
+    <string name="float_needs_permission">フローティングウィンドウを使うには、HexDroid に他のアプリの上に重ねて表示する権限を許可してください</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">スクリプトを実行</string>
@@ -523,10 +536,25 @@
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">クリア</string>
+    <string name="script_pick_file_title">スクリプト用のファイルを選びますか？</string>
+    <string name="script_pick_file_body">スクリプトがアップロードするファイルの選択を求めています。スクリプトが受け取るのは選んだファイルだけで、端末上のほかのものは受け取りません。</string>
+    <string name="script_pick_file_body_in">%1$s のスクリプトがアップロードするファイルの選択を求めています。スクリプトが受け取るのは選んだファイルだけで、端末上のほかのものは受け取りません。</string>
+    <string name="script_pick_file_choose">ファイルを選択</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">接続</string>
+    <string name="network_section_connection_desc">サーバーアドレス、ポート、TLS</string>
+    <string name="network_section_identity_desc">ニック、代替ニック、ユーザー名、本名</string>
+    <string name="network_section_autoconnect_desc">起動時に接続、再接続、サーバーパスワード</string>
+    <string name="network_section_sasl_desc">接続時にサービスへログイン</string>
+    <string name="network_section_tls_cert_desc">あなたを識別するための証明書</string>
+    <string name="network_section_autojoin_desc">接続時に参加するチャンネル</string>
+    <string name="network_section_postcmds_desc">接続後に実行するコマンド</string>
+    <string name="network_section_proxy_desc">このネットワークをプロキシ経由にする</string>
+    <string name="network_section_encoding_desc">このネットワークの文字セット</string>
+    <string name="network_section_notifications_desc">エラー通知と無視するメンション</string>
+    <string name="network_section_ircv3_desc">サーバーに要求する機能</string>
     <string name="network_section_identity">アイデンティティ</string>
     <string name="network_section_autoconnect">自動接続 &amp; パスワード</string>
     <string name="network_section_sasl">SASL認証</string>
@@ -562,14 +590,14 @@
     <string name="network_cert_selected">選択済み: %1$s</string>
     <string name="network_cert_none">証明書が選択されていません。</string>
     <string name="netcert_title">このネットワーク用の証明書</string>
-    <string name="netcert_desc">HexDroid はこのネットワーク専用に作成した証明書を提示します。ニックや IP を変えても同じままなので、SASL EXTERNAL でログインでき、ネットワークのオペレーターはこの端末を識別できます。ネットワークごとに別の証明書を使うため、ネットワーク同士であなたを結び付けることはできません。バックアップには含まれず、再インストールすると新しく作成されます。</string>
+    <string name="netcert_desc">HexDroid はこのネットワーク専用に作成した証明書を提示するため、SASL EXTERNAL でログインできます。</string>
     <string name="netcert_pending">初回接続時に作成されます</string>
     <string name="netcert_fingerprint">フィンガープリント: %1$s</string>
     <string name="netcert_add_nickserv">%1$s アカウントに追加</string>
     <string name="netcert_add_sent">証明書を %1$s に送信しました。サーバーバッファで返答を確認し、SASL を EXTERNAL に切り替えてください。</string>
     <string name="netcert_not_connected">先にこのネットワークに接続し、サービスで認証してください</string>
     <string name="core_netcert_unavailable">*** このネットワークの証明書を作成できなかったため、証明書なしで接続しています。</string>
-    <string name="core_netcert_created">*** HexDroid はこのネットワーク専用に作成した証明書を提示するようになりました。SASL EXTERNAL でログインでき、ネットワークはこの端末を識別できます。ネットワークの TLS 証明書設定でオフにできます。</string>
+    <string name="core_netcert_created">*** HexDroid はこのネットワーク専用に作成した証明書を提示するようになりました。SASL EXTERNAL でログインできます。ネットワークの TLS 証明書設定でオフにできます。</string>
     <string name="vm_auth_sasl_netcert">HexDroid を再インストールまたは復元した場合、このネットワークの証明書は新しくなっています。パスワードで認証してから、ネットワークの証明書設定で再度アカウントに追加してください。</string>
     <string name="network_cert_pem_hint">.pemファイルには証明書と秘密鍵の両方が含まれている必要があります。</string>
     <string name="network_cert_choose_pem">.pem / .crt / .cer を選択</string>
@@ -633,7 +661,7 @@
     <string name="theme_terminal">ターミナル</string>
     <string name="section_media_previews">メディアプレビュー</string>
     <string name="setting_image_previews">画像・動画プレビューを有効にする</string>
-    <string name="setting_image_previews_desc">チャットに投稿された画像やYouTubeリンクのインラインプレビューを表示します。Twitter/XのリンクはfxTwitter.com（サードパーティサービス）を通じて解決されます。プレビューを読み込む際にツイートIDがそのサービスに送信されます。</string>
+    <string name="setting_image_previews_desc">チャットに投稿された画像や YouTube リンクのプレビューを許可します。Twitter/X のリンクは fxtwitter.com を通じて解決されます - プレビューは自動では表示されません。</string>
     <string name="setting_previews_wifi_only">Wi-Fiのみ</string>
     <string name="setting_previews_wifi_only_desc">モバイルデータの消費を避けるため、Wi-Fi接続時のみプレビューを読み込みます。</string>
     <string name="theme_system_default">システムデフォルト</string>
@@ -795,7 +823,7 @@
     <string name="bouncer_networks_clone_dismiss">閉じる</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">バウンサーでは、下の SASL を有効にすることを推奨します — これは最新の認証経路です。代わりにこの PASS フィールドを使用する場合は、パスワードのみを入力してください。上のフィールドのバウンサーユーザー名とネットワークが自動的に追加されます (<b>username/network:password</b> として、または ZNC の場合は <b>username@clientid/network:password</b> として送信)。<b>username/network:password</b> を自分で入力することもできます。</string>
+    <string name="network_server_password_bouncer_hint">バウンサーでは SASL を推奨します。代わりにこの PASS フィールドを使う場合は、パスワードだけを入力してください。上のフィールドのバウンサーユーザー名とネットワークが自動的に先頭に追加されます。<b>username/network:password</b> をすべて入力しても動作します。</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">メタデータを編集</string>
@@ -1051,7 +1079,7 @@
     <string name="vm_halted_tls">自動再接続を停止しました: TLS のエラーは自然には解消しません。証明書の信頼設定を調整してから手動で再接続してください。</string>
     <string name="vm_halted_unreachable">自動再接続を停止しました: サーバーに到達できません (ホスト名が解決できないか、ポートが閉じています)。ネットワーク設定でホストとポートを確認してから手動で再接続してください。</string>
     <string name="vm_tls_tofu_pinned">TLS: 証明書のフィンガープリントを記録してピン留めしました (TOFU)。今後の接続では次を検証します: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">証明書のホスト名が一致しません: %1$s に接続しましたが、証明書の SAN は %2$s です。接続を許可しました。</string>
+    <string name="vm_cert_hostname_mismatch">証明書のホスト名が一致しません！ %1$s に接続しましたが、証明書の発行先は %2$s です - 接続を拒否しました。自動再接続を停止しました。目的のサーバーで、証明書の設定ミスや古い証明書が原因なだけであれば、ネットワーク設定を開いて「これらの証明書名を信頼する」をタップしてください。心当たりがない場合は受け入れないでください: 誰かが接続を傍受している可能性があります。</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">%2$s に対する %1$s からの DCC RESUME を無視しました — 該当する送信が進行していません。</string>
@@ -1167,6 +1195,8 @@
     <string name="core_disconnected">切断</string>
     <string name="core_disconnect_server_error">サーバーエラー: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS 証明書のフィンガープリントが変わりました</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS 証明書はこのホストに対して有効ではありません</string>
+    <string name="vm_cert_hostname_grace">証明書のホスト名が一致しません: %1$s に接続しましたが、証明書の発行先は %2$s です。HexDroid は以前これを確認していなかったため、このプロファイルが引き続き使えるようにこれらの名前を一度だけ受け入れ、接続を再試行しています。心当たりがない場合は、ネットワーク設定を開いて「これらの名前の信頼をやめる」をタップしてください。</string>
     <string name="core_disconnect_connect_failed">接続に失敗しました: %1$s</string>
     <string name="core_disconnect_connection_error">接続エラー: %1$s</string>
     <string name="core_disconnect_registration_timeout">登録のタイムアウト</string>
@@ -1414,6 +1444,7 @@
     <string name="vm_ev_message_deleted">(%1$s がメッセージを削除しました)</string>
     <string name="vm_ev_message_deleted_reason">(%1$s がメッセージを削除しました: %2$s)</string>
     <string name="vm_history_divider">── チャット履歴 • 最後のメッセージ: %1$s ──</string>
+    <string name="vm_history_gap">── 古いメッセージの一部がまだありません。この会話を開き直すと引き続き読み込みます ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">ネットワーク %1$d 件: %2$s</string>
@@ -1528,7 +1559,8 @@
     <string name="cmd_gsearch">このネットワークのすべてのバッファでメッセージを検索します</string>
     <string name="cmd_gfind">/gsearch の別名</string>
     <string name="cmd_nick">ニックを変更します</string>
-    <string name="cmd_away">離席を設定します。引数なしの /away で解除します</string>
+    <string name="cmd_away">離席に設定します [reason]</string>
+    <string name="cmd_back">離席を解除します</string>
     <string name="cmd_whois">ユーザーの詳しい情報を照会します</string>
     <string name="cmd_who">マスクに一致するユーザーを照会します</string>
     <string name="cmd_ignore">ユーザーを無視します (引数なしで一覧表示)</string>
@@ -1769,4 +1801,22 @@
     <string name="setting_webpush_no_distributor">プッシュディストリビューターがインストールされていません。利用するには ntfy などをインストールしてください。</string>
     <string name="setting_webpush_distributor_current">%1$s（使用中）</string>
     <string name="vm_webpush_failed">プッシュ通知: サーバーが購読を拒否しました (%1$s: %2$s)。</string>
+    <string name="vm_age_no_action">%1$s で +AGE が有効な間はアクション（/me）を送信できないため、何も送信していません。</string>
+    <string name="notif_reply">返信</string>
+    <string name="notif_reply_hint">返信…</string>
+    <string name="notif_quit">切断</string>
+    <string name="notif_reply_not_sent_title">返信を送信できません: 未接続</string>
+    <string name="notif_reply_not_sent_text">HexDroid を開いて再接続すると、%1$s への返信を送信できます</string>
+    <string name="notif_channel_connection_desc">HexDroid IRC の接続中の接続状態</string>
+    <string name="notif_channel_errors">IRCエラー</string>
+    <string name="notif_channel_errors_desc">サーバーと接続のエラー（ネットワークごとに有効にした場合のみ）</string>
+    <string name="notif_channel_group_networks">IRCネットワーク</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: メンション（無音）</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: メンション</string>
+    <string name="notif_channel_net_pm">%1$s: プライベートメッセージ</string>
+    <string name="setting_hide_hostnames">入退室メッセージのホスト名を非表示</string>
+    <string name="vm_ev_has_joined_nohost">%1$s が %2$s に参加しました</string>
+    <string name="vm_ev_has_left_nohost">%1$s が %2$s から退出しました</string>
+    <string name="vm_ev_has_quit_nohost">%1$s が終了しました</string>
+    <string name="push_encrypted">暗号化されたメッセージ</string>
 </resources>

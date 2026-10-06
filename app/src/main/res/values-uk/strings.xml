@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">Увімкнути DCC</string>
     <string name="setting_open_app_settings">Відкрити налаштування застосунку</string>
     <string name="setting_battery_optimization">Список оптимізації батареї</string>
+    <string name="setting_ctcp_replies">Відповідати на запити CTCP</string>
+    <string name="setting_ctcp_replies_desc">Вимкнути відповіді на VERSION, TIME, PING тощо.</string>
+    <string name="setting_show_nick_icons">Показувати значки ніків</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Чат і повідомлення</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Нік</string>
     <string name="chat_ban_type_account">Акаунт</string>
     <string name="chat_ban_type_domain">Домен</string>
+    <string name="chat_react_custom">Власна реакція</string>
+    <string name="chat_react_custom_hint">Емодзі або слово</string>
+    <string name="chat_react_send">Відреагувати</string>
+    <string name="chat_reply_not_loaded">Відповідь на попереднє повідомлення</string>
 
     <!-- Network screens -->
     <string name="networks_title">Мережі</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">Забути політику STS для цього хоста</string>
     <string name="list_retry">Повторити</string>
     <string name="network_trust_extra_pinned_cert">Довіряти і цьому серверу (round-robin DNS)</string>
+    <string name="network_trust_cert_names">Довіряти цим іменам сертифіката</string>
+    <string name="network_cert_names_accepted">Прийняті імена сертифіката</string>
+    <string name="network_clear_cert_names">Більше не довіряти цим іменам</string>
     <string name="network_nick">Нік</string>
     <string name="network_alt_nick">Альтернативний нік</string>
     <string name="network_username">Ім\'я користувача</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Розширені можливості IRCv3</string>
     <string name="core_nick_change_refused">Сервер не дозволяє змінити нік: %1$s</string>
+    <string name="core_ctcp_reply_disabled">Проігноровано CTCP %1$s від %2$s (відповіді вимкнено)</string>
     <string name="settings_raw_log">Журнал сирого протоколу</string>
     <string name="settings_raw_log_desc">Показувати кожен надісланий і отриманий рядок у буфері Raw для кожної мережі. Паролі приховано. Для налагодження.</string>
     <string name="chat_show_less">Показати менше</string>
@@ -459,6 +470,8 @@
     <string name="menu_reconnect">Перепідключитися</string>
     <string name="menu_disconnect">Відключитися</string>
     <string name="menu_exit">Вийти</string>
+    <string name="menu_float">Плаваюче вікно</string>
+    <string name="float_needs_permission">Дозвольте HexDroid показуватися поверх інших застосунків, щоб використовувати плаваюче вікно</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Запустити скрипти</string>
@@ -523,10 +536,25 @@
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Очистити</string>
+    <string name="script_pick_file_title">Вибрати файл для скрипту?</string>
+    <string name="script_pick_file_body">Скрипт просить вибрати файл для завантаження. Він отримає лише вибраний файл і нічого більше з пристрою.</string>
+    <string name="script_pick_file_body_in">Скрипт у %1$s просить вибрати файл для завантаження. Він отримає лише вибраний файл і нічого більше з пристрою.</string>
+    <string name="script_pick_file_choose">Вибрати файл</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">З\'єднання</string>
+    <string name="network_section_connection_desc">Адреса сервера, порт, TLS</string>
+    <string name="network_section_identity_desc">Нік, запасний нік, ім\'я користувача, справжнє ім\'я</string>
+    <string name="network_section_autoconnect_desc">Підключення під час запуску, перепідключення, пароль сервера</string>
+    <string name="network_section_sasl_desc">Вхід у служби під час підключення</string>
+    <string name="network_section_tls_cert_desc">Сертифікат для вашої ідентифікації</string>
+    <string name="network_section_autojoin_desc">Канали, до яких приєднуватися під час підключення</string>
+    <string name="network_section_postcmds_desc">Команди, що виконуються після підключення</string>
+    <string name="network_section_proxy_desc">Спрямовувати цю мережу через проксі</string>
+    <string name="network_section_encoding_desc">Кодування для цієї мережі</string>
+    <string name="network_section_notifications_desc">Сповіщення про помилки та ігноровані виділення</string>
+    <string name="network_section_ircv3_desc">Можливості, які запитувати в сервера</string>
     <string name="network_section_identity">Ідентифікація</string>
     <string name="network_section_autoconnect">Автопідключення &amp; пароль</string>
     <string name="network_section_sasl">Автентифікація SASL</string>
@@ -562,14 +590,14 @@
     <string name="network_cert_selected">Вибрано: %1$s</string>
     <string name="network_cert_none">Сертифікат не вибрано.</string>
     <string name="netcert_title">Сертифікат для цієї мережі</string>
-    <string name="netcert_desc">HexDroid пред\'являє сертифікат, створений лише для цієї мережі. Він не змінюється, коли ви змінюєте нік чи IP, тож можна входити через SASL EXTERNAL, а оператори мережі можуть упізнати цей пристрій. Кожна мережа отримує інший, тому мережі не можуть пов\'язати вас між собою. Він не потрапляє до резервних копій: після перевстановлення створюється новий.</string>
+    <string name="netcert_desc">HexDroid пред\'являє сертифікат, створений лише для цієї мережі, тож можна входити через SASL EXTERNAL.</string>
     <string name="netcert_pending">Створюється під час першого підключення</string>
     <string name="netcert_fingerprint">Відбиток: %1$s</string>
     <string name="netcert_add_nickserv">Додати до облікового запису %1$s</string>
     <string name="netcert_add_sent">Сертифікат надіслано до %1$s. Перегляньте відповідь у буфері сервера, а потім перемкніть SASL на EXTERNAL.</string>
     <string name="netcert_not_connected">Спершу підключіться до цієї мережі та ідентифікуйтеся в її сервісах</string>
     <string name="core_netcert_unavailable">*** Не вдалося створити сертифікат цієї мережі, тому ви підключені без нього.</string>
-    <string name="core_netcert_created">*** Тепер HexDroid пред\'являє сертифікат, створений лише для цієї мережі, тож можна входити через SASL EXTERNAL, а мережа може впізнати цей пристрій. Це можна вимкнути в налаштуваннях TLS-сертифіката мережі.</string>
+    <string name="core_netcert_created">*** Тепер HexDroid пред\'являє сертифікат, створений лише для цієї мережі, тож можна входити через SASL EXTERNAL. Це можна вимкнути в налаштуваннях TLS-сертифіката мережі.</string>
     <string name="vm_auth_sasl_netcert">Якщо HexDroid перевстановили або відновили, сертифікат цієї мережі новий: ідентифікуйтеся паролем, а потім знову додайте його до облікового запису в налаштуваннях сертифіката мережі.</string>
     <string name="network_cert_pem_hint">Файл .pem має містити і ваш сертифікат, і приватний ключ.</string>
     <string name="network_cert_choose_pem">Вибрати PEM</string>
@@ -1051,7 +1079,7 @@
     <string name="vm_halted_tls">Автоперепідключення припинено: помилка TLS навряд чи зникне сама. Змініть налаштування довіри до сертифікатів, потім перепідключіться вручну.</string>
     <string name="vm_halted_unreachable">Автоперепідключення припинено: сервер недоступний (ім\'я хоста не розпізнається або порт закрито). Перевірте хост і порт у налаштуваннях мережі, потім перепідключіться вручну.</string>
     <string name="vm_tls_tofu_pinned">TLS: відпечаток сертифіката вивчено й закріплено (TOFU). Майбутні підключення перевірятимуть: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Незбіг імені хоста в сертифікаті: підключено до %1$s, але SAN сертифіката: %2$s. Підключення дозволено.</string>
+    <string name="vm_cert_hostname_mismatch">Незбіг імені хоста в сертифікаті! Підключено до %1$s, але сертифікат видано для: %2$s - Підключення відхилено. Автоперепідключення зупинено. Якщо це потрібний сервер і він просто має неправильно налаштований чи застарілий сертифікат, відкрийте налаштування мережі й натисніть «Довіряти цим іменам сертифіката». Якщо ви цього не очікували, не приймайте: хтось може перехоплювати підключення.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">DCC RESUME від %1$s для %2$s проігноровано — немає відповідного активного надсилання.</string>
@@ -1167,6 +1195,8 @@
     <string name="core_disconnected">Відключено</string>
     <string name="core_disconnect_server_error">Помилка сервера: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">Відпечаток сертифіката TLS змінився</string>
+    <string name="core_disconnect_tls_hostname_mismatch">Сертифікат TLS недійсний для цього хоста</string>
+    <string name="vm_cert_hostname_grace">Незбіг імені хоста в сертифікаті: підключено до %1$s, але сертифікат видано для: %2$s. Раніше HexDroid цього не перевіряв, тому ці імена одноразово прийнято, щоб профіль і далі працював, і підключення повторюється. Якщо ви цього не очікували, відкрийте налаштування мережі й натисніть «Більше не довіряти цим іменам».</string>
     <string name="core_disconnect_connect_failed">Не вдалося підключитися: %1$s</string>
     <string name="core_disconnect_connection_error">Помилка з\'єднання: %1$s</string>
     <string name="core_disconnect_registration_timeout">Час реєстрації вичерпано</string>
@@ -1414,6 +1444,7 @@
     <string name="vm_ev_message_deleted">(повідомлення видалив %1$s)</string>
     <string name="vm_ev_message_deleted_reason">(повідомлення видалив %1$s: %2$s)</string>
     <string name="vm_history_divider">── Історія чату • Останнє повідомлення: %1$s ──</string>
+    <string name="vm_history_gap">── Деяких старіших повідомлень досі бракує. Відкрийте цю розмову знову, щоб продовжити їх завантаження ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">Мережі (%1$d): %2$s</string>
@@ -1528,7 +1559,8 @@
     <string name="cmd_gsearch">Шукає повідомлення в усіх буферах цієї мережі</string>
     <string name="cmd_gfind">Те саме, що /gsearch</string>
     <string name="cmd_nick">Змінює ваш нік</string>
-    <string name="cmd_away">Позначає вас відсутнім; /away без аргументів знімає позначку</string>
+    <string name="cmd_away">Позначає вас як відсутнього [reason]</string>
+    <string name="cmd_back">Скасовує стан відсутності</string>
     <string name="cmd_whois">Запитує докладні відомості про користувача</string>
     <string name="cmd_who">Шукає користувачів за маскою</string>
     <string name="cmd_ignore">Ігнорує користувача (без аргументів показує список)</string>
@@ -1769,4 +1801,22 @@
     <string name="setting_webpush_no_distributor">Push-розповсюджувач не встановлено. Установіть його (наприклад, ntfy), щоб скористатися цим.</string>
     <string name="setting_webpush_distributor_current">%1$s (використовується)</string>
     <string name="vm_webpush_failed">Push-сповіщення: сервер відхилив підписку (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">Дії (/me) не можна надсилати, поки для %1$s увімкнено +AGE, тому нічого не надіслано.</string>
+    <string name="notif_reply">Відповісти</string>
+    <string name="notif_reply_hint">Відповісти…</string>
+    <string name="notif_quit">Від\'єднатися</string>
+    <string name="notif_reply_not_sent_title">Відповідь не надіслано: немає з\'єднання</string>
+    <string name="notif_reply_not_sent_text">Відкрийте HexDroid і під\'єднайтеся знову, щоб надіслати відповідь %1$s</string>
+    <string name="notif_channel_connection_desc">Стан з\'єднання, поки HexDroid IRC під\'єднано</string>
+    <string name="notif_channel_errors">Помилки IRC</string>
+    <string name="notif_channel_errors_desc">Помилки сервера та з\'єднання (лише якщо увімкнено для мережі)</string>
+    <string name="notif_channel_group_networks">Мережі IRC</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: виділення (без звуку)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: виділення</string>
+    <string name="notif_channel_net_pm">%1$s: приватні повідомлення</string>
+    <string name="setting_hide_hostnames">Приховувати імена хостів у повідомленнях про вхід, вихід і відключення</string>
+    <string name="vm_ev_has_joined_nohost">%1$s увійшов до %2$s</string>
+    <string name="vm_ev_has_left_nohost">%1$s покинув %2$s</string>
+    <string name="vm_ev_has_quit_nohost">%1$s вийшов</string>
+    <string name="push_encrypted">Зашифроване повідомлення</string>
 </resources>

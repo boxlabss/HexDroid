@@ -288,6 +288,8 @@ data class UiSettings(
     val showTopicBar: Boolean = true,
     val hideMotdOnConnect: Boolean = false,
     val hideJoinPartQuit: Boolean = false,
+    /** Join, part and quit lines leave out the user@host. */
+    val hideHostnames: Boolean = false,
     /** Colour channel-event lines (join, part, quit, kick, nick, mode). Display only. */
     val colorChannelEvents: Boolean = true,
     /**
@@ -692,7 +694,16 @@ class IrcViewModel(
     private val awayMessages: MutableMap<String, String> =
         java.util.concurrent.ConcurrentHashMap()
 
-    private val lastLoggedTimeMs: MutableMap<String, Long> =
+    /** Per buffer, the newest server-stamped line written to the log. */
+    private val lastLoggedServerMs: MutableMap<String, Long> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
+     * Per buffer, the newest line already logged when the current connection began, from the log
+     * on disk or from earlier connections. A replayed line at or before it is on disk already; a
+     * newer one, such as a bouncer playing back what it held while we were away, is not.
+     */
+    private val loggedBeforeConnectMs: MutableMap<String, Long> =
         java.util.concurrent.ConcurrentHashMap()
 
     /** A disk scrollback read in progress. [key] follows the buffer if it is renamed meanwhile. */
@@ -774,6 +785,7 @@ class IrcViewModel(
         val STATUS_LINE_BANNERS = intArrayOf(
             R.string.vm_deleted_message, R.string.vm_ev_back, R.string.vm_ev_has_joined,
             R.string.vm_ev_has_left, R.string.vm_ev_has_quit, R.string.vm_ev_host_now,
+            R.string.vm_ev_has_joined_nohost, R.string.vm_ev_has_left_nohost, R.string.vm_ev_has_quit_nohost,
             R.string.vm_ev_invited_you, R.string.vm_ev_kicked, R.string.vm_ev_logged_out,
             R.string.vm_ev_nick_logged_in_as, R.string.vm_ev_now_away, R.string.vm_ev_now_away_msg,
             R.string.vm_ev_now_known_as, R.string.vm_ev_now_talking, R.string.vm_ev_realname_changed,
@@ -3020,6 +3032,12 @@ class IrcViewModel(
             val hasReplyTagCap = client.hasCap("message-tags")
             val isChannel      = buffer.isNotEmpty() && buffer[0] in "#&+!"
 
+            // +AGE: sent over the encrypted session, which carries no reply tag.
+            if (ageOn(networkId, buffer)) {
+                sendAgeText(networkId, key, buffer, if (isChannel && from.isNotBlank()) "$from: $text" else text)
+                return@launch
+            }
+
             // The local echo mirrors the wire: one line per PRIVMSG, so each matches its echo and
             // any later replay of it.
             val sentChunks = mutableListOf<String>()
@@ -3697,13 +3715,6 @@ fun startAddNetwork() {
         _state.update { it.copy(backupMessage = null, backupIsError = false) }
     }
 
-    /**
-     * Write a backup of current settings and networks to [uri] (obtained from
-     * ACTION_CREATE_DOCUMENT).  The URI must be writable.
-     *
-     * Passwords and TLS client certificates are excluded - they are tied to device-specific
-     * Android Keystore keys and cannot be transferred.
-     */
     /** Bytes used by logs kept in app storage. */
     suspend fun internalLogsSize(): Long =
         withContext(Dispatchers.IO) { runCatching { logs.internalLogsSize() }.getOrDefault(0L) }
@@ -3738,6 +3749,13 @@ fun startAddNetwork() {
         android.widget.Toast.makeText(appContext, appContext.getString(res), android.widget.Toast.LENGTH_SHORT).show()
     }
 
+    /**
+     * Write a backup of current settings and networks to [uri] (obtained from
+     * ACTION_CREATE_DOCUMENT).  The URI must be writable.
+     *
+     * Passwords and TLS client certificates are excluded - they are tied to device-specific
+     * Android Keystore keys and cannot be transferred.
+     */
     fun exportBackup(uri: android.net.Uri) {
         val st = _state.value
         viewModelScope.launch(Dispatchers.IO) {
@@ -4469,6 +4487,16 @@ fun startAddNetwork() {
         return casefoldText(netId, nick) == casefoldText(netId, my)
     }
 
+    /** Whether the app was last reported in front, so APPACTIVE fires only on a change. */
+    private var appActiveForScripts: Boolean? = null
+
+    /** The app came to the front or went to the background: scripts get APPACTIVE. */
+    fun onAppActiveChanged(active: Boolean) {
+        if (appActiveForScripts == active) return
+        appActiveForScripts = active
+        scriptEvent("APPACTIVE", _state.value.activeNetworkId.orEmpty(), "", fields = mapOf("appactive" to active.toString()))
+    }
+
     fun scriptScreenChanged() {
         viewModelScope.launch(Dispatchers.Main.immediate) {
             runCatching {
@@ -5192,6 +5220,11 @@ fun startAddNetwork() {
             val caps = active?.let { cm.getNetworkCapabilities(it) }
             if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) null else active
         }.getOrNull()
+
+        // What is on disk for each of this network's buffers as the connection begins.
+        for ((k, v) in lastLoggedServerMs) {
+            if (k.startsWith("$netId::")) loggedBeforeConnectMs.merge(k, v, ::maxOf)
+        }
 
         val client = IrcClient(cfg.copy(pinnedNetwork = chosenNetwork))
         // Set before the connect coroutine starts so the handshake itself is logged, which
@@ -6526,6 +6559,11 @@ fun startAddNetwork() {
                         }
 
                         val target = if (bufferName == "*server*") return@launch else bufferName
+                        if (ageOn(netId, target)) {
+                            append(currentKey, from = null, doNotify = false,
+                                text = "*** " + appContext.getString(R.string.vm_age_no_action, target))
+                            return@launch
+                        }
                         // Route through ctcp() so privmsg()'s E2E hook gets to encrypt
                         // the ACTION body when a per-target key is configured. Direct
                         // c.sendRaw("PRIVMSG …") would bypass that hook and ship the
@@ -6564,6 +6602,11 @@ fun startAddNetwork() {
                         }
 
                         val target = if (bufferName == "*server*") return@launch else bufferName
+                        if (ageOn(netId, target)) {
+                            append(currentKey, from = null, doNotify = false,
+                                text = "*** " + appContext.getString(R.string.vm_age_no_action, target))
+                            return@launch
+                        }
                         // Route through ctcp() so privmsg()'s E2E hook can encrypt the ACTION
                         // body when a per-target key is set, exactly like /me above.
                         val actLabel = c.ctcp(target, "ACTION $msg")
@@ -6855,64 +6898,8 @@ fun startAddNetwork() {
                 c.sendRaw(fullMessage)
                 return@launch
             }
-            // +AGE typed messages. On a keyed channel, encrypt over the group key and ship as AGE CHAT,
-            // chunking the PLAINTEXT conservatively so each encrypted line stays under the IRC limit.
-            // +AGE is on: encrypt (channel group key or 1:1 PM ratchet). If the secure session isn't
-            // established yet, fail closed - never put plaintext on the wire. Self-heal: after a restart
-            // the bridge is empty though the pref persists, so (re)start key agreement here.
-            if (ageEnabledPrefs.getBoolean(ageKey(netId, bufferName), false)) {
-                val bridge = ageBridgeFor(netId)
-                if (bridge?.isActive(bufferName) != true) {
-                    if (isChannelTarget(bufferName)) bridge?.enableChat(bufferName) else bridge?.enablePm(bufferName)
-                }
-                val myNickNow = st.connections[netId]?.myNick ?: st.myNick
-                if (isChannelTarget(bufferName) && bridge?.chatReady(bufferName) == true) {
-                    for (chunk in splitMessageByLength(fullMessage, 120)) {
-                        if (chunk.isEmpty()) continue
-                        if (bridge.sendChat(bufferName, chunk)) {
-                            append(currentKey, from = myNickNow, text = chunk, isLocal = true,
-                                   encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
-                            recordLocalSend(netId, currentKey, chunk, isAction = false)
-                        } else append(currentKey, from = null, doNotify = false,
-                                   text = "*** " + appContext.getString(R.string.vm_age_send_failed))
-                    }
-                } else if (!isChannelTarget(bufferName)) {
-                    // PM. sendOrHoldPm chooses: send now over the ratchet if it's up; self-key + AGE CHAT
-                    // if we've already decided the peer has no +AGE; otherwise HOLD the message. Held
-                    // messages are flushed through the ratchet the moment the handshake completes (so a
-                    // +AGE peer decrypts them properly), or self-keyed as garbled AGE CHAT if the grace
-                    // period below lapses with no AGE IDENT from the peer. We echo locally either way,
-                    // since it's our own text. Fail-closed throughout: nothing plaintext hits the wire.
-                    var anyHeldOrSent = false
-                    for (chunk in splitMessageByLength(fullMessage, 120)) {
-                        if (chunk.isEmpty()) continue
-                        when (bridge?.sendOrHoldPm(bufferName, chunk)) {
-                            com.boxlabs.hexdroid.script.cap.AgeScriptBridge.PmSend.SENT -> {
-                                anyHeldOrSent = true
-                                append(currentKey, from = myNickNow, text = chunk, isLocal = true,
-                                       encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
-                                recordLocalSend(netId, currentKey, chunk, isAction = false)
-                            }
-                            com.boxlabs.hexdroid.script.cap.AgeScriptBridge.PmSend.HELD -> {
-                                anyHeldOrSent = true
-                                // Echo now, but marked pending: it's queued behind the handshake, not yet
-                                // on the wire. onPmFlushed -> markAgePmDelivered clears it once it ships.
-                                append(currentKey, from = myNickNow, text = chunk, isLocal = true,
-                                       encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE, pending = true)
-                                recordLocalSend(netId, currentKey, chunk, isAction = false)
-                            }
-                            else -> append(currentKey, from = null, doNotify = false,
-                                       text = "*** " + appContext.getString(R.string.vm_age_send_failed))
-                        }
-                    }
-                    if (anyHeldOrSent) scheduleAgePmGrace(netId, bufferName, bridge)
-                } else {
-                    // Channel that isn't keyed for us yet. With owner self-keying this only happens to a
-                    // non-owner during the brief window before the owner's invite arrives; it resolves on
-                    // its own, so keep the message short and transient rather than a hard failure.
-                    append(currentKey, from = null, doNotify = false, text =
-                        "*** " + appContext.getString(R.string.vm_age_still_keying, bufferName))
-                }
+            if (ageOn(netId, bufferName)) {
+                sendAgeText(netId, currentKey, bufferName, fullMessage)
                 return@launch
             }
 
@@ -6987,6 +6974,70 @@ fun startAddNetwork() {
      */
     private fun outgoingChunks(netId: String, bufferName: String, text: String): List<String> =
         splitMessageByLength(text, outgoingByteBudget(netId, bufferName))
+
+    /** True when +AGE is switched on for [target] on [netId]. */
+    private fun ageOn(netId: String, target: String): Boolean =
+        ageEnabledPrefs.getBoolean(ageKey(netId, target), false)
+
+    /**
+     * Send [text] to [bufferName] over +AGE and echo it into [currentKey]: the channel group key
+     * when keyed, or the PM ratchet (sent, or held until the handshake completes). Never puts
+     * plaintext on the wire. If the secure session isn't running, key agreement is (re)started.
+     */
+    private fun sendAgeText(netId: String, currentKey: String, bufferName: String, text: String) {
+        val bridge = ageBridgeFor(netId)
+        if (bridge?.isActive(bufferName) != true) {
+            if (isChannelTarget(bufferName)) bridge?.enableChat(bufferName) else bridge?.enablePm(bufferName)
+        }
+        val myNickNow = _state.value.connections[netId]?.myNick ?: _state.value.myNick
+        if (isChannelTarget(bufferName) && bridge?.chatReady(bufferName) == true) {
+            for (chunk in splitMessageByLength(text, 120)) {
+                if (chunk.isEmpty()) continue
+                if (bridge.sendChat(bufferName, chunk)) {
+                    append(currentKey, from = myNickNow, text = chunk, isLocal = true,
+                           encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
+                    recordLocalSend(netId, currentKey, chunk, isAction = false)
+                } else append(currentKey, from = null, doNotify = false,
+                           text = "*** " + appContext.getString(R.string.vm_age_send_failed))
+            }
+        } else if (!isChannelTarget(bufferName)) {
+            // PM. sendOrHoldPm chooses: send now over the ratchet if it's up; self-key + AGE CHAT
+            // if we've already decided the peer has no +AGE; otherwise HOLD the message. Held
+            // messages are flushed through the ratchet the moment the handshake completes (so a
+            // +AGE peer decrypts them properly), or self-keyed as garbled AGE CHAT if the grace
+            // period below lapses with no AGE IDENT from the peer. We echo locally either way,
+            // since it's our own text. Fail-closed throughout: nothing plaintext hits the wire.
+            var anyHeldOrSent = false
+            for (chunk in splitMessageByLength(text, 120)) {
+                if (chunk.isEmpty()) continue
+                when (bridge?.sendOrHoldPm(bufferName, chunk)) {
+                    com.boxlabs.hexdroid.script.cap.AgeScriptBridge.PmSend.SENT -> {
+                        anyHeldOrSent = true
+                        append(currentKey, from = myNickNow, text = chunk, isLocal = true,
+                               encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE)
+                        recordLocalSend(netId, currentKey, chunk, isAction = false)
+                    }
+                    com.boxlabs.hexdroid.script.cap.AgeScriptBridge.PmSend.HELD -> {
+                        anyHeldOrSent = true
+                        // Echo now, but marked pending: it's queued behind the handshake, not yet
+                        // on the wire. onPmFlushed -> markAgePmDelivered clears it once it ships.
+                        append(currentKey, from = myNickNow, text = chunk, isLocal = true,
+                               encryption = com.boxlabs.hexdroid.crypto.E2eScheme.AGE, pending = true)
+                        recordLocalSend(netId, currentKey, chunk, isAction = false)
+                    }
+                    else -> append(currentKey, from = null, doNotify = false,
+                               text = "*** " + appContext.getString(R.string.vm_age_send_failed))
+                }
+            }
+            if (anyHeldOrSent) scheduleAgePmGrace(netId, bufferName, bridge)
+        } else {
+            // Channel that isn't keyed for us yet. With owner self-keying this only happens to a
+            // non-owner during the brief window before the owner's invite arrives; it resolves on
+            // its own, so keep the message short and transient rather than a hard failure.
+            append(currentKey, from = null, doNotify = false, text =
+                "*** " + appContext.getString(R.string.vm_age_still_keying, bufferName))
+        }
+    }
 
     /**
      * Split a message into chunks that don't exceed [maxLen] bytes (UTF-8).
@@ -8572,23 +8623,30 @@ if (code == "442") {
                 val suppressUnread = ev.isHistory && !st.settings.ircHistoryCountsAsUnread
                 if (!ev.isServer && isNickIgnored(netId, ev.from)) return
                 if (!ev.isHistory && ev.from.equals("AuthServ", ignoreCase = true)) authServNetworks += netId
-                if (!ev.isHistory) scriptEvent(
-                    "NOTICE", netId, if (ev.isPrivate) "" else ev.target, ev.from, ev.text,
-                    isMyNick(netId, ev.from), isPrivate = ev.isPrivate,
-                    fields = mapOf("isserver" to ev.isServer.toString()),
-                )
+                if (!ev.isHistory) {
+                    scriptEvent(
+                        "NOTICE", netId, if (ev.isPrivate) "" else ev.target, ev.from, ev.text,
+                        isMyNick(netId, ev.from), isPrivate = ev.isPrivate,
+                        fields = mapOf("isserver" to ev.isServer.toString()),
+                    )
+                    if (ev.isServer) scriptEvent("SNOTICE", netId, "", ev.from, ev.text)
+                }
                 val normTarget0 = normalizeIncomingBufferName(netId, ev.target)
                 val normTarget = stripStatusMsgPrefix(netId, normTarget0)
                 val isChanTarget = isChannelOnNet(netId, normTarget)
                 val targetIsServerBuffer = normTarget == "*server*"
+                // A stored notice being played back (a bouncer's buffer, chathistory), as opposed
+                // to one sent just now. It keeps its own time, and the join heuristics skip it.
+                val replayedNotice = ev.isHistory ||
+                    (ev.timeMs != null && ev.timeMs < System.currentTimeMillis() - BufferLog.REPLAY_SUSPICION_MS)
 
                 // Notice routing:
                 //   1. Server notices (hostname prefix) go to *server*.
                 //   2. A notice to a channel we have a buffer for goes there.
                 //   3. A notice naming a channel we have a buffer for goes there (service-bot
                 //     welcomes).
-                //   4. Otherwise, one arriving within ~5 s of joining a single channel goes to that
-                //     channel.
+                //   4. Otherwise, a live one arriving within ~5 s of joining a single channel goes
+                //     to that channel.
                 //   5. Everything else goes to the selected buffer on this network, or *server*.
                 // Rules 3 and 4 never create a buffer.
                 fun firstMentionedKnownChannelKey(): String? {
@@ -8682,7 +8740,7 @@ if (code == "442") {
                         replyParentBufferKey()
                             ?: firstMentionedKnownChannelKey()
                             ?: senderPrivateBufferKey()
-                            ?: recentlyJoinedChannelKey()
+                            ?: (if (replayedNotice) null else recentlyJoinedChannelKey())
                             ?: run {
                                 val sel = st.selectedBuffer
                                 val (selNet, _) = splitKey(sel)
@@ -8705,24 +8763,29 @@ if (code == "442") {
                 } else {
                     "* <${ev.from}> ${ev.text}"
                 }
+                // A live notice arriving just after we joined is that channel's entry notice. It
+                // keeps its own time like any other notice, but doesn't mark the channel unread.
+                val entryNotice = !replayedNotice &&
+                    recentJoinAtMs[destKey]?.let { System.currentTimeMillis() - it <= ENTRY_NOTICE_WINDOW_MS } == true
                 append(
                     destKey,
                     from = null,
                     text = rendered,
-                    isLocal = suppressUnread,
+                    isLocal = suppressUnread || entryNotice,
                     timeMs = ev.timeMs,
                     isHistory = ev.isHistory,
                     doNotify = false,
                     msgId = ev.msgId,
                     replyToMsgId = ev.replyToMsgId,
                     encryption = ev.encryption,
-                    // A notice arriving just after we joined is that channel's entry notice,
-                    // which servers send again on every join.
-                    repeatsOnJoin = recentJoinAtMs[destKey]?.let { System.currentTimeMillis() - it <= ENTRY_NOTICE_WINDOW_MS } == true,
                 )
             }
 
             is IrcEvent.CtcpReply -> {
+                if (!isNickIgnored(netId, ev.from)) scriptEvent(
+                    "CTCPREPLY", netId, "", ev.from,
+                    text = listOf(ev.command, ev.args).filter { it.isNotEmpty() }.joinToString(" "),
+                )
                 // Display CTCP replies in the current buffer or server buffer
                 val st = _state.value
                 val sel = st.selectedBuffer
@@ -8840,7 +8903,12 @@ if (code == "442") {
                         val host = ev.userHost ?: "*!*@*"
                         // extended-join: include account name if logged in
                         val accountSuffix = ev.account?.let { " [" + appContext.getString(R.string.vm_ev_logged_in_as, it) + "]" } ?: ""
-                        "* " + appContext.getString(R.string.vm_ev_has_joined, ev.nick, host, ev.channel) + accountSuffix
+                        val line = if (st0.settings.hideHostnames) {
+                            appContext.getString(R.string.vm_ev_has_joined_nohost, ev.nick, ev.channel)
+                        } else {
+                            appContext.getString(R.string.vm_ev_has_joined, ev.nick, host, ev.channel)
+                        }
+                        "* " + line + accountSuffix
                     }
                     append(
                         chanKey,
@@ -9007,8 +9075,12 @@ if (code == "442") {
                         "* " + appContext.getString(R.string.vm_ev_you_left, ev.channel)
                     } else {
                         val host = ev.userHost ?: "*!*@*"
-                        "* " + appContext.getString(R.string.vm_ev_has_left, ev.nick, host, ev.channel) +
-                            (ev.reason?.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: "")
+                        val line = if (st0.settings.hideHostnames) {
+                            appContext.getString(R.string.vm_ev_has_left_nohost, ev.nick, ev.channel)
+                        } else {
+                            appContext.getString(R.string.vm_ev_has_left, ev.nick, host, ev.channel)
+                        }
+                        "* " + line + (ev.reason?.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: "")
                     }
                     append(
                         chanKey,
@@ -9163,7 +9235,12 @@ if (code == "442") {
                     isOwnNickForReplay(netId, ev.nick, st0.connections[netId]?.myNick ?: st0.myNick)
                 if (!st0.settings.hideJoinPartQuit && !ownReplay) {
                     val host = ev.userHost ?: "*!*@*"
-                    val msg = "* " + appContext.getString(R.string.vm_ev_has_quit, ev.nick, host) + (reason?.let { " [$it]" } ?: "")
+                    val line = if (st0.settings.hideHostnames) {
+                        appContext.getString(R.string.vm_ev_has_quit_nohost, ev.nick)
+                    } else {
+                        appContext.getString(R.string.vm_ev_has_quit, ev.nick, host)
+                    }
+                    val msg = "* " + line + (reason?.let { " [$it]" } ?: "")
                     val coloured = colorEvent(msg, 5)  // brown — distinguishes server-side QUIT from client-side PART
                     for (k in targets) {
                         append(
@@ -9270,6 +9347,7 @@ if (code == "442") {
                 }
             }
             is IrcEvent.Topic -> {
+                if (!ev.isHistory) scriptEvent("TOPIC", netId, ev.channel, ev.setter, ev.topic.orEmpty(), isMyNick(netId, ev.setter))
                 val chanKey = resolveBufferKey(netId, ev.channel)
                 ensureBuffer(chanKey)
                 // Always update the topic bar; isHistory only gates the chat line below, since a
@@ -9294,14 +9372,25 @@ if (code == "442") {
                     val symbols = conn?.prefixSymbols ?: "~&@%+"
                     val modes = conn?.prefixModes ?: "qaohv"
                     val letter = ev.prefix?.let { p -> modes.getOrNull(symbols.indexOf(p)) }
-                    if (letter != null) scriptEvent(
-                        "MODE", netId, ev.channel, ev.byNick, isMe = isMyNick(netId, ev.nick),
-                        fields = mapOf(
+                    if (letter != null) {
+                        val fields = mapOf(
                             "mode" to (if (ev.adding) "+" else "-") + letter,
                             "victim" to ev.nick,
                             "prefix" to ev.prefix.toString(),
-                        ),
-                    )
+                            // mIRC's names for the affected nick
+                            "opnick" to ev.nick, "vnick" to ev.nick, "hnick" to ev.nick,
+                        )
+                        val isMe = isMyNick(netId, ev.nick)
+                        scriptEvent("MODE", netId, ev.channel, ev.byNick, isMe = isMe, fields = fields)
+                        // mIRC's per-status events
+                        val named = when (letter) {
+                            'o' -> if (ev.adding) "OP" else "DEOP"
+                            'v' -> if (ev.adding) "VOICE" else "DEVOICE"
+                            'h' -> if (ev.adding) "HELP" else "DEHELP"
+                            else -> null
+                        }
+                        if (named != null) scriptEvent(named, netId, ev.channel, ev.byNick, isMe = isMe, fields = fields)
+                    }
                 }
             }
             is IrcEvent.ChannelListStart -> {
@@ -9415,6 +9504,7 @@ if (code == "442") {
 
             // Incoming channel invite.
             is IrcEvent.InviteReceived -> {
+                if (!isNickIgnored(netId, ev.from)) scriptEvent("INVITE", netId, "", ev.from, fields = mapOf("chan" to ev.channel))
                 val serverKey = bufKey(netId, "*server*")
                 val line = "* " + appContext.getString(R.string.vm_ev_invited_you, ev.from, ev.channel)
                 append(serverKey, from = null, text = line, timeMs = ev.timeMs, doNotify = false, isLocal = false, isHighlight = true)
@@ -9575,6 +9665,7 @@ if (code == "442") {
             }
 
             is IrcEvent.MonitorStatus -> {
+                scriptEvent(if (ev.online) "NOTIFY" else "UNOTIFY", netId, "", ev.nick)
                 // MONITOR: a watched nick came online or went offline.
                 // Show a brief status line in the server buffer (and PM buffer if open).
                 val statusLine = if (ev.online) "*** " + appContext.getString(R.string.vm_ev_monitor_online, ev.nick) else "*** " + appContext.getString(R.string.vm_ev_monitor_offline, ev.nick)
@@ -9920,17 +10011,19 @@ if (code == "442") {
             is IrcEvent.MessageRedacted -> {
                 // Replace the deleted message's text
                 val chanKey = resolveBufferKey(netId, ev.target)
-                val buf = _state.value.buffers[chanKey]
-                val idx = buf?.messages?.indexOfLast { it.msgId != null && it.msgId == ev.msgId } ?: -1
-                if (buf != null && idx >= 0) {
-                    val victim = buf.messages[idx]
-                    val tombstone = if (ev.reason.isNullOrBlank())
-                        appContext.getString(R.string.vm_ev_message_deleted, ev.fromNick)
-                    else
-                        appContext.getString(R.string.vm_ev_message_deleted_reason, ev.fromNick, ev.reason)
-                    val newLog = buf.log.replaceAt(idx, victim.copy(text = tombstone))
-                    _state.update { it.copy(buffers = it.buffers + (chanKey to buf.copy(log = newLog))) }
-                } else {
+                val tombstone = if (ev.reason.isNullOrBlank())
+                    appContext.getString(R.string.vm_ev_message_deleted, ev.fromNick)
+                else
+                    appContext.getString(R.string.vm_ev_message_deleted_reason, ev.fromNick, ev.reason)
+                var replaced = false
+                _state.update { st ->
+                    val buf = st.buffers[chanKey]
+                    val idx = buf?.messages?.indexOfLast { it.msgId != null && it.msgId == ev.msgId } ?: -1
+                    replaced = buf != null && idx >= 0
+                    if (buf == null || idx < 0) st
+                    else st.copy(buffers = st.buffers + (chanKey to buf.copy(log = buf.log.replaceAt(idx, buf.messages[idx].copy(text = tombstone)))))
+                }
+                if (!replaced) {
                     append(chanKey, from = null,
                         text = "* " + appContext.getString(R.string.vm_deleted_message, ev.fromNick),
                         timeMs = ev.timeMs, doNotify = false, isLocal = true,
@@ -10013,6 +10106,33 @@ if (code == "442") {
                     val read = buf.messages.lastOrNull { it.msgId == ev.msgId } ?: return@update s
                     if ((buf.peerReadAtMs ?: Long.MIN_VALUE) >= read.timeMs) return@update s
                     s.copy(buffers = s.buffers + (key to buf.copy(peerReadAtMs = read.timeMs)))
+                }
+            }
+
+            is IrcEvent.ChannelModeChanges -> {
+                // Scripts: RAWMODE once per line, BAN/UNBAN for each ban change.
+                if (!ev.isHistory) {
+                    scriptEvent("RAWMODE", netId, ev.channel, ev.byNick, ev.modes, isMyNick(netId, ev.byNick))
+                    for (c in ev.changes) {
+                        if (c.mode != 'b' || c.arg == null) continue
+                        scriptEvent(
+                            if (c.adding) "BAN" else "UNBAN", netId, ev.channel, ev.byNick,
+                            text = c.arg, isMe = isMyNick(netId, ev.byNick), fields = mapOf("banmask" to c.arg),
+                        )
+                    }
+                }
+            }
+
+            is IrcEvent.CtcpRequest -> {
+                // Scripts only: HexDroid answers the CTCPs it knows itself. Ignored nicks never
+                // reach scripts, as for messages and notices.
+                if (!ev.isHistory && !isNickIgnored(netId, ev.from)) {
+                    val inChannel = isChannelOnNet(netId, ev.target)
+                    scriptEvent(
+                        "CTCP", netId, if (inChannel) ev.target else "", ev.from,
+                        text = listOf(ev.command, ev.args).filter { it.isNotEmpty() }.joinToString(" "),
+                        isMe = isMyNick(netId, ev.from), isPrivate = !inChannel,
+                    )
                 }
             }
 
@@ -10118,7 +10238,8 @@ if (code == "442") {
                 withContext(Dispatchers.Main) {
                     val liveKey = load.key
                     val newestLogged = loaded.maxOf { it.timeMs }
-                    lastLoggedTimeMs.merge(liveKey, newestLogged, ::maxOf)
+                    loaded.filter { it.timeMs <= loadStartMs - 2_000L }.maxOfOrNull { it.timeMs }
+                        ?.let { loggedBeforeConnectMs.merge(liveKey, it, ::maxOf) }
                     var blockAdded = false
                     _state.update { st ->
                         blockAdded = false
@@ -10171,17 +10292,19 @@ if (code == "442") {
     }
 
     /**
-     * Put log lines that were written slightly late back in time order. A line of ours is
-     * written when the server echoes it, which can be after lines received meanwhile. Only
-     * short inversions are corrected, so a clock change such as the end of daylight saving,
-     * which repeats an hour of local times, keeps the order the file has.
+     * Put log lines that were written out of order back in time order. A line of ours is
+     * written when the server echoes it, which can be after lines received meanwhile, and a
+     * bouncer's playback is written after the join and topic lines that came before it. A line
+     * moves back past status lines however far, but past chat lines only within
+     * [LOG_REORDER_WINDOW_MS], so a clock change such as the end of daylight saving, which
+     * repeats an hour of local times, keeps the conversation in the order the file has.
      */
     private fun settleLogOrder(lines: List<UiMessage>): List<UiMessage> {
         val out = ArrayList<UiMessage>(lines.size)
         for (m in lines) {
             var at = out.size
             while (at > 0 && out[at - 1].timeMs > m.timeMs &&
-                out[at - 1].timeMs - m.timeMs <= LOG_REORDER_WINDOW_MS
+                (out[at - 1].timeMs - m.timeMs <= LOG_REORDER_WINDOW_MS || out[at - 1].from == null)
             ) at--
             out.add(at, m)
         }
@@ -10974,7 +11097,8 @@ if (code == "442") {
         joinStartId.remove(from)?.let { joinStartId[to] = it }
         leftChannelAtMs.remove(from)?.let { leftChannelAtMs[to] = it }
         pendingJoinCatchups.remove(from)?.let { pendingJoinCatchups[to] = it }
-        lastLoggedTimeMs.remove(from)?.let { lastLoggedTimeMs.merge(to, it, ::maxOf) }
+        lastLoggedServerMs.remove(from)?.let { lastLoggedServerMs.merge(to, it, ::maxOf) }
+        loggedBeforeConnectMs.remove(from)?.let { loggedBeforeConnectMs.merge(to, it, ::maxOf) }
         recentSelfSends.remove(from)?.let { moving ->
             // Merge: both keys can hold pending echoes if messaged under each nick.
             val dq = recentSelfSends.getOrPut(to) { ArrayDeque(16) }
@@ -11006,7 +11130,8 @@ if (code == "442") {
         catchupCursor.remove(key)
         pendingJoinCatchups.remove(key)
         dropDeferredReplays(key)
-        lastLoggedTimeMs.remove(key)
+        lastLoggedServerMs.remove(key)
+        loggedBeforeConnectMs.remove(key)
         historyAnchors.remove(key)
         sessionFirstLive.remove(key)
         catchupAnchorMs.remove(key)
@@ -11320,23 +11445,20 @@ if (code == "442") {
         fromOper: Boolean = false,
         /** Bot Mode: sender is a bot (see UiMessage.fromBot). */
         fromBot: Boolean = false,
-        /** A line re-sent on every join: shown at the end, in place of any earlier copy. */
-        repeatsOnJoin: Boolean = false,
     ) {
         val nowMs = System.currentTimeMillis()
-        // A line re-sent on every join is shown as of this join, whatever time it carries.
-        val ts = if (repeatsOnJoin) nowMs else timeMs ?: nowMs
+        val ts = timeMs ?: nowMs
 
         // A server-stamped line this old is a replay however it arrived. The short threshold
         // only affects ordering; the long one also governs logging, unread and alerts.
-        val suspectReplay = isHistory || repeatsOnJoin ||
+        val suspectReplay = isHistory ||
             (timeMs != null && timeMs < nowMs - BufferLog.REPLAY_SUSPICION_MS)
         val serverNow = if (!isHistory && timeMs != null) {
             newestLiveServerTimeMs.merge(splitKey(bufferKey).first, timeMs, ::maxOf)
         } else {
             null
         }
-        val staleLive = !repeatsOnJoin && serverNow != null && timeMs != null &&
+        val staleLive = serverNow != null && timeMs != null &&
             timeMs < serverNow - STALE_LIVE_LINE_MS
 
         // Playback for a buffer still reading its log waits for it, so the logged lines land
@@ -11363,7 +11485,6 @@ if (code == "442") {
                     pending = pending,
                     fromOper = fromOper,
                     fromBot = fromBot,
-                    repeatsOnJoin = repeatsOnJoin,
                 )
             }
         ) return
@@ -11415,12 +11536,11 @@ if (code == "442") {
 
         // A stale live line is treated as history is: quiet unless the user asked otherwise.
         val settingsNow = _state.value.settings
-        val quiet = isLocal || repeatsOnJoin || (staleLive && !settingsNow.ircHistoryCountsAsUnread)
+        val quiet = isLocal || (staleLive && !settingsNow.ircHistoryCountsAsUnread)
         val mayNotify = doNotify && (!staleLive || settingsNow.ircHistoryTriggersNotifications)
         val floorMs = scrollbackFloorMs[bufferKey]
 
         var msgWasDuplicate = false
-        var replacedLogCopy = false
         _state.update { st: UiState ->
             msgWasDuplicate = false
             val buf = st.buffers[bufferKey] ?: UiBuffer(bufferKey)
@@ -11434,9 +11554,7 @@ if (code == "442") {
                 nowMs = nowMs,
                 floorMs = floorMs,
                 skewSeconds = if (ownForDedup) BufferLog.OWN_SIGNATURE_SKEW_SECONDS else BufferLog.SIGNATURE_SKEW_SECONDS,
-                repeatsOnJoin = repeatsOnJoin,
             )
-            replacedLogCopy = result is BufferLog.Insert.Replaced
 
             // A rejected message leaves its identity behind for a third-route copy.
             if (result is BufferLog.Insert.Duplicate) {
@@ -11497,15 +11615,19 @@ if (code == "442") {
         // will do: a local line has no msgid and a clock the server never saw.
         if (!isHistory && !staleLive && !isLocal && from != null) sessionFirstLive.putIfAbsent(bufferKey, msg)
 
-        // Logging. A replay is written only when newer than the last line already on disk;
-        // in-memory dedup cannot cover this alone, since the scrollback load runs on IO and
-        // a fast replay can beat it.
-        val alreadyOnDisk = replacedLogCopy ||
-            ((isHistory || staleLive) && (lastLoggedTimeMs[bufferKey]?.let { ts <= it } == true))
+        // Logging. A replay is written only when newer than what was logged before this
+        // connection; in-memory dedup cannot cover this alone, since the scrollback load runs on
+        // IO and a fast replay can beat it. Lines logged since the connection began, such as
+        // our join, don't count: a bouncer plays back what it held after sending the JOIN.
+        val alreadyOnDisk =
+            (isHistory || staleLive) && (loggedBeforeConnectMs[bufferKey]?.let { ts <= it } == true)
         if (!alreadyOnDisk) {
             val held = isFromMe && isLocal && !isHistory &&
                 holdOwnLogLine(bufferKey, from, text, isAction, ts, encryption)
-            if (!held) writeLogLine(bufferKey, ts, from, text, isAction)
+            if (!held) {
+                writeLogLine(bufferKey, ts, from, text, isAction)
+                if (timeMs != null) lastLoggedServerMs.merge(bufferKey, ts, ::maxOf)
+            }
         }
 
         // notifications
@@ -11592,7 +11714,6 @@ if (code == "442") {
         val netName = st.networks.firstOrNull { it.id == netId }?.name ?: "network"
         val logLine = formatLogLine(ts, from, text, isAction)
         val logFolderUri = st.settings.logFolderUri
-        lastLoggedTimeMs.merge(bufferKey, ts, ::maxOf)
         scope.launch(Dispatchers.IO) {
             val err = runCatching {
                 logs.append(netName, bufferName, logLine, logFolderUri)
@@ -12010,10 +12131,10 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 val wanted = desiredConnected.toList()
                 val namesWanted = wanted.mapNotNull { id -> st.networks.firstOrNull { it.id == id }?.name }.ifEmpty { wanted }
                 val labelWanted = if (wanted.size > 1) {
-                    "${wanted.size} networks: ${namesWanted.joinToString(", ")}"
+                    appContext.getString(R.string.vm_notif_networks, wanted.size, namesWanted.joinToString(", "))
                 } else {
                     val net = st.networks.firstOrNull { it.id == wanted.first() }
-                    if (net != null) "${net.name} • ${net.host}:${net.port}" else "HexDroid IRC"
+                    if (net != null) "${net.name} • ${net.host}:${net.port}" else appContext.getString(R.string.app_name)
                 }
                 val netIdForIntent = st.activeNetworkId?.takeIf { wanted.contains(it) } ?: wanted.first()
                 val statusTxt = if (!hasInternetConnection()) appContext.getString(R.string.vm_status_waiting_network)
@@ -12042,11 +12163,10 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         val names = displayIds.mapNotNull { id -> st.networks.firstOrNull { it.id == id }?.name }.ifEmpty { displayIds }
 
         val label = if (displayIds.size > 1) {
-            // NotificationHelper prefixes this with "Connected to".
             appContext.getString(R.string.vm_notif_networks, displayIds.size, names.joinToString(", "))
         } else {
             val net = st.networks.firstOrNull { it.id == displayIds.first() }
-            if (net != null) "${net.name} • ${net.host}:${net.port}" else "HexDroid IRC"
+            if (net != null) "${net.name} • ${net.host}:${net.port}" else appContext.getString(R.string.app_name)
         }
 
         val status = statusOverride ?: when {
@@ -12237,6 +12357,10 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                     }
                 }
                 updateIncoming(offer) { it.copy(done = true, savedPath = savedPath, endTimeMs = System.currentTimeMillis()) }
+                scriptEvent(
+                    "FILERCVD", offer.netId, "", offer.from, text = offer.filename,
+                    fields = mapOf("filename" to offer.filename, "filesize" to offer.size.toString(), "path" to savedPath),
+                )
                 // Clear the partial record on success (don't delete the file — it IS the completed download).
                 dccPartials.remove(offer.from, baseName, offer.size)
                 val displayPath = if (savedPath.startsWith("content://")) "Downloads" else savedPath.substringAfterLast('/')
@@ -12561,12 +12685,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
         }
     }
 
+    /** Update the incoming transfer for [offer]. Atomic, since transfers report from IO threads. */
     private fun updateIncoming(offer: DccOffer, f: (DccTransferState.Incoming) -> DccTransferState.Incoming) {
-        val st = _state.value
-        val updated = st.dccTransfers.map {
-            if (it is DccTransferState.Incoming && it.offer == offer) f(it) else it
+        _state.update { st ->
+            st.copy(dccTransfers = st.dccTransfers.map {
+                if (it is DccTransferState.Incoming && it.offer == offer) f(it) else it
+            })
         }
-        _state.value = st.copy(dccTransfers = updated)
     }
 
     private fun quoteDccFilenameIfNeeded(nameRaw: String): String {
@@ -12622,10 +12747,11 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 _state.value = st.copy(dccTransfers = st.dccTransfers + outgoing)
 
                 fun updateOutgoing(sent: Long) {
-                    val st2 = _state.value
-                    _state.value = st2.copy(dccTransfers = st2.dccTransfers.map {
-                        if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName) it.copy(bytesSent = sent) else it
-                    })
+                    _state.update { st2 ->
+                        st2.copy(dccTransfers = st2.dccTransfers.map {
+                            if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName) it.copy(bytesSent = sent) else it
+                        })
+                    }
                 }
 
                 suspend fun doActiveSend() {
@@ -12669,12 +12795,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                             // withTimeoutOrNull keeps us off the experimental getCompleted() API.
                             val offset = withTimeoutOrNull(500L) { liveDeferred.await() } ?: 0L
                             if (offset > 0L) {
-                                val st4 = _state.value
-                                _state.value = st4.copy(dccTransfers = st4.dccTransfers.map {
-                                    if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName)
-                                        it.copy(resumeOffset = offset, bytesSent = offset)
-                                    else it
-                                })
+                                _state.update { st4 ->
+                                    st4.copy(dccTransfers = st4.dccTransfers.map {
+                                        if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName)
+                                            it.copy(resumeOffset = offset, bytesSent = offset)
+                                        else it
+                                    })
+                                }
                             }
                             offset
                         },
@@ -12724,12 +12851,13 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                         // getCompleted() API.
                         val startOffset = withTimeoutOrNull(100L) { liveDeferred.await() } ?: 0L
                         if (startOffset > 0L) {
-                            val st4 = _state.value
-                            _state.value = st4.copy(dccTransfers = st4.dccTransfers.map {
-                                if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName)
-                                    it.copy(resumeOffset = startOffset, bytesSent = startOffset)
-                                else it
-                            })
+                            _state.update { st4 ->
+                                st4.copy(dccTransfers = st4.dccTransfers.map {
+                                    if (it is DccTransferState.Outgoing && it.target == target && it.filename == offerName)
+                                        it.copy(resumeOffset = startOffset, bytesSent = startOffset)
+                                    else it
+                                })
+                            }
                             append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_accepted_resume, target, startOffset), doNotify = false)
                         } else {
                             append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_accepted_connecting, target), doNotify = false)
@@ -12788,6 +12916,7 @@ private fun moveNickAcrossChannels(netId: String, oldNick: String, newNick: Stri
                 })
                 outgoingSendJobs.remove(jobKey)
                 append(statusKey, from = null, text = "*** " + appContext.getString(R.string.vm_dcc_send_complete, offerName, target), doNotify = false)
+                scriptEvent("FILESENT", netId, "", target, text = offerName, fields = mapOf("filename" to offerName))
 
             } catch (t: Throwable) {
                 // See incoming catch above for why !isActive is the reliable cancel signal:

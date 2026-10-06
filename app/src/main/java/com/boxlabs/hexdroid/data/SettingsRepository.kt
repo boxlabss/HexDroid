@@ -307,6 +307,7 @@ class SettingsRepository(private val ctx: Context) {
                 nickPaneFracLandscape = o.optDouble("nickPaneFracLandscape", 0.05).toFloat(),
 
                 hideJoinPartQuit = o.optBoolean("hideJoinPartQuit", false),
+                hideHostnames = o.optBoolean("hideHostnames", false),
                 colorChannelEvents = o.optBoolean("colorChannelEvents", true),
                 hideAwayNotify = o.optBoolean("hideAwayNotify", false),
 
@@ -424,6 +425,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("nickPaneFracLandscape", s.nickPaneFracLandscape.toDouble())
 
         o.put("hideJoinPartQuit", s.hideJoinPartQuit)
+        o.put("hideHostnames", s.hideHostnames)
         o.put("colorChannelEvents", s.colorChannelEvents)
         o.put("hideAwayNotify", s.hideAwayNotify)
 

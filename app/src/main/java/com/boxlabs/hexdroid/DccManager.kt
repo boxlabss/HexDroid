@@ -1067,6 +1067,8 @@ class DccManager(ctx: Context) {
             // If the writer errored late (while draining), surface that as the failure
             // rather than reporting a clean total.
             writerError.get()?.let { throw it }
+            // A writer still running hasn't saved everything it was handed.
+            if (writerThread.isAlive) throw IOException("DCC receive: saving the file stalled")
         }
 
         // Final progress beat so the UI lands on the actual total rather than the last
@@ -1179,13 +1181,18 @@ class DccManager(ctx: Context) {
                         throw IOException("DCC SEND: could not seek to startOffset $startOffset (file shorter than expected)")
                     }
                 }
+                var lastProgressMs = 0L
                 while (true) {
                     val n = fin.read(buf)
                     if (n <= 0) break
                     try {
                         out.write(buf, 0, n)
                         sent += n
-                        onProgress(sent, size)
+                        val now = System.currentTimeMillis()
+                        if (now - lastProgressMs >= 100L) {
+                            lastProgressMs = now
+                            onProgress(sent, size)
+                        }
                     } catch (io: IOException) {
                         // If the peer already ACKed the full size, treat as success.
                         if (size > 0L && acked.get() >= size) break
@@ -1194,6 +1201,7 @@ class DccManager(ctx: Context) {
                 }
             }
             out.flush()
+            onProgress(sent, size)
 
             // Half-close so receiver sees EOF; then wait briefly for final ACK/peer close.
             runCatching { sock.shutdownOutput() }

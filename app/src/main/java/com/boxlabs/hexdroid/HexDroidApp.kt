@@ -75,6 +75,7 @@ class HexDroidApp : Application() {
             // "typing" state, and so the 30-second paused/done timer coroutine doesn't
             // keep the CPU awake.
             ircViewModel.cancelTypingOnBackground()
+            ircViewModel.onAppActiveChanged(false)
             // Flush log file buffers so lines written since the last periodic flush
             // reach disk before the OS might kill the process.
             ircViewModel.flushLogs()
@@ -94,6 +95,7 @@ class HexDroidApp : Application() {
                 // outlived it and the user came back, clear that suppression so connections
                 // resume normally.
                 ircViewModel.onAppForegrounded()
+                ircViewModel.onAppActiveChanged(true)
                 // Clear unread on the selected buffer when the app comes back to the foreground:
                 // messages that arrived in the background counted as unread, but this is the buffer
                 // on screen.

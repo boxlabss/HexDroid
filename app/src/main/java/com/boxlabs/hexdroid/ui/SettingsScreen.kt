@@ -1150,6 +1150,7 @@ fun SettingsScreen(
             }
             item { SettingToggle(stringResource(R.string.setting_hide_motd), s.hideMotdOnConnect) { onUpdate { copy(hideMotdOnConnect = !hideMotdOnConnect) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_joinpartquit), s.hideJoinPartQuit) { onUpdate { copy(hideJoinPartQuit = !hideJoinPartQuit) } } }
+            item { SettingToggle(stringResource(R.string.setting_hide_hostnames), s.hideHostnames) { onUpdate { copy(hideHostnames = !hideHostnames) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_away_notify), s.hideAwayNotify) { onUpdate { copy(hideAwayNotify = !hideAwayNotify) } } }
             item { SettingToggle(stringResource(R.string.setting_hide_topic_on_entry), s.hideTopicOnEntry) { onUpdate { copy(hideTopicOnEntry = !hideTopicOnEntry) } } }
             item { SectionTitle(stringResource(R.string.section_landscape)) }

@@ -49,6 +49,8 @@ class AgeScriptCapabilities(
     private val raiseSignal: (name: String, fields: Map<String, String>, args: List<String>) -> Unit,
 ) {
     private val channels = HashMap<String, AgeChannel>()              // channel -> AgeChannel (keyed)
+    /** The seq the next channel built for a name must start at or above, kept across rebuilds. */
+    private val seqFloor = HashMap<String, Int>()
     private val pendingMembers = HashMap<String, MutableSet<String>>() // members added before keying
 
     /** Dispatch a script `age.*` call. Unknown names return "". */
@@ -99,7 +101,8 @@ class AgeScriptCapabilities(
     private fun channelFor(channel: String): AgeChannel? {
         channels[channel]?.let { return it }
         val k = groupKeyFor(channel) ?: return null              // not yet established (invite pending)
-        val ch = AgeChannel(p, channel, me, myFp, groupKey = k)
+        val firstSeq = maxOf(AgeChannel.initialSendSeq(System.currentTimeMillis()), seqFloor[channel] ?: 0)
+        val ch = AgeChannel(p, channel, me, myFp, groupKey = k, firstSeq = firstSeq)
         channels[channel] = ch
         pendingMembers.remove(channel)?.forEach { fp -> keyFor(fp)?.let { (sig, _) -> ch.addMember(fp, sig) } }
         return ch
@@ -116,6 +119,7 @@ class AgeScriptCapabilities(
         require(current == null || !existing.usesKey(current)) {
             "resetChannel(\"$channel\") called with an unchanged group key"
         }
+        seqFloor[channel] = existing.nextSeq
         channels.remove(channel)
     }
 
@@ -125,7 +129,7 @@ class AgeScriptCapabilities(
     /** Encrypt [text] as an `AGE CHAT` wire line for [channel], or null if not keyed (fail closed). */
     fun encryptChat(channel: String, text: String): String? {
         val ch = channelFor(channel) ?: return null
-        return AgeWire.chat(ch.encrypt(text.encodeToByteArray()))
+        return runCatching { AgeWire.chat(ch.encrypt(text.encodeToByteArray())) }.getOrNull()
     }
 
     /** Decrypt an inbound `AGE CHAT` line on [channel] to (senderFpHex, plaintext), or null on any failure. */
@@ -140,7 +144,7 @@ class AgeScriptCapabilities(
 
     private fun sendMove(channel: String, move: List<String>) {
         val ch = channelFor(channel) ?: return                  // not keyed → don't transmit (fail closed)
-        val enc = ch.encrypt(move.joinToString(" ").encodeToByteArray())
+        val enc = runCatching { ch.encrypt(move.joinToString(" ").encodeToByteArray()) }.getOrNull() ?: return
         send(AgeWire.msg(enc))
     }
 

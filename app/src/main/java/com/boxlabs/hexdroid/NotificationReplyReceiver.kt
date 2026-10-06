@@ -47,6 +47,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         val notifId      = intent.getIntExtra(NotificationHelper.EXTRA_NOTIF_ID, -1)
         val from         = intent.getStringExtra(NotificationHelper.EXTRA_FROM)           ?: ""
         val originalText = intent.getStringExtra(NotificationHelper.EXTRA_ORIGINAL_TEXT) ?: ""
+        val replyMsgId   = intent.getStringExtra(NotificationHelper.EXTRA_REPLY_MSGID)
 
         val bundle = RemoteInput.getResultsFromIntent(intent) ?: return
         val replyText = bundle.getCharSequence(NotificationHelper.EXTRA_REPLY_TEXT)
@@ -61,7 +62,7 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         val hasLiveConnection = vm?.hasLiveConnection(netId) == true
 
         if (hasLiveConnection) {
-            vm.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText)
+            vm.sendToBuffer(netId, buffer, replyText, from = from, originalText = originalText, msgId = replyMsgId)
             // Cancel by tag as well as id: message notifications are posted under a
             // per-buffer tag, and an untagged cancel matches nothing.
             if (notifId >= 0) runCatching {
@@ -75,8 +76,8 @@ class NotificationReplyReceiver : BroadcastReceiver() {
                     ctx, NotificationHelper.CH_HIGHLIGHT_SILENT
                 )
                     .setSmallIcon(android.R.drawable.stat_notify_chat)
-                    .setContentTitle("Reply not sent: not connected")
-                    .setContentText("Open HexDroid and reconnect to send your reply to $buffer")
+                    .setContentTitle(ctx.getString(R.string.notif_reply_not_sent_title))
+                    .setContentText(ctx.getString(R.string.notif_reply_not_sent_text, buffer))
                     .setAutoCancel(true)
                     .build()
                 // Same tag as the notification it replaces, so opening the conversation

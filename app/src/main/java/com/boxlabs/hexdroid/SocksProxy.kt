@@ -291,7 +291,7 @@ object SocksProxy {
         val out = ByteArray(4)
         for (idx in 0 until 4) {
             val p = parts[idx]
-            if (p.isEmpty() || p.length > 3 || p.any { !it.isDigit() }) return null
+            if (p.isEmpty() || p.length > 3 || p.any { it !in '0'..'9' }) return null
             val n = p.toInt()
             if (n !in 0..255) return null
             out[idx] = n.toByte()

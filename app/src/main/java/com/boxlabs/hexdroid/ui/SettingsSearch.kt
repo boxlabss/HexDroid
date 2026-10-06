@@ -122,6 +122,8 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         keywords = "motd hide"),
     SettingsSearchEntry(R.string.setting_hide_joinpartquit, SettingsCategory.CHAT,
         keywords = "join part quit hide"),
+    SettingsSearchEntry(R.string.setting_hide_hostnames, SettingsCategory.CHAT,
+        keywords = "hostname host ident mask join part quit hide"),
     SettingsSearchEntry(R.string.setting_hide_away_notify, SettingsCategory.CHAT,
         keywords = "away hide"),
     SettingsSearchEntry(R.string.setting_hide_topic_on_entry, SettingsCategory.CHAT,
@@ -201,6 +203,10 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         keywords = "log server buffer"),
     SettingsSearchEntry(R.string.setting_log_folder, SettingsCategory.LOGGING,
         keywords = "log folder directory storage"),
+    SettingsSearchEntry(R.string.setting_logs_export, SettingsCategory.LOGGING,
+        keywords = "log export zip save download"),
+    SettingsSearchEntry(R.string.setting_logs_delete, SettingsCategory.LOGGING,
+        descRes = R.string.setting_logs_delete_body, keywords = "log delete clear erase remove wipe"),
     SettingsSearchEntry(R.string.setting_retention_days, SettingsCategory.LOGGING,
         descRes = R.string.setting_retention_days_hint, keywords = "retention purge delete days"),
     SettingsSearchEntry(R.string.setting_max_scrollback, SettingsCategory.LOGGING,
@@ -249,7 +255,7 @@ private typealias SearchRow = Pair<SettingsSearchEntry, String>
 /** Combining marks left behind after decomposing accented characters. */
 private val COMBINING_MARKS = Regex("\\p{Mn}+")
 
-/** Lower-cases */
+/** Lower-cased with accents removed, so a match ignores case and diacritics. */
 private fun foldForSearch(text: String): String =
     Normalizer.normalize(text.lowercase(Locale.ROOT), Normalizer.Form.NFD)
         .replace(COMBINING_MARKS, "")

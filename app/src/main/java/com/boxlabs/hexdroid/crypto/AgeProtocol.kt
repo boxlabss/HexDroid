@@ -411,10 +411,15 @@ class AgeChannel(
     private val mySigFpHex: String,
     groupKey: ByteArray,
     epoch: Int = 0,
+    /** The first seq this instance sends. See [initialSendSeq]. */
+    firstSeq: Int = initialSendSeq(System.currentTimeMillis()),
 ) {
     private var key: ByteArray = groupKey.copyOf()
     private var epoch: Int = epoch
-    private var sendSeq: Int = 0
+    private var sendSeq: Int = firstSeq
+
+    /** The seq the next [encrypt] will use. */
+    val nextSeq: Int get() = sendSeq
 
     /**
      * True when [k] is the key this channel is already using. sendSeq restarts at zero on a newly
@@ -436,8 +441,12 @@ class AgeChannel(
         lastSeqByFp.clear()  // seq space resets per epoch
     }
 
-    /** Encrypt a move (opaque bytes from the game/.hex layer). Returns the AGE MSG body. */
+    /**
+     * Encrypt a move (opaque bytes from the game/.hex layer). Returns the AGE MSG body. Throws
+     * [AgeException] once the seq space is used up, since wrapping would repeat nonces.
+     */
     fun encrypt(move: ByteArray): EncMessage {
+        if (sendSeq == Int.MAX_VALUE) throw AgeException("channel: seq space exhausted")
         val seq = sendSeq++
         val inner = AgeCodec.Writer().str(gameId).u32(epoch).u32(seq).str(mySigFpHex).bytes(move).build()
         val sig = p.sign(me.sigSeed, MSG_TAG + inner)
@@ -538,6 +547,21 @@ class AgeChannel(
         private val MSG_TAG = "hexdroid/+AGE/msg-sign/v1".encodeToByteArray()
         private val MSG_AAD = "hexdroid/+AGE/msg/v1".encodeToByteArray()
         private val MSG_KEY_INFO = "hexdroid/+AGE/msg-key/v1".encodeToByteArray()
+
+        /** 2026-01-01T00:00:00Z. */
+        private const val SEQ_EPOCH_MS = 1_767_225_600_000L
+
+        /**
+         * A starting seq from the clock: half-seconds since 2026, which lasts until 2060.
+         *
+         * A client that rejoins or restarts is sealed the same group key again, and its message key
+         * and nonce depend only on that key, its fingerprint, the epoch and the seq. Starting each
+         * instance at zero would repeat (key, nonce) pairs, and every receiver's replay guard would
+         * drop its messages. Started from the clock, an instance sends above anything an earlier one
+         * did, provided that one averaged fewer than two messages a second over its life.
+         */
+        fun initialSendSeq(nowMs: Long): Int =
+            ((nowMs - SEQ_EPOCH_MS) / 500L).coerceIn(0L, Int.MAX_VALUE - 1L).toInt()
     }
 }
 

@@ -2,7 +2,7 @@
     <string name="app_name">HexDroid IRC</string>
 
     <!-- Welcome / Setup Screen -->
-    <string name="welcome_title">HexDroid IRC\'ye Hoş Geldiniz</string>
+    <string name="welcome_title">HexDroid\'e Hoş Geldiniz</string>
     <string name="welcome_subtitle">Başlamadan önce sizi ayarlayalım.</string>
     <string name="welcome_language_label">Dil</string>
     <string name="welcome_nick_label">Takma ad</string>
@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">Giriş alanının üstünde ağ çubuğu</string>
     <string name="setting_network_tabs_bottom_desc">Kanal değiştiriciyi sohbetin altında gösterir.</string>
     <string name="setting_portrait_nicklist_overlay">Yan panel kullanıcı listesi</string>
-    <string name="setting_portrait_nicklist_overlay_desc">Kullanıcı listesini alt sayfa yerine yeniden boyutlandırılabilir yan panel olarak göster (yatay mod gibi). Etkinleştirildiğinde, düğme kalıcı göster/gizle olarak çalışır.</string>
+    <string name="setting_portrait_nicklist_overlay_desc">Kullanıcı listesini açılır pencere yerine yeniden boyutlandırılabilir yan panel olarak göster. Etkinleştirildiğinde liste düğmesi kalıcı göster/gizle olarak çalışır.</string>
     <string name="setting_ignore_list">Yoksayma listesi</string>
     <string name="setting_ignore_list_desc">Belirli takma adlardan gelen mesajları ve DCC tekliflerini gizle (ağ başına).</string>
     <string name="setting_quit_message">Çıkış mesajı</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">DCC\'yi etkinleştir</string>
     <string name="setting_open_app_settings">Uygulama ayarlarını aç</string>
     <string name="setting_battery_optimization">Pil optimizasyon listesi</string>
+    <string name="setting_ctcp_replies">CTCP isteklerini yanıtla</string>
+    <string name="setting_ctcp_replies_desc">VERSION, TIME, PING ve benzerlerine verilen yanıtları kapatır.</string>
+    <string name="setting_show_nick_icons">Takma ad simgelerini göster</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">Sohbet ve mesajlar</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">Nick</string>
     <string name="chat_ban_type_account">Hesap</string>
     <string name="chat_ban_type_domain">Alan adı</string>
+    <string name="chat_react_custom">Özel tepki</string>
+    <string name="chat_react_custom_hint">Emoji veya kelime</string>
+    <string name="chat_react_send">Tepki ver</string>
+    <string name="chat_reply_not_loaded">Daha önceki bir mesaja yanıt</string>
 
     <!-- Network screens -->
     <string name="networks_title">Ağlar</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">Bu ana makine için STS politikasını unut</string>
     <string name="list_retry">Yeniden dene</string>
     <string name="network_trust_extra_pinned_cert">Bu sunucuya da güven (round-robin DNS)</string>
+    <string name="network_trust_cert_names">Bu sertifika adlarına güven</string>
+    <string name="network_cert_names_accepted">Kabul edilen sertifika adları</string>
+    <string name="network_clear_cert_names">Bu adlara güvenmeyi bırak</string>
     <string name="network_nick">Takma ad</string>
     <string name="network_alt_nick">Alternatif takma ad</string>
     <string name="network_username">Kullanıcı adı</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">Gelişmiş IRCv3 caps</string>
     <string name="core_nick_change_refused">Sunucu takma adı değiştirmenize izin vermiyor: %1$s</string>
+    <string name="core_ctcp_reply_disabled">%2$s kaynaklı CTCP %1$s yok sayıldı (yanıtlar kapalı)</string>
     <string name="settings_raw_log">Ham protokol günlüğü</string>
     <string name="settings_raw_log_desc">Gönderilen ve alınan her satırı ağ başına bir Raw tamponunda gösterir. Parolalar gizlenir. Hata ayıklama içindir.</string>
     <string name="chat_show_less">Daha az göster</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">Sunucu mesajı reddetti (%1$s): %2$s</string>
     <string name="network_edit_cap_also">ayrıca %1$s ister</string>
     <string name="network_edit_caps_hint">Temel IRCv3 özellikleri varsayılan olarak etkin. Gelişmiş seçenekler için açın.</string>
-    <string name="network_edit_bouncer_caps">Bouncer caps (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">Bouncer caps</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">Aktarımlar</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">%1$s\'den gelen DCC sohbeti</string>
-    <string name="notif_dcc_incoming_chat_text">Açmak için dokun — veya Transferler\'i kullan</string>
+    <string name="notif_dcc_incoming_chat_text">Açmak için dokunun veya kabul/ret için Transferleri kullanın</string>
     <string name="notif_dcc_incoming_file_title">%1$s\'den gelen dosya</string>
     <string name="notif_dcc_file_done_title">DCC tamamlandı</string>
     <string name="notif_dcc_file_done_text">%1$s, %2$s\'e kaydedildi</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">Alternatif nick</string>
     <string name="network_username_label">Kullanıcı adı (ident)</string>
     <string name="network_bouncer_username_label">Kullanıcı adı</string>
-    <string name="network_username_bouncer_hint">Bouncer profilleri için bu, <b>bouncer\'daki giriş adınızdır</b> — bouncer hesabını kurduğunuz adın aynısı. IRC takma adınız değil.</string>
+    <string name="network_username_bouncer_hint">Bouncer profilleri için bu, <b>bouncer\'daki giriş adınızdır</b></string>
     <string name="network_realname_label">Gerçek ad</string>
     <string name="network_use_tls_label">TLS kullan</string>
     <string name="network_allow_plaintext">Düz metne izin ver</string>
     <string name="network_auto_connect_label">Başlangıçta bağlan</string>
     <string name="network_show_in_switcher_label">Kanal değiştiricide göster</string>
-    <string name="network_auto_reconnect_label">Otomatik yeniden bağlan</string>
-    <string name="network_bouncer_label">Bouncer (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">Bağlantı kesilince otomatik yeniden bağlan</string>
+    <string name="network_bouncer_label">Bouncer modu</string>
     <string name="network_bouncer_kind_label">Bouncer türü</string>
     <string name="network_bouncer_kind_none">Yok / belirtilmemiş</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">Genel  (user/network)</string>
     <string name="network_bouncer_network_label">Ağ adı (isteğe bağlı)</string>
-    <string name="network_bouncer_network_help">Bu profilin bouncer\'da hedeflediği yukarı akış ağı (ör. \"libera\", \"oftc\"). Hat üzerinde yukarıdaki bouncer kullanıcı adı alanıyla birleştirilir — USER\'da ve seçtiğiniz kimlik doğrulama yöntemine bağlı olarak SASL veya PASS satırında — seçili bouncer türünün sözdizimi kullanılarak gönderilir.</string>
+    <string name="network_bouncer_network_help">Bu profilin bouncer üzerinde hedeflediği üst ağ (ör. \"afternet\", \"libera\"). Yukarıdaki bouncer kullanıcı adı alanıyla birleştirilir ve seçtiğiniz kimlik doğrulama yöntemine göre SASL\'da veya PASS satırında gönderilir.</string>
     <string name="network_bouncer_clientid_label">İstemci kimliği (isteğe bağlı)</string>
     <string name="network_bouncer_clientid_help">Bu cihaz için kısa bir tanımlayıcı, ör. \"phone\" veya \"hexdroid\". Bouncer destekliyorsa (ZNC clientbuffer, soju istemci başına geçmiş) istemci başına tampon ve geçmişi etkinleştirir. Tüm istemciler arasında tek bir tamponu paylaşmak için boş bırakın.</string>
     <string name="network_server_password_label">Sunucu şifresi (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">Şifre</string>
     <string name="network_sasl_recommended_for_bouncers">Bouncer\'lar için önerilir — yukarıdaki Genel bölümünden bouncer kullanıcı adını kullanmak için kullanıcı adı alanını boş bırakın.</string>
     <string name="network_cert_format_label">Sertifika biçimi</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">Anahtar şifresi (şifreliyse)</string>
@@ -410,9 +421,9 @@
     <string name="networks_drag_reorder">Yeniden sıralamak için sürükle</string>
     <string name="networks_insecure_title">Güvensiz bağlantı engellendi</string>
     <string name="networks_local_title">Yerel ağ erişimi gerekli</string>
-    <string name="networks_local_body">{0} adresine bağlanmak için yerel ağ izni gereklidir.
+    <string name="networks_local_body">{0} adresine bağlanmak için Yerel ağ izni gerekir.
 
-Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bir gerekliliktir.</string>
+        Bu, yerel ağınızdaki sunuculara (ev ağı, bouncer vb.) bağlanmak için Android 17 ile gelen yeni bir gerekliliktir.</string>
     <string name="networks_local_grant">İzin ver</string>
     <string name="networks_insecure_body">Şifrelenmemiş IRC bağlantıları korumasızdır ve mesajlarınızı ile şifrenizi ifşa edebilir.</string>
     <string name="networks_insecure_body2">%1$s adresine TLS olmadan bağlanmak için bu ağ için şifrelenmemiş bağlantılara açıkça izin vermelisiniz.</string>
@@ -459,6 +470,8 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="menu_reconnect">Yeniden bağlan</string>
     <string name="menu_disconnect">Bağlantıyı kes</string>
     <string name="menu_exit">Çıkış</string>
+    <string name="menu_float">Yüzen pencere</string>
+    <string name="float_needs_permission">Yüzen pencereyi kullanmak için HexDroid\'in diğer uygulamaların üzerinde görüntülenmesine izin verin</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">Betikleri çalıştır</string>
@@ -523,10 +536,25 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">Temizle</string>
+    <string name="script_pick_file_title">Bir betik için dosya seçilsin mi?</string>
+    <string name="script_pick_file_body">Bir betik, yüklemek için bir dosya seçmenizi istiyor. Yalnızca seçtiğiniz dosyayı alır, cihazdaki başka hiçbir şeyi almaz.</string>
+    <string name="script_pick_file_body_in">%1$s içindeki bir betik, yüklemek için bir dosya seçmenizi istiyor. Yalnızca seçtiğiniz dosyayı alır, cihazdaki başka hiçbir şeyi almaz.</string>
+    <string name="script_pick_file_choose">Dosya seç</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">Bağlantı</string>
+    <string name="network_section_connection_desc">Sunucu adresi, bağlantı noktası, TLS</string>
+    <string name="network_section_identity_desc">Takma ad, yedek takma ad, kullanıcı adı, gerçek ad</string>
+    <string name="network_section_autoconnect_desc">Başlangıçta bağlan, yeniden bağlan, sunucu şifresi</string>
+    <string name="network_section_sasl_desc">Bağlanırken servislere giriş yap</string>
+    <string name="network_section_tls_cert_desc">Sizi tanımlamak için kullanılan sertifika</string>
+    <string name="network_section_autojoin_desc">Bağlanınca katılınacak kanallar</string>
+    <string name="network_section_postcmds_desc">Bağlandıktan sonra çalıştırılacak komutlar</string>
+    <string name="network_section_proxy_desc">Bu ağı bir proxy üzerinden yönlendir</string>
+    <string name="network_section_encoding_desc">Bu ağın karakter kümesi</string>
+    <string name="network_section_notifications_desc">Hata uyarıları ve yok sayılan bahisler</string>
+    <string name="network_section_ircv3_desc">Sunucudan istenecek yetenekler</string>
     <string name="network_section_identity">Kimlik</string>
     <string name="network_section_autoconnect">Otomatik bağlantı &amp; Şifre</string>
     <string name="network_section_sasl">SASL Kimlik Doğrulama</string>
@@ -562,14 +590,14 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="network_cert_selected">Seçildi: %1$s</string>
     <string name="network_cert_none">Sertifika seçilmedi.</string>
     <string name="netcert_title">Bu ağ için sertifika</string>
-    <string name="netcert_desc">HexDroid yalnızca bu ağ için oluşturulmuş bir sertifika sunar. Nick veya IP değiştirdiğinizde aynı kalır; böylece SASL EXTERNAL ile giriş yapabilir, ağın operatörleri de bu cihazı tanıyabilir. Her ağ farklı bir sertifika alır, bu yüzden ağlar sizi birbiriyle ilişkilendiremez. Yedeklenmez: yeniden yüklemek yeni bir tane oluşturur.</string>
+    <string name="netcert_desc">HexDroid yalnızca bu ağ için oluşturulmuş bir sertifika sunar; böylece SASL EXTERNAL ile giriş yapabilirsiniz.</string>
     <string name="netcert_pending">İlk bağlantıda oluşturulur</string>
     <string name="netcert_fingerprint">Parmak izi: %1$s</string>
     <string name="netcert_add_nickserv">%1$s hesabına ekle</string>
     <string name="netcert_add_sent">Sertifika %1$s\'e gönderildi. Yanıtı sunucu arabelleğinde kontrol edin, ardından SASL\'ı EXTERNAL olarak değiştirin.</string>
     <string name="netcert_not_connected">Önce bu ağa bağlanın ve ağın hizmetlerinde kimliğinizi doğrulayın</string>
     <string name="core_netcert_unavailable">*** Bu ağın sertifikası oluşturulamadı, bu yüzden sertifikasız bağlandınız.</string>
-    <string name="core_netcert_created">*** HexDroid artık yalnızca bu ağ için oluşturulmuş bir sertifika sunuyor; böylece SASL EXTERNAL ile giriş yapabilir, ağ da bu cihazı tanıyabilir. Bunu ağın TLS sertifikası ayarlarından kapatabilirsiniz.</string>
+    <string name="core_netcert_created">*** HexDroid artık yalnızca bu ağ için oluşturulmuş bir sertifika sunuyor; böylece SASL EXTERNAL ile giriş yapabilirsiniz. Bunu ağın TLS sertifikası ayarlarından kapatabilirsiniz.</string>
     <string name="vm_auth_sasl_netcert">HexDroid yeniden yüklendiyse veya geri yüklendiyse bu ağın sertifikası yenidir: parolanızla kimliğinizi doğrulayın, ardından ağın sertifika ayarlarından hesabınıza yeniden ekleyin.</string>
     <string name="network_cert_pem_hint">.pem hem sertifikanızı hem de özel anahtarınızı içermelidir.</string>
     <string name="network_cert_choose_pem">.pem / .crt / .cer seç</string>
@@ -633,7 +661,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="theme_terminal">Terminal</string>
     <string name="section_media_previews">Medya Önizlemeleri</string>
     <string name="setting_image_previews">Resim ve video önizlemelerini etkinleştir</string>
-    <string name="setting_image_previews_desc">Sohbete gönderilen resimler ve YouTube bağlantıları için satır içi önizlemeler göster. Twitter/X bağlantıları fxtwitter.com (üçüncü taraf hizmet) aracılığıyla çözümlenir — önizleme yüklenirken tweet kimliği bu hizmete gönderilir.</string>
+    <string name="setting_image_previews_desc">Sohbete gönderilen resimler ve YouTube bağlantıları için önizlemelere izin ver. Twitter/X bağlantıları fxtwitter.com aracılığıyla çözümlenir - Önizlemeler otomatik değildir.</string>
     <string name="setting_previews_wifi_only">Yalnızca Wi-Fi</string>
     <string name="setting_previews_wifi_only_desc">Mobil veri kullanımını önlemek için önizlemeleri yalnızca Wi-Fi bağlantısında yükle.</string>
     <string name="theme_system_default">Sistem varsayılanı</string>
@@ -795,7 +823,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="bouncer_networks_clone_dismiss">Kapat</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">Bouncer\'lar için aşağıdaki SASL\'ı etkinleştirmeyi tercih edin — modern kimlik doğrulama yoludur. Bunun yerine bu PASS alanını kullanırsanız sadece parolayı girin; yukarıdaki alanlardaki bouncer kullanıcı adı ve ağ otomatik olarak öne eklenir (<b>username/network:password</b> olarak veya ZNC için <b>username@clientid/network:password</b> olarak gönderilir). <b>username/network:password</b>\'yi kendiniz yazmayı tercih ederseniz, bu da çalışır.</string>
+    <string name="network_server_password_bouncer_hint">Bouncer\'lar için SASL önerilir. Bunun yerine bu PASS alanını kullanırsanız yalnızca şifreyi girin; yukarıdaki alanlardaki bouncer kullanıcı adı ve ağ otomatik olarak başa eklenir. Tam <b>username/network:password</b> yazmak da çalışır.</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">Üst verileri düzenle</string>
@@ -1051,7 +1079,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="vm_halted_tls">Otomatik yeniden bağlanma durduruldu: TLS hatasının kendiliğinden düzelmesi olası değildir. Sertifika güven ayarlarını değiştirip elle yeniden bağlanın.</string>
     <string name="vm_halted_unreachable">Otomatik yeniden bağlanma durduruldu: sunucuya ulaşılamıyor (ana makine adı çözümlenmiyor veya bağlantı noktası kapalı). Ağ Ayarları bölümünde ana makineyi ve bağlantı noktasını denetleyip elle yeniden bağlanın.</string>
     <string name="vm_tls_tofu_pinned">TLS: Sertifika parmak izi öğrenildi ve sabitlendi (TOFU). Sonraki bağlantılar şunu doğrulayacak: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">Sertifika ana makine adı uyuşmuyor: %1$s adresine bağlanıldı ancak sertifikanın SAN değerleri: %2$s. Bağlantıya izin verildi.</string>
+    <string name="vm_cert_hostname_mismatch">Sertifika ana makine adı uyuşmuyor! %1$s adresine bağlanıldı ancak sertifika şunun için verilmiş: %2$s - Bağlantı reddedildi. Otomatik yeniden bağlanma durduruldu. Bağlanmak istediğiniz sunucu buysa ve yalnızca yanlış yapılandırılmış ya da eski bir sertifikası varsa, ağ ayarlarını açıp \'Bu sertifika adlarına güven\' düğmesine dokunun. Bunu beklemiyorsanız kabul etmeyin: biri bağlantıyı ele geçiriyor olabilir.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">%1$s kaynaklı %2$s için DCC RESUME yok sayıldı — eşleşen bir gönderim sürmüyor.</string>
@@ -1167,6 +1195,8 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="core_disconnected">Bağlantı kesildi</string>
     <string name="core_disconnect_server_error">Sunucu hatası: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS sertifikası parmak izi değişti</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS sertifikası bu ana makine için geçerli değil</string>
+    <string name="vm_cert_hostname_grace">Sertifika ana makine adı uyuşmuyor: %1$s adresine bağlanıldı ancak sertifika şunun için verilmiş: %2$s. HexDroid bunu daha önce denetlemiyordu, bu yüzden bu profil çalışmaya devam etsin diye bu adlar bir kez kabul edildi ve bağlantı yeniden deneniyor. Bunu beklemiyorsanız ağ ayarlarını açıp \'Bu adlara güvenmeyi bırak\' düğmesine dokunun.</string>
     <string name="core_disconnect_connect_failed">Bağlantı kurulamadı: %1$s</string>
     <string name="core_disconnect_connection_error">Bağlantı hatası: %1$s</string>
     <string name="core_disconnect_registration_timeout">Kayıt zaman aşımı</string>
@@ -1414,6 +1444,7 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="vm_ev_message_deleted">(mesaj %1$s tarafından silindi)</string>
     <string name="vm_ev_message_deleted_reason">(mesaj %1$s tarafından silindi: %2$s)</string>
     <string name="vm_history_divider">── Sohbet geçmişi • Son mesaj: %1$s ──</string>
+    <string name="vm_history_gap">── Bazı eski mesajlar hâlâ eksik. Yüklemeye devam etmek için bu sohbeti yeniden açın ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">%1$d ağ: %2$s</string>
@@ -1528,7 +1559,8 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="cmd_gsearch">Bu ağdaki tüm arabelleklerde arar</string>
     <string name="cmd_gfind">/gsearch için takma ad</string>
     <string name="cmd_nick">Nickinizi değiştirir</string>
-    <string name="cmd_away">Uzakta olduğunuzu belirtir; argümansız /away bunu kaldırır</string>
+    <string name="cmd_away">Sizi uzakta olarak işaretler [reason]</string>
+    <string name="cmd_back">Uzakta durumunu kaldırır</string>
     <string name="cmd_whois">Bir kullanıcı hakkında ayrıntılı bilgi ister</string>
     <string name="cmd_who">Bir maskeye uyan kullanıcıları sorgular</string>
     <string name="cmd_ignore">Bir kullanıcıyı yok sayar (argümansız kullanımda listeyi gösterir)</string>
@@ -1769,4 +1801,22 @@ Bu, Android 17\'nin yerel ağdaki sunuculara bağlanmak için getirdiği yeni bi
     <string name="setting_webpush_no_distributor">Kurulu bir anlık bildirim dağıtıcısı yok. Bunu kullanmak için bir tane kur (örneğin ntfy).</string>
     <string name="setting_webpush_distributor_current">%1$s (kullanımda)</string>
     <string name="vm_webpush_failed">Anlık bildirimler: sunucu aboneliği reddetti (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">%1$s için +AGE açıkken eylem (/me) gönderilemez, bu yüzden hiçbir şey gönderilmedi.</string>
+    <string name="notif_reply">Yanıtla</string>
+    <string name="notif_reply_hint">Yanıtla…</string>
+    <string name="notif_quit">Bağlantıyı kes</string>
+    <string name="notif_reply_not_sent_title">Yanıt gönderilmedi: bağlı değil</string>
+    <string name="notif_reply_not_sent_text">Yanıtınızı %1$s hedefine göndermek için HexDroid\'i açıp yeniden bağlanın</string>
+    <string name="notif_channel_connection_desc">HexDroid IRC bağlıyken bağlantı durumu</string>
+    <string name="notif_channel_errors">IRC hataları</string>
+    <string name="notif_channel_errors_desc">Sunucu ve bağlantı hataları (yalnızca ağ başına açıldığında)</string>
+    <string name="notif_channel_group_networks">IRC ağları</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: bahisler (sessiz)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: bahisler</string>
+    <string name="notif_channel_net_pm">%1$s: özel mesajlar</string>
+    <string name="setting_hide_hostnames">Giriş/çıkış mesajlarında ana makine adlarını gizle</string>
+    <string name="vm_ev_has_joined_nohost">%1$s şuraya katıldı: %2$s</string>
+    <string name="vm_ev_has_left_nohost">%1$s şuradan ayrıldı: %2$s</string>
+    <string name="vm_ev_has_quit_nohost">%1$s çıkış yaptı</string>
+    <string name="push_encrypted">Şifreli mesaj</string>
 </resources>

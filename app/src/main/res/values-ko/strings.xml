@@ -83,7 +83,7 @@
     <string name="setting_network_tabs_bottom">입력창 위에 네트워크 바 표시</string>
     <string name="setting_network_tabs_bottom_desc">채널 전환기를 대화 아래쪽에 표시합니다.</string>
     <string name="setting_portrait_nicklist_overlay">사이드 패널 닉 목록</string>
-    <string name="setting_portrait_nicklist_overlay_desc">닉 목록을 팝업 대신 사이드 패널로 표시합니다.</string>
+    <string name="setting_portrait_nicklist_overlay_desc">닉 목록을 팝업 대신 크기를 조절할 수 있는 사이드 패널로 표시합니다. 켜면 닉 목록 버튼이 표시/숨기기 상태를 계속 유지합니다.</string>
     <string name="setting_ignore_list">무시 목록</string>
     <string name="setting_ignore_list_desc">특정 닉의 메시지와 DCC 제안을 숨깁니다 (네트워크별).</string>
     <string name="setting_quit_message">종료 메시지</string>
@@ -125,6 +125,9 @@
     <string name="setting_enable_dcc">DCC 활성화</string>
     <string name="setting_open_app_settings">앱 설정 열기</string>
     <string name="setting_battery_optimization">배터리 최적화 목록</string>
+    <string name="setting_ctcp_replies">CTCP 요청에 응답</string>
+    <string name="setting_ctcp_replies_desc">VERSION, TIME, PING 등에 대한 응답을 끕니다.</string>
+    <string name="setting_show_nick_icons">닉 아이콘 표시</string>
 
     <!-- Settings categories -->
     <string name="settings_cat_chat">채팅 및 메시지</string>
@@ -187,6 +190,10 @@
     <string name="chat_ban_type_nick">닉</string>
     <string name="chat_ban_type_account">계정</string>
     <string name="chat_ban_type_domain">도메인</string>
+    <string name="chat_react_custom">사용자 지정 반응</string>
+    <string name="chat_react_custom_hint">이모지 또는 단어</string>
+    <string name="chat_react_send">반응하기</string>
+    <string name="chat_reply_not_loaded">이전 메시지에 대한 답장</string>
 
     <!-- Network screens -->
     <string name="networks_title">네트워크</string>
@@ -212,6 +219,9 @@
     <string name="network_sts_forget">이 호스트의 STS 정책 잊기</string>
     <string name="list_retry">다시 시도</string>
     <string name="network_trust_extra_pinned_cert">이 서버도 신뢰하기 (라운드 로빈 DNS)</string>
+    <string name="network_trust_cert_names">이 인증서 이름 신뢰</string>
+    <string name="network_cert_names_accepted">허용된 인증서 이름</string>
+    <string name="network_clear_cert_names">이 이름 신뢰 중지</string>
     <string name="network_nick">닉네임</string>
     <string name="network_alt_nick">대체 닉</string>
     <string name="network_username">사용자 이름</string>
@@ -260,6 +270,7 @@
 
     <string name="network_edit_advanced_caps">고급 IRCv3 캡</string>
     <string name="core_nick_change_refused">서버가 닉 변경을 허용하지 않습니다: %1$s</string>
+    <string name="core_ctcp_reply_disabled">%2$s의 CTCP %1$s 무시함 (응답 꺼짐)</string>
     <string name="settings_raw_log">원시 프로토콜 로그</string>
     <string name="settings_raw_log_desc">네트워크마다 Raw 버퍼에 주고받은 모든 줄을 표시합니다. 비밀번호는 가려집니다. 디버깅용입니다.</string>
     <string name="chat_show_less">간략히 보기</string>
@@ -268,7 +279,7 @@
     <string name="vm_multiline_rejected">서버가 메시지를 거부했습니다 (%1$s): %2$s</string>
     <string name="network_edit_cap_also">%1$s도 함께 요청함</string>
     <string name="network_edit_caps_hint">기본 IRCv3 기능은 기본으로 활성화됩니다. 고급 옵션을 보려면 켜세요.</string>
-    <string name="network_edit_bouncer_caps">바운서 캡 (soju/pounce)</string>
+    <string name="network_edit_bouncer_caps">바운서 캡</string>
 
     <!-- DCC / Transfers Screen -->
     <string name="transfers_title">파일 전송</string>
@@ -328,7 +339,7 @@
 
     <!-- DCC notification strings -->
     <string name="notif_dcc_incoming_chat_title">%1$s의 DCC 채팅</string>
-    <string name="notif_dcc_incoming_chat_text">탭하여 열기 — 또는 전송 사용</string>
+    <string name="notif_dcc_incoming_chat_text">탭하여 열거나 전송에서 수락/거부하세요</string>
     <string name="notif_dcc_incoming_file_title">%1$s의 수신 파일</string>
     <string name="notif_dcc_file_done_title">DCC 완료</string>
     <string name="notif_dcc_file_done_text">%1$s을(를) %2$s에 저장했습니다</string>
@@ -365,21 +376,21 @@
     <string name="network_alt_nick_label">대체 닉</string>
     <string name="network_username_label">사용자 이름 (ident)</string>
     <string name="network_bouncer_username_label">사용자 이름</string>
-    <string name="network_username_bouncer_hint">바운서 프로파일의 경우, 이는 <b>바운서 로그인 이름</b>입니다 — 바운서 계정을 설정한 이름과 동일합니다. IRC 닉네임이 아닙니다.</string>
+    <string name="network_username_bouncer_hint">바운서 프로파일의 경우, 이는 <b>바운서 로그인 이름</b>입니다</string>
     <string name="network_realname_label">실명</string>
     <string name="network_use_tls_label">TLS 사용</string>
     <string name="network_allow_plaintext">일반 텍스트 허용</string>
     <string name="network_auto_connect_label">시작 시 연결</string>
     <string name="network_show_in_switcher_label">채널 전환기에 표시</string>
-    <string name="network_auto_reconnect_label">자동 재연결</string>
-    <string name="network_bouncer_label">바운서 (ZNC / soju)</string>
+    <string name="network_auto_reconnect_label">연결이 끊기면 자동 재연결</string>
+    <string name="network_bouncer_label">바운서 모드</string>
     <string name="network_bouncer_kind_label">바운서 종류</string>
     <string name="network_bouncer_kind_none">없음 / 미지정</string>
     <string name="network_bouncer_kind_soju">soju  (user/network@clientid)</string>
     <string name="network_bouncer_kind_znc">ZNC  (user@clientid/network)</string>
     <string name="network_bouncer_kind_generic">일반  (user/network)</string>
     <string name="network_bouncer_network_label">네트워크 이름 (선택사항)</string>
-    <string name="network_bouncer_network_help">이 프로파일이 바운서에서 대상으로 하는 업스트림 네트워크 (예: \"libera\", \"oftc\"). 위의 바운서 사용자 이름 필드와 와이어 상에서 결합되며 — USER에서 전송되고 선택한 인증 방식에 따라 SASL 또는 PASS 줄에서 전송됩니다 — 선택한 바운서 유형의 구문을 사용합니다.</string>
+    <string name="network_bouncer_network_help">이 프로필이 대상으로 하는 바운서의 업스트림 네트워크 (예: \"afternet\", \"libera\"). 위의 바운서 사용자 이름 필드와 결합되어, 선택한 인증 방식에 따라 SASL 또는 PASS 줄로 전송됩니다.</string>
     <string name="network_bouncer_clientid_label">클라이언트 ID (선택사항)</string>
     <string name="network_bouncer_clientid_help">이 기기의 짧은 식별자입니다 (예: \"phone\" 또는 \"hexdroid\"). 바운서가 지원하는 경우 (ZNC clientbuffer, soju 클라이언트별 히스토리) 클라이언트별 버퍼와 기록을 활성화합니다. 모든 클라이언트에서 단일 버퍼를 공유하려면 비워 두십시오.</string>
     <string name="network_server_password_label">서버 비밀번호 (PASS)</string>
@@ -389,7 +400,7 @@
     <string name="network_sasl_password_label">비밀번호</string>
     <string name="network_sasl_recommended_for_bouncers">바운서에 권장 — 사용자 이름 필드를 비워두면 위의 \"일반\" 섹션의 바운서 사용자 이름이 사용됩니다.</string>
     <string name="network_cert_format_label">인증서 형식</string>
-    <string name="network_cert_format_pem">PEM (.pem)</string>
+    <string name="network_cert_format_pem">PEM (.pem/.crt/.cer)</string>
     <string name="network_cert_format_crt_key">CRT + KEY (.crt/.key)</string>
     <string name="network_cert_format_p12">PKCS#12 (.p12/.pfx)</string>
     <string name="network_key_password_label">키 비밀번호 (암호화된 경우)</string>
@@ -412,7 +423,7 @@
     <string name="networks_local_title">로컬 네트워크 접근 권한 필요</string>
     <string name="networks_local_body">{0}에 연결하려면 로컬 네트워크 권한이 필요합니다.
 
-Android 17의 새로운 요구 사항입니다.</string>
+        로컬 네트워크의 서버(홈 네트워크, 바운서 등)에 연결할 때 적용되는 Android 17의 새로운 요구 사항입니다.</string>
     <string name="networks_local_grant">권한 허용</string>
     <string name="networks_insecure_body">암호화되지 않은 IRC 연결은 보호되지 않으며 메시지와 비밀번호가 노출될 수 있습니다.</string>
     <string name="networks_insecure_body2">TLS 없이 %1$s에 연결하려면 이 네트워크에 대해 암호화되지 않은 연결을 명시적으로 허용해야 합니다.</string>
@@ -459,6 +470,8 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="menu_reconnect">재연결</string>
     <string name="menu_disconnect">연결 끊기</string>
     <string name="menu_exit">종료</string>
+    <string name="menu_float">플로팅 창</string>
+    <string name="float_needs_permission">플로팅 창을 사용하려면 HexDroid가 다른 앱 위에 표시되도록 허용하세요</string>
 
     <!-- ChatScreen tail -->
     <string name="chat_cd_launch_scripts">스크립트 실행</string>
@@ -523,10 +536,25 @@ Android 17의 새로운 요구 사항입니다.</string>
 
     <!-- Network edit: clear certificate -->
     <string name="network_clear">지우기</string>
+    <string name="script_pick_file_title">스크립트용 파일을 선택할까요?</string>
+    <string name="script_pick_file_body">스크립트가 업로드할 파일을 선택하라고 요청합니다. 스크립트는 선택한 파일만 받으며, 기기의 다른 것은 받지 않습니다.</string>
+    <string name="script_pick_file_body_in">%1$s의 스크립트가 업로드할 파일을 선택하라고 요청합니다. 스크립트는 선택한 파일만 받으며, 기기의 다른 것은 받지 않습니다.</string>
+    <string name="script_pick_file_choose">파일 선택</string>
 
 
     <!-- NetworkEditScreen: section headers -->
     <string name="network_section_connection">연결</string>
+    <string name="network_section_connection_desc">서버 주소, 포트, TLS</string>
+    <string name="network_section_identity_desc">닉, 대체 닉, 사용자 이름, 실명</string>
+    <string name="network_section_autoconnect_desc">시작 시 연결, 재연결, 서버 비밀번호</string>
+    <string name="network_section_sasl_desc">연결 시 서비스에 로그인</string>
+    <string name="network_section_tls_cert_desc">사용자를 식별하는 인증서</string>
+    <string name="network_section_autojoin_desc">연결 시 참여할 채널</string>
+    <string name="network_section_postcmds_desc">연결 후 실행할 명령</string>
+    <string name="network_section_proxy_desc">이 네트워크를 프록시를 통해 연결</string>
+    <string name="network_section_encoding_desc">이 네트워크의 문자 집합</string>
+    <string name="network_section_notifications_desc">오류 알림 및 무시할 언급</string>
+    <string name="network_section_ircv3_desc">서버에 요청할 기능</string>
     <string name="network_section_identity">신원</string>
     <string name="network_section_autoconnect">자동 연결 &amp; 암호</string>
     <string name="network_section_sasl">SASL 인증</string>
@@ -562,14 +590,14 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="network_cert_selected">선택됨: %1$s</string>
     <string name="network_cert_none">인증서가 선택되지 않았습니다.</string>
     <string name="netcert_title">이 네트워크용 인증서</string>
-    <string name="netcert_desc">HexDroid는 이 네트워크만을 위해 만든 인증서를 제시합니다. 닉이나 IP를 바꿔도 그대로 유지되므로 SASL EXTERNAL로 로그인할 수 있고, 네트워크 운영자는 이 기기를 알아볼 수 있습니다. 네트워크마다 다른 인증서를 쓰므로 네트워크끼리 사용자를 연결할 수 없습니다. 백업되지 않으며, 다시 설치하면 새로 만들어집니다.</string>
+    <string name="netcert_desc">HexDroid는 이 네트워크만을 위해 만든 인증서를 제시하므로 SASL EXTERNAL로 로그인할 수 있습니다.</string>
     <string name="netcert_pending">처음 연결할 때 만들어집니다</string>
     <string name="netcert_fingerprint">지문: %1$s</string>
     <string name="netcert_add_nickserv">%1$s 계정에 추가</string>
     <string name="netcert_add_sent">%1$s에 인증서를 보냈습니다. 서버 버퍼에서 응답을 확인한 다음 SASL을 EXTERNAL로 바꾸세요.</string>
     <string name="netcert_not_connected">먼저 이 네트워크에 연결하고 서비스에 인증하세요</string>
     <string name="core_netcert_unavailable">*** 이 네트워크의 인증서를 만들 수 없어 인증서 없이 연결했습니다.</string>
-    <string name="core_netcert_created">*** 이제 HexDroid가 이 네트워크만을 위해 만든 인증서를 제시합니다. SASL EXTERNAL로 로그인할 수 있고 네트워크가 이 기기를 알아볼 수 있습니다. 네트워크의 TLS 인증서 설정에서 끌 수 있습니다.</string>
+    <string name="core_netcert_created">*** 이제 HexDroid는 이 네트워크만을 위해 만든 인증서를 제시하므로 SASL EXTERNAL로 로그인할 수 있습니다. 네트워크의 TLS 인증서 설정에서 끌 수 있습니다.</string>
     <string name="vm_auth_sasl_netcert">HexDroid를 다시 설치했거나 복원했다면 이 네트워크의 인증서가 새로 바뀌었습니다. 비밀번호로 인증한 다음 네트워크 인증서 설정에서 계정에 다시 추가하세요.</string>
     <string name="network_cert_pem_hint">.pem에는 인증서와 개인 키가 모두 포함되어야 합니다.</string>
     <string name="network_cert_choose_pem">.pem / .crt / .cer 선택</string>
@@ -633,7 +661,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="theme_terminal">터미널</string>
     <string name="section_media_previews">미디어 미리보기</string>
     <string name="setting_image_previews">이미지 및 동영상 미리보기 사용</string>
-    <string name="setting_image_previews_desc">채팅에 게시된 이미지와 YouTube 링크의 인라인 미리보기를 표시합니다. Twitter/X 링크는 fxtwitter.com(서드파티 서비스)을 통해 확인되며, 미리보기 로드 시 트윗 ID가 해당 서비스로 전송됩니다.</string>
+    <string name="setting_image_previews_desc">채팅에 게시된 이미지와 YouTube 링크의 미리보기를 허용합니다. Twitter/X 링크는 fxtwitter.com을 통해 확인됩니다 - 미리보기는 자동으로 표시되지 않습니다.</string>
     <string name="setting_previews_wifi_only">Wi-Fi만 사용</string>
     <string name="setting_previews_wifi_only_desc">모바일 데이터 사용을 방지하기 위해 Wi-Fi에 연결된 경우에만 미리보기를 불러옵니다.</string>
     <string name="theme_system_default">시스템 기본값</string>
@@ -795,7 +823,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="bouncer_networks_clone_dismiss">닫기</string>
 
     <!-- Bouncer-aware password field hint -->
-    <string name="network_server_password_bouncer_hint">바운서의 경우 아래에서 SASL 활성화를 선호하세요 — 이것이 현대적인 인증 경로입니다. 대신 이 PASS 필드를 사용하는 경우 비밀번호만 입력하세요. 위 필드의 바운서 사용자 이름과 네트워크가 자동으로 앞에 추가됩니다 (<b>username/network:password</b>로 전송되거나, ZNC의 경우 <b>username@clientid/network:password</b>로 전송). <b>username/network:password</b>를 직접 입력해도 작동합니다.</string>
+    <string name="network_server_password_bouncer_hint">바운서에는 SASL을 권장합니다. 대신 이 PASS 필드를 사용한다면 비밀번호만 입력하세요. 위 필드의 바운서 사용자 이름과 네트워크가 자동으로 앞에 붙습니다. <b>username/network:password</b> 전체를 입력해도 됩니다.</string>
 
     <!-- IRCv3 metadata editor (draft/metadata-2) -->
     <string name="menu_edit_metadata">메타데이터 편집</string>
@@ -1051,7 +1079,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="vm_halted_tls">자동 재연결이 중단되었습니다: TLS 오류는 저절로 해결되지 않습니다. 인증서 신뢰 설정을 조정한 뒤 수동으로 재연결하세요.</string>
     <string name="vm_halted_unreachable">자동 재연결이 중단되었습니다: 서버에 연결할 수 없습니다 (호스트 이름이 조회되지 않거나 포트가 닫혀 있습니다). 네트워크 설정에서 호스트와 포트를 확인한 뒤 수동으로 재연결하세요.</string>
     <string name="vm_tls_tofu_pinned">TLS: 인증서 지문을 학습하여 고정했습니다 (TOFU). 이후 연결에서는 다음을 확인합니다: %1$s</string>
-    <string name="vm_cert_hostname_mismatch">인증서 호스트 이름 불일치: %1$s에 연결했지만 인증서의 SAN은 %2$s입니다. 연결을 허용했습니다.</string>
+    <string name="vm_cert_hostname_mismatch">인증서 호스트 이름 불일치! %1$s에 연결했지만 인증서는 %2$s에 발급되었습니다 - 연결을 거부했습니다. 자동 재연결을 중지했습니다. 원래 접속하려던 서버이고 인증서 설정이 잘못되었거나 오래된 것뿐이라면, 네트워크 설정을 열고 \'이 인증서 이름 신뢰\'를 누르세요. 예상하지 못한 일이라면 허용하지 마세요: 누군가 연결을 가로채고 있을 수 있습니다.</string>
 
     <!-- IrcViewModel DCC/bouncer/channel status -->
     <string name="vm_dcc_resume_nomatch">%2$s에 대한 %1$s의 DCC RESUME을 무시했습니다 — 진행 중인 해당 전송이 없습니다.</string>
@@ -1167,6 +1195,8 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="core_disconnected">연결 끊김</string>
     <string name="core_disconnect_server_error">서버 오류: %1$s</string>
     <string name="core_disconnect_tls_fingerprint_changed">TLS 인증서 지문이 변경되었습니다</string>
+    <string name="core_disconnect_tls_hostname_mismatch">TLS 인증서가 이 호스트에 유효하지 않습니다</string>
+    <string name="vm_cert_hostname_grace">인증서 호스트 이름 불일치: %1$s에 연결했지만 인증서는 %2$s에 발급되었습니다. HexDroid는 이전에 이를 확인하지 않았으므로, 이 프로필이 계속 작동하도록 이 이름들을 한 번 허용했고 연결을 다시 시도하고 있습니다. 예상하지 못한 일이라면 네트워크 설정을 열고 \'이 이름 신뢰 중지\'를 누르세요.</string>
     <string name="core_disconnect_connect_failed">연결에 실패했습니다: %1$s</string>
     <string name="core_disconnect_connection_error">연결 오류: %1$s</string>
     <string name="core_disconnect_registration_timeout">등록 시간 초과</string>
@@ -1414,6 +1444,7 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="vm_ev_message_deleted">(%1$s이(가) 메시지를 삭제함)</string>
     <string name="vm_ev_message_deleted_reason">(%1$s이(가) 메시지를 삭제함: %2$s)</string>
     <string name="vm_history_divider">── 대화 기록 • 마지막 메시지: %1$s ──</string>
+    <string name="vm_history_gap">── 일부 이전 메시지가 아직 없습니다. 이 대화를 다시 열면 계속 불러옵니다 ──</string>
 
     <!-- IrcViewModel: notifications -->
     <string name="vm_notif_networks">네트워크 %1$d개: %2$s</string>
@@ -1528,7 +1559,8 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="cmd_gsearch">이 네트워크의 모든 버퍼에서 메시지를 검색합니다</string>
     <string name="cmd_gfind">/gsearch의 다른 이름</string>
     <string name="cmd_nick">닉을 바꿉니다</string>
-    <string name="cmd_away">자리 비움을 설정합니다. 인자 없이 /away를 쓰면 해제됩니다</string>
+    <string name="cmd_away">자리 비움으로 표시합니다 [reason]</string>
+    <string name="cmd_back">자리 비움을 해제합니다</string>
     <string name="cmd_whois">사용자의 자세한 정보를 조회합니다</string>
     <string name="cmd_who">마스크와 일치하는 사용자를 조회합니다</string>
     <string name="cmd_ignore">사용자를 무시합니다 (인자가 없으면 목록 표시)</string>
@@ -1769,4 +1801,22 @@ Android 17의 새로운 요구 사항입니다.</string>
     <string name="setting_webpush_no_distributor">설치된 푸시 배포자가 없습니다. 사용하려면 ntfy 같은 앱을 설치하세요.</string>
     <string name="setting_webpush_distributor_current">%1$s(사용 중)</string>
     <string name="vm_webpush_failed">푸시 알림: 서버가 구독을 거부했습니다 (%1$s: %2$s).</string>
+    <string name="vm_age_no_action">%1$s에서 +AGE가 켜져 있는 동안에는 액션(/me)을 보낼 수 없어 아무것도 보내지 않았습니다.</string>
+    <string name="notif_reply">답장</string>
+    <string name="notif_reply_hint">답장…</string>
+    <string name="notif_quit">연결 끊기</string>
+    <string name="notif_reply_not_sent_title">답장을 보내지 못함: 연결되지 않음</string>
+    <string name="notif_reply_not_sent_text">HexDroid를 열고 다시 연결하면 %1$s에게 답장을 보낼 수 있습니다</string>
+    <string name="notif_channel_connection_desc">HexDroid IRC가 연결된 동안의 연결 상태</string>
+    <string name="notif_channel_errors">IRC 오류</string>
+    <string name="notif_channel_errors_desc">서버 및 연결 오류 (네트워크별로 켠 경우에만)</string>
+    <string name="notif_channel_group_networks">IRC 네트워크</string>
+    <string name="notif_channel_net_highlight_silent">%1$s: 언급 (무음)</string>
+    <string name="notif_channel_net_highlight_sound">%1$s: 언급</string>
+    <string name="notif_channel_net_pm">%1$s: 개인 메시지</string>
+    <string name="setting_hide_hostnames">입퇴장/종료 메시지에서 호스트 이름 숨기기</string>
+    <string name="vm_ev_has_joined_nohost">%1$s이(가) %2$s에 참여했습니다</string>
+    <string name="vm_ev_has_left_nohost">%1$s이(가) %2$s에서 나갔습니다</string>
+    <string name="vm_ev_has_quit_nohost">%1$s이(가) 종료했습니다</string>
+    <string name="push_encrypted">암호화된 메시지</string>
 </resources>
