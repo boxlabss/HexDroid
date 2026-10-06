@@ -1,7 +1,7 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
-## [1.7.7] 2026-09-06
+## [1.7.7] 2026-10-06
 ### Added
 - Delete logs option when no folder is selected, Export logs as .zip
 - Expanded .hex engine (docs at https://hexdroid.org/scripting)
