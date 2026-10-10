@@ -1071,6 +1071,8 @@ Ez egy új Android 17 követelmény a helyi hálózatodon lévő szerverekhez va
     <string name="vm_sts_upgrade">STS: a kiszolgáló TLS-t igényel - biztonságos újracsatlakozás a(z) %1$s porton</string>
     <string name="vm_registered_as">Regisztrálva mint %1$s</string>
     <string name="vm_reconnected">Újracsatlakozva</string>
+    <string name="vm_replay_summary">Visszajátszva %1$s %2$s.</string>
+    <string name="vm_replay_previous_disconnect">Előző kapcsolatbontás: %1$s</string>
     <string name="vm_waiting_autojoin">Várakozás %1$s mp az automatikus belépés &amp; parancsok előtt…</string>
     <string name="vm_waiting">Várakozás %1$s mp…</string>
     <string name="vm_dcc_incoming">Bejövő DCC fájlajánlat tőle: %1$s: %2$s (elfogadás a Fájlátvitelek képernyőn)</string>

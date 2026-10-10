@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS: sunucu TLS gerektiriyor - %1$s numaralı bağlantı noktasından güvenli yeniden bağlanılıyor</string>
     <string name="vm_registered_as">Kaydedildi: %1$s</string>
     <string name="vm_reconnected">Yeniden bağlanıldı</string>
+    <string name="vm_replay_summary">%2$s %1$s yeniden oynatıldı.</string>
+    <string name="vm_replay_previous_disconnect">Önceki bağlantı kesilmesi: %1$s</string>
     <string name="vm_waiting_autojoin">Otomatik katılım &amp; komutlardan önce %1$s saniye bekleniyor…</string>
     <string name="vm_waiting">%1$s saniye bekleniyor…</string>
     <string name="vm_dcc_incoming">%1$s kaynaklı gelen DCC dosya teklifi: %2$s (kabul etmek için Aktarımlar ekranı)</string>

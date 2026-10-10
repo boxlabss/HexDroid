@@ -31,4 +31,12 @@
         <item quantity="one">%1$d güvenilen</item>
         <item quantity="other">%1$d güvenilen</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d mesaj</item>
+        <item quantity="other">%1$d mesaj</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d sohbetten</item>
+        <item quantity="other">%1$d sohbetten</item>
+    </plurals>
 </resources>

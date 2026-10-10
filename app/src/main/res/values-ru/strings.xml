@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS: сервер требует TLS - защищённое переподключение на порт %1$s</string>
     <string name="vm_registered_as">Зарегистрирован как %1$s</string>
     <string name="vm_reconnected">Переподключено</string>
+    <string name="vm_replay_summary">Воспроизведено %1$s из %2$s.</string>
+    <string name="vm_replay_previous_disconnect">Предыдущее отключение: %1$s</string>
     <string name="vm_waiting_autojoin">Ожидание %1$sс перед автовходом &amp; командами…</string>
     <string name="vm_waiting">Ожидание %1$sс…</string>
     <string name="vm_dcc_incoming">Входящее предложение файла DCC от %1$s: %2$s (для приёма откройте экран передачи файлов)</string>

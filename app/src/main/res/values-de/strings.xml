@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS: Der Server erfordert TLS - sichere Wiederverbindung über Port %1$s</string>
     <string name="vm_registered_as">Registriert als %1$s</string>
     <string name="vm_reconnected">Neu verbunden</string>
+    <string name="vm_replay_summary">%1$s aus %2$s wiedergegeben.</string>
+    <string name="vm_replay_previous_disconnect">Vorherige Trennung: %1$s</string>
     <string name="vm_waiting_autojoin">Warte %1$ss vor automatischem Betreten &amp; Befehlen…</string>
     <string name="vm_waiting">Warte %1$ss…</string>
     <string name="vm_dcc_incoming">Eingehendes DCC-Dateiangebot von %1$s: %2$s (zum Annehmen den Bildschirm Dateiübertragungen öffnen)</string>

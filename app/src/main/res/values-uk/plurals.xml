@@ -47,4 +47,16 @@
         <item quantity="many">%1$d довірених</item>
         <item quantity="other">%1$d довірених</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d повідомлення</item>
+        <item quantity="few">%1$d повідомлення</item>
+        <item quantity="many">%1$d повідомлень</item>
+        <item quantity="other">%1$d повідомлення</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d розмови</item>
+        <item quantity="few">%1$d розмов</item>
+        <item quantity="many">%1$d розмов</item>
+        <item quantity="other">%1$d розмови</item>
+    </plurals>
 </resources>

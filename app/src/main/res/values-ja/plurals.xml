@@ -24,4 +24,10 @@
     <plurals name="dcc_trusted_entry_count">
         <item quantity="other">信頼済み %1$d 件</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="other">%1$d 件のメッセージ</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="other">%1$d 件の会話</item>
+    </plurals>
 </resources>

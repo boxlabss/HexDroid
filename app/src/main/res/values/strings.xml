@@ -594,14 +594,14 @@
     <string name="network_cert_selected">Selected: %1$s</string>
     <string name="network_cert_none">No certificate selected.</string>
     <string name="netcert_title">Certificate for this network</string>
-    <string name="netcert_desc">HexDroid presents a certificate made just for this network, so you can auth with SASL EXTERNAL.</string>
+    <string name="netcert_desc">HexDroid presents a certificate made just for this network, so you can log in with SASL EXTERNAL.</string>
     <string name="netcert_pending">Created the first time you connect</string>
     <string name="netcert_fingerprint">Fingerprint: %1$s</string>
     <string name="netcert_add_nickserv">Add to %1$s account</string>
     <string name="netcert_add_sent">Sent the certificate to %1$s. Check the server buffer for its reply, then switch SASL to EXTERNAL.</string>
     <string name="netcert_not_connected">Connect to this network and identify to its services first</string>
     <string name="core_netcert_unavailable">*** This network\'s certificate couldn\'t be created, so you\'re connected without it.</string>
-    <string name="core_netcert_created">*** HexDroid now presents a client cert made just for this network, so you can auth with SASL EXTERNAL. You can turn this off in the network\'s TLS certificate settings.</string>
+    <string name="core_netcert_created">*** HexDroid now presents a certificate made just for this network, so you can log in with SASL EXTERNAL. You can turn this off in the network\'s TLS certificate settings.</string>
     <string name="vm_auth_sasl_netcert">If HexDroid was reinstalled or restored, this network\'s certificate is new: identify with your password, then add it to your account again from the network\'s certificate settings.</string>
     <string name="network_cert_pem_hint">The .pem should include both your certificate and private key.</string>
     <string name="network_cert_choose_pem">Choose PEM</string>
@@ -1078,6 +1078,8 @@
     <string name="vm_sts_upgrade">STS: server requires TLS - reconnecting securely on port %1$s</string>
     <string name="vm_registered_as">Registered as %1$s</string>
     <string name="vm_reconnected">Reconnected</string>
+    <string name="vm_replay_summary">Replayed %1$s from %2$s.</string>
+    <string name="vm_replay_previous_disconnect">Previous disconnect: %1$s</string>
     <string name="vm_waiting_autojoin">Waiting %1$ss before auto-join &amp; commands…</string>
     <string name="vm_waiting">Waiting %1$ss…</string>
     <string name="vm_dcc_incoming">Incoming DCC file offer from %1$s: %2$s (Transfers screen to accept)</string>

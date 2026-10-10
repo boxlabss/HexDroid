@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS：服务器要求使用 TLS - 正在通过端口 %1$s 安全重连</string>
     <string name="vm_registered_as">已注册为 %1$s</string>
     <string name="vm_reconnected">已重新连接</string>
+    <string name="vm_replay_summary">已从%2$s中重放%1$s。</string>
+    <string name="vm_replay_previous_disconnect">上次断开：%1$s</string>
     <string name="vm_waiting_autojoin">将在自动加入频道与执行命令前等待 %1$s 秒…</string>
     <string name="vm_waiting">正在等待 %1$s 秒…</string>
     <string name="vm_dcc_incoming">收到来自 %1$s 的 DCC 文件请求：%2$s（请在文件传输界面接受）</string>

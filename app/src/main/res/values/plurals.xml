@@ -50,4 +50,12 @@
         <item quantity="one">%1$d trusted</item>
         <item quantity="other">%1$d trusted</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d conversation</item>
+        <item quantity="other">%1$d conversations</item>
+    </plurals>
 </resources>

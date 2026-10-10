@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS: サーバーが TLS を要求しています - ポート %1$s で安全に再接続します</string>
     <string name="vm_registered_as">%1$s として登録しました</string>
     <string name="vm_reconnected">再接続しました</string>
+    <string name="vm_replay_summary">%2$sから%1$sを再生しました。</string>
+    <string name="vm_replay_previous_disconnect">前回の切断: %1$s</string>
     <string name="vm_waiting_autojoin">自動参加とコマンド実行の前に %1$s 秒待機しています…</string>
     <string name="vm_waiting">%1$s 秒待機しています…</string>
     <string name="vm_dcc_incoming">%1$s からの DCC ファイル送信の申し出: %2$s (受け入れるにはファイル転送画面へ)</string>

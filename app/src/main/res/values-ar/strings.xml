@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">‏STS: يتطلب الخادم TLS - جارٍ إعادة الاتصال بأمان على المنفذ %1$s</string>
     <string name="vm_registered_as">مسجَّل باسم %1$s</string>
     <string name="vm_reconnected">أُعيد الاتصال</string>
+    <string name="vm_replay_summary">الرسائل المستعادة: %1$s من %2$s.</string>
+    <string name="vm_replay_previous_disconnect">سبب الانقطاع السابق: %1$s</string>
     <string name="vm_waiting_autojoin">انتظار %1$s ثانية قبل الانضمام التلقائي &amp; الأوامر…</string>
     <string name="vm_waiting">انتظار %1$s ثانية…</string>
     <string name="vm_dcc_incoming">عرض ملف DCC وارد من %1$s: %2$s (افتح شاشة عمليات النقل للقبول)</string>

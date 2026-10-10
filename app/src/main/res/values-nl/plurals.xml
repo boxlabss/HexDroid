@@ -31,4 +31,12 @@
         <item quantity="one">%1$d vertrouwd</item>
         <item quantity="other">%1$d vertrouwd</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d bericht</item>
+        <item quantity="other">%1$d berichten</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d gesprek</item>
+        <item quantity="other">%1$d gesprekken</item>
+    </plurals>
 </resources>

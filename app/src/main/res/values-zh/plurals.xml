@@ -24,4 +24,10 @@
     <plurals name="dcc_trusted_entry_count">
         <item quantity="other">已信任 %1$d 位</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="other">%1$d 条消息</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="other">%1$d 个对话</item>
+    </plurals>
 </resources>

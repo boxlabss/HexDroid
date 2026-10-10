@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS: de server vereist TLS - beveiligd opnieuw verbinden op poort %1$s</string>
     <string name="vm_registered_as">Geregistreerd als %1$s</string>
     <string name="vm_reconnected">Opnieuw verbonden</string>
+    <string name="vm_replay_summary">%1$s uit %2$s opnieuw afgespeeld.</string>
+    <string name="vm_replay_previous_disconnect">Vorige verbreking: %1$s</string>
     <string name="vm_waiting_autojoin">%1$ss wachten vóór automatisch deelnemen &amp; commando\'s…</string>
     <string name="vm_waiting">%1$ss wachten…</string>
     <string name="vm_dcc_incoming">Binnenkomend DCC-bestandsaanbod van %1$s: %2$s (accepteren via het scherm Bestandsoverdrachten)</string>

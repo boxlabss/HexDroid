@@ -67,4 +67,20 @@
         <item quantity="many">%1$d موثوقاً</item>
         <item quantity="other">%1$d موثوق</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="zero">%1$d رسالة</item>
+        <item quantity="one">%1$d رسالة</item>
+        <item quantity="two">%1$d رسالتان</item>
+        <item quantity="few">%1$d رسائل</item>
+        <item quantity="many">%1$d رسالةً</item>
+        <item quantity="other">%1$d رسالة</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="zero">%1$d محادثة</item>
+        <item quantity="one">%1$d محادثة</item>
+        <item quantity="two">%1$d محادثتين</item>
+        <item quantity="few">%1$d محادثات</item>
+        <item quantity="many">%1$d محادثةً</item>
+        <item quantity="other">%1$d محادثة</item>
+    </plurals>
 </resources>

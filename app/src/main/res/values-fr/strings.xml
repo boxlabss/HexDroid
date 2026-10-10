@@ -1071,6 +1071,8 @@
     <string name="vm_sts_upgrade">STS : le serveur exige TLS - reconnexion sécurisée sur le port %1$s</string>
     <string name="vm_registered_as">Enregistré en tant que %1$s</string>
     <string name="vm_reconnected">Reconnecté</string>
+    <string name="vm_replay_summary">Relecture de %1$s provenant de %2$s.</string>
+    <string name="vm_replay_previous_disconnect">Déconnexion précédente : %1$s</string>
     <string name="vm_waiting_autojoin">Attente de %1$ss avant l\'auto-join et les commandes…</string>
     <string name="vm_waiting">Attente de %1$ss…</string>
     <string name="vm_dcc_incoming">Offre de fichier DCC entrante de %1$s : %2$s (écran Transferts pour accepter)</string>

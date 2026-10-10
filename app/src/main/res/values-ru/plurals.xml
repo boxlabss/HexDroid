@@ -47,4 +47,16 @@
         <item quantity="many">%1$d доверенных</item>
         <item quantity="other">%1$d доверенных</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d сообщение</item>
+        <item quantity="few">%1$d сообщения</item>
+        <item quantity="many">%1$d сообщений</item>
+        <item quantity="other">%1$d сообщения</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d разговора</item>
+        <item quantity="few">%1$d разговоров</item>
+        <item quantity="many">%1$d разговоров</item>
+        <item quantity="other">%1$d разговора</item>
+    </plurals>
 </resources>

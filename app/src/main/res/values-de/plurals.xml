@@ -31,4 +31,12 @@
         <item quantity="one">%1$d vertraut</item>
         <item quantity="other">%1$d vertraut</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d Nachricht</item>
+        <item quantity="other">%1$d Nachrichten</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d Unterhaltung</item>
+        <item quantity="other">%1$d Unterhaltungen</item>
+    </plurals>
 </resources>

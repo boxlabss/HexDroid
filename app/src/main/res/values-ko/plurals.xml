@@ -24,4 +24,10 @@
     <plurals name="dcc_trusted_entry_count">
         <item quantity="other">신뢰 %1$d명</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="other">메시지 %1$d개</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="other">대화 %1$d개</item>
+    </plurals>
 </resources>

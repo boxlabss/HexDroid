@@ -48,4 +48,16 @@
         <item quantity="many">%1$d zaufanych</item>
         <item quantity="other">%1$d zaufanych</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d wiadomość</item>
+        <item quantity="few">%1$d wiadomości</item>
+        <item quantity="many">%1$d wiadomości</item>
+        <item quantity="other">%1$d wiadomości</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d rozmowy</item>
+        <item quantity="few">%1$d rozmów</item>
+        <item quantity="many">%1$d rozmów</item>
+        <item quantity="other">%1$d rozmowy</item>
+    </plurals>
 </resources>

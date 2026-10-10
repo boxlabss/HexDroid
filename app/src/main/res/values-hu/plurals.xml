@@ -31,4 +31,12 @@
         <item quantity="one">%1$d megbízható</item>
         <item quantity="other">%1$d megbízható</item>
     </plurals>
+    <plurals name="vm_replay_messages">
+        <item quantity="one">%1$d üzenet</item>
+        <item quantity="other">%1$d üzenet</item>
+    </plurals>
+    <plurals name="vm_replay_conversations">
+        <item quantity="one">%1$d beszélgetésből</item>
+        <item quantity="other">%1$d beszélgetésből</item>
+    </plurals>
 </resources>
