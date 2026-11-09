@@ -1,22 +1,22 @@
 ; Image upload for HexDroid
+; For websites that use https://phpaste.sourceforge.io
 ;
-; /img   picks an image and uploads it, then sends the URL to the channel.
-; /imgme does the same but shows the URL only to you.
+; /img   picks an image and uploads it, then sends the link to the channel.
+; /imgme does the same but shows the link only to you.
 ;
-; Written for the Paste Image Uploader PHP endpoint, which:
-;   - reads the file from the form field "images"
-;   - strips EXIF when the form field "strip_exif" is set
-;   - answers 200 with {"results":[{"success":true,"filePath":"/img/img_x.png",...}]}
-;     or {"results":[{"success":false,"error":"..."}]}
-;   - returns a site-absolute path, not a full URL, so %img_base supplies the origin
+; Uploads through the Paste API (api.php?action=upload), which:
+;   - takes your API key, from Profile > API Keys on the site; sites that allow
+;     guest uploads also take uploads without one
+;   - reads the file from the form field "file"
+;   - removes EXIF and GPS tags unless strip_exif=0 is sent
+;   - answers 201 with {"success":true,"upload":{"file":"https://.../img/<key>.png",...}}
+;     or an error status with {"success":false,"error":"..."}
 ;
 ; SETTINGS
-;   %img_ep     exact upload URL including the file name. A directory URL answers 301 and
-;               the upload is not redirected, on purpose: a redirect to another host would
-;               send your file somewhere HexDroid never checked.
-;   %img_base   scheme and host the returned path hangs off, no trailing slash.
+;   %img_ep     exact upload URL. Redirects are not followed, so use the final URL.
 ;   %img_field  form field the server reads the file from.
-;   %img_auth   optional, a whole header line, e.g. Authorization: Bearer abc123
+;   %img_auth   optional, your API key as a whole header line: Authorization: Bearer <key>
+;               (X-API-Key: <key> also works). Leave empty to upload as a guest.
 ;
 ; Globals are shared by every script, so the settings carry an img_ prefix.
 ;
@@ -24,9 +24,8 @@
 ; script is handed a token for that one file, not a path, and can read nothing else.
 
 on LOAD {
-  set %img_ep https://paste.boxlabs.uk/img/index.php
-  set %img_base https://paste.boxlabs.uk
-  set %img_field images
+  set %img_ep https://paste.boxlabs.uk/api.php?action=upload
+  set %img_field file
   set %img_auth
 }
 
@@ -46,7 +45,6 @@ on SIGNAL:img_picked {
   ; $1 buffer, $2 public|private
   if ($mediaok != true) { return }
   toast Uploading $medianame
-  ; strip_exif matters for photos: without it the server keeps the GPS tags.
   if ($len(%img_auth) == 0) {
     media.upload -f %img_field -p strip_exif=1 %img_ep $mediatoken img_done $1 $2
   }
@@ -56,33 +54,30 @@ on SIGNAL:img_picked {
 }
 
 on SIGNAL:img_done {
+  ; $1 buffer, $2 public|private
   if ($httpok != true) {
     if ($httpstatus == 0) {
       echo $1 *** upload failed: $httperror
+      return
+    }
+    if ($httpstatus == 401) {
+      echo $1 *** this site needs an API key: add it to img_auth in the LOAD block
+      return
+    }
+    set -l %err $json($httpbody, error)
+    if ($len(%err) > 0) {
+      echo $1 *** upload failed ($httpstatus): %err
       return
     }
     echo $1 *** upload failed ($httpstatus) $left($trim($re_replace($httpbody, \s+, " ")), 200)
     return
   }
 
-  ; A 2xx is not success here: this endpoint reports its failures in a 200 body.
-  set -l %err $json($httpbody, results.0.error)
-  if ($len(%err) > 0) {
-    echo $1 *** upload rejected: %err
+  set -l %url $trim($json($httpbody, upload.file))
+  if ($len(%url) == 0) {
+    echo $1 *** uploaded, but no link in the reply: $left($trim($re_replace($httpbody, \s+, " ")), 200)
     return
   }
-
-  set -l %path $trim($json($httpbody, results.0.filePath))
-  if ($len(%path) == 0) {
-    echo $1 *** uploaded, but no path in the reply: $left($trim($re_replace($httpbody, \s+, " ")), 200)
-    return
-  }
-
-  ; A site-absolute path hangs off %img_base; a full URL is used as it is.
-  ; Adjacent expansions concatenate, as translate.hex builds its endpoint.
-  set -l %url %img_base%path
-  if ($left(%path, 8) == https://) { set -l %url %path }
-  if ($left(%path, 7) == http://) { set -l %url %path }
 
   if ($2 == public) { msg $1 %url }
   else { echo $1 %url }
