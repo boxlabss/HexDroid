@@ -83,4 +83,45 @@
         <item quantity="many">%1$d محادثةً</item>
         <item quantity="other">%1$d محادثة</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="zero">إرسال %1$d سطر؟</item>
+        <item quantity="one">إرسال %1$d سطر؟</item>
+        <item quantity="two">إرسال %1$d سطرين؟</item>
+        <item quantity="few">إرسال %1$d أسطر؟</item>
+        <item quantity="many">إرسال %1$d سطرًا؟</item>
+        <item quantity="other">إرسال %1$d سطر؟</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="zero">يُرسل كل سطر كرسالة منفصلة. لتجنب قطع الاتصال بسبب الإغراق، يستغرق الإرسال نحو %1$d ثانية.</item>
+        <item quantity="one">يُرسل كل سطر كرسالة منفصلة. لتجنب قطع الاتصال بسبب الإغراق، يستغرق الإرسال نحو %1$d ثانية.</item>
+        <item quantity="two">يُرسل كل سطر كرسالة منفصلة. لتجنب قطع الاتصال بسبب الإغراق، يستغرق الإرسال نحو %1$d ثانية.</item>
+        <item quantity="few">يُرسل كل سطر كرسالة منفصلة. لتجنب قطع الاتصال بسبب الإغراق، يستغرق الإرسال نحو %1$d ثوانٍ.</item>
+        <item quantity="many">يُرسل كل سطر كرسالة منفصلة. لتجنب قطع الاتصال بسبب الإغراق، يستغرق الإرسال نحو %1$d ثانية.</item>
+        <item quantity="other">يُرسل كل سطر كرسالة منفصلة. لتجنب قطع الاتصال بسبب الإغراق، يستغرق الإرسال نحو %1$d ثانية.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="zero">إرسال كـ %1$d سطر</item>
+        <item quantity="one">إرسال كـ %1$d سطر</item>
+        <item quantity="two">إرسال كـ %1$d سطرين</item>
+        <item quantity="few">إرسال كـ %1$d أسطر</item>
+        <item quantity="many">إرسال كـ %1$d سطرًا</item>
+        <item quantity="other">إرسال كـ %1$d سطر</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="zero">%1$d ملف</item>
+        <item quantity="one">%1$d ملف</item>
+        <item quantity="two">%1$d ملفان</item>
+        <item quantity="few">%1$d ملفات</item>
+        <item quantity="many">%1$d ملفًا</item>
+        <item quantity="other">%1$d ملف</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="zero">جارٍ رفع %1$d ملف…</item>
+        <item quantity="one">جارٍ رفع %1$d ملف…</item>
+        <item quantity="two">جارٍ رفع %1$d ملفين…</item>
+        <item quantity="few">جارٍ رفع %1$d ملفات…</item>
+        <item quantity="many">جارٍ رفع %1$d ملفًا…</item>
+        <item quantity="other">جارٍ رفع %1$d ملف…</item>
+    </plurals>
 </resources>

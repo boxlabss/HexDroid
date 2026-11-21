@@ -24,7 +24,8 @@ import com.boxlabs.hexdroid.data.IgnoreType
 import com.boxlabs.hexdroid.data.eventPrefs
 import kotlinx.coroutines.isActive
 
-internal fun IrcViewModel.isBufferMuted(bufferKey: String): Boolean = channelPrefsFor(bufferKey).muted
+internal fun IrcViewModel.isBufferMuted(bufferKey: String): Boolean =
+    channelPrefsFor(bufferKey).isMutedAt(System.currentTimeMillis())
 
 /** The event settings that apply in [chanKey]: its own, or the app-wide ones. */
 internal fun IrcViewModel.eventPrefsFor(chanKey: String): EventPrefs =

@@ -175,6 +175,10 @@ fun isPreviewableImageUrl(url: String): Boolean {
            path.endsWith(".avif")
 }
 
+/** True when [InlinePreview] shows something for [url]: an image, a YouTube video or a post on X. */
+internal fun hasInlineMediaPreview(url: String): Boolean =
+    extractYouTubeId(url) != null || extractTwitterData(url) != null || isPreviewableImageUrl(url)
+
 // Wifi only option
 
 fun isOnWifi(context: Context): Boolean {

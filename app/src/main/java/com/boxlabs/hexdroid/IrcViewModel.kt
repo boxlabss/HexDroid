@@ -93,6 +93,13 @@ class IrcViewModel(
     internal val awayMessages: MutableMap<String, String> =
         java.util.concurrent.ConcurrentHashMap()
 
+    /** Networks marked away by auto-away, which are the only ones it marks back. */
+    internal val autoAwayNets: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** Waits out the background delay before auto-away. */
+    internal var autoAwayJob: Job? = null
+    /** Auto-away is in effect: the app has been in the background long enough. */
+    @Volatile internal var autoAwayActive = false
+
     /** Per buffer, the newest server-stamped line written to the log. */
     internal val lastLoggedServerMs: MutableMap<String, Long> =
         java.util.concurrent.ConcurrentHashMap()
@@ -383,6 +390,8 @@ class IrcViewModel(
         val bouncerOps: ArrayDeque<BouncerOp> = ArrayDeque(),
         /** soju.im/muted values listed on this connection before the subscription was confirmed. */
         val muteSync: MuteSync = MuteSync(),
+        /** The notify list has been sent with MONITOR on this connection. */
+        @Volatile var notifyListSent: Boolean = false,
     )
 
     // These per-network maps and sets are read and written from each network's event coroutine
@@ -2594,8 +2603,7 @@ fun startAddNetwork() {
 
         typingDoneJob?.cancel()
 
-        // "//" sends a literal slash, so only a single leading slash marks a command.
-        val isCommand = text.startsWith("/") && !text.startsWith("//")
+        val isCommand = SlashInput.isCommand(SlashInput.stripLeadingFormatting(text.trimStart()))
         if (text.isEmpty() || isCommand) {
             typingLastKey?.let { sendTypingDone(it) }
             typingLastKey = null
@@ -2624,15 +2632,17 @@ fun startAddNetwork() {
     /**
      * Send what the user typed in the input box. `on INPUT` script handlers see it first and may
      * rewrite or halt it; lines sent by scripts, buttons and menus use [sendInput] and skip them.
+     * [pasteGuard] is false for composers outside the main screen, which cannot show its dialog.
      */
-    fun sendUserInput(raw: String, targetKey: String? = null) {
+    fun sendUserInput(raw: String, targetKey: String? = null, pasteGuard: Boolean = true) {
+        onAutoAwayInteraction()
         val st = _state.value
         val key = targetKey?.takeIf { it.isNotBlank() && st.buffers.containsKey(it) } ?: st.selectedBuffer
         if (key.isBlank() || raw.isBlank()) return
         val (netId, bufferName) = splitKey(key)
         val result = scriptEngine.onInput(com.boxlabs.hexdroid.script.InputEvent(netId, bufferName, raw))
         if (result.halted) return
-        sendInputInternal(result.text, 0, targetKey)
+        sendInputInternal(result.text, 0, targetKey, fromUser = true, pasteConfirmed = !pasteGuard)
     }
 
     fun joinChannel(channel: String) {
@@ -3347,6 +3357,53 @@ fun startAddNetwork() {
      * the proxy.
      */
     fun uploadFileToFilehost(netId: String, uri: android.net.Uri, onDone: (url: String?, error: String?) -> Unit) {
+        uploadToFilehost(
+            netId = netId,
+            describe = {
+                val name = queryDisplayName(uri)
+                    ?: runCatching { java.net.URLDecoder.decode(uri.lastPathSegment ?: "", "UTF-8") }.getOrNull()
+                val size = try {
+                    appContext.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) {
+                            val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                            if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else -1L
+                        } else -1L
+                    } ?: -1L
+                } catch (_: Throwable) { -1L }
+                val mime = runCatching { appContext.contentResolver.getType(uri) }.getOrNull()
+                Triple(name, mime, size)
+            },
+            open = { appContext.contentResolver.openInputStream(uri) },
+            onDone = onDone,
+        )
+    }
+
+    /** Upload [bytes] as a file named [fileName] to the network's FILEHOST endpoint. See [uploadFileToFilehost]. */
+    fun uploadBytesToFilehost(
+        netId: String,
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+        onDone: (url: String?, error: String?) -> Unit,
+    ) {
+        uploadToFilehost(
+            netId = netId,
+            describe = { Triple(fileName, mimeType, bytes.size.toLong()) },
+            open = { java.io.ByteArrayInputStream(bytes) },
+            onDone = onDone,
+        )
+    }
+
+    /**
+     * The FILEHOST upload behind [uploadFileToFilehost] and [uploadBytesToFilehost]. [describe]
+     * gives the name, MIME type and size (or -1), and [open] the content; both run off the main thread.
+     */
+    private fun uploadToFilehost(
+        netId: String,
+        describe: () -> Triple<String?, String?, Long>,
+        open: () -> java.io.InputStream?,
+        onDone: (url: String?, error: String?) -> Unit,
+    ) {
         val cfg = runtimes[netId]?.client?.config
         val uploadUrl = _state.value.connections[netId]?.filehostUrl
         if (cfg == null || uploadUrl.isNullOrBlank()) {
@@ -3380,20 +3437,10 @@ fun startAddNetwork() {
         }
         viewModelScope.launch(Dispatchers.IO) {
             val result = try {
-                val name = queryDisplayName(uri)
-                    ?: runCatching { java.net.URLDecoder.decode(uri.lastPathSegment ?: "", "UTF-8") }.getOrNull()
-                val size = try {
-                    appContext.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
-                        if (c.moveToFirst()) {
-                            val idx = c.getColumnIndex(OpenableColumns.SIZE)
-                            if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else -1L
-                        } else -1L
-                    } ?: -1L
-                } catch (_: Throwable) { -1L }
-                val mime = runCatching { appContext.contentResolver.getType(uri) }.getOrNull()
+                val (name, mime, size) = describe()
 
                 fun send(declaredLength: Long): FilehostUpload.Result {
-                    val stream = appContext.contentResolver.openInputStream(uri)
+                    val stream = open()
                         ?: return FilehostUpload.Result(null, appContext.getString(R.string.vm_file_open_failed))
                     return stream.use { inp ->
                         FilehostUpload.upload(

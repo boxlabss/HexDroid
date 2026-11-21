@@ -202,6 +202,8 @@ internal fun IrcViewModel.handleStateEvent(netId: String, ev: IrcEvent) {
 
         is IrcEvent.MonitorStatus -> {
             scriptEvent(if (ev.online) "NOTIFY" else "UNOTIFY", netId, "", ev.nick)
+            // The first status of a notify list nick on a connection only fills in its presence.
+            if (onWatchedStatus(netId, ev.nick, ev.online)) return
             // MONITOR: a watched nick came online or went offline.
             // Show a brief status line in the server buffer (and PM buffer if open).
             val statusLine = if (ev.online) "*** " + appContext.getString(R.string.vm_ev_monitor_online, ev.nick) else "*** " + appContext.getString(R.string.vm_ev_monitor_offline, ev.nick)
@@ -222,13 +224,24 @@ internal fun IrcViewModel.handleStateEvent(netId: String, ev: IrcEvent) {
             val targetKey = resolveBufferKey(netId, ev.target)
             val incoming = ev.timestamp.takeIf { it != "*" }?.let { parseMarkReadMs(it) }
             if (incoming != null) {
+                var readEverything = false
                 _state.update { st ->
+                    readEverything = false
                     val buf = st.buffers[targetKey] ?: return@update st
                     val known = buf.lastReadTimestamp?.let { parseMarkReadMs(it) }
                     if (known != null && incoming <= known) return@update st
+                    // Read up to the newest message from someone else: nothing is unread.
+                    val newest = buf.messages.lastOrNull { it.from != null && !isMyNick(netId, it.from) }?.timeMs
+                    readEverything = newest == null || incoming >= newest
                     st.copy(buffers = st.buffers + (targetKey to buf.copy(
-                        lastReadTimestamp = ev.timestamp
+                        lastReadTimestamp = ev.timestamp,
+                        unread = if (readEverything) 0 else buf.unread,
+                        highlights = if (readEverything) 0 else buf.highlights,
                     )))
+                }
+                if (readEverything) {
+                    val (_, bufName) = splitKey(targetKey)
+                    notifier.cancelBuffer(netId, bufName)
                 }
             }
         }

@@ -58,4 +58,25 @@
         <item quantity="one">%1$d conversation</item>
         <item quantity="other">%1$d conversations</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">Send %1$d line?</item>
+        <item quantity="other">Send %1$d lines?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Each line goes out as a separate message. To avoid a flood disconnect, sending takes about %1$d second.</item>
+        <item quantity="other">Each line goes out as a separate message. To avoid a flood disconnect, sending takes about %1$d seconds.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Send as %1$d line</item>
+        <item quantity="other">Send as %1$d lines</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">Uploading %1$d file…</item>
+        <item quantity="other">Uploading %1$d files…</item>
+    </plurals>
 </resources>

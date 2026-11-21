@@ -256,6 +256,20 @@ class IrcClient(val config: IrcConfig) {
      */
     fun sendBacklogMs(): Long = (queuedDueAtMs - System.currentTimeMillis()).coerceAtLeast(0L)
 
+    /**
+     * How long typed lines of [lineLengths] characters would take to go out from now under flood
+     * pacing, after anything already queued. Zero where pacing is off.
+     */
+    fun pacedSendEstimateMs(lineLengths: List<Int>): Long {
+        if (!registered || config.isBouncer || safeRate) return 0L
+        val now = System.currentTimeMillis()
+        synchronized(queuedPaceLock) {
+            var clock = maxOf(queuedFloodClock, now)
+            for (len in lineLengths) clock += floodPenaltyMs + len * floodPerCharMs
+            return (clock - floodBurstMs - now).coerceAtLeast(0L)
+        }
+    }
+
     // Outbound flood pacing (applied in the writer loop). IRC servers charge a per-line penalty of
     // roughly 2s + length/120s and cut you for "excess flood" once you get ~10s ahead of real time.
     private val floodPenaltyMs = 2_200L      // base cost charged per outbound line

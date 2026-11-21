@@ -64,8 +64,12 @@ class NotificationHelper(private val ctx: Context) {
         const val NOTIF_ID_CONNECTION = 1001
         /** Id of a conversation's notification. The buffer tag tells conversations apart. */
         const val NOTIF_ID_CONVERSATION = 1002
+        /** Id of a notify list alert. The buffer tag tells people apart, so a newer alert replaces an older one. */
+        const val NOTIF_ID_WATCHED = 1003
         private const val MAX_CONVERSATION_MESSAGES = 12
         private const val SHORTCUT_CATEGORY_CONVERSATION = "android.shortcut.conversation"
+        /** Category of the share target declared in res/xml/shortcuts.xml. */
+        const val SHORTCUT_CATEGORY_SHARE = "com.boxlabs.hexdroid.category.SHARE_TARGET"
 
         /** Shortcut ids pushed by this process, with the key of the icon each was pushed with. */
         private val publishedShortcuts = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -108,6 +112,11 @@ class NotificationHelper(private val ctx: Context) {
         const val ACTION_OPEN_TRANSFERS   = "action_open_transfers"
         const val ACTION_OPEN_DCC_CHAT    = "action_open_dcc_chat"
         const val ACTION_INLINE_REPLY     = "action_inline_reply"
+        /** Mark a conversation read from its notification. */
+        const val ACTION_MARK_READ        = "com.boxlabs.hexdroid.MARK_READ"
+        /** Silence a conversation's notifications for [MUTE_FOR_MS]. */
+        const val ACTION_MUTE_FOR         = "com.boxlabs.hexdroid.MUTE_FOR"
+        const val MUTE_FOR_MS             = 60 * 60_000L
         /** Intent action of a conversation shortcut. */
         const val ACTION_OPEN_CONVERSATION = "com.boxlabs.hexdroid.OPEN_CONVERSATION"
         /** Accept the DCC file offer identified by [EXTRA_DCC_FROM] + [EXTRA_DCC_FILENAME]. */
@@ -381,13 +390,42 @@ class NotificationHelper(private val ctx: Context) {
      */
     fun cancelBuffer(networkId: String, buffer: String) {
         val tag = notifTagFor(networkId, buffer)
+        // A pushed message whose network was not known is tagged with an empty network id.
+        val pushTag = notifTagFor("", buffer)
         lastPosts.remove(tag)
+        lastPosts.remove(pushTag)
         val mgr = NotificationManagerCompat.from(ctx)
         runCatching {
             for (sbn in mgr.activeNotifications) {
-                if (sbn.tag == tag) mgr.cancel(sbn.tag, sbn.id)
+                val t = sbn.tag ?: continue
+                if (t == tag || t.equals(pushTag, ignoreCase = true)) mgr.cancel(t, sbn.id)
             }
         }
+    }
+
+    /** A broadcast to [NotificationReplyReceiver] that runs [action] on [buffer]. */
+    private fun conversationActionIntent(action: String, networkId: String, buffer: String): PendingIntent? {
+        val i = Intent(ctx, NotificationReplyReceiver::class.java).apply {
+            this.action = action
+            putExtra(EXTRA_NETWORK_ID, networkId)
+            putExtra(EXTRA_BUFFER, buffer)
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+        return safePi { PendingIntent.getBroadcast(ctx, nextPiRequestCode(), i, flags) }
+    }
+
+    /** "Notify list" alert: [nick] on [networkId] came online. Tapping opens a query with them. */
+    fun notifyWatchedOnline(networkId: String, nick: String, networkName: String) {
+        ensureChannels()
+        val builder = NotificationCompat.Builder(ctx, CH_HIGHLIGHT_SILENT)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(ctx.getString(R.string.notif_watched_online_title, nick))
+            .setContentText(ctx.getString(R.string.notif_watched_online_text, networkName))
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+        openBufferPendingIntent(networkId, nick)?.let { builder.setContentIntent(it) }
+        runCatching { NotificationManagerCompat.from(ctx).notify(notifTagFor(networkId, nick), NOTIF_ID_WATCHED, builder.build()) }
     }
 
     /**
@@ -619,6 +657,22 @@ class NotificationHelper(private val ctx: Context) {
         if (post.networkId.isNotBlank()) {
             buildReplyAction(post.networkId, post.buffer, NOTIF_ID_CONVERSATION, post.from, post.originalText, post.msgAnchor)
                 ?.let { builder.addAction(it) }
+            conversationActionIntent(ACTION_MARK_READ, post.networkId, post.buffer)?.let {
+                builder.addAction(
+                    NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_mark_read), it)
+                        .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+                        .setShowsUserInterface(false)
+                        .build()
+                )
+            }
+            conversationActionIntent(ACTION_MUTE_FOR, post.networkId, post.buffer)?.let {
+                builder.addAction(
+                    NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_mute_hour), it)
+                        .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MUTE)
+                        .setShowsUserInterface(false)
+                        .build()
+                )
+            }
             // The latest sender's face, so a channel highlight shows who it is from.
             val icon = conversationIcon(post.networkId, post.from.ifBlank { post.title }, missing)
             val person = if (post.isGroup) null else post.from.takeIf { it.isNotBlank() }?.let { personFor(post.networkId, it, missing) }
@@ -712,7 +766,7 @@ class NotificationHelper(private val ctx: Context) {
                 .setLongLabel(title)
                 .setIntent(intent)
                 .setLongLived(true)
-                .setCategories(setOf(SHORTCUT_CATEGORY_CONVERSATION))
+                .setCategories(setOf(SHORTCUT_CATEGORY_CONVERSATION, SHORTCUT_CATEGORY_SHARE))
                 .setLocusId(LocusIdCompat(id))
                 .setIcon(icon.icon)
                 .apply { if (person != null) setPerson(person) }

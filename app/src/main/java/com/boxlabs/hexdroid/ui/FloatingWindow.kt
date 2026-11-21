@@ -117,6 +117,8 @@ object FloatingWindow {
                 val ui by vm.state.collectAsStateWithLifecycle()
                 HexDroidIRCTheme(
                     themeMode = ui.settings.themeMode,
+                    themeColor = ui.settings.themeColor,
+                    themeColorCustomInt = ui.settings.themeColorCustomInt,
                     fontChoice = ui.settings.fontChoice,
                     customFontPath = ui.settings.customFontPath,
                 ) {

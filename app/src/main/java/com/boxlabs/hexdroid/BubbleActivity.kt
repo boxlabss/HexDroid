@@ -47,6 +47,8 @@ class BubbleActivity : ComponentActivity() {
             val state by vm.state.collectAsStateWithLifecycle()
             HexDroidIRCTheme(
                 themeMode = state.settings.themeMode,
+                themeColor = state.settings.themeColor,
+                themeColorCustomInt = state.settings.themeColorCustomInt,
                 fontChoice = state.settings.fontChoice,
                 customFontPath = state.settings.customFontPath,
             ) {

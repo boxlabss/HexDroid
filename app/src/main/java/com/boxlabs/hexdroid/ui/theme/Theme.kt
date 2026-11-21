@@ -33,7 +33,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.ColorScheme
 import com.boxlabs.hexdroid.FontChoice
+import com.boxlabs.hexdroid.ThemeColor
 import com.boxlabs.hexdroid.data.ThemeMode
 
 private val DarkColorScheme = darkColorScheme(
@@ -182,11 +184,52 @@ private val TerminalAccents = AccentColors(
 /** Accent colours for the current theme. */
 val LocalAccentColors = staticCompositionLocalOf { DefaultAccents }
 
+/** [base] with its accent roles taken from [seed]. Surfaces and error colours are kept. */
+private fun seededScheme(base: ColorScheme, seed: Int, dark: Boolean): Pair<ColorScheme, AccentColors> {
+    val r = SeedPalette.roles(seed, dark, base.background.toArgbInt())
+    val scheme = base.copy(
+        primary = Color(r.primary),
+        onPrimary = Color(r.onPrimary),
+        primaryContainer = Color(r.primaryContainer),
+        onPrimaryContainer = Color(r.onPrimaryContainer),
+        secondary = Color(r.secondary),
+        onSecondary = Color(r.onSecondary),
+        secondaryContainer = Color(r.secondaryContainer),
+        onSecondaryContainer = Color(r.onSecondaryContainer),
+        tertiary = Color(r.tertiary),
+        onTertiary = Color(r.onTertiary),
+        tertiaryContainer = Color(r.tertiaryContainer),
+        onTertiaryContainer = Color(r.onTertiaryContainer),
+        surfaceTint = Color(r.primary),
+    )
+    val accents = DefaultAccents.copy(
+        send = listOf(Color(r.sendStart), Color(r.sendEnd)),
+        onAccent = Color(r.onSend),
+    )
+    return scheme to accents
+}
+
+/** Send-button accents that follow a wallpaper scheme. */
+private fun dynamicAccents(scheme: ColorScheme): AccentColors =
+    DefaultAccents.copy(
+        send = listOf(scheme.primary, scheme.tertiary),
+        onAccent = scheme.onPrimary,
+    )
+
+private fun Color.toArgbInt(): Int {
+    fun ch(v: Float) = (v * 255f + 0.5f).toInt().coerceIn(0, 255)
+    return (ch(alpha) shl 24) or (ch(red) shl 16) or (ch(green) shl 8) or ch(blue)
+}
+
 @Composable
 fun HexDroidIRCTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
-    // Unused; the theme mode decides dynamic colour. Kept for call-site compatibility.
+    // Unused; themeColor decides dynamic colour. Kept for call-site compatibility.
     @Suppress("UNUSED_PARAMETER") dynamicColor: Boolean = false,
+    /** Accent colour for the Light, Dark and System themes. */
+    themeColor: ThemeColor = ThemeColor.DEFAULT,
+    /** ARGB seed for [ThemeColor.CUSTOM]. */
+    themeColorCustomInt: Int? = null,
     fontChoice: FontChoice = FontChoice.OPEN_SANS,
     customFontPath: String? = null,
     // Deprecated parameter kept for source-compatibility with call sites that pass darkTheme directly.
@@ -202,20 +245,25 @@ fun HexDroidIRCTheme(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
 
-    val colorScheme = when {
-        isMatrix   -> MatrixColorScheme
-        isTerminal -> TerminalColorScheme
-        // SYSTEM theme: honour the wallpaper-derived palette on Android 12+ so the app
-        // feels integrated with the device's own look. The user has explicitly chosen
-        // "Follow system" so a pink or green button is intentional. it matches their
-        // wallpaper. All other explicit themes (LIGHT, DARK) use the fixed HexDroid
-        // palette so semantic colours (unread pill, find highlight, etc.) are predictable.
-        themeMode == ThemeMode.SYSTEM && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (resolvedDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val context = LocalContext.current
+    val baseScheme = if (resolvedDark) DarkColorScheme else LightColorScheme
+    val seed: Int? = when (themeColor) {
+        ThemeColor.CUSTOM -> themeColorCustomInt
+        else -> themeColor.seed?.toInt()
+    }
+    // Matrix and Terminal keep their own palettes. Dynamic colour needs Android 12; below it
+    // the default palette is used.
+    val (colorScheme, seededAccents) = remember(isMatrix, isTerminal, resolvedDark, themeColor, seed) {
+        when {
+            isMatrix -> MatrixColorScheme to MatrixAccents
+            isTerminal -> TerminalColorScheme to TerminalAccents
+            themeColor == ThemeColor.DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                val dyn = if (resolvedDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                dyn to dynamicAccents(dyn)
+            }
+            seed != null -> seededScheme(baseScheme, seed, resolvedDark)
+            else -> baseScheme to DefaultAccents
         }
-        resolvedDark -> DarkColorScheme
-        else -> LightColorScheme
     }
 
     // Matrix and Terminal themes use monospace font to reinforce the terminal aesthetic.
@@ -225,13 +273,7 @@ fun HexDroidIRCTheme(
         typographyForFont(effectiveFont, customFontPath)
     }
 
-    val accents = when {
-        isMatrix -> MatrixAccents
-        isTerminal -> TerminalAccents
-        else -> DefaultAccents
-    }
-
-    CompositionLocalProvider(LocalAccentColors provides accents) {
+    CompositionLocalProvider(LocalAccentColors provides seededAccents) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = typography,

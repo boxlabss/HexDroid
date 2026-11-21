@@ -125,6 +125,7 @@ internal fun IrcViewModel.isMyNick(netId: String, nick: String?): Boolean {
 fun IrcViewModel.onAppActiveChanged(active: Boolean) {
     if (appActiveForScripts == active) return
     appActiveForScripts = active
+    onAutoAwayAppActive(active)
     scriptEvent("APPACTIVE", _state.value.activeNetworkId.orEmpty(), "", fields = mapOf("appactive" to active.toString()))
 }
 

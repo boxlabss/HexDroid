@@ -39,4 +39,25 @@
         <item quantity="one">%1$d beszélgetésből</item>
         <item quantity="other">%1$d beszélgetésből</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">Elküldesz %1$d sort?</item>
+        <item quantity="other">Elküldesz %1$d sort?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Minden sor külön üzenetként megy el. A flood miatti kidobás elkerülése érdekében a küldés nagyjából %1$d másodpercig tart.</item>
+        <item quantity="other">Minden sor külön üzenetként megy el. A flood miatti kidobás elkerülése érdekében a küldés nagyjából %1$d másodpercig tart.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Küldés %1$d sorként</item>
+        <item quantity="other">Küldés %1$d sorként</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d fájl</item>
+        <item quantity="other">%1$d fájl</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">%1$d fájl feltöltése…</item>
+        <item quantity="other">%1$d fájl feltöltése…</item>
+    </plurals>
 </resources>

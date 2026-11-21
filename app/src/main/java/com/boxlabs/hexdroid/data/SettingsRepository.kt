@@ -79,6 +79,17 @@ class SettingsRepository(private val ctx: Context) {
         }
     }
 
+    /** Applies [transform] to one buffer's stored settings in a single read and write. */
+    suspend fun updateChannelPrefs(bufferKey: String, transform: (ChannelPrefs) -> ChannelPrefs) {
+        ctx.dataStore.edit { prefs ->
+            val all = ChannelPrefsCodec.decode(prefs[Keys.CHANNEL_PREFS_JSON]).toMutableMap()
+            val key = ChannelPrefsCodec.keyFor(bufferKey)
+            val next = transform(all[key] ?: ChannelPrefs())
+            if (next.isDefault) all.remove(key) else all[key] = next
+            prefs[Keys.CHANNEL_PREFS_JSON] = ChannelPrefsCodec.encode(all)
+        }
+    }
+
     /** Clears the settings of every buffer on [networkId]. */
     suspend fun removeChannelPrefsForNetwork(networkId: String) {
         ctx.dataStore.edit { prefs ->
@@ -280,10 +291,17 @@ class SettingsRepository(private val ctx: Context) {
         if (json.isNullOrBlank()) return UiSettings()
         return try {
             val o = JSONObject(json)
+            val themeMode = runCatching {
+                ThemeMode.valueOf(o.optString("themeMode", ThemeMode.DARK.name))
+            }.getOrDefault(ThemeMode.DARK)
             UiSettings(
-                themeMode = runCatching {
-                    ThemeMode.valueOf(o.optString("themeMode", ThemeMode.DARK.name))
-                }.getOrDefault(ThemeMode.DARK),
+                themeMode = themeMode,
+                // Settings saved before the colour choice existed: System followed the wallpaper.
+                themeColor = o.optString("themeColor", "").takeIf { it.isNotBlank() }
+                    ?.let { raw -> runCatching { com.boxlabs.hexdroid.ThemeColor.valueOf(raw) }.getOrNull() }
+                    ?: if (themeMode == ThemeMode.SYSTEM) com.boxlabs.hexdroid.ThemeColor.DYNAMIC
+                       else com.boxlabs.hexdroid.ThemeColor.DEFAULT,
+                themeColorCustomInt = o.opt("themeColorCustomInt")?.let { (it as? Int) ?: (it as? Long)?.toInt() },
                 compactMode = o.optBoolean("compactMode", false),
                 networkTabs = o.optBoolean("networkTabs", false),
                 networkTabsAtBottom = o.optBoolean("networkTabsAtBottom", false),
@@ -416,6 +434,15 @@ class SettingsRepository(private val ctx: Context) {
                 receiveTypingIndicator = o.optBoolean("receiveTypingIndicator", true),
                 imagePreviewsEnabled = o.optBoolean("imagePreviewsEnabled", false),
                 imagePreviewsWifiOnly = o.optBoolean("imagePreviewsWifiOnly", true),
+                linkPreviewsEnabled = o.optBoolean("linkPreviewsEnabled", false),
+                pasteGuardEnabled = o.optBoolean("pasteGuardEnabled", true),
+                pasteGuardLines = o.optInt("pasteGuardLines", 5).coerceIn(1, 50),
+                pasteServiceUrl = o.optString("pasteServiceUrl", com.boxlabs.hexdroid.PasteService.DEFAULT_SERVICE),
+                notifyListAlerts = o.optBoolean("notifyListAlerts", true),
+                autoAwayEnabled = o.optBoolean("autoAwayEnabled", false),
+                autoAwayMinutes = o.optInt("autoAwayMinutes", 10).coerceIn(1, 240),
+                autoAwayMessage = o.optString("autoAwayMessage", ""),
+                autoAwayOnBouncers = o.optBoolean("autoAwayOnBouncers", false),
                 commandAliases = o.optJSONObject("commandAliases")?.let { ao ->
                     buildMap {
                         ao.keys().forEach { k ->
@@ -433,6 +460,8 @@ class SettingsRepository(private val ctx: Context) {
     private fun toSettingsJson(s: UiSettings): JSONObject {
         val o = JSONObject()
         o.put("themeMode", s.themeMode.name)
+        o.put("themeColor", s.themeColor.name)
+        if (s.themeColorCustomInt != null) o.put("themeColorCustomInt", s.themeColorCustomInt) else o.remove("themeColorCustomInt")
         o.put("compactMode", s.compactMode)
         o.put("networkTabs", s.networkTabs)
         o.put("networkTabsAtBottom", s.networkTabsAtBottom)
@@ -533,6 +562,15 @@ class SettingsRepository(private val ctx: Context) {
         o.put("receiveTypingIndicator", s.receiveTypingIndicator)
         o.put("imagePreviewsEnabled", s.imagePreviewsEnabled)
         o.put("imagePreviewsWifiOnly", s.imagePreviewsWifiOnly)
+        o.put("linkPreviewsEnabled", s.linkPreviewsEnabled)
+        o.put("pasteGuardEnabled", s.pasteGuardEnabled)
+        o.put("pasteGuardLines", s.pasteGuardLines)
+        o.put("pasteServiceUrl", s.pasteServiceUrl)
+        o.put("notifyListAlerts", s.notifyListAlerts)
+        o.put("autoAwayEnabled", s.autoAwayEnabled)
+        o.put("autoAwayMinutes", s.autoAwayMinutes)
+        o.put("autoAwayMessage", s.autoAwayMessage)
+        o.put("autoAwayOnBouncers", s.autoAwayOnBouncers)
         o.put("commandAliases", JSONObject().apply {
             s.commandAliases.forEach { (k, v) -> put(k, v) }
         })
@@ -634,6 +672,12 @@ class SettingsRepository(private val ctx: Context) {
                         } ?: emptyList(),
                         ignoreLevels = IgnoreRules.decodeLevels(o.optJSONObject("ignoreLevels")),
     
+                        notifyList = o.optJSONArray("notifyList")?.let { nl ->
+                            (0 until nl.length()).mapNotNull { j ->
+                                nl.optString(j)?.trim()?.takeIf { it.isNotBlank() }
+                            }.distinctBy { it.lowercase() }
+                        } ?: emptyList(),
+
                         dccAutoAcceptNicks = o.optJSONArray("dccAutoAccept")?.let { aa ->
                             (0 until aa.length()).mapNotNull { j ->
                                 aa.optString(j)?.trim()?.takeIf { it.isNotBlank() }
@@ -781,6 +825,7 @@ class SettingsRepository(private val ctx: Context) {
             val levels = n.ignoreLevels.filterKeys { k -> n.ignoredNicks.any { IgnoreRules.key(it) == k } }
             if (levels.isNotEmpty()) o.put("ignoreLevels", IgnoreRules.encodeLevels(levels))
             o.put("dccAutoAccept", JSONArray(n.dccAutoAcceptNicks))
+            if (n.notifyList.isNotEmpty()) o.put("notifyList", JSONArray(n.notifyList))
             o.put("notifyOnErrors", n.notifyOnErrors)
             if (n.highlightIgnoreMasks.isNotEmpty()) {
                 o.put("highlightIgnoreMasks", JSONArray(n.highlightIgnoreMasks))
@@ -1009,7 +1054,7 @@ class SettingsRepository(private val ctx: Context) {
         val root = JSONObject()
         // version: bumped when the schema gains fields whose absence in a round-trip through
         //   an older build would silently change behaviour.
-        root.put("version", 6)
+        root.put("version", 7)
         root.put("minCompatVersion", 1)
         root.put("app", "HexDroid")
         root.put("exportedAt", java.time.Instant.now().toString())
@@ -1026,7 +1071,9 @@ class SettingsRepository(private val ctx: Context) {
             "v4: added proxyType, proxyHost, proxyPort, proxyUsername on NetworkProfile (SOCKS/Tor).",
             "v5: updated cap fields",
             "v6: added channelPrefs, ignoreLevels on NetworkProfile, and optional encryptedSecrets " +
-                "(Argon2id + AES-256-GCM over the network passwords)."
+                "(Argon2id + AES-256-GCM over the network passwords).",
+            "v7: added notifyList on NetworkProfile; themeColor, linkPreviewsEnabled, paste guard, " +
+                "notify list and auto-away fields on UiSettings."
         )))
         root.put("settings", toSettingsJson(settings))
         root.put("networks", toNetworksJson(networks))
@@ -1385,6 +1432,9 @@ data class NetworkProfile(
 
     /** What each ignore entry drops, keyed by [IgnoreRules.key]. Entries without types use [IgnoreRules.DEFAULT_TYPES]. */
     val ignoreLevels: Map<String, Set<IgnoreType>> = emptyMap(),
+
+    /** Nicks watched with MONITOR on this network (the notify list). */
+    val notifyList: List<String> = emptyList(),
 
     /**
      * Nicks whose DCC file offers are accepted without prompting on this network

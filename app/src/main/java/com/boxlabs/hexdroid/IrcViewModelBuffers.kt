@@ -1301,6 +1301,10 @@ internal fun IrcViewModel.append(
         && st.screen == AppScreen.CHAT
         && AppVisibility.isForeground) || bufferKey in bubblesShowing
     if (isActivelyVisible && !isHistory && from != null && !isFromMe) sendReadReceipt(bufferKey)
+    if (effectiveHighlight && !isPrivate && !isLocal && !isFromMe && from != null &&
+        splitKey(bufferKey).let { (n, b) -> isChannelOnNet(n, b) }) {
+        recordMention(bufferKey, from, text, ts, msgId, seen = isActivelyVisible || isHistory)
+    }
     if (mayNotify && !isActivelyVisible && !quiet && st.settings.notificationsEnabled) {
         val (netId, bufferName) = splitKey(bufferKey)
         val cleanText = stripIrcFormatting(text)

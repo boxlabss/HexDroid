@@ -48,4 +48,30 @@
         <item quantity="many">%1$d de conversas</item>
         <item quantity="other">%1$d conversas</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">Enviar %1$d linha?</item>
+        <item quantity="many">Enviar %1$d de linhas?</item>
+        <item quantity="other">Enviar %1$d linhas?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Cada linha é enviada como uma mensagem separada. Para evitar uma desconexão por flood, o envio demora cerca de %1$d segundo.</item>
+        <item quantity="many">Cada linha é enviada como uma mensagem separada. Para evitar uma desconexão por flood, o envio demora cerca de %1$d de segundos.</item>
+        <item quantity="other">Cada linha é enviada como uma mensagem separada. Para evitar uma desconexão por flood, o envio demora cerca de %1$d segundos.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Enviar como %1$d linha</item>
+        <item quantity="many">Enviar como %1$d de linhas</item>
+        <item quantity="other">Enviar como %1$d linhas</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d ficheiro</item>
+        <item quantity="many">%1$d de ficheiros</item>
+        <item quantity="other">%1$d ficheiros</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">A carregar %1$d ficheiro…</item>
+        <item quantity="many">A carregar %1$d de ficheiros…</item>
+        <item quantity="other">A carregar %1$d ficheiros…</item>
+    </plurals>
 </resources>

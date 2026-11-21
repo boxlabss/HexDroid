@@ -59,4 +59,35 @@
         <item quantity="many">%1$d розмов</item>
         <item quantity="other">%1$d розмови</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">Надіслати %1$d рядок?</item>
+        <item quantity="few">Надіслати %1$d рядки?</item>
+        <item quantity="many">Надіслати %1$d рядків?</item>
+        <item quantity="other">Надіслати %1$d рядка?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Кожен рядок буде надіслано окремим повідомленням. Щоб уникнути відключення за флуд, надсилання триватиме приблизно %1$d секунду.</item>
+        <item quantity="few">Кожен рядок буде надіслано окремим повідомленням. Щоб уникнути відключення за флуд, надсилання триватиме приблизно %1$d секунди.</item>
+        <item quantity="many">Кожен рядок буде надіслано окремим повідомленням. Щоб уникнути відключення за флуд, надсилання триватиме приблизно %1$d секунд.</item>
+        <item quantity="other">Кожен рядок буде надіслано окремим повідомленням. Щоб уникнути відключення за флуд, надсилання триватиме приблизно %1$d секунди.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Надіслати %1$d рядком</item>
+        <item quantity="few">Надіслати %1$d рядками</item>
+        <item quantity="many">Надіслати %1$d рядками</item>
+        <item quantity="other">Надіслати %1$d рядками</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d файл</item>
+        <item quantity="few">%1$d файли</item>
+        <item quantity="many">%1$d файлів</item>
+        <item quantity="other">%1$d файлу</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">Завантаження %1$d файлу…</item>
+        <item quantity="few">Завантаження %1$d файлів…</item>
+        <item quantity="many">Завантаження %1$d файлів…</item>
+        <item quantity="other">Завантаження %1$d файлу…</item>
+    </plurals>
 </resources>

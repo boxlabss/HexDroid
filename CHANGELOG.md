@@ -1,7 +1,27 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
-## [1.7.8] 2026-10-27
+## [Unreleased]
+### Added
+- Notify list for each network. Add someone with `/notify <nick>` or from their nick actions, remove them with `/unnotify <nick>`, or manage the list from Notify list in the chat menu. On servers with MONITOR the list shows who is online, private chats with someone on it show a presence dot, and an optional notification says when they come online (Settings > Notifications). Lists are kept with the network and in backups.
+- Mentions, from the chat menu, the drawer or `/mentions`: every channel message that highlighted you this session, across all networks, newest first. Tap one to open the conversation at that message.
+- Share to HexDroid from other apps. Text, images and videos can be shared to any channel or private chat; files are uploaded through the network's file host and their links put in the message box. Recent conversations appear as direct share targets.
+- Mark read and Mute for 1 hour actions on message notifications. A paused conversation shows in its Channel settings with a Resume button, and push notifications follow the pause too.
+- Paste guard, on by default. A message that would go out as more than 5 lines (adjustable) asks first, with how long sending will take, and offers to send it as lines, join it into one line, or upload it as a paste. Uploads use the network's file host, or otherwise pastebin.cloud, which can be changed or turned off in Settings > Chat & Messages. Nothing is uploaded on a proxied network.
+- Auto-away (Settings > IRC, off by default): marks you away after HexDroid has been in the background for a set number of minutes and back when you return, with your own away message. It leaves an away status you set yourself alone and skips bouncers unless you turn that on.
+- Accent colour (Settings > Appearance): HexDroid blue, wallpaper colours on Android 12 and later, six preset colours or a colour of your own. Text colours are adjusted to stay readable.
+- Emoji button inside the message box, with recently used emoji, and the upload button now sits inside the box too.
+- Link previews (Settings > Media, off by default): the title and description of a linked https page under the message. They follow the Wi-Fi only setting and are never fetched on a proxied network or from private addresses.
+- `/say <text>` and a leading `//` send text that starts with `/` as a message.
+
+### Fixed
+- A read marker from another client now clears the unread and highlight counts and the notification.
+- Text starting with `/` that isn't a command, such as a path or a smiley, is sent as a message instead of failing as an unknown command.
+- Pasting several lines that start with a command no longer drops the lines after the first.
+- Text typed in the server window shows a hint instead of being sent to the server as a raw line.
+- A command typed after a colour code is recognised as a command.
+
+## [1.7.8] 2026-11-01
 ### Added
 - Secure DCC chat (SCHAT) `/dcc schat <nick>` always offers a secure chat and `/dcc chat` follows the SDCC setting. The chat shows the certificate fingerprint.
 - Added `/dcc accept`, `/dcc reject` and `/dcc close`

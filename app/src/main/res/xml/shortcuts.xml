@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Conversation shortcuts carry this category, so recent channels and queries are offered as
+     direct share targets in the system share sheet. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.boxlabs.hexdroid.MainActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="video/*" />
+        <category android:name="com.boxlabs.hexdroid.category.SHARE_TARGET" />
+    </share-target>
+</shortcuts>

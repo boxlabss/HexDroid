@@ -50,8 +50,13 @@ data class ChannelPrefs(
      * another client, a local one by this device.
      */
     val syncedMute: Boolean = false,
+    /** Notifications are silenced until this time (epoch ms), as from "Mute for 1 hour"; 0 when not. */
+    val mutedUntilMs: Long = 0L,
 ) {
-    val isDefault: Boolean get() = !muted && highlightWords.isEmpty() && events == null && !syncedMute
+    val isDefault: Boolean get() = !muted && highlightWords.isEmpty() && events == null && !syncedMute && mutedUntilMs <= 0L
+
+    /** True when notifications from this buffer are silenced at [nowMs]. */
+    fun isMutedAt(nowMs: Long): Boolean = muted || mutedUntilMs > nowMs
 }
 
 fun UiSettings.eventPrefs(): EventPrefs = EventPrefs(
@@ -83,11 +88,15 @@ object ChannelPrefsCodec {
 
     fun encode(all: Map<String, ChannelPrefs>): String {
         val root = JSONObject()
-        for ((key, p) in all) {
+        val now = System.currentTimeMillis()
+        for ((key, stored) in all) {
+            // A timed mute that has ended is not kept.
+            val p = if (stored.mutedUntilMs in 1..now) stored.copy(mutedUntilMs = 0L) else stored
             if (p.isDefault) continue
             val o = JSONObject()
             if (p.muted) o.put("muted", true)
             if (p.syncedMute) o.put("syncedMute", true)
+            if (p.mutedUntilMs > 0L) o.put("mutedUntilMs", p.mutedUntilMs)
             if (p.highlightWords.isNotEmpty()) o.put("highlightWords", JSONArray(p.highlightWords))
             p.events?.let { e ->
                 o.put("events", JSONObject().apply {
@@ -134,6 +143,7 @@ object ChannelPrefsCodec {
                 highlightWords = words,
                 events = events,
                 syncedMute = o.optBoolean("syncedMute", false),
+                mutedUntilMs = o.optLong("mutedUntilMs", 0L),
             )
             if (!p.isDefault) out[keyFor(key)] = p
         }

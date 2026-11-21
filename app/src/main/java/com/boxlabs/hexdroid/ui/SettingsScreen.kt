@@ -122,7 +122,13 @@ import com.boxlabs.hexdroid.ChatFontStyle
 import com.boxlabs.hexdroid.FontChoice
 import com.boxlabs.hexdroid.NickStyle
 import com.boxlabs.hexdroid.R
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import com.boxlabs.hexdroid.SmartFilter
+import com.boxlabs.hexdroid.ThemeColor
+import com.boxlabs.hexdroid.PasteService
 import com.boxlabs.hexdroid.data.eventPrefs
 import com.boxlabs.hexdroid.data.withEventPrefs
 import com.boxlabs.hexdroid.TimestampStyle
@@ -207,6 +213,7 @@ private fun NickColourPickerDialog(
     initial: Color,
     onDismiss: () -> Unit,
     onConfirm: (Color) -> Unit,
+    title: String? = null,
 ) {
     // Decompose to HSV
     val initHsv = FloatArray(3)
@@ -226,7 +233,7 @@ private fun NickColourPickerDialog(
         dismissButton = {
             TextButton(onClick = onDismiss, modifier = Modifier.focusHighlight(RoundedCornerShape(50))) { Text(stringResource(android.R.string.cancel)) }
         },
-        title = { Text(stringResource(R.string.setting_own_nick_colour_title)) },
+        title = { Text(title ?: stringResource(R.string.setting_own_nick_colour_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 // Colour preview swatch
@@ -800,6 +807,29 @@ fun SettingsScreen(
                 ThemePicker(s.themeMode) { mode -> onUpdate { copy(themeMode = mode) } }
             }
 
+            if (s.themeMode != ThemeMode.MATRIX && s.themeMode != ThemeMode.TERMINAL) {
+                item {
+                    var showCustom by remember { mutableStateOf(false) }
+                    if (showCustom) {
+                        NickColourPickerDialog(
+                            initial = s.themeColorCustomInt?.let { Color(it) } ?: Color(0xFF2563EB.toInt()),
+                            title = stringResource(R.string.setting_theme_colour),
+                            onDismiss = { showCustom = false },
+                            onConfirm = { picked ->
+                                onUpdate { copy(themeColor = ThemeColor.CUSTOM, themeColorCustomInt = picked.toArgb()) }
+                                showCustom = false
+                            },
+                        )
+                    }
+                    ThemeColorPicker(
+                        current = s.themeColor,
+                        customInt = s.themeColorCustomInt,
+                        onPick = { c -> onUpdate { copy(themeColor = c) } },
+                        onCustom = { showCustom = true },
+                    )
+                }
+            }
+
             item {
                 FontPicker(
                     fieldLabel = stringResource(R.string.setting_ui_font),
@@ -1007,7 +1037,16 @@ fun SettingsScreen(
                 }
             }
 
-            if (s.imagePreviewsEnabled) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_link_previews), s.linkPreviewsEnabled) {
+                        onUpdate { copy(linkPreviewsEnabled = !linkPreviewsEnabled) }
+                    }
+                    Text(stringResource(R.string.setting_link_previews_desc), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                }
+            }
+
+            if (s.imagePreviewsEnabled || s.linkPreviewsEnabled) {
                 item {
                     Column(Modifier.fillMaxWidth()) {
                         SettingToggle(stringResource(R.string.setting_previews_wifi_only), s.imagePreviewsWifiOnly) {
@@ -1202,6 +1241,43 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            item { SectionTitle(stringResource(R.string.section_paste_guard)) }
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_paste_guard), s.pasteGuardEnabled) {
+                        onUpdate { copy(pasteGuardEnabled = !pasteGuardEnabled) }
+                    }
+                    Text(stringResource(R.string.setting_paste_guard_desc), style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    NumberSettingField(
+                        value = s.pasteGuardLines,
+                        range = 1..50,
+                        onCommit = { n -> onUpdate { copy(pasteGuardLines = n) } },
+                        label = { Text(stringResource(R.string.setting_paste_guard_lines)) },
+                        enabled = s.pasteGuardEnabled,
+                        modifier = Modifier.widthIn(max = 220.dp),
+                    )
+                }
+            }
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.setting_paste_service), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.setting_paste_service_desc), style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
+                    val urlOk = s.pasteServiceUrl.isBlank() || PasteService.isUsable(s.pasteServiceUrl)
+                    OutlinedTextField(
+                        value = s.pasteServiceUrl,
+                        onValueChange = { v -> onUpdate { copy(pasteServiceUrl = v.trim()) } },
+                        placeholder = { Text("https://paste.example/api.php") },
+                        isError = !urlOk,
+                        supportingText = if (urlOk) null else ({ Text(stringResource(R.string.setting_paste_service_https)) }),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
             }
 
             if (onePage || current == SettingsCategory.ALIASES) {
@@ -1370,6 +1446,37 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+            }
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_auto_away), s.autoAwayEnabled) {
+                        onUpdate { copy(autoAwayEnabled = !autoAwayEnabled) }
+                    }
+                    Text(stringResource(R.string.setting_auto_away_desc), style = MaterialTheme.typography.bodySmall)
+                    if (s.autoAwayEnabled) {
+                        Spacer(Modifier.height(8.dp))
+                        NumberSettingField(
+                            value = s.autoAwayMinutes,
+                            range = 1..240,
+                            onCommit = { n -> onUpdate { copy(autoAwayMinutes = n) } },
+                            label = { Text(stringResource(R.string.setting_auto_away_minutes)) },
+                            modifier = Modifier.widthIn(max = 220.dp),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = s.autoAwayMessage,
+                            onValueChange = { v -> onUpdate { copy(autoAwayMessage = v) } },
+                            label = { Text(stringResource(R.string.setting_auto_away_message)) },
+                            placeholder = { Text(stringResource(R.string.auto_away_default)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        SettingToggle(stringResource(R.string.setting_auto_away_bouncers), s.autoAwayOnBouncers) {
+                            onUpdate { copy(autoAwayOnBouncers = !autoAwayOnBouncers) }
+                        }
+                        Text(stringResource(R.string.setting_auto_away_bouncers_desc), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
             item { SettingToggle(stringResource(R.string.setting_connection_status), s.showConnectionStatusNotification) { onUpdate { copy(showConnectionStatusNotification = !showConnectionStatusNotification) } } }
             item {
@@ -1549,6 +1656,14 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_enable_notifications), s.notificationsEnabled) { onUpdate { copy(notificationsEnabled = !notificationsEnabled) } } }
             item { SettingToggle(stringResource(R.string.setting_notify_highlights), s.notifyOnHighlights) { onUpdate { copy(notifyOnHighlights = !notifyOnHighlights) } } }
             item { SettingToggle(stringResource(R.string.setting_notify_pm), s.notifyOnPrivateMessages) { onUpdate { copy(notifyOnPrivateMessages = !notifyOnPrivateMessages) } } }
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingToggle(stringResource(R.string.setting_notify_list_alerts), s.notifyListAlerts) {
+                        onUpdate { copy(notifyListAlerts = !notifyListAlerts) }
+                    }
+                    Text(stringResource(R.string.setting_notify_list_alerts_desc), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             item { SettingToggle(stringResource(R.string.setting_sound_highlight), s.playSoundOnHighlight) { onUpdate { copy(playSoundOnHighlight = !playSoundOnHighlight) } } }
             item { SettingToggle(stringResource(R.string.setting_vibrate_highlight), s.vibrateOnHighlight) { onUpdate { copy(vibrateOnHighlight = !vibrateOnHighlight) } } }
             if (s.vibrateOnHighlight) {
@@ -2126,6 +2241,93 @@ private fun ChannelEventsCard(s: UiSettings, showWindow: Boolean, onUpdate: (UiS
             SettingToggle(stringResource(R.string.setting_hide_topic_on_entry), s.hideTopicOnEntry) { onUpdate { copy(hideTopicOnEntry = !hideTopicOnEntry) } }
             SettingToggle(stringResource(R.string.setting_hide_away_notify), s.hideAwayNotify) { onUpdate { copy(hideAwayNotify = !hideAwayNotify) } }
         }
+    }
+}
+
+/** The label of a theme colour choice. */
+@Composable
+private fun themeColorLabel(c: ThemeColor): String = stringResource(
+    when (c) {
+        ThemeColor.DEFAULT -> R.string.theme_colour_default
+        ThemeColor.DYNAMIC -> R.string.theme_colour_dynamic
+        ThemeColor.TEAL -> R.string.theme_colour_teal
+        ThemeColor.GREEN -> R.string.theme_colour_green
+        ThemeColor.PURPLE -> R.string.theme_colour_purple
+        ThemeColor.PINK -> R.string.theme_colour_pink
+        ThemeColor.ORANGE -> R.string.theme_colour_orange
+        ThemeColor.RED -> R.string.theme_colour_red
+        ThemeColor.CUSTOM -> R.string.theme_colour_custom
+    }
+)
+
+/**
+ * Accent colour swatches: the HexDroid blue, the wallpaper's colours on Android 12 and later,
+ * the presets, and a custom colour from the colour wheel.
+ */
+@Composable
+private fun ThemeColorPicker(
+    current: ThemeColor,
+    customInt: Int?,
+    onPick: (ThemeColor) -> Unit,
+    onCustom: () -> Unit,
+) {
+    // Below Android 12 wallpaper colours fall back to the default palette.
+    val shown = if (current == ThemeColor.DYNAMIC && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) ThemeColor.DEFAULT else current
+    val rainbow = Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))
+    val wallpaper = Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary))
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.setting_theme_colour), style = MaterialTheme.typography.titleSmall)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            for (c in ThemeColor.values()) {
+                if (c == ThemeColor.DYNAMIC && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) continue
+                val label = themeColorLabel(c)
+                val selected = shown == c
+                val fill: Modifier = when (c) {
+                    ThemeColor.DEFAULT -> Modifier.background(Color(0xFF2563EB))
+                    ThemeColor.DYNAMIC -> Modifier.background(wallpaper)
+                    ThemeColor.CUSTOM -> customInt?.let { Modifier.background(Color(it)) } ?: Modifier.background(rainbow)
+                    else -> Modifier.background(Color(c.seed ?: 0xFF2563EB))
+                }
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .focusHighlight(CircleShape)
+                        .clip(CircleShape)
+                        .then(fill)
+                        .border(
+                            width = if (selected) 3.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape,
+                        )
+                        .clickable { if (c == ThemeColor.CUSTOM) onCustom() else onPick(c) }
+                        .semantics {
+                            contentDescription = label
+                            this.selected = selected
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(Color.Black.copy(alpha = 0.35f), CircleShape)
+                                .padding(2.dp),
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            themeColorLabel(shown),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

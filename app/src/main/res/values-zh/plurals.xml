@@ -30,4 +30,20 @@
     <plurals name="vm_replay_conversations">
         <item quantity="other">%1$d 个对话</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="other">发送 %1$d 行？</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="other">每一行都会作为单独的消息发送。为避免因刷屏被断开连接，发送大约需要 %1$d 秒。</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="other">作为 %1$d 行发送</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="other">%1$d 个文件</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="other">正在上传 %1$d 个文件…</item>
+    </plurals>
 </resources>

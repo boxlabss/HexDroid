@@ -39,4 +39,25 @@
         <item quantity="one">%1$d gesprek</item>
         <item quantity="other">%1$d gesprekken</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">%1$d regel versturen?</item>
+        <item quantity="other">%1$d regels versturen?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Elke regel gaat als apart bericht. Om een verbreking wegens flooding te voorkomen, duurt versturen ongeveer %1$d seconde.</item>
+        <item quantity="other">Elke regel gaat als apart bericht. Om een verbreking wegens flooding te voorkomen, duurt versturen ongeveer %1$d seconden.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Versturen als %1$d regel</item>
+        <item quantity="other">Versturen als %1$d regels</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d bestand</item>
+        <item quantity="other">%1$d bestanden</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">%1$d bestand uploaden…</item>
+        <item quantity="other">%1$d bestanden uploaden…</item>
+    </plurals>
 </resources>

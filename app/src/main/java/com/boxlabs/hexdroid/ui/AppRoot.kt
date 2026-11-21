@@ -54,6 +54,13 @@ import com.boxlabs.hexdroid.AppScreen
 import com.boxlabs.hexdroid.ui.script.ScriptsScreen
 import com.boxlabs.hexdroid.ui.script.ScriptViewHost
 import com.boxlabs.hexdroid.IrcViewModel
+import com.boxlabs.hexdroid.cancelShare
+import com.boxlabs.hexdroid.clearMentions
+import com.boxlabs.hexdroid.deliverShare
+import com.boxlabs.hexdroid.dismissMention
+import com.boxlabs.hexdroid.openMention
+import com.boxlabs.hexdroid.resolvePasteGuard
+import com.boxlabs.hexdroid.sendComposerReply
 import com.boxlabs.hexdroid.data.ThemeMode
 import com.boxlabs.hexdroid.ui.theme.HexDroidIRCTheme
 import androidx.compose.foundation.layout.Box
@@ -234,6 +241,8 @@ fun AppRoot(
     key(themeMode, state.settings.fontChoice, state.settings.customFontPath) {
         HexDroidIRCTheme(
             themeMode = themeMode,
+            themeColor = state.settings.themeColor,
+            themeColorCustomInt = state.settings.themeColorCustomInt,
             fontChoice = state.settings.fontChoice,
             customFontPath = state.settings.customFontPath
         ) {
@@ -287,7 +296,7 @@ fun AppRoot(
                     state = state,
                     onSelectBuffer = vm::openBuffer,
                     onSend = vm::sendUserInput,
-                    onSendReply = vm::sendToBuffer,
+                    onSendReply = vm::sendComposerReply,
                     onSendReaction = { msgId, emoji, remove -> vm.sendReaction(msgId, emoji, remove) },
                     onDisconnect = vm::disconnectActive,
                     onReconnect = vm::reconnectActive,
@@ -482,6 +491,14 @@ fun AppRoot(
                     onUnignoreNick = vm::unignoreNick,
                     onSetIgnoreTypes = vm::setIgnoreTypes,
                 )
+
+                AppScreen.MENTIONS -> MentionsScreen(
+                    state = state,
+                    onBack = vm::backToChat,
+                    onOpen = { entry -> vm.openMention(entry) },
+                    onDismiss = { entry -> vm.dismissMention(entry) },
+                    onClearAll = { vm.clearMentions() },
+                )
 }
             }
 
@@ -578,6 +595,21 @@ fun AppRoot(
             onAction = vm::scriptViewAction,
             onClose = vm::closeScriptView,
             onScreenChanged = vm::scriptScreenChanged,
+        )
+    }
+
+    // Text held by the paste guard until the user chooses how to send it.
+    state.pasteGuard?.let { req ->
+        PasteGuardDialog(req = req, onChoice = { choice -> vm.resolvePasteGuard(choice) })
+    }
+
+    // Something shared from another app without a conversation picked yet.
+    state.pendingShare?.let { share ->
+        ShareTargetDialog(
+            state = state,
+            share = share,
+            onPick = { key -> vm.deliverShare(key, share) },
+            onDismiss = { vm.cancelShare() },
         )
     }
 }

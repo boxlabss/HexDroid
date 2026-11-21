@@ -392,6 +392,7 @@ private suspend fun IrcViewModel.cloneUpstream(
         bouncerNetworkId = upstreamId?.takeIf { parent.bouncerKind == BouncerKind.SOJU },
         bouncerClientId = null,
         autoJoin = emptyList(),
+        notifyList = emptyList(),
         autoConnect = false,
         isFavourite = false,
         sortOrder = sortOrder,

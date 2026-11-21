@@ -706,6 +706,12 @@ internal fun IrcViewModel.handleServerEvent(netId: String, ev: IrcEvent) {
 
                         noteBouncerNetId(netId, ev.bouncerNetId)
 
+                        // MONITOR support is known once ISUPPORT arrives after registration.
+                        runtimes[netId]?.client?.takeIf { it.registered }?.let { cl ->
+                            setNetConn(netId) { it.copy(monitorSupported = cl.monitorLimit != -1) }
+                        }
+                        maybeSendNotifyList(netId)
+
                         // Surface the filehost upload endpoint (soju.im/FILEHOST) to the UI so
                         // ChatScreen can offer the attach button. Assigned unconditionally: a
                         // later 005 without the token must not leave a stale URL behind. The
@@ -789,6 +795,8 @@ internal fun IrcViewModel.handleServerEvent(netId: String, ev: IrcEvent) {
                         // Re-send our own metadata so display name / avatar / colour etc. survive a
                         // reconnect even on servers that don't persist metadata across sessions.
                         reapplyOwnMetadata(netId)
+                        maybeSendNotifyList(netId)
+                        maybeApplyAutoAway(netId)
                         append(bufKey(netId, "*server*"), from = null, text = "*** " + appContext.getString(R.string.vm_registered_as, ev.nick), doNotify = false)
                         // After a reconnect (backoff attempts > 0), announce it in every channel and query
                         // buffer. Done before the dedup reset.

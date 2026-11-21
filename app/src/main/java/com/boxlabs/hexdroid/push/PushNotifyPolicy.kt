@@ -42,6 +42,7 @@ object PushNotifyPolicy {
     private const val KEY_INTENSITY = "vibrate_intensity"
     private const val KEY_MASKS = "mute_masks"
     private const val KEY_MUTED_BUFFERS = "muted_buffers"
+    private const val KEY_MUTED_UNTIL = "muted_until"
 
     /**
      * The gate a pushed message passes through, with the highlight-ignore masks of every
@@ -57,6 +58,8 @@ object PushNotifyPolicy {
         val muteMasks: Map<String, List<String>>,
         /** Muted buffers, as [ChannelPrefsCodec.keyFor] keys. */
         val mutedBuffers: Set<String> = emptySet(),
+        /** Buffers muted for a while, with the time (epoch ms) each mute ends. */
+        val mutedUntil: Map<String, Long> = emptyMap(),
     ) {
         /**
          * True when [nick] is muted for [netId]. An empty [netId] (push not attributable to a
@@ -71,11 +74,13 @@ object PushNotifyPolicy {
          * True when [buffer] is muted on [netId]. An empty [netId] matches the buffer name on
          * any network.
          */
-        fun mutesBuffer(netId: String, buffer: String): Boolean {
-            if (mutedBuffers.isEmpty() || buffer.isBlank()) return false
-            if (netId.isNotBlank()) return ChannelPrefsCodec.keyFor("$netId::$buffer") in mutedBuffers
+        fun mutesBuffer(netId: String, buffer: String, nowMs: Long = System.currentTimeMillis()): Boolean {
+            if (buffer.isBlank()) return false
+            val muted = mutedBuffers + mutedUntil.filterValues { it > nowMs }.keys
+            if (muted.isEmpty()) return false
+            if (netId.isNotBlank()) return ChannelPrefsCodec.keyFor("$netId::$buffer") in muted
             val suffix = ChannelPrefsCodec.keyFor("::$buffer")
-            return mutedBuffers.any { it.endsWith(suffix) }
+            return muted.any { it.endsWith(suffix) }
         }
     }
 
@@ -103,8 +108,28 @@ object PushNotifyPolicy {
             .putString(KEY_INTENSITY, settings.vibrateIntensity.name)
             .putString(KEY_MASKS, masks.toString())
             .putStringSet(KEY_MUTED_BUFFERS, channelPrefs.filterValues { it.muted }.keys.toSet())
+            .putString(KEY_MUTED_UNTIL, encodeMutedUntil(
+                channelPrefs.filterValues { it.mutedUntilMs > System.currentTimeMillis() }.mapValues { it.value.mutedUntilMs }
+            ))
             .apply()
     }
+
+    /** Record that [bufferKey] is muted until [untilMs], without the rest of the policy. */
+    fun setMutedUntil(ctx: Context, bufferKey: String, untilMs: Long) {
+        val p = prefs(ctx)
+        val now = System.currentTimeMillis()
+        val map = decodeMutedUntil(p.getString(KEY_MUTED_UNTIL, null)).filterValues { it > now }.toMutableMap()
+        map[ChannelPrefsCodec.keyFor(bufferKey)] = untilMs
+        p.edit().putString(KEY_MUTED_UNTIL, encodeMutedUntil(map)).apply()
+    }
+
+    private fun encodeMutedUntil(map: Map<String, Long>): String =
+        JSONObject().apply { for ((k, v) in map) put(k, v) }.toString()
+
+    private fun decodeMutedUntil(json: String?): Map<String, Long> = runCatching {
+        val obj = JSONObject(json.orEmpty().ifBlank { "{}" })
+        buildMap { for (k in obj.keys()) put(k, obj.optLong(k, 0L)) }
+    }.getOrDefault(emptyMap())
 
     /**
      * The stored policy, or the app's own defaults when nothing has been mirrored yet.
@@ -134,6 +159,7 @@ object PushNotifyPolicy {
             }.getOrDefault(defaults.vibrateIntensity),
             muteMasks = masks,
             mutedBuffers = runCatching { p.getStringSet(KEY_MUTED_BUFFERS, null)?.toSet() }.getOrNull().orEmpty(),
+            mutedUntil = decodeMutedUntil(p.getString(KEY_MUTED_UNTIL, null)),
         )
     }
 }

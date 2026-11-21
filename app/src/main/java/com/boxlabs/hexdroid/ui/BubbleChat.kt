@@ -109,7 +109,7 @@ fun BubbleChat(
             fun send() {
                 val t = text.trim()
                 if (t.isNotEmpty()) {
-                    vm.sendUserInput(t, bufferKey)
+                    vm.sendUserInput(t, bufferKey, pasteGuard = false)
                     text = ""
                 }
             }

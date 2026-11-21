@@ -39,4 +39,25 @@
         <item quantity="one">%1$d conversación</item>
         <item quantity="other">%1$d conversaciones</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">¿Enviar %1$d línea?</item>
+        <item quantity="other">¿Enviar %1$d líneas?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Cada línea se envía como un mensaje aparte. Para evitar una desconexión por flood, el envío tarda unos %1$d segundo.</item>
+        <item quantity="other">Cada línea se envía como un mensaje aparte. Para evitar una desconexión por flood, el envío tarda unos %1$d segundos.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Enviar como %1$d línea</item>
+        <item quantity="other">Enviar como %1$d líneas</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d archivo</item>
+        <item quantity="other">%1$d archivos</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">Subiendo %1$d archivo…</item>
+        <item quantity="other">Subiendo %1$d archivos…</item>
+    </plurals>
 </resources>

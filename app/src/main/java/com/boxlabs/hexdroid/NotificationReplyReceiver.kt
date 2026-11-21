@@ -23,6 +23,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
+import kotlinx.coroutines.launch
 
 /**
  * Handles the inline reply on highlight and PM notifications, without bringing the app forward. If
@@ -35,9 +36,47 @@ class NotificationReplyReceiver : BroadcastReceiver() {
         // Outer guard: a throw here shows the system crash dialog. Expected cases (missing extras,
         // no live connection) are handled above; this catches the unexpected.
         try {
-            handleReply(ctx, intent)
+            when (intent.action) {
+                NotificationHelper.ACTION_MARK_READ -> handleMarkRead(ctx, intent)
+                NotificationHelper.ACTION_MUTE_FOR -> handleMute(ctx, intent)
+                else -> handleReply(ctx, intent)
+            }
         } catch (t: Throwable) {
-            android.util.Log.e("NotificationReplyReceiver", "Reply broadcast handler crashed", t)
+            android.util.Log.e("NotificationReplyReceiver", "Notification action handler crashed", t)
+        }
+    }
+
+    /** Marks the conversation read, here and on the server, and clears its notification. */
+    private fun handleMarkRead(ctx: Context, intent: Intent) {
+        val netId = intent.getStringExtra(NotificationHelper.EXTRA_NETWORK_ID) ?: return
+        val buffer = intent.getStringExtra(NotificationHelper.EXTRA_BUFFER) ?: return
+        val vm = (ctx.applicationContext as? HexDroidApp)?.ircViewModelOrNull
+        if (vm != null) vm.markReadFromNotification(netId, buffer)
+        else NotificationHelper(ctx).cancelBuffer(netId, buffer)
+    }
+
+    /** Silences the conversation for [NotificationHelper.MUTE_FOR_MS] and clears its notification. */
+    private fun handleMute(ctx: Context, intent: Intent) {
+        val netId = intent.getStringExtra(NotificationHelper.EXTRA_NETWORK_ID) ?: return
+        val buffer = intent.getStringExtra(NotificationHelper.EXTRA_BUFFER) ?: return
+        val until = System.currentTimeMillis() + NotificationHelper.MUTE_FOR_MS
+        NotificationHelper(ctx).cancelBuffer(netId, buffer)
+        val app = ctx.applicationContext as? HexDroidApp ?: return
+        val vm = app.ircViewModelOrNull
+        if (vm != null) {
+            vm.muteBufferUntil(vm.bufferKeyFor(netId, buffer), until)
+            return
+        }
+        // No ViewModel in this process: write the setting directly so it holds when one starts.
+        val key = "$netId::$buffer"
+        com.boxlabs.hexdroid.push.PushNotifyPolicy.setMutedUntil(ctx, key, until)
+        val pending = goAsync()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                runCatching { app.repo.updateChannelPrefs(key) { it.copy(mutedUntilMs = until) } }
+            } finally {
+                pending.finish()
+            }
         }
     }
 

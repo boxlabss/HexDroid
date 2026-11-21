@@ -30,4 +30,20 @@
     <plurals name="vm_replay_conversations">
         <item quantity="other">대화 %1$d개</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="other">%1$d줄을 보낼까요?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="other">각 줄이 별도의 메시지로 전송됩니다. 플러드로 인한 연결 끊김을 피하기 위해 전송에 약 %1$d초가 걸립니다.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="other">%1$d줄로 보내기</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="other">파일 %1$d개</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="other">파일 %1$d개 업로드 중…</item>
+    </plurals>
 </resources>

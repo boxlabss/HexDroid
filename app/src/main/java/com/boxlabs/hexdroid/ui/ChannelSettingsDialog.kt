@@ -63,6 +63,7 @@ fun ChannelSettingsDialog(
     onDismiss: () -> Unit,
 ) {
     var muted by remember { mutableStateOf(prefs.muted) }
+    var mutedUntil by remember { mutableStateOf(prefs.mutedUntilMs.takeIf { it > System.currentTimeMillis() } ?: 0L) }
     var words by remember { mutableStateOf(prefs.highlightWords.joinToString(", ")) }
     var custom by remember { mutableStateOf(prefs.events != null) }
     var events by remember { mutableStateOf(prefs.events ?: globalEvents) }
@@ -71,6 +72,7 @@ fun ChannelSettingsDialog(
         muted = muted,
         highlightWords = words.split(',').map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
         events = if (isChannel && custom) events else null,
+        mutedUntilMs = mutedUntil,
     )
 
     AlertDialog(
@@ -95,6 +97,23 @@ fun ChannelSettingsDialog(
                         onCheckedChange = { muted = it },
                         modifier = Modifier.focusHighlight(RoundedCornerShape(16.dp)),
                     )
+                }
+                if (mutedUntil > 0L && !muted) {
+                    val untilText = remember(mutedUntil) {
+                        java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(mutedUntil))
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.channel_settings_muted_until, untilText),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            onClick = { mutedUntil = 0L },
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(50)),
+                        ) { Text(stringResource(R.string.channel_settings_unmute_now)) }
+                    }
                 }
                 if (isChannel) {
                     OutlinedTextField(

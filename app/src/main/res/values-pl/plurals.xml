@@ -60,4 +60,35 @@
         <item quantity="many">%1$d rozmów</item>
         <item quantity="other">%1$d rozmowy</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">Wysłać %1$d linię?</item>
+        <item quantity="few">Wysłać %1$d linie?</item>
+        <item quantity="many">Wysłać %1$d linii?</item>
+        <item quantity="other">Wysłać %1$d linii?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Każda linia zostanie wysłana jako osobna wiadomość. Aby uniknąć rozłączenia za flood, wysyłanie potrwa około %1$d sekundy.</item>
+        <item quantity="few">Każda linia zostanie wysłana jako osobna wiadomość. Aby uniknąć rozłączenia za flood, wysyłanie potrwa około %1$d sekund.</item>
+        <item quantity="many">Każda linia zostanie wysłana jako osobna wiadomość. Aby uniknąć rozłączenia za flood, wysyłanie potrwa około %1$d sekund.</item>
+        <item quantity="other">Każda linia zostanie wysłana jako osobna wiadomość. Aby uniknąć rozłączenia za flood, wysyłanie potrwa około %1$d sekundy.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Wyślij jako %1$d linię</item>
+        <item quantity="few">Wyślij jako %1$d linie</item>
+        <item quantity="many">Wyślij jako %1$d linii</item>
+        <item quantity="other">Wyślij jako %1$d linii</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d plik</item>
+        <item quantity="few">%1$d pliki</item>
+        <item quantity="many">%1$d plików</item>
+        <item quantity="other">%1$d pliku</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">Przesyłanie %1$d pliku…</item>
+        <item quantity="few">Przesyłanie %1$d plików…</item>
+        <item quantity="many">Przesyłanie %1$d plików…</item>
+        <item quantity="other">Przesyłanie %1$d pliku…</item>
+    </plurals>
 </resources>

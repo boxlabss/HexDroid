@@ -236,7 +236,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material3.BadgedBox
 import com.boxlabs.hexdroid.ChatFontStyle
+import com.boxlabs.hexdroid.SlashInput
+import com.boxlabs.hexdroid.addToNotifyList
+import com.boxlabs.hexdroid.bufferKeyFor
+import com.boxlabs.hexdroid.openMentions
+import com.boxlabs.hexdroid.removeFromNotifyList
 import com.boxlabs.hexdroid.FontChoice
 import com.boxlabs.hexdroid.R
 import com.boxlabs.hexdroid.UiMessage
@@ -423,6 +431,18 @@ fun ChatScreen(
     ) {
         val unread = meta?.unread ?: 0
         val hi = meta?.highlights ?: 0
+        // A private chat with someone on the notify list shows whether they are online.
+        val (rowNet, rowName) = splitKey(key)
+        val rowConn = state.connections[rowNet]
+        val watched = rowName.isNotBlank() && !rowName.startsWith("*") && !rowName.startsWith("DCCCHAT:") &&
+            rowName.first() !in (rowConn?.chanTypes ?: "#&!+") &&
+            state.networks.firstOrNull { it.id == rowNet }?.notifyList.orEmpty().any { it.equals(rowName, ignoreCase = true) }
+        val presence: Boolean? = when {
+            !watched || rowConn?.connected != true -> null
+            rowName.lowercase() in (rowConn?.watchOnline ?: emptySet()) -> true
+            rowName.lowercase() in (rowConn?.watchOffline ?: emptySet()) -> false
+            else -> null
+        }
 
         Column(
             Modifier
@@ -454,6 +474,9 @@ fun ChatScreen(
                                 .clip(RoundedCornerShape(4.dp))
                         )
                     }
+                }
+                if (watched) {
+                    PresenceDot(presence, Modifier.padding(end = 6.dp), describe = true)
                 }
                 Text(
                     text = label,
@@ -832,6 +855,8 @@ fun ChatScreen(
 
     var overflowExpanded by remember { mutableStateOf(false) }
     var launcherExpanded by remember { mutableStateOf(false) }
+    var showNotifyList by remember(selNetId) { mutableStateOf(false) }
+    var showEmojiPicker by remember { mutableStateOf(false) }
 
     // Tour: on the "More actions" step, open the overflow menu so users can see what's inside.
     LaunchedEffect(tourActive, tourTarget) {
@@ -852,9 +877,7 @@ fun ChatScreen(
         // Build IRC formatting prefix based on active formatting state
         // Strip any leading IRC formatting bytes from the raw input for command detection.
         // This mirrors the ViewModel's strippedForCommandCheck so we agree on what's a command.
-        val isCommand = t.trimStart('\u0002', '\u0003', '\u000f', '\u0016', '\u001d', '\u001e', '\u001f')
-            .replace(Regex("^\u0003\\d{0,2}(?:,\\d{0,2})?"), "")
-            .startsWith("/")
+        val isCommand = SlashInput.isCommand(SlashInput.stripLeadingFormatting(t))
 
         val formattedText = if (isCommand) {
             // Commands: never prepend formatting — the slash must be the first character
@@ -916,6 +939,16 @@ fun ChatScreen(
     fun mention(nick: String) {
         val newText = if (input.text.isBlank()) "$nick: " else input.text + " $nick"
         input = TextFieldValue(newText, TextRange(newText.length))
+    }
+
+    /** Replaces the selection in the message box with [text] and puts the cursor after it. */
+    fun insertAtCursor(text: String) {
+        val len = input.text.length
+        val start = minOf(input.selection.start, input.selection.end).coerceIn(0, len)
+        val end = maxOf(input.selection.start, input.selection.end).coerceIn(0, len)
+        val newText = input.text.replaceRange(start, end, text)
+        input = TextFieldValue(newText, TextRange(start + text.length))
+        onTypingChanged(newText)
     }
 
 	@Composable
@@ -1055,6 +1088,31 @@ fun ChatScreen(
 							modifier = Modifier.size(16.dp),
 							tint = MaterialTheme.colorScheme.onSurfaceVariant
 						)
+					}
+					if (viewModel != null) {
+						IconButton(
+							onClick = {
+								scope.launch { if (!isWide) drawerState.close() }
+								viewModel.openMentions()
+							},
+							modifier = Modifier.size(28.dp).focusHighlight(CircleShape)
+						) {
+							BadgedBox(badge = {
+								if (state.unseenMentions > 0) {
+									Badge(containerColor = MaterialTheme.colorScheme.error) {
+										Text(if (state.unseenMentions > 99) "99+" else "${state.unseenMentions}")
+									}
+								}
+							}) {
+								Icon(
+									imageVector = Icons.Default.AlternateEmail,
+									contentDescription = if (state.unseenMentions > 0) stringResource(R.string.menu_mentions_count, state.unseenMentions)
+										else stringResource(R.string.menu_mentions),
+									modifier = Modifier.size(16.dp),
+									tint = MaterialTheme.colorScheme.onSurfaceVariant
+								)
+							}
+						}
 					}
 					IconButton(
 						onClick = { showSearchDialog = true },
@@ -2214,6 +2272,14 @@ fun ChatScreen(
                                 add(MenuEntry(stringResource(R.string.menu_file_transfers)) { overflowExpanded = false; onOpenTransfers() })
                                 if (viewModel != null) {
                                     add(MenuEntry(stringResource(R.string.menu_search_logs)) { overflowExpanded = false; showLogSearch = true })
+                                    val unseen = state.unseenMentions
+                                    add(MenuEntry(
+                                        if (unseen > 0) stringResource(R.string.menu_mentions_count, unseen)
+                                        else stringResource(R.string.menu_mentions)
+                                    ) { overflowExpanded = false; viewModel.openMentions() })
+                                    if (selNetId.isNotBlank() && state.networks.any { it.id == selNetId }) {
+                                        add(MenuEntry(stringResource(R.string.menu_notify_list)) { overflowExpanded = false; showNotifyList = true })
+                                    }
                                 }
                                 // Encryption is only meaningful for channel/query buffers, not the
                                 // *server*/*status* tab. selNetId can be blank if no networks exist
@@ -2699,6 +2765,7 @@ fun ChatScreen(
                             ansiColorsEnabled = state.settings.ansiColorsEnabled,
                             imagePreviewsEnabled = state.settings.imagePreviewsEnabled && selNetUnproxied,
                             imagePreviewsWifiOnly = state.settings.imagePreviewsWifiOnly,
+                            linkPreviewsEnabled = state.settings.linkPreviewsEnabled && selNetUnproxied,
                             nickColor = ::nickColor,
                             displayNick = ::displayNick,
                             onToggleSelected = {
@@ -3354,64 +3421,46 @@ fun ChatScreen(
                         }
                     }
                 }
-                // Filehost attach button: shown when the server advertises a
-                // soju.im/FILEHOST upload endpoint (soju, Ergo, standalone filehost
-                // servers). Picks a document, uploads it, and appends the resulting
-                // URL to the input so the user can add text before sending.
+                // Attach button inside the message box: shown when the server advertises a
+                // soju.im/FILEHOST upload endpoint (soju, Ergo, standalone filehost servers).
+                // Picks a document, uploads it, and appends the resulting URL to the input so
+                // the user can add text before sending.
                 val filehostUrl = state.connections[selNetId]?.filehostUrl
-                if (viewModel != null && filehostUrl != null) {
-                    var uploading by remember { mutableStateOf(false) }
-                    val ctxUpload = LocalContext.current
-                    val filePicker = rememberLauncherForActivityResult(
-                        ActivityResultContracts.OpenDocument()
-                    ) { uri ->
-                        if (uri != null && !uploading) {
-                            uploading = true
-                            val startKey = selected
-                            viewModel.uploadFileToFilehost(selNetId, uri) { url, err ->
-                                uploading = false
-                                if (url != null) {
-                                    if (liveSelected == startKey) {
-                                        val target = liveInputState
-                                        val cur = target.value
-                                        val sep = if (cur.text.isEmpty() || cur.text.endsWith(" ")) "" else " "
-                                        val newText = cur.text + sep + url
-                                        target.value = cur.copy(
-                                            text = newText,
-                                            selection = TextRange(newText.length)
-                                        )
-                                    } else if (startKey.isNotBlank()) {
-                                        // The user moved on; the link goes into that buffer's draft.
-                                        val draft = draftFor(startKey)
-                                        val sep = if (draft.text.isEmpty() || draft.text.endsWith(" ")) "" else " "
-                                        val newText = draft.text + sep + url
-                                        onDraftChanged(startKey, newText, newText.length)
-                                    }
-                                } else {
-                                    Toast.makeText(ctxUpload, err ?: "Upload failed", Toast.LENGTH_LONG).show()
+                val canAttach = viewModel != null && filehostUrl != null
+                var uploading by remember { mutableStateOf(false) }
+                val ctxUpload = LocalContext.current
+                val filePicker = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri ->
+                    if (uri != null && !uploading && viewModel != null) {
+                        uploading = true
+                        val startKey = selected
+                        viewModel.uploadFileToFilehost(selNetId, uri) { url, err ->
+                            uploading = false
+                            if (url != null) {
+                                if (liveSelected == startKey) {
+                                    val target = liveInputState
+                                    val cur = target.value
+                                    val sep = if (cur.text.isEmpty() || cur.text.endsWith(" ")) "" else " "
+                                    val newText = cur.text + sep + url
+                                    target.value = cur.copy(
+                                        text = newText,
+                                        selection = TextRange(newText.length)
+                                    )
+                                } else if (startKey.isNotBlank()) {
+                                    // The user moved on; the link goes into that buffer's draft.
+                                    val draft = draftFor(startKey)
+                                    val sep = if (draft.text.isEmpty() || draft.text.endsWith(" ")) "" else " "
+                                    val newText = draft.text + sep + url
+                                    onDraftChanged(startKey, newText, newText.length)
                                 }
+                            } else {
+                                Toast.makeText(ctxUpload, err ?: "Upload failed", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
-                    if (uploading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        IconButton(
-                            onClick = { filePicker.launchPicker(ctxUpload, arrayOf("*/*")) },
-                            modifier = Modifier.size(28.dp).focusHighlight(),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AttachFile,
-                                contentDescription = stringResource(R.string.chat_cd_upload_file),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
                 }
+                val keyboard = LocalSoftwareKeyboardController.current
                 // Build the text style for the input based on active formatting
                 val defaultTextColor = MaterialTheme.colorScheme.onSurface
                 val inputTextStyle = chatTextStyle.copy(
@@ -3526,19 +3575,72 @@ fun ChatScreen(
 					decorationBox = { innerTextField ->
 						OutlinedTextFieldDefaults.DecorationBox(
 							value = input.text,
-							innerTextField = innerTextField,
+							// Emoji button at the start of the box and the attach button at its end, both kept
+							// on the bottom line as the box grows.
+							innerTextField = {
+								Row(verticalAlignment = Alignment.Bottom) {
+									IconButton(
+										onClick = {
+											keyboard?.hide()
+											showEmojiPicker = true
+										},
+										modifier = Modifier.size(40.dp).focusHighlight(CircleShape),
+									) {
+										Icon(
+											imageVector = Icons.Default.EmojiEmotions,
+											contentDescription = stringResource(R.string.chat_cd_emoji),
+											tint = MaterialTheme.colorScheme.onSurfaceVariant,
+											modifier = Modifier.size(20.dp),
+										)
+									}
+									Box(
+										Modifier
+											.weight(1f)
+											.heightIn(min = 40.dp)
+											.padding(vertical = 9.dp),
+										contentAlignment = Alignment.CenterStart,
+									) {
+										if (input.text.isEmpty()) {
+											Text(
+												text = stringResource(R.string.chat_message_label),
+												color = MaterialTheme.colorScheme.onSurfaceVariant,
+												style = inputTextStyle,
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis,
+											)
+										}
+										innerTextField()
+									}
+									if (canAttach) {
+										if (uploading) {
+											Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+												CircularProgressIndicator(
+													modifier = Modifier.size(18.dp),
+													strokeWidth = 2.dp
+												)
+											}
+										} else {
+											IconButton(
+												onClick = { filePicker.launchPicker(ctxUpload, arrayOf("*/*")) },
+												modifier = Modifier.size(40.dp).focusHighlight(CircleShape),
+											) {
+												Icon(
+													imageVector = Icons.Default.AttachFile,
+													contentDescription = stringResource(R.string.chat_cd_upload_file),
+													tint = MaterialTheme.colorScheme.onSurfaceVariant,
+													modifier = Modifier.size(20.dp),
+												)
+											}
+										}
+									}
+								}
+							},
 							enabled = true,
 							singleLine = false,
 							visualTransformation = VisualTransformation.None,
 							interactionSource = interactionSource,
-							placeholder = {
-								Text(
-									text = stringResource(R.string.chat_message_label),
-									color = MaterialTheme.colorScheme.onSurfaceVariant,
-									style = inputTextStyle
-								)
-							},
-							contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+							placeholder = null,
+							contentPadding = PaddingValues(start = 0.dp, end = if (canAttach) 0.dp else 8.dp, top = 0.dp, bottom = 0.dp),
 							colors = tfColors,
 							container = {
 								OutlinedTextFieldDefaults.Container(
@@ -5235,6 +5337,34 @@ fun ChatScreen(
         }
     }
 
+    if (showNotifyList && viewModel != null && selNetId.isNotBlank()) {
+        val conn = state.connections[selNetId]
+        NotifyListDialog(
+            networkName = selNetName,
+            nicks = state.networks.firstOrNull { it.id == selNetId }?.notifyList.orEmpty(),
+            online = conn?.watchOnline ?: emptySet(),
+            offline = conn?.watchOffline ?: emptySet(),
+            connected = conn?.connected == true,
+            monitorAvailable = conn?.monitorSupported,
+            alertsOn = state.settings.notifyListAlerts,
+            onToggleAlerts = { on -> onUpdateSettings { copy(notifyListAlerts = on) } },
+            onAdd = { nick -> viewModel.addToNotifyList(selNetId, nick) },
+            onRemove = { nick -> viewModel.removeFromNotifyList(selNetId, nick) },
+            onOpenQuery = { nick ->
+                showNotifyList = false
+                onSelectBuffer(viewModel.bufferKeyFor(selNetId, nick))
+            },
+            onDismiss = { showNotifyList = false },
+        )
+    }
+
+    if (showEmojiPicker) {
+        EmojiPickerSheet(
+            onPick = { emoji -> insertAtCursor(emoji) },
+            onDismiss = { showEmojiPicker = false },
+        )
+    }
+
     confirmAutoAcceptFor?.let { pendingNick ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmAutoAcceptFor = null },
@@ -5430,6 +5560,20 @@ fun ChatScreen(
                     subtitle = stringResource(R.string.nick_mention_desc, selectedNick),
                     onClick = { mention(selectedNick); showNickActions = false }
                 )
+                if (viewModel != null && !selectedNick.equals(myNick, ignoreCase = true)) {
+                    val watchedNick = state.networks.firstOrNull { it.id == selNetId }?.notifyList.orEmpty()
+                        .any { it.equals(selectedNick, ignoreCase = true) }
+                    ActionRow(
+                        icon = if (watchedNick) Icons.Default.PersonRemove else Icons.Default.PersonAdd,
+                        label = stringResource(if (watchedNick) R.string.nick_notify_remove else R.string.nick_notify_add),
+                        subtitle = stringResource(if (watchedNick) R.string.nick_notify_remove_desc else R.string.nick_notify_add_desc),
+                        onClick = {
+                            if (watchedNick) viewModel.removeFromNotifyList(selNetId, selectedNick)
+                            else viewModel.addToNotifyList(selNetId, selectedNick)
+                            showNickActions = false
+                        }
+                    )
+                }
 
                 // ── DCC ─────────────────────────────────────────────────────
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))

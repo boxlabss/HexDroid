@@ -30,4 +30,20 @@
     <plurals name="vm_replay_conversations">
         <item quantity="other">%1$d 件の会話</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="other">%1$d 行を送信しますか？</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="other">各行が別々のメッセージとして送信されます。フラッドによる切断を避けるため、送信には約 %1$d 秒かかります。</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="other">%1$d 行として送信</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="other">%1$d 個のファイル</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="other">%1$d 個のファイルをアップロード中…</item>
+    </plurals>
 </resources>

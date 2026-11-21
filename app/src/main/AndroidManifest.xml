@@ -154,12 +154,24 @@
                         <data android:scheme="ircs" />
                         <data android:scheme="irc+ssl" />
                     </intent-filter>
-                    <!-- Share to IRC: receive text/URLs from other apps via the system share sheet. -->
+                    <!-- Share to IRC: text and links, and files that are uploaded where the network
+                    offers an upload service. -->
                     <intent-filter>
                         <action android:name="android.intent.action.SEND" />
                         <category android:name="android.intent.category.DEFAULT" />
                         <data android:mimeType="text/plain" />
                     </intent-filter>
+                    <intent-filter>
+                        <action android:name="android.intent.action.SEND" />
+                        <action android:name="android.intent.action.SEND_MULTIPLE" />
+                        <category android:name="android.intent.category.DEFAULT" />
+                        <data android:mimeType="image/*" />
+                        <data android:mimeType="video/*" />
+                    </intent-filter>
+                    <!-- Conversation shortcuts as direct share targets. -->
+                    <meta-data
+                        android:name="android.app.shortcuts"
+                        android:resource="@xml/shortcuts" />
                 </activity>
 
                 <!-- One conversation in a notification bubble. Bubbles need an embeddable,

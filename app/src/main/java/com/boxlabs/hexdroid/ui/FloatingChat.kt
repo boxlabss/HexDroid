@@ -133,7 +133,7 @@ fun FloatingChat(
             }
             FloatingComposer(
                 // Same path as the main composer, so slash commands and aliases work here too.
-                onSend = { vm.sendUserInput(it, selected) },
+                onSend = { vm.sendUserInput(it, selected, pasteGuard = false) },
                 onKeyboard = onKeyboard,
                 onResize = onResize,
             )

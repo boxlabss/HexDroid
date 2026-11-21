@@ -24,7 +24,7 @@ import com.boxlabs.hexdroid.data.NetworkProfile
 import com.boxlabs.hexdroid.data.ThemeMode
 import kotlinx.collections.immutable.PersistentList
 
-enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE, SCRIPTS, DCC_TRUSTED }
+enum class AppScreen { CHAT, LIST, SETTINGS, NETWORKS, NETWORK_EDIT, TRANSFERS, ABOUT, IGNORE, SCRIPTS, DCC_TRUSTED, MENTIONS }
 
 /**
  * UI-level message model. [id] must be unique within a buffer: it is the LazyColumn key, and
@@ -176,12 +176,33 @@ enum class NickStyle(val open: String, val close: String) {
 
 enum class VibrateIntensity { LOW, MEDIUM, HIGH }
 
+/**
+ * Accent colour for the Light, Dark and System themes. [DYNAMIC] follows the wallpaper on
+ * Android 12 and later; [CUSTOM] uses [UiSettings.themeColorCustomInt]. Matrix and Terminal keep
+ * their own palettes.
+ */
+enum class ThemeColor(val seed: Long?) {
+    DEFAULT(null),
+    DYNAMIC(null),
+    TEAL(0xFF14B8A6),
+    GREEN(0xFF22C55E),
+    PURPLE(0xFF8B5CF6),
+    PINK(0xFFEC4899),
+    ORANGE(0xFFF97316),
+    RED(0xFFEF4444),
+    CUSTOM(null),
+}
+
 
 /** How we initiate DCC SEND connections. */
 enum class DccSendMode { AUTO, ACTIVE, PASSIVE }
 
 data class UiSettings(
     val themeMode: ThemeMode = ThemeMode.DARK,
+    /** Accent colour for the Light, Dark and System themes. */
+    val themeColor: ThemeColor = ThemeColor.DEFAULT,
+    /** ARGB seed for [ThemeColor.CUSTOM]. */
+    val themeColorCustomInt: Int? = null,
     val compactMode: Boolean = false,
     // Buffer-drawer navigation. networkTabs replaces the vertical network tree with a
     // horizontal tab strip (one tab per network, showing that network's buffers below).
@@ -366,6 +387,29 @@ data class UiSettings(
     val imagePreviewsEnabled: Boolean = false,
     /** When true, only load previews on Wi-Fi to save mobile data. */
     val imagePreviewsWifiOnly: Boolean = true,
+    /** Show the title of a linked web page under the message. Off by default. */
+    val linkPreviewsEnabled: Boolean = false,
+
+    /** Ask before sending text that would go out as more than [pasteGuardLines] lines. */
+    val pasteGuardEnabled: Boolean = true,
+    val pasteGuardLines: Int = 5,
+    /**
+     * Where "Upload as paste" sends text when the network has no upload service: a Paste site or
+     * api.php address, or a service that takes the text as the request body and answers with its
+     * link. Blank when none.
+     */
+    val pasteServiceUrl: String = PasteService.DEFAULT_SERVICE,
+
+    /** Alert when someone on a network's notify list comes online. */
+    val notifyListAlerts: Boolean = true,
+
+    /** Mark away after the app has been in the background for [autoAwayMinutes]. */
+    val autoAwayEnabled: Boolean = false,
+    val autoAwayMinutes: Int = 10,
+    /** Away message for auto-away; blank uses the default. */
+    val autoAwayMessage: String = "",
+    /** Also set auto-away on bouncer connections. */
+    val autoAwayOnBouncers: Boolean = false,
     /** User-defined command aliases */
     val commandAliases: Map<String, String> = emptyMap(),
 )
@@ -464,6 +508,54 @@ data class NetConnState(
      * a `bot` message tag. Used to badge them in the member list and nick sheet.
      */
     val botNicks: Set<String> = emptySet(),
+    /** Lowercased notify-list nicks MONITOR reports online on this connection. */
+    val watchOnline: Set<String> = emptySet(),
+    /** Lowercased notify-list nicks MONITOR reports offline on this connection. */
+    val watchOffline: Set<String> = emptySet(),
+    /** False once registered on a server that does not offer MONITOR. Null until known. */
+    val monitorSupported: Boolean? = null,
+)
+
+/** A highlight kept for the Mentions view. */
+data class MentionEntry(
+    val netId: String,
+    val bufferKey: String,
+    val from: String,
+    val text: String,
+    val timeMs: Long,
+    /** Server msgid, when the message had one. */
+    val msgId: String? = null,
+)
+
+/** Text held by the paste guard until the user decides how to send it. */
+data class PasteGuardRequest(
+    val bufferKey: String,
+    val text: String,
+    /** How many lines it would go out as. */
+    val lines: Int,
+    /** Estimated time to send every line under flood pacing. */
+    val waitMs: Long,
+    /** Sent as one multiline message, which other modern clients show as a block. */
+    val batched: Boolean,
+    /** An upload service is available for this network. */
+    val canUpload: Boolean,
+    /** Setting a paste service would make uploading possible: none is set and the network is not proxied. */
+    val suggestPasteService: Boolean = false,
+    /** An upload is running. */
+    val uploading: Boolean = false,
+    /** Set when the text is a reply to a message. */
+    val reply: PasteReply? = null,
+)
+
+/** The message a held reply answers. */
+data class PasteReply(val from: String, val originalText: String, val msgId: String?)
+
+/** Something shared from another app, waiting for the user to pick where it goes. */
+data class PendingShare(
+    val text: String? = null,
+    /** content:// URIs of shared files. */
+    val uris: List<String> = emptyList(),
+    val mimeType: String? = null,
 )
 
 /** Phase of a draft/account-registration flow, for the registration dialog. */
@@ -572,6 +664,14 @@ data class UiState(
     val pendingShareText: String? = null,
     /** The buffer [pendingShareText] must go to, or null for whichever is open. */
     val pendingShareTarget: String? = null,
+    /** A share from another app with no target yet; the chooser is shown while set. */
+    val pendingShare: PendingShare? = null,
+    /** Highlights for the Mentions view, newest last. */
+    val mentions: List<MentionEntry> = emptyList(),
+    /** Highlights since the Mentions view was last opened. */
+    val unseenMentions: Int = 0,
+    /** Text held by the paste guard, or null. */
+    val pasteGuard: PasteGuardRequest? = null,
     /** Epoch-ms when pendingHighlightAnchor was last set; used to time-out the scroll attempt. */
     val pendingHighlightSetAtMs: Long = 0L,
     /** The buffer key that pendingHighlightAnchor belongs to. */

@@ -68,6 +68,7 @@ internal data class IrcCommand(
 internal val IRC_COMMANDS = listOf(
     // Messaging
     IrcCommand("me", "/me <action>", R.string.cmd_me),
+    IrcCommand("say", "/say <text>", R.string.cmd_say),
     IrcCommand("msg", "/msg <nick> <message>", R.string.cmd_msg),
     IrcCommand("notice", "/notice <target> <text>", R.string.cmd_notice),
     IrcCommand("react", "/react <emoji> [n]", R.string.cmd_react),
@@ -188,6 +189,9 @@ internal val IRC_COMMANDS = listOf(
     IrcCommand("setname", "/setname <realname>", R.string.cmd_setname),
     IrcCommand("markread", "/markread [target] [timestamp]", R.string.cmd_markread),
     IrcCommand("monitor", "/monitor +nick | -nick | C | L | S", R.string.cmd_monitor),
+    IrcCommand("notify", "/notify [nick]", R.string.cmd_notify),
+    IrcCommand("unnotify", "/unnotify <nick>", R.string.cmd_unnotify),
+    IrcCommand("mentions", "/mentions", R.string.cmd_mentions),
     IrcCommand("register", "/register [account] [email] <password>", R.string.cmd_register),
     IrcCommand("verify", "/verify [account] <code>", R.string.cmd_verify),
     IrcCommand("metadata", "/metadata [target] <sub> | <key> [value]", R.string.cmd_metadata),

@@ -154,6 +154,8 @@ internal fun SingleMessageItem(
     ansiColorsEnabled: Boolean,
     imagePreviewsEnabled: Boolean,
     imagePreviewsWifiOnly: Boolean,
+    /** Show the linked page's title under the message. */
+    linkPreviewsEnabled: Boolean = false,
     nickColor: (String) -> Color,
     displayNick: (String) -> String,
     // Callbacks for state mutations that live in the parent.
@@ -506,6 +508,12 @@ internal fun SingleMessageItem(
             for (previewUrl in msgUrls) {
                 InlinePreview(url = previewUrl, previewsEnabled = true, wifiOnly = imagePreviewsWifiOnly)
             }
+        }
+        if (linkPreviewsEnabled) {
+            val titleUrl = remember(m.id, m.text, imagePreviewsEnabled) {
+                linkPreviewUrl(messageUrls(m.text).take(3).toList(), mediaPreviewsShown = imagePreviewsEnabled)
+            }
+            if (titleUrl != null) LinkPreviewCard(url = titleUrl, wifiOnly = imagePreviewsWifiOnly)
         }
         if (m.reactions.isNotEmpty()) {
             ReactionRow(

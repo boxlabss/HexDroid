@@ -39,4 +39,25 @@
         <item quantity="one">%1$d Unterhaltung</item>
         <item quantity="other">%1$d Unterhaltungen</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">%1$d Zeile senden?</item>
+        <item quantity="other">%1$d Zeilen senden?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Jede Zeile wird als eigene Nachricht gesendet. Um eine Trennung wegen Flooding zu vermeiden, dauert das Senden etwa %1$d Sekunde.</item>
+        <item quantity="other">Jede Zeile wird als eigene Nachricht gesendet. Um eine Trennung wegen Flooding zu vermeiden, dauert das Senden etwa %1$d Sekunden.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">Als %1$d Zeile senden</item>
+        <item quantity="other">Als %1$d Zeilen senden</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d Datei</item>
+        <item quantity="other">%1$d Dateien</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">%1$d Datei wird hochgeladen…</item>
+        <item quantity="other">%1$d Dateien werden hochgeladen…</item>
+    </plurals>
 </resources>

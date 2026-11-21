@@ -161,24 +161,8 @@ internal fun IrcViewModel.handleIrcUri(ircUri: IrcUri) {
 fun IrcViewModel.handleIntent(intent: Intent?) {
     if (intent == null) return
 
-    // Handle text shared from another app (e.g. share a URL to paste into IRC).
-    if (intent.action == Intent.ACTION_SEND &&
-        intent.type?.startsWith("text/") == true) {
-        // Some apps share a CharSequence, which getStringExtra would read as null.
-        val sharedText = runCatching { intent.getCharSequenceExtra(android.content.Intent.EXTRA_TEXT) }.getOrNull()
-            ?.toString()?.trim()?.takeIf { it.isNotBlank() }
-        if (sharedText != null) {
-            // Navigate to chat screen if not already there. Use backToChat so
-            // unread/highlights on the previously-selected buffer get cleared
-            // along with the screen flip - the user is effectively going to
-            // read the chat now.
-            if (_state.value.screen != AppScreen.CHAT) {
-                backToChat()
-            }
-            _state.value = _state.value.copy(pendingShareText = sharedText, pendingShareTarget = null)
-        }
-        return
-    }
+    // Text or files shared from another app, directly to a conversation or through the chooser.
+    if (handleShareIntent(intent)) return
 
     // Handle irc:// and ircs:// deep links before any notification extras.
     if (intent.action == Intent.ACTION_VIEW) {
@@ -254,6 +238,7 @@ fun IrcViewModel.setBubbleShowing(key: String, showing: Boolean) {
     if (showing) {
         bubblesShowing.add(key)
         markBufferSeen(key)
+        onAutoAwayInteraction()
     } else {
         bubblesShowing.remove(key)
     }

@@ -39,4 +39,25 @@
         <item quantity="one">%1$d sohbetten</item>
         <item quantity="other">%1$d sohbetten</item>
     </plurals>
+
+    <plurals name="paste_guard_title">
+        <item quantity="one">%1$d satır gönderilsin mi?</item>
+        <item quantity="other">%1$d satır gönderilsin mi?</item>
+    </plurals>
+    <plurals name="paste_guard_slow">
+        <item quantity="one">Her satır ayrı bir mesaj olarak gönderilir. Flood nedeniyle bağlantının kesilmemesi için gönderim yaklaşık %1$d saniye sürer.</item>
+        <item quantity="other">Her satır ayrı bir mesaj olarak gönderilir. Flood nedeniyle bağlantının kesilmemesi için gönderim yaklaşık %1$d saniye sürer.</item>
+    </plurals>
+    <plurals name="paste_send_lines">
+        <item quantity="one">%1$d satır olarak gönder</item>
+        <item quantity="other">%1$d satır olarak gönder</item>
+    </plurals>
+    <plurals name="share_files">
+        <item quantity="one">%1$d dosya</item>
+        <item quantity="other">%1$d dosya</item>
+    </plurals>
+    <plurals name="share_uploading">
+        <item quantity="one">%1$d dosya yükleniyor…</item>
+        <item quantity="other">%1$d dosya yükleniyor…</item>
+    </plurals>
 </resources>
