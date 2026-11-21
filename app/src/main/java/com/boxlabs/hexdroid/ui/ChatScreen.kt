@@ -439,8 +439,8 @@ fun ChatScreen(
             state.networks.firstOrNull { it.id == rowNet }?.notifyList.orEmpty().any { it.equals(rowName, ignoreCase = true) }
         val presence: Boolean? = when {
             !watched || rowConn?.connected != true -> null
-            rowName.lowercase() in (rowConn?.watchOnline ?: emptySet()) -> true
-            rowName.lowercase() in (rowConn?.watchOffline ?: emptySet()) -> false
+            rowName.lowercase() in rowConn.watchOnline -> true
+            rowName.lowercase() in rowConn.watchOffline -> false
             else -> null
         }
 
