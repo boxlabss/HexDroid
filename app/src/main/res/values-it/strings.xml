@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Arancione</string>
     <string name="theme_colour_red">Rosso</string>
     <string name="theme_colour_custom">Personalizzato</string>
+    <string name="setting_bubbles">Bolle delle conversazioni</string>
+    <string name="setting_bubbles_desc">Le notifiche dei messaggi propongono di aprire la conversazione in una bolla mobile. Disattiva per togliere il pulsante della bolla e chiudere le bolle aperte. Android decide anche, nelle sue impostazioni delle notifiche, quali conversazioni possono apparire come bolla.</string>
 </resources>

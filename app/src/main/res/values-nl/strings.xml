@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Oranje</string>
     <string name="theme_colour_red">Rood</string>
     <string name="theme_colour_custom">Aangepast</string>
+    <string name="setting_bubbles">Gespreksbubbels</string>
+    <string name="setting_bubbles_desc">Berichtmeldingen bieden aan het gesprek als zwevende bubbel te openen. Zet dit uit om de bubbelknop te verwijderen en open bubbels te sluiten. Android bepaalt in zijn meldingsinstellingen ook welke gesprekken als bubbel mogen verschijnen.</string>
 </resources>

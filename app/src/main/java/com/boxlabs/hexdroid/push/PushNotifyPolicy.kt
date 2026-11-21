@@ -43,6 +43,7 @@ object PushNotifyPolicy {
     private const val KEY_MASKS = "mute_masks"
     private const val KEY_MUTED_BUFFERS = "muted_buffers"
     private const val KEY_MUTED_UNTIL = "muted_until"
+    private const val KEY_BUBBLES = "bubbles"
 
     /**
      * The gate a pushed message passes through, with the highlight-ignore masks of every
@@ -103,6 +104,7 @@ object PushNotifyPolicy {
             .putBoolean(KEY_ENABLED, settings.notificationsEnabled)
             .putBoolean(KEY_HIGHLIGHTS, settings.notifyOnHighlights)
             .putBoolean(KEY_PMS, settings.notifyOnPrivateMessages)
+            .putBoolean(KEY_BUBBLES, settings.bubblesEnabled)
             .putBoolean(KEY_SOUND, settings.playSoundOnHighlight)
             .putBoolean(KEY_VIBRATE, settings.vibrateOnHighlight)
             .putString(KEY_INTENSITY, settings.vibrateIntensity.name)
@@ -113,6 +115,9 @@ object PushNotifyPolicy {
             ))
             .apply()
     }
+
+    /** Whether conversation notifications may offer a bubble. */
+    fun bubblesEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_BUBBLES, true)
 
     /** Record that [bufferKey] is muted until [untilMs], without the rest of the policy. */
     fun setMutedUntil(ctx: Context, bufferKey: String, untilMs: Long) {

@@ -439,6 +439,7 @@ class SettingsRepository(private val ctx: Context) {
                 pasteGuardLines = o.optInt("pasteGuardLines", 5).coerceIn(1, 50),
                 pasteServiceUrl = o.optString("pasteServiceUrl", com.boxlabs.hexdroid.PasteService.DEFAULT_SERVICE),
                 notifyListAlerts = o.optBoolean("notifyListAlerts", true),
+                bubblesEnabled = o.optBoolean("bubblesEnabled", true),
                 autoAwayEnabled = o.optBoolean("autoAwayEnabled", false),
                 autoAwayMinutes = o.optInt("autoAwayMinutes", 10).coerceIn(1, 240),
                 autoAwayMessage = o.optString("autoAwayMessage", ""),
@@ -567,6 +568,7 @@ class SettingsRepository(private val ctx: Context) {
         o.put("pasteGuardLines", s.pasteGuardLines)
         o.put("pasteServiceUrl", s.pasteServiceUrl)
         o.put("notifyListAlerts", s.notifyListAlerts)
+        o.put("bubblesEnabled", s.bubblesEnabled)
         o.put("autoAwayEnabled", s.autoAwayEnabled)
         o.put("autoAwayMinutes", s.autoAwayMinutes)
         o.put("autoAwayMessage", s.autoAwayMessage)
@@ -1073,7 +1075,7 @@ class SettingsRepository(private val ctx: Context) {
             "v6: added channelPrefs, ignoreLevels on NetworkProfile, and optional encryptedSecrets " +
                 "(Argon2id + AES-256-GCM over the network passwords).",
             "v7: added notifyList on NetworkProfile; themeColor, linkPreviewsEnabled, paste guard, " +
-                "notify list and auto-away fields on UiSettings."
+                "notify list, auto-away and bubblesEnabled fields on UiSettings."
         )))
         root.put("settings", toSettingsJson(settings))
         root.put("networks", toNetworksJson(networks))

@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">オレンジ</string>
     <string name="theme_colour_red">レッド</string>
     <string name="theme_colour_custom">カスタム</string>
+    <string name="setting_bubbles">会話のバブル</string>
+    <string name="setting_bubbles_desc">メッセージ通知で、会話をフローティングバブルで開けるようにします。オフにするとバブルボタンが消え、開いているバブルも閉じます。どの会話をバブル表示できるかは、Android の通知設定でも決まります。</string>
 </resources>

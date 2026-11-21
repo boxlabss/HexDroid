@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Naranja</string>
     <string name="theme_colour_red">Rojo</string>
     <string name="theme_colour_custom">Personalizado</string>
+    <string name="setting_bubbles">Burbujas de conversación</string>
+    <string name="setting_bubbles_desc">Las notificaciones de mensajes ofrecen abrir la conversación en una burbuja flotante. Desactívalo para quitar el botón de burbuja y cerrar las burbujas abiertas. Android también decide, en sus ajustes de notificaciones, qué conversaciones pueden mostrarse como burbuja.</string>
 </resources>

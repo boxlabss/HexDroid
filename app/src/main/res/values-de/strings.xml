@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Orange</string>
     <string name="theme_colour_red">Rot</string>
     <string name="theme_colour_custom">Eigene</string>
+    <string name="setting_bubbles">Unterhaltungsblasen</string>
+    <string name="setting_bubbles_desc">Nachrichtenbenachrichtigungen bieten an, die Unterhaltung als schwebende Blase zu öffnen. Ausschalten, um die Blasen-Schaltfläche zu entfernen und offene Blasen zu schließen. Welche Unterhaltungen als Blase erscheinen dürfen, legt Android zusätzlich in seinen Benachrichtigungseinstellungen fest.</string>
 </resources>

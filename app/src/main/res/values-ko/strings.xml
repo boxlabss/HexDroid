@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">주황</string>
     <string name="theme_colour_red">빨강</string>
     <string name="theme_colour_custom">사용자 지정</string>
+    <string name="setting_bubbles">대화 풍선</string>
+    <string name="setting_bubbles_desc">메시지 알림에서 대화를 떠 있는 풍선으로 열 수 있게 합니다. 끄면 풍선 버튼이 사라지고 열려 있는 풍선도 닫힙니다. 어떤 대화를 풍선으로 표시할지는 Android 알림 설정에서도 정해집니다.</string>
 </resources>

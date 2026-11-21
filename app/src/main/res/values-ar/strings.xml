@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">برتقالي</string>
     <string name="theme_colour_red">أحمر</string>
     <string name="theme_colour_custom">مخصص</string>
+    <string name="setting_bubbles">فقاعات المحادثات</string>
+    <string name="setting_bubbles_desc">تعرض إشعارات الرسائل فتح المحادثة في فقاعة عائمة. أوقف الخيار لإزالة زر الفقاعة وإغلاق الفقاعات المفتوحة. يحدد Android أيضًا في إعدادات الإشعارات المحادثات التي يمكن عرضها كفقاعات.</string>
 </resources>

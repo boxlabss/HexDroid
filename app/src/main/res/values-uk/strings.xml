@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Помаранчевий</string>
     <string name="theme_colour_red">Червоний</string>
     <string name="theme_colour_custom">Власний</string>
+    <string name="setting_bubbles">Спливаючі чати</string>
+    <string name="setting_bubbles_desc">Сповіщення про повідомлення пропонують відкрити розмову у спливаючому чаті. Вимкніть, щоб прибрати кнопку спливаючого чату й закрити відкриті. Android також вирішує у своїх налаштуваннях сповіщень, які розмови можуть відкриватися у спливаючих чатах.</string>
 </resources>

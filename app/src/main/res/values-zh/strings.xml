@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">橙色</string>
     <string name="theme_colour_red">红色</string>
     <string name="theme_colour_custom">自定义</string>
+    <string name="setting_bubbles">对话气泡</string>
+    <string name="setting_bubbles_desc">消息通知会提供以浮动气泡打开对话的选项。关闭后会移除气泡按钮并关闭已打开的气泡。哪些对话可以显示为气泡，也由 Android 的通知设置决定。</string>
 </resources>

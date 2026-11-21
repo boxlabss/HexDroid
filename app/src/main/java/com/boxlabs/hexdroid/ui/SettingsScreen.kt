@@ -1656,6 +1656,16 @@ fun SettingsScreen(
             item { SettingToggle(stringResource(R.string.setting_enable_notifications), s.notificationsEnabled) { onUpdate { copy(notificationsEnabled = !notificationsEnabled) } } }
             item { SettingToggle(stringResource(R.string.setting_notify_highlights), s.notifyOnHighlights) { onUpdate { copy(notifyOnHighlights = !notifyOnHighlights) } } }
             item { SettingToggle(stringResource(R.string.setting_notify_pm), s.notifyOnPrivateMessages) { onUpdate { copy(notifyOnPrivateMessages = !notifyOnPrivateMessages) } } }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                item {
+                    Column(Modifier.fillMaxWidth()) {
+                        SettingToggle(stringResource(R.string.setting_bubbles), s.bubblesEnabled) {
+                            onUpdate { copy(bubblesEnabled = !bubblesEnabled) }
+                        }
+                        Text(stringResource(R.string.setting_bubbles_desc), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             item {
                 Column(Modifier.fillMaxWidth()) {
                     SettingToggle(stringResource(R.string.setting_notify_list_alerts), s.notifyListAlerts) {

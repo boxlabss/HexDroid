@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Laranja</string>
     <string name="theme_colour_red">Vermelho</string>
     <string name="theme_colour_custom">Personalizada</string>
+    <string name="setting_bubbles">Balões de conversa</string>
+    <string name="setting_bubbles_desc">As notificações de mensagens oferecem abrir a conversa num balão flutuante. Desative para remover o botão do balão e fechar os balões abertos. O Android também decide, nas suas definições de notificações, que conversas podem aparecer em balão.</string>
 </resources>

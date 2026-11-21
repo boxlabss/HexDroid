@@ -944,6 +944,9 @@ class IrcViewModel(
                     it.client.nickRegainEnabled = s.nickRegainEnabled
                 }
                 syncPushNotifyPolicy()
+                if (st.settingsLoaded && s.bubblesEnabled != st.settings.bubblesEnabled) {
+                    runCatching { notifier.refreshConversations() }
+                }
                 maybeAutoConnect()
                 maybeRestoreDesiredConnections()
             }

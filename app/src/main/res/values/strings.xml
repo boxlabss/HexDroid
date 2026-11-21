@@ -2037,4 +2037,6 @@
     <string name="theme_colour_orange">Orange</string>
     <string name="theme_colour_red">Red</string>
     <string name="theme_colour_custom">Custom</string>
+    <string name="setting_bubbles">Conversation bubbles</string>
+    <string name="setting_bubbles_desc">Message notifications offer to open the conversation as a floating bubble. Turn off to remove the bubble button and close any open bubbles. Android also decides which conversations can bubble, in its notification settings.</string>
 </resources>

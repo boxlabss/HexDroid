@@ -13,6 +13,7 @@ All notable changes to HexDroid are documented here.
 - Emoji button inside the message box, with recently used emoji, and the upload button now sits inside the box too.
 - Link previews (Settings > Media, off by default): the title and description of a linked https page under the message. They follow the Wi-Fi only setting and are never fetched on a proxied network or from private addresses.
 - `/say <text>` and a leading `//` send text that starts with `/` as a message.
+- Conversation bubbles can be turned off in Settings > Notifications, which removes the bubble button from message notifications and closes open bubbles.
 
 ### Fixed
 - A read marker from another client now clears the unread and highlight counts and the notification.

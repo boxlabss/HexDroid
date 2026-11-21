@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Turuncu</string>
     <string name="theme_colour_red">Kırmızı</string>
     <string name="theme_colour_custom">Özel</string>
+    <string name="setting_bubbles">Sohbet baloncukları</string>
+    <string name="setting_bubbles_desc">Mesaj bildirimleri sohbeti yüzen bir baloncukta açmayı önerir. Baloncuk düğmesini kaldırmak ve açık baloncukları kapatmak için kapat. Hangi sohbetlerin baloncuk olabileceğine Android de kendi bildirim ayarlarında karar verir.</string>
 </resources>

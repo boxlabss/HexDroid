@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Orange</string>
     <string name="theme_colour_red">Rouge</string>
     <string name="theme_colour_custom">Personnalisée</string>
+    <string name="setting_bubbles">Bulles de conversation</string>
+    <string name="setting_bubbles_desc">Les notifications de message proposent d’ouvrir la conversation dans une bulle flottante. Désactivez pour retirer le bouton de bulle et fermer les bulles ouvertes. Android décide aussi, dans ses paramètres de notification, quelles conversations peuvent s’afficher en bulle.</string>
 </resources>

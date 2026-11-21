@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Narancs</string>
     <string name="theme_colour_red">Piros</string>
     <string name="theme_colour_custom">Egyéni</string>
+    <string name="setting_bubbles">Beszélgetésbuborékok</string>
+    <string name="setting_bubbles_desc">Az üzenetértesítések felajánlják a beszélgetés lebegő buborékban való megnyitását. Kapcsold ki a buborék gomb eltávolításához és a nyitott buborékok bezárásához. Azt, hogy mely beszélgetések jelenhetnek meg buborékként, az Android is szabályozza az értesítési beállításaiban.</string>
 </resources>

@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Оранжевый</string>
     <string name="theme_colour_red">Красный</string>
     <string name="theme_colour_custom">Свой</string>
+    <string name="setting_bubbles">Всплывающие чаты</string>
+    <string name="setting_bubbles_desc">Уведомления о сообщениях предлагают открыть беседу во всплывающем чате. Выключите, чтобы убрать кнопку всплывающего чата и закрыть открытые. Android также решает в своих настройках уведомлений, какие беседы могут открываться во всплывающих чатах.</string>
 </resources>

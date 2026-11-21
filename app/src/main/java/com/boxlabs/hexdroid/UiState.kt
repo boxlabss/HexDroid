@@ -403,6 +403,9 @@ data class UiSettings(
     /** Alert when someone on a network's notify list comes online. */
     val notifyListAlerts: Boolean = true,
 
+    /** Offer conversations as bubbles (Android 11 and later). */
+    val bubblesEnabled: Boolean = true,
+
     /** Mark away after the app has been in the background for [autoAwayMinutes]. */
     val autoAwayEnabled: Boolean = false,
     val autoAwayMinutes: Int = 10,

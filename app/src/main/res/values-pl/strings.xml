@@ -2035,4 +2035,6 @@
     <string name="theme_colour_orange">Pomarańczowy</string>
     <string name="theme_colour_red">Czerwony</string>
     <string name="theme_colour_custom">Własny</string>
+    <string name="setting_bubbles">Dymki rozmów</string>
+    <string name="setting_bubbles_desc">Powiadomienia o wiadomościach proponują otwarcie rozmowy w pływającym dymku. Wyłącz, aby usunąć przycisk dymku i zamknąć otwarte dymki. Android w ustawieniach powiadomień również decyduje, które rozmowy mogą pojawiać się jako dymki.</string>
 </resources>

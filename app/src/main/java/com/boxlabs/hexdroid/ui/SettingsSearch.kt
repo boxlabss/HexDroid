@@ -201,6 +201,8 @@ val SETTINGS_SEARCH_INDEX: List<SettingsSearchEntry> = listOf(
         keywords = "notification highlight ping mention"),
     SettingsSearchEntry(R.string.setting_notify_pm, SettingsCategory.NOTIFICATIONS,
         keywords = "notification private message query pm"),
+    SettingsSearchEntry(R.string.setting_bubbles, SettingsCategory.NOTIFICATIONS,
+        descRes = R.string.setting_bubbles_desc, keywords = "bubble bubbles floating chat head conversation"),
     SettingsSearchEntry(R.string.setting_notify_list_alerts, SettingsCategory.NOTIFICATIONS,
         descRes = R.string.setting_notify_list_alerts_desc, keywords = "notify list monitor watch online friend buddy"),
     SettingsSearchEntry(R.string.setting_sound_highlight, SettingsCategory.NOTIFICATIONS,

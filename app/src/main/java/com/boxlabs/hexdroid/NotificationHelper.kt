@@ -585,6 +585,11 @@ class NotificationHelper(private val ctx: Context) {
         fetchAvatars(tag, missing)
     }
 
+    /** Silently reposts every conversation still in the shade, so a changed bubble setting applies to it. */
+    fun refreshConversations() {
+        for (tag in lastPosts.keys.toList()) refreshConversation(tag)
+    }
+
     /**
      * Repost [tag]'s conversation silently with the avatars fetched since, if it is still in the
      * shade. Returns false when there was nothing to repost.
@@ -680,7 +685,9 @@ class NotificationHelper(private val ctx: Context) {
             if (shortcutId != null) {
                 builder.setShortcutId(shortcutId)
                 builder.setLocusId(LocusIdCompat(shortcutId))
-                bubbleFor(post.networkId, post.buffer, shortcutId, icon.icon)?.let { builder.setBubbleMetadata(it) }
+                if (com.boxlabs.hexdroid.push.PushNotifyPolicy.bubblesEnabled(ctx)) {
+                    bubbleFor(post.networkId, post.buffer, shortcutId, icon.icon)?.let { builder.setBubbleMetadata(it) }
+                }
             }
         }
         NotificationManagerCompat.from(ctx).notify(tag, NOTIF_ID_CONVERSATION, builder.build())
