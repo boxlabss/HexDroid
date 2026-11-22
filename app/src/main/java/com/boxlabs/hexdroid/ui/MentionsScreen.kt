@@ -36,6 +36,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -204,4 +206,14 @@ fun MentionsScreen(
             }
         }
     }
+}
+
+/** [content] with a small dot at its corner while [show] is true, for unseen mentions. */
+@Composable
+internal fun MentionsDot(show: Boolean, content: @Composable () -> Unit) {
+    if (!show) {
+        content()
+        return
+    }
+    BadgedBox(badge = { Badge(containerColor = MaterialTheme.colorScheme.error) }) { content() }
 }

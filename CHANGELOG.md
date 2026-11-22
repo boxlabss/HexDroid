@@ -1,10 +1,10 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
-## [Unreleased]
+## [1.7.9] 2026-11-23
 ### Added
-- Notify list for each network. Add someone with `/notify <nick>` or from their nick actions, remove them with `/unnotify <nick>`, or manage the list from Notify list in the chat menu. On servers with MONITOR the list shows who is online, private chats with someone on it show a presence dot, and an optional notification says when they come online (Settings > Notifications). Lists are kept with the network and in backups.
-- Mentions, from the chat menu, the drawer or `/mentions`: every channel message that highlighted you this session, across all networks, newest first. Tap one to open the conversation at that message.
+- Notify list for each network. Add someone with `/notify <nick>` or from their nick actions, remove them with `/unnotify <nick>`, or manage the list from the people button above the conversation list. On servers with MONITOR the list shows who is online, private chats with someone on it show a presence dot, and an optional notification says when they come online (Settings > Notifications). Lists are kept with the network and in backups.
+- Mentions, from the @ button above the conversation list or `/mentions`: every channel message that highlighted you this session, across all networks, newest first. Tap one to open the conversation at that message.
 - Share to HexDroid from other apps. Text, images and videos can be shared to any channel or private chat; files are uploaded through the network's file host and their links put in the message box. Recent conversations appear as direct share targets.
 - Mark read and Mute for 1 hour actions on message notifications. A paused conversation shows in its Channel settings with a Resume button, and push notifications follow the pause too.
 - Paste guard, on by default. A message that would go out as more than 5 lines (adjustable) asks first, with how long sending will take, and offers to send it as lines, join it into one line, or upload it as a paste. Uploads use the network's file host, or otherwise pastebin.cloud, which can be changed or turned off in Settings > Chat & Messages. Nothing is uploaded on a proxied network.

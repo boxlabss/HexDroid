@@ -236,6 +236,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material3.BadgedBox
@@ -1064,7 +1065,7 @@ fun ChatScreen(
 				)
 				Row(
 					modifier = Modifier.align(Alignment.CenterEnd),
-					horizontalArrangement = Arrangement.spacedBy(4.dp),
+					horizontalArrangement = Arrangement.spacedBy(2.dp),
 					verticalAlignment = Alignment.CenterVertically
 				) {
 					IconButton(
@@ -1108,6 +1109,22 @@ fun ChatScreen(
 									imageVector = Icons.Default.AlternateEmail,
 									contentDescription = if (state.unseenMentions > 0) stringResource(R.string.menu_mentions_count, state.unseenMentions)
 										else stringResource(R.string.menu_mentions),
+									modifier = Modifier.size(16.dp),
+									tint = MaterialTheme.colorScheme.onSurfaceVariant
+								)
+							}
+						}
+						if (selNetId.isNotBlank() && state.networks.any { it.id == selNetId }) {
+							IconButton(
+								onClick = {
+									scope.launch { if (!isWide) drawerState.close() }
+									showNotifyList = true
+								},
+								modifier = Modifier.size(28.dp).focusHighlight(CircleShape)
+							) {
+								Icon(
+									imageVector = Icons.Default.People,
+									contentDescription = stringResource(R.string.menu_notify_list),
 									modifier = Modifier.size(16.dp),
 									tint = MaterialTheme.colorScheme.onSurfaceVariant
 								)
@@ -2075,14 +2092,14 @@ fun ChatScreen(
                             size = iconBtnSize,
                             onClick = onToggleBufferList,
                             modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON),
-                        ) { Text("☰") }
+                        ) { MentionsDot(state.unseenMentions > 0) { Text("☰") } }
                     } else if (!state.settings.networkTabsAtBottom) {
                         // The bottom bar replaces the drawer in this mode, so drop the opener.
                         BarIconButton(
                             size = iconBtnSize,
                             onClick = { scope.launch { drawerState.open() } },
                             modifier = Modifier.tourTarget(TourTarget.CHAT_DRAWER_BUTTON),
-                        ) { Text("☰") }
+                        ) { MentionsDot(state.unseenMentions > 0) { Text("☰") } }
                     }
 
                     Column(Modifier.weight(1f)) {
@@ -2272,13 +2289,17 @@ fun ChatScreen(
                                 add(MenuEntry(stringResource(R.string.menu_file_transfers)) { overflowExpanded = false; onOpenTransfers() })
                                 if (viewModel != null) {
                                     add(MenuEntry(stringResource(R.string.menu_search_logs)) { overflowExpanded = false; showLogSearch = true })
-                                    val unseen = state.unseenMentions
-                                    add(MenuEntry(
-                                        if (unseen > 0) stringResource(R.string.menu_mentions_count, unseen)
-                                        else stringResource(R.string.menu_mentions)
-                                    ) { overflowExpanded = false; viewModel.openMentions() })
-                                    if (selNetId.isNotBlank() && state.networks.any { it.id == selNetId }) {
-                                        add(MenuEntry(stringResource(R.string.menu_notify_list)) { overflowExpanded = false; showNotifyList = true })
+                                    // Mentions and the notify list live in the conversation list's toolbar,
+                                    // which tabs at the bottom replace.
+                                    if (!isWide && state.settings.networkTabsAtBottom) {
+                                        val unseen = state.unseenMentions
+                                        add(MenuEntry(
+                                            if (unseen > 0) stringResource(R.string.menu_mentions_count, unseen)
+                                            else stringResource(R.string.menu_mentions)
+                                        ) { overflowExpanded = false; viewModel.openMentions() })
+                                        if (selNetId.isNotBlank() && state.networks.any { it.id == selNetId }) {
+                                            add(MenuEntry(stringResource(R.string.menu_notify_list)) { overflowExpanded = false; showNotifyList = true })
+                                        }
                                     }
                                 }
                                 // Encryption is only meaningful for channel/query buffers, not the

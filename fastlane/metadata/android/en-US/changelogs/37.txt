@@ -1,0 +1,16 @@
+New:
+- Notify list: know when friends come online
+- Mentions view
+- Share text, images and videos to HexDroid
+- Mark read and Mute actions on notifications
+- Paste guard for long pastes
+- Optional auto-away
+- Accent colours
+- Emoji and upload buttons in the message box
+- Optional link previews
+- Bubbles can be turned off
+
+Fixed:
+- Read markers from other clients clear unread
+- Text starting with / is no longer taken as a command
+- Pasted lines after a command are no longer lost
