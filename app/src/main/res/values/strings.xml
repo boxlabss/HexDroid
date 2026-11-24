@@ -2014,7 +2014,7 @@
     <string name="setting_paste_guard_desc">When a message would go out as many lines, choose whether to send them, join them into one line or upload them as a paste.</string>
     <string name="setting_paste_guard_lines">Ask above this many lines</string>
     <string name="setting_paste_service">Paste service</string>
-    <string name="setting_paste_service_desc">Used for \"Upload as a paste\" when the network has no upload service. The default is pastebin.cloud. You can enter another Paste site\'s api.php address, or any service that takes the text as the request body and answers with a link. Leave blank for none.</string>
+    <string name="setting_paste_service_desc">Where \"Upload as a paste\" sends long text. The default is pastebin.cloud. You can enter another Paste site\'s api.php address, or any service that takes the text as the request body and answers with a link. Leave blank to use the network\'s own upload service instead, where it has one.</string>
     <string name="setting_paste_service_https">Must be an https:// address</string>
     <string name="setting_link_previews">Link previews</string>
     <string name="setting_link_previews_desc">Show the title of a linked web page under the message. HexDroid fetches the page itself, so the site sees your IP address. Only https links on the public internet, and never on a network that uses a proxy.</string>

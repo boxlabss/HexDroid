@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Quando uma mensagem seria enviada em muitas linhas, escolha se as envia, se as junta numa linha ou se as carrega como paste.</string>
     <string name="setting_paste_guard_lines">Perguntar acima deste número de linhas</string>
     <string name="setting_paste_service">Serviço de paste</string>
-    <string name="setting_paste_service_desc">Usado em «Carregar como paste» quando a rede não tem serviço de carregamento. A predefinição é pastebin.cloud. Pode indicar o endereço api.php de outro site Paste, ou qualquer serviço que aceite o texto como corpo do pedido e responda com uma ligação. Deixe em branco para nenhum.</string>
+    <string name="setting_paste_service_desc">Para onde «Carregar como paste» envia texto longo. A predefinição é pastebin.cloud. Pode indicar o endereço api.php de outro site Paste, ou qualquer serviço que aceite o texto como corpo do pedido e responda com uma ligação. Deixe em branco para usar antes o serviço de carregamento da rede, se tiver um.</string>
     <string name="setting_paste_service_https">Tem de ser um endereço https://</string>
     <string name="setting_link_previews">Pré-visualização de ligações</string>
     <string name="setting_link_previews_desc">Mostra o título da página web ligada por baixo da mensagem. O HexDroid obtém a página por si, por isso o site vê o seu endereço IP. Apenas ligações https na internet pública e nunca numa rede com proxy.</string>

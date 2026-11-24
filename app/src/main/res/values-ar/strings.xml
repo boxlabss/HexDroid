@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">عندما تُرسل رسالة على شكل أسطر كثيرة، اختر إرسالها أو دمجها في سطر واحد أو رفعها كـ paste.</string>
     <string name="setting_paste_guard_lines">السؤال عند تجاوز هذا العدد من الأسطر</string>
     <string name="setting_paste_service">خدمة paste</string>
-    <string name="setting_paste_service_desc">تُستخدم لخيار «رفع كـ paste» عندما لا تملك الشبكة خدمة رفع. الخدمة الافتراضية هي pastebin.cloud. يمكنك إدخال عنوان api.php لموقع Paste آخر، أو أي خدمة تقبل النص كمحتوى الطلب وترد برابط. اتركه فارغًا لعدم استخدام أي خدمة.</string>
+    <string name="setting_paste_service_desc">المكان الذي يرسل إليه خيار «رفع كـ paste» النص الطويل. الخدمة الافتراضية هي pastebin.cloud. يمكنك إدخال عنوان api.php لموقع Paste آخر، أو أي خدمة تقبل النص كمحتوى الطلب وترد برابط. اتركه فارغًا لاستخدام خدمة الرفع الخاصة بالشبكة بدلًا من ذلك، إن وُجدت.</string>
     <string name="setting_paste_service_https">يجب أن يكون عنوان https://</string>
     <string name="setting_link_previews">معاينة الروابط</string>
     <string name="setting_link_previews_desc">يعرض عنوان صفحة الويب المرتبطة أسفل الرسالة. يجلب HexDroid الصفحة بنفسه، لذا يرى الموقع عنوان IP الخاص بك. روابط https على الإنترنت العام فقط، وأبدًا على شبكة تستخدم وكيلًا.</string>

@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">메시지가 여러 줄로 나뉘어 전송될 때, 그대로 보낼지, 한 줄로 합칠지, 붙여넣기로 업로드할지 선택합니다.</string>
     <string name="setting_paste_guard_lines">이 줄 수를 넘으면 묻기</string>
     <string name="setting_paste_service">붙여넣기 서비스</string>
-    <string name="setting_paste_service_desc">네트워크에 업로드 서비스가 없을 때 \'붙여넣기로 업로드\'에 사용됩니다. 기본값은 pastebin.cloud입니다. 다른 Paste 사이트의 api.php 주소나, 텍스트를 요청 본문으로 받아 링크로 응답하는 서비스를 입력할 수 있습니다. 사용하지 않으려면 비워 두세요.</string>
+    <string name="setting_paste_service_desc">\'붙여넣기로 업로드\'가 긴 텍스트를 보내는 곳입니다. 기본값은 pastebin.cloud입니다. 다른 Paste 사이트의 api.php 주소나, 텍스트를 요청 본문으로 받아 링크로 응답하는 서비스를 입력할 수 있습니다. 비워 두면 네트워크에 자체 업로드 서비스가 있을 때 그것을 사용합니다.</string>
     <string name="setting_paste_service_https">https:// 주소여야 합니다</string>
     <string name="setting_link_previews">링크 미리보기</string>
     <string name="setting_link_previews_desc">링크된 웹 페이지의 제목을 메시지 아래에 표시합니다. HexDroid가 직접 페이지를 가져오므로 사이트에 내 IP 주소가 보입니다. 공개 인터넷의 https 링크만 해당하며, 프록시를 쓰는 네트워크에서는 표시하지 않습니다.</string>

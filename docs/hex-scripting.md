@@ -76,13 +76,30 @@ Populated per event/handler:
 |---|---|
 | `$network` | network id the event is on |
 | `$buffer`, `$chan`, `$target` | the buffer/channel (all three alias the same value) |
-| `$text` | the message text (TEXT/ACTION/INPUT) |
-| `$nick` | sender's nick (when present) |
+| `$text` | the message text (TEXT/ACTION/INPUT/NOTICE), or the part, quit, kick or disconnect reason |
+| `$nick` | sender's nick (when present); for KICK the kicker, for NICK the old nick |
 | `$me` | your current nick |
-| `$isme` | `"true"` / `"false"` did this line originate from you |
+| `$isme` | `"true"` / `"false"`: the event is about you (your line from another client in TEXT, your own join, part, quit or nick change, or your being kicked) |
+| `$isprivate` | `"true"` for a private message or notice, `"false"` in a channel |
+| `$iscmd` | INPUT only: `"true"` when the line is a `/command` |
+| `$victim` | KICK: who was kicked; MODE: whose status changed |
+| `$mode` | MODE only: the change, such as `+v` or `-o` |
+| `$newnick` | NICK only: the new nick |
+| `$account` | JOIN only: the joiner's services account, when the server reports it |
+| `$isserver` | NOTICE only: `"true"` for a server notice |
 
 Signals carry their own extra fields (e.g. HTTP callbacks add `$httpok`,
 `$httpstatus`, `$httpbody` - see §10).
+
+These read the same in any handler:
+
+| identifier | value |
+|---|---|
+| `$ctime` | the current Unix time, in seconds |
+| `$ticks` | milliseconds from a steady clock, for measuring intervals; only differences between readings mean anything |
+| `$time` | the local time as `HH:mm:ss` |
+| `$screen.landscape` / `$screen.tv` | `1` or `0` |
+| `$screen.width` / `$screen.height` | the display size in dp, for choosing a `view` layout |
 
 ### Positional arguments `$0 $1 $2...`
 Handlers and aliases receive arguments:
@@ -110,15 +127,64 @@ Register with `on <EVENT> {... }`. Event names are case-insensitive.
 | event | fires when | notes |
 |---|---|---|
 | `LOAD` | after every (re)load of the scripts | set up globals, register sidebar launchers here |
-| `TEXT` | an **incoming** (or your own) chat line arrives | can transform or suppress it (see below) |
+| `TEXT` | an **incoming** chat line arrives | can transform or suppress it (see below). Not for lines you send from this device (that's INPUT); your own lines from another client, such as through a bouncer, arrive with `$isme` true |
 | `ACTION` | like TEXT but for `/me` actions | |
-| `INPUT` | you send a line (before it goes out) | can transform/suppress your outgoing text |
+| `INPUT` | you press send in the input box, before the line is processed | can transform/suppress it; `/commands` included (`$iscmd`). Lines sent by scripts, buttons and menus don't trigger it |
 | `NUMERIC` | a server line is about to be printed | `$code` is the numeric; can transform or suppress it |
+| `JOIN` | someone joins a channel, you included | `$nick`, `$chan`, `$account` |
+| `PART` | someone leaves a channel | `$text` is the part message |
+| `QUIT` | someone disconnects from the network | `$text` is the quit message; `$chan` is empty |
+| `KICK` | someone is kicked | `$nick` kicked `$victim`; `$text` is the reason; `$isme` when it's you |
+| `MODE` | someone's channel status changes (op, voice, ...), once per change | `$mode` e.g. `+v`, `$victim` whose status, `$nick` who set it |
+| `OP` `DEOP` `VOICE` `DEVOICE` `HELP` `DEHELP` | the matching status change, alongside MODE | `$victim` (also `$opnick` `$vnick` `$hnick`), `$nick` who set it |
+| `BAN` / `UNBAN` | a ban is set or removed | `$banmask`, `$nick` who set it |
+| `RAWMODE` | any channel MODE line, once | `$text` e.g. `+bv *!*@host alice` |
+| `TOPIC` | the topic changes | `$text` is the new topic |
+| `INVITE` | you're invited | `$nick` invited you to `$chan`; `echo $chan` would open that buffer, so use `echo -a` |
+| `CTCP` | a CTCP request (not `/me`) | `$text` e.g. `VERSION` or `PING 1234`; HexDroid still answers the ones it knows |
+| `CTCPREPLY` | a reply to a CTCP you sent | `$text` is the command and reply |
+| `SNOTICE` | a server notice, alongside NOTICE | |
+| `NOTIFY` / `UNOTIFY` | someone on your `/monitor` list comes online / goes offline | `$nick` |
+| `APPACTIVE` | the app comes to the front / goes to the background | `$appactive` is `true` / `false` |
+| `FILERCVD` / `FILESENT` | a DCC transfer finishes | `$filename`; received files also `$filesize`, `$path` |
+| `NICK` | someone changes nick | `$nick` is the old nick, `$newnick` the new |
+| `NOTICE` | a notice arrives (service replies included) | `$nick`, `$text`, `$isprivate`, `$isserver`; a private notice has no `$chan`; ignored nicks never reach scripts |
+| `CONNECT` | registration completes on a network | identify or join channels here |
+| `DISCONNECT` | a connection that was up closes | `$text` is the reason; a failed connect attempt doesn't count |
 | `SIGNAL:<name>` | a `signal`, `timer`, or HTTP callback fires `<name>` | your own async plumbing |
 
-Optional glob filter on TEXT/ACTION/NUMERIC: `on TEXT:*help*` only runs when the
-text matches the glob. The filter always matches against `$text`, so filter on a
+Optional glob filter: `on TEXT:*help*` only runs when the text matches the glob
+(case-insensitive). Channel events (JOIN, PART, KICK, MODE, the status events, BAN/UNBAN,
+RAWMODE, TOPIC, INVITE) filter on the channel instead, so
+`on JOIN:#help` runs only there; every other event filters on `$text`, so filter a
 numeric by testing `$code` in the body.
+
+Headers pasted from mIRC work too: `on *:TEXT:*hello*:#:{` is read as
+`<level>:<event>:<match>:<target>:`. The level (and prefixes such as `@` or `!`) is
+ignored, since HexDroid has no user levels. The match text works like a filter (it may
+contain spaces and colons); with a `$` in the level it's a regex instead, as in
+`on $*:TEXT:/^!seen (\S+)/i:#:{`. The target is `#` for channels, `?` for private
+messages, `*` for both, or a comma list such as `#help,#dev`. `on *:SIGNAL:name:` and
+`on *:START:` work too, as `on SIGNAL:name` and `on LOAD`. For JOIN, PART, KICK and MODE the target is
+the channel list. A handler for an event HexDroid never raises is reported in the script
+log at load, rather than silently never running.
+
+The IRC events (JOIN through DISCONNECT) fire only for live traffic, never for history
+replayed after a reconnect, so a bouncer's backlog doesn't greet everyone again. They
+report what happened and can't `rewrite` or `halt` it.
+
+```
+on CONNECT { msg NickServ IDENTIFY %ns_pass }        ; identify as soon as you connect
+
+on JOIN:#help {
+  if ($isme == true) { return }
+  notice $nick Welcome to #help, $nick. Ask away, someone will answer.
+}
+
+on NOTICE {
+  if ($nick == NickServ && $contains($text, "You are now identified") == true) { join #private }
+}
+```
 
 `NUMERIC` fires for server output such as WHOIS replies, MOTD lines and error
 numerics. `$code` holds the three digit code, or is empty for server text that
@@ -133,8 +199,8 @@ line hides it; the client still acts on it internally.
 - `halt` suppresses the line entirely (it is not shown/sent) and stops the handler.
 - returning normally leaves the line unchanged.
 
-`LOAD` runs on the app's main path at (re)load. TEXT/ACTION/INPUT run synchronously
-when the line is processed. See §12 for threads.
+`LOAD` runs on the app's main path at (re)load. TEXT/ACTION/INPUT and the IRC events
+run synchronously when the line is processed. See §12 for threads.
 
 ---
 
@@ -151,8 +217,8 @@ One command per statement (verb first). Full set:
 | `push %v <value>` | append to a list variable |
 | `setat %map <key> <value>` | set a map/list entry |
 | `rewrite <text>` | replace the current event's text (TEXT/ACTION/INPUT/NUMERIC) |
-| `echo <buffer> <text>` | print a local line into `<buffer>` (not sent to the server) |
-| `msg <buffer> <text>` | send a PRIVMSG to `<buffer>` |
+| `echo <buffer> <text>` | print a local line into `<buffer>` (not sent to the server). `-a` is the buffer you're in, `-s` the server buffer; a variable that's empty (like `$chan` in QUIT) also means the one you're in |
+| `msg <buffer> <text>` | send a PRIVMSG to `<buffer>`; if `<buffer>` is a variable that's empty, nothing is sent |
 | `raw <line>` | send a raw IRC line |
 | `signal <name> [args…]` | fire `SIGNAL:<name>` now |
 | `timer <ms> <signal> [args…]` | fire `SIGNAL:<signal>` after `<ms>` (at least 20) |
@@ -193,6 +259,9 @@ are trimmed, a separator with surrounding spaces can't be passed literally - e.g
 `$indexof(s,sub)` `$repeat(s,n)` `$pad(s,n[,ch])` `$padleft(s,n[,ch])`
 `$capitalize(s)` `$title(s)`
 
+A negative `n` counts from the other end, as in mIRC: `$left(s,-2)` is all but the last
+two characters and `$right(s,-2)` all but the first two.
+
 **Regex** (Java/Kotlin flavour; input capped at 20 000 chars):
 `$re_match(s,pattern)`→bool `$re_find(s,pattern)` (first whole match)
 `$re_group(s,pattern,n)` (capture group n; 0 = whole match)
@@ -202,7 +271,8 @@ script sigil). An invalid pattern makes `re_match`/`re_find`/`re_group` return e
 
 **Math:** `$calc(expr)` (arithmetic `+ - * / %` with parens, e.g. `$calc((%pot + %bet) % 2)`)
 `$mod(a,b)` `$idiv(a,b)` (integer/floor division) `$int(x)` (floor) `$round(x[,dp])` `$ceil(x)` `$abs(x)` `$pow(a,b)`
-`$clamp(x,lo,hi)` `$rand(n)`→0..n−1 / `$rand(lo,hi)`>inclusive.
+`$clamp(x,lo,hi)` `$rand(n)`→0..n−1 / `$rand(lo,hi)`>inclusive. `$rand`, `$pick` and
+`$shuffle` are fine for games but not unguessable; use `$age.rand(n)` for secrets.
 `$min(…)`/`$max(…)` take either several numeric args **or** a single list
 `$max(3,9,2)` and `$max(%scores)` both work.
 
@@ -308,8 +378,10 @@ echo $chan $get(%stack, alice)     ; 1000
 foreach %p %stack { echo $chan $p = $get(%stack,%p) }
 ```
 
-`$tojson(%stack)` serialises to JSON (number-looking strings emit unquoted so they
-round-trip); pair it with `$json()` to read structured data back.
+`$tojson(%stack)` serialises to JSON (strings JSON reads as a number, such as `12` or
+`-0.5`, emit unquoted so they round-trip; `007` and `1e5` stay strings); pair it with
+`$json()` to read structured data back. Control characters, IRC colour and bold codes
+included, are escaped.
 
 ---
 
@@ -556,7 +628,10 @@ on LOAD { sidebar add poker poker_open Poker Night }
   except the signal from `media.pick`, which only reaches the script that asked.
 
 A script is dropped and reloaded (its handlers cleared and re-registered, `LOAD`
-re-fired) on reload; globals do not survive a reload.
+re-fired) on reload; globals do not survive a reload. Anything still pending is
+cancelled too: a `timer`, `http.*` request or `media.*` pick started before the reload
+never answers afterwards, so an edited script never receives its previous copy's
+callbacks.
 
 ---
 
@@ -579,12 +654,21 @@ encrypted channel/among peers (and to drive practice bots locally):
 
 Commands: `age.join <chan>`, `age.host <chan>`, `age.send <chan> <tokens…>`
 (send to peers, fail-closed until keyed), `age.local <from> <tokens…>` (inject an
-event as another local seat - practice bots), `age.seal <fp> <c1> <c2>`.
-Functions: `$age.me` (your fingerprint), `$age.rand(n)`, `$age.sha(s)`.
+event as another local seat - practice bots), `age.seal <fp> <c1> <c2>`,
+`age.close <chan>` (drop a closed table's keys and roster), `age.purge <chan>` (drop
+its queued outgoing lines).
+Functions: `$age.me` (your fingerprint), `$age.rand(n)`, `$age.sha(s)`,
+`$age.fp(nick)` (a pinned nick's fingerprint), `$age.ready(chan)` (`true` once keyed),
+`$age.owner(chan)` (the elected host: the lowest fingerprint present, identical on every
+client) and `$age.members(chan)` (the other +AGE members present, space-separated).
 
 Incoming peer messages surface as `SIGNAL:AGE_MSG` with the sender's fingerprint in
 `$from` and the payload tokens in `$1 $2...`. Sealed hole cards arrive as
-`SIGNAL:AGE_DEAL` with `$from` and the dealt tokens in `$data`. See `poker.hex` for a
+`SIGNAL:AGE_DEAL` with `$from` and the dealt tokens in `$data`. `SIGNAL:AGE_PEER`
+(`$chan`, `$fp`) fires when someone announces themselves on a channel,
+`SIGNAL:AGE_READY` (`$chan`) when a channel becomes keyed, and `SIGNAL:AGE_LEFT`
+(`$chan`, `$from`, `$nick`) when a member leaves by part, quit or kick; `$from` is your
+own fingerprint when you leave or lose the connection. See `poker.hex` for a
 full worked example.
 
 ---

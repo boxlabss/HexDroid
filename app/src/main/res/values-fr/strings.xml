@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Quand un message partirait en de nombreuses lignes, choisissez de les envoyer, de les réunir en une ligne ou de les téléverser comme paste.</string>
     <string name="setting_paste_guard_lines">Demander au-delà de ce nombre de lignes</string>
     <string name="setting_paste_service">Service de paste</string>
-    <string name="setting_paste_service_desc">Utilisé pour « Téléverser comme paste » quand le réseau n’a pas de service de téléversement. Par défaut : pastebin.cloud. Vous pouvez indiquer l’adresse api.php d’un autre site Paste, ou tout service qui reçoit le texte dans le corps de la requête et répond par un lien. Laissez vide pour aucun.</string>
+    <string name="setting_paste_service_desc">Où « Téléverser comme paste » envoie un long texte. Par défaut : pastebin.cloud. Vous pouvez indiquer l’adresse api.php d’un autre site Paste, ou tout service qui reçoit le texte dans le corps de la requête et répond par un lien. Laissez vide pour utiliser plutôt le service de téléversement du réseau, s’il en a un.</string>
     <string name="setting_paste_service_https">Doit être une adresse https://</string>
     <string name="setting_link_previews">Aperçus des liens</string>
     <string name="setting_link_previews_desc">Affiche le titre d’une page web liée sous le message. HexDroid récupère lui-même la page, le site voit donc votre adresse IP. Uniquement les liens https sur l’internet public, et jamais sur un réseau qui utilise un proxy.</string>

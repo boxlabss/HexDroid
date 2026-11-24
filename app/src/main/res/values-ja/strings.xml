@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">メッセージが多くの行に分かれて送信される場合に、そのまま送信するか、1 行にまとめるか、ペーストとしてアップロードするかを選べます。</string>
     <string name="setting_paste_guard_lines">この行数を超えたら確認</string>
     <string name="setting_paste_service">ペーストサービス</string>
-    <string name="setting_paste_service_desc">ネットワークにアップロードサービスがないときの「ペーストとしてアップロード」で使用します。既定は pastebin.cloud です。別の Paste サイトの api.php のアドレス、またはテキストをリクエスト本文として受け取りリンクを返すサービスを指定できます。使わない場合は空欄にします。</string>
+    <string name="setting_paste_service_desc">「ペーストとしてアップロード」で長いテキストを送る先です。既定は pastebin.cloud です。別の Paste サイトの api.php のアドレス、またはテキストをリクエスト本文として受け取りリンクを返すサービスを指定できます。空欄にすると、ネットワークにアップロードサービスがあればそちらを使います。</string>
     <string name="setting_paste_service_https">https:// のアドレスを指定してください</string>
     <string name="setting_link_previews">リンクのプレビュー</string>
     <string name="setting_link_previews_desc">リンク先のウェブページのタイトルをメッセージの下に表示します。HexDroid がページを直接取得するため、サイトにはあなたの IP アドレスが見えます。公開インターネット上の https リンクのみで、プロキシを使うネットワークでは表示しません。</string>

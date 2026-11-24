@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Wenn eine Nachricht als viele Zeilen gesendet würde, wähle, ob sie gesendet, zu einer Zeile zusammengefügt oder als Paste hochgeladen werden.</string>
     <string name="setting_paste_guard_lines">Ab so vielen Zeilen fragen</string>
     <string name="setting_paste_service">Paste-Dienst</string>
-    <string name="setting_paste_service_desc">Wird für „Als Paste hochladen“ verwendet, wenn das Netzwerk keinen Upload-Dienst hat. Standard ist pastebin.cloud. Du kannst die api.php-Adresse einer anderen Paste-Seite eingeben oder einen Dienst, der den Text als Anfragekörper annimmt und mit einem Link antwortet. Leer lassen für keinen.</string>
+    <string name="setting_paste_service_desc">Wohin „Als Paste hochladen“ langen Text sendet. Standard ist pastebin.cloud. Du kannst die api.php-Adresse einer anderen Paste-Seite eingeben oder einen Dienst, der den Text als Anfragekörper annimmt und mit einem Link antwortet. Leer lassen, um stattdessen den Upload-Dienst des Netzwerks zu nutzen, falls es einen hat.</string>
     <string name="setting_paste_service_https">Muss eine https://-Adresse sein</string>
     <string name="setting_link_previews">Link-Vorschauen</string>
     <string name="setting_link_previews_desc">Zeigt den Titel einer verlinkten Webseite unter der Nachricht. HexDroid ruft die Seite selbst ab, daher sieht die Website deine IP-Adresse. Nur https-Links im öffentlichen Internet und nie in einem Netzwerk mit Proxy.</string>

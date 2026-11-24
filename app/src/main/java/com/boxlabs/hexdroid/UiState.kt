@@ -394,9 +394,8 @@ data class UiSettings(
     val pasteGuardEnabled: Boolean = true,
     val pasteGuardLines: Int = 5,
     /**
-     * Where "Upload as paste" sends text when the network has no upload service: a Paste site or
-     * api.php address, or a service that takes the text as the request body and answers with its
-     * link. Blank when none.
+     * Where "Upload as paste" sends text: a Paste site or api.php address, or a service that takes
+     * the text as the request body and answers with its link. Blank uses the network's FILEHOST.
      */
     val pasteServiceUrl: String = PasteService.DEFAULT_SERVICE,
 

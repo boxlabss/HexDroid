@@ -76,8 +76,8 @@ fun IrcViewModel.sendComposerReply(
 }
 
 /**
- * True when text can be uploaded as a paste for [netId]: through its FILEHOST service, or the
- * paste service in Settings. Never on a proxied network, which the upload would bypass.
+ * True when text can be uploaded as a paste for [netId]: to the paste service in Settings, or
+ * through its FILEHOST service. Never on a proxied network, which the upload would bypass.
  */
 fun IrcViewModel.pasteUploadAvailable(netId: String): Boolean {
     val st = _state.value
@@ -144,20 +144,19 @@ fun IrcViewModel.resolvePasteGuard(choice: PasteChoice) {
 }
 
 /**
- * Uploads [text] as a paste: to [netId]'s FILEHOST service when it has one, else to the paste
- * service in Settings. [onDone] gets the link or an error on the main thread.
+ * Uploads [text] as a paste: to the paste service in Settings, else to [netId]'s FILEHOST
+ * service. [onDone] gets the link or an error on the main thread.
  */
 fun IrcViewModel.uploadPaste(netId: String, text: String, title: String, onDone: (url: String?, error: String?) -> Unit) {
     if (!pasteUploadAvailable(netId)) {
         onDone(null, appContext.getString(R.string.paste_no_service))
         return
     }
-    val st = _state.value
-    if (filehostUsable(netId)) {
+    val service = _state.value.settings.pasteServiceUrl
+    if (!PasteService.isUsable(service)) {
         uploadBytesToFilehost(netId, text.toByteArray(Charsets.UTF_8), "paste.txt", "text/plain; charset=utf-8", onDone)
         return
     }
-    val service = st.settings.pasteServiceUrl
     viewModelScope.launch(Dispatchers.IO) {
         val result = PasteService.upload(service, text, title)
         withContext(Dispatchers.Main) { onDone(result.url, result.error) }

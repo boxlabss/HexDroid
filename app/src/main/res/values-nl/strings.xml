@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Als een bericht als veel regels zou gaan, kies je of je ze verstuurt, samenvoegt tot één regel of als paste uploadt.</string>
     <string name="setting_paste_guard_lines">Vragen boven dit aantal regels</string>
     <string name="setting_paste_service">Pastedienst</string>
-    <string name="setting_paste_service_desc">Gebruikt voor ‘Uploaden als paste’ als het netwerk geen uploaddienst heeft. Standaard is pastebin.cloud. Je kunt het api.php-adres van een andere Paste-site invullen, of een dienst die de tekst als verzoekinhoud aanneemt en met een link antwoordt. Leeg laten voor geen.</string>
+    <string name="setting_paste_service_desc">Waar ‘Uploaden als paste’ lange tekst naartoe stuurt. Standaard is pastebin.cloud. Je kunt het api.php-adres van een andere Paste-site invullen, of een dienst die de tekst als verzoekinhoud aanneemt en met een link antwoordt. Leeg laten om in plaats daarvan de uploaddienst van het netwerk te gebruiken, als het die heeft.</string>
     <string name="setting_paste_service_https">Moet een https://-adres zijn</string>
     <string name="setting_link_previews">Linkvoorbeelden</string>
     <string name="setting_link_previews_desc">Toont de titel van een gelinkte webpagina onder het bericht. HexDroid haalt de pagina zelf op, dus de site ziet je IP-adres. Alleen https-links op het openbare internet en nooit op een netwerk met een proxy.</string>

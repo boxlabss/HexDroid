@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Bir mesaj çok sayıda satır olarak gidecekse, satırları göndermeyi, tek satırda birleştirmeyi ya da paste olarak yüklemeyi seç.</string>
     <string name="setting_paste_guard_lines">Bu satır sayısının üstünde sor</string>
     <string name="setting_paste_service">Paste hizmeti</string>
-    <string name="setting_paste_service_desc">Ağın yükleme hizmeti olmadığında “Paste olarak yükle” için kullanılır. Varsayılan pastebin.cloud. Başka bir Paste sitesinin api.php adresini ya da metni istek gövdesi olarak alıp bağlantıyla yanıt veren herhangi bir hizmeti girebilirsin. Hiçbiri için boş bırak.</string>
+    <string name="setting_paste_service_desc">“Paste olarak yükle”nin uzun metni gönderdiği yer. Varsayılan pastebin.cloud. Başka bir Paste sitesinin api.php adresini ya da metni istek gövdesi olarak alıp bağlantıyla yanıt veren herhangi bir hizmeti girebilirsin. Bunun yerine ağın kendi yükleme hizmetini kullanmak için boş bırak (varsa).</string>
     <string name="setting_paste_service_https">https:// adresi olmalı</string>
     <string name="setting_link_previews">Bağlantı önizlemeleri</string>
     <string name="setting_link_previews_desc">Bağlantı verilen web sayfasının başlığını mesajın altında gösterir. Sayfayı HexDroid kendisi indirir, bu yüzden site IP adresini görür. Yalnızca genel internetteki https bağlantıları ve proxy kullanan bir ağda asla.</string>

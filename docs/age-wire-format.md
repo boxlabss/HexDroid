@@ -241,6 +241,15 @@ Wire: `AGE MSG <gameId> <senderFp> <epoch> <seq> <b64(ct)>`. The nonce is **not*
 transmitted, the receiver reconstructs it from `senderFp` and `seq`, both on the wire.
 `senderFp[0:8]` is the first 8 bytes (16 hex chars) of the sender's fingerprint.
 
+**Choosing `seq`.** A sender must never repeat a `seq` under the same `k_s`. A client that
+loses its state (an app restart, or leaving and rejoining a table) can be sealed the same
+`K_G` again, so it does not start from 0: each channel instance starts at the number of
+half-seconds since 2026-01-01T00:00:00Z, and counts up from there. That stays above
+anything an earlier instance sent unless it averaged two or more messages a second over its
+life, and it keeps the receiver's replay guard (step 6 below) accepting the client's new
+messages. Receivers need no change, and the value stays below 2^31, the range they compare
+it in, until 2060.
+
 **Why a per-sender key, not `K_G` directly.** The nonce carries only the first 8 bytes of
 `senderFp`, so cross-sender nonce uniqueness rests on 64 bits. Under one shared key, two
 members with a grindable 64-bit fingerprint-prefix collision (~2^64 targeted, ~2^32 by

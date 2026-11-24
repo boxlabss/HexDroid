@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Если сообщение уйдёт множеством строк, выберите: отправить их, объединить в одну строку или загрузить как paste.</string>
     <string name="setting_paste_guard_lines">Спрашивать, если строк больше</string>
     <string name="setting_paste_service">Сервис paste</string>
-    <string name="setting_paste_service_desc">Используется для «Загрузить как paste», когда у сети нет сервиса загрузки. По умолчанию pastebin.cloud. Можно указать адрес api.php другого сайта Paste или любой сервис, который принимает текст в теле запроса и отвечает ссылкой. Оставьте пустым, чтобы не использовать.</string>
+    <string name="setting_paste_service_desc">Куда «Загрузить как paste» отправляет длинный текст. По умолчанию pastebin.cloud. Можно указать адрес api.php другого сайта Paste или любой сервис, который принимает текст в теле запроса и отвечает ссылкой. Оставьте пустым, чтобы использовать сервис загрузки самой сети, если он есть.</string>
     <string name="setting_paste_service_https">Нужен адрес https://</string>
     <string name="setting_link_previews">Предпросмотр ссылок</string>
     <string name="setting_link_previews_desc">Показывает заголовок страницы по ссылке под сообщением. HexDroid сам загружает страницу, поэтому сайт видит ваш IP-адрес. Только ссылки https в публичном интернете и никогда в сети через прокси.</string>

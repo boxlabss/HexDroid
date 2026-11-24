@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">Ha egy üzenet sok sorként menne el, választhatsz: elküldöd, egy sorba vonod, vagy pasteként feltöltöd.</string>
     <string name="setting_paste_guard_lines">Kérdezzen ennyi sor fölött</string>
     <string name="setting_paste_service">Paste szolgáltatás</string>
-    <string name="setting_paste_service_desc">A „Feltöltés pasteként” használja, ha a hálózatnak nincs feltöltési szolgáltatása. Alapértelmezés: pastebin.cloud. Megadhatod egy másik Paste oldal api.php címét, vagy bármely szolgáltatást, amely a kérés törzseként fogadja a szöveget és hivatkozással válaszol. Hagyd üresen, ha nem kell.</string>
+    <string name="setting_paste_service_desc">Ahová a „Feltöltés pasteként” a hosszú szöveget küldi. Alapértelmezés: pastebin.cloud. Megadhatod egy másik Paste oldal api.php címét, vagy bármely szolgáltatást, amely a kérés törzseként fogadja a szöveget és hivatkozással válaszol. Hagyd üresen, ha inkább a hálózat saját feltöltési szolgáltatását használnád, ha van ilyen.</string>
     <string name="setting_paste_service_https">https:// címnek kell lennie</string>
     <string name="setting_link_previews">Hivatkozás-előnézetek</string>
     <string name="setting_link_previews_desc">Az üzenet alatt megjeleníti a hivatkozott weboldal címét. Az oldalt a HexDroid maga tölti le, így a webhely látja az IP-címedet. Csak a nyilvános interneten elérhető https hivatkozásoknál, proxyt használó hálózaton soha.</string>

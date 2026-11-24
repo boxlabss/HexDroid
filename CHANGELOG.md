@@ -1,6 +1,8 @@
 # Changelog
 All notable changes to HexDroid are documented here.
 
+- Upload as a paste goes to the paste service (pastebin.cloud by default) instead of the network's file host, which asked for a login on servers where you were not authenticated. Clearing the paste service setting uses the file host again.
+
 ## [1.7.9] 2026-11-23
 ### Added
 - Notify list for each network. Add someone with `/notify <nick>` or from their nick actions, remove them with `/unnotify <nick>`, or manage the list from the people button above the conversation list. On servers with MONITOR the list shows who is online, private chats with someone on it show a presence dot, and an optional notification says when they come online (Settings > Notifications). Lists are kept with the network and in backups.

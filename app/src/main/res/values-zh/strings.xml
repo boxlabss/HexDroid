@@ -2012,7 +2012,7 @@
     <string name="setting_paste_guard_desc">当一条消息会被拆成多行发送时，选择照常发送、合并为一行，或上传为粘贴。</string>
     <string name="setting_paste_guard_lines">超过此行数时询问</string>
     <string name="setting_paste_service">粘贴服务</string>
-    <string name="setting_paste_service_desc">当网络没有上传服务时用于“上传为粘贴”。默认是 pastebin.cloud。你可以填写其他 Paste 站点的 api.php 地址，或任何以请求正文接收文本并返回链接的服务。留空表示不使用。</string>
+    <string name="setting_paste_service_desc">“上传为粘贴”发送长文本的目标。默认是 pastebin.cloud。你可以填写其他 Paste 站点的 api.php 地址，或任何以请求正文接收文本并返回链接的服务。留空则改用网络自带的上传服务（如有）。</string>
     <string name="setting_paste_service_https">必须是 https:// 地址</string>
     <string name="setting_link_previews">链接预览</string>
     <string name="setting_link_previews_desc">在消息下方显示所链接网页的标题。HexDroid 会自行获取页面，因此该网站能看到你的 IP 地址。仅限公共互联网上的 https 链接，在使用代理的网络中从不显示。</string>
